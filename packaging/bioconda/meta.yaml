@@ -1,0 +1,53 @@
+{% set name = "mlva-seer" %}
+{% set version = "0.1.0" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  url: https://github.com/microbemarsh/mlva_seer/archive/refs/tags/v{{ version }}.tar.gz
+  sha256: REPLACE_WITH_RELEASE_TARBALL_SHA256
+
+build:
+  noarch: python
+  number: 0
+  script: {{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
+  entry_points:
+    - mlva-nanopore = mlva_nanopore.cli:main
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools >=68
+  run:
+    - python >=3.10
+    - amplirust
+    - sassy
+    - edlib
+
+test:
+  imports:
+    - mlva_nanopore
+  commands:
+    - mlva-nanopore --help
+    - mlva-nanopore call --help
+    - mlva-nanopore simulate --help
+    - mlva-nanopore extract-amplicons --help
+
+about:
+  home: https://github.com/microbemarsh/mlva_seer
+  summary: Nanopore amplicon MLVA/VNTR genotyping prototype
+  description: |
+    MLVA Seer converts high-depth Nanopore VNTR amplicon reads into
+    interpretable repeat-copy-number calls, sequence-aware VNTR repeat
+    variants, probabilistic MLVA fingerprints, and known-profile matches.
+    Assembly and reference in-silico PCR extraction is delegated to amplirust,
+    which uses sassy for accelerated approximate primer matching.
+  license: GPL-3.0-only
+  license_file: LICENSE
+
+extra:
+  recipe-maintainers:
+    - microbemarsh

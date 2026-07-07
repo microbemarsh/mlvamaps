@@ -1,0 +1,18 @@
+name: mlva-seer
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.12
+  - pip
+  - pytest
+  - build
+  - twine
+  - amplirust
+  - sassy
+  - edlib
+  - minimap2
+  - pysam
+  - pip:
+      - sassy-rs
+      - -e .

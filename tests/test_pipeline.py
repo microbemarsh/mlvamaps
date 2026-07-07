@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+import csv
+from types import SimpleNamespace
+
+from mlva_nanopore import sequence
+from mlva_nanopore.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
+from mlva_nanopore.io import read_loci
+from mlva_nanopore.pipeline import run_call
+from mlva_nanopore.primers import read_primer_pairs
+from mlva_nanopore.simulation import simulate_reads
+
+
+def write_panel(tmp_path):
+    loci = tmp_path / "mlva_loci.tsv"
+    loci.write_text(
+        "\t".join(
+            [
+                "locus_id",
+                "chrom_or_contig",
+                "start",
+                "end",
+                "forward_primer",
+                "reverse_primer",
+                "left_flank_sequence",
+                "right_flank_sequence",
+                "repeat_motif",
+                "expected_min_repeats",
+                "expected_max_repeats",
+                "expected_amplicon_min_bp",
+                "expected_amplicon_max_bp",
+                "pool_id",
+            ]
+        )
+        + "\n"
+        + "VNTR_01\tchr1\t1\t100\tACGTTGCAAC\tTGCATGCAAA\tGGTA\tCCAT\tATG\t3\t8\t30\t80\tA\n"
+        + "VNTR_02\tchr1\t200\t300\tTTGACCGTAA\tAACCGGTTCA\tCCTA\tTAGG\tGATA\t2\t6\t30\t90\tA\n"
+    )
+    profiles = tmp_path / "profiles.tsv"
+    profiles.write_text("profile_id\tstrain_id\tVNTR_01\tVNTR_02\tmetadata\nP1\tS1\t5\t4\tknown\n")
+    return loci, profiles
+
+
+def read_tsv(path):
+    with path.open() as handle:
+        return list(csv.DictReader(handle, delimiter="\t"))
+
+
+def test_simulate_and_call_pipeline(tmp_path):
+    loci, profiles = write_panel(tmp_path)
+    sim = simulate_reads(
+        loci_path=str(loci),
+        profiles_path=str(profiles),
+        profile_id="P1",
+        outdir=str(tmp_path / "sim"),
+        sample_id="SIM1",
+        depth=25,
+        error_rate=0.0,
+    )
+    result = run_call(
+        reads_path=str(sim["reads"]),
+        loci_path=str(loci),
+        profiles_path=str(profiles),
+        outdir=str(tmp_path / "results"),
+        sample_id="SIM1",
+        min_read_length=20,
+        min_depth=5,
+    )
+
+    calls = {row["locus_id"]: row for row in read_tsv(result["allele_calls"])}
+    assert calls["VNTR_01"]["called_repeat_count"] == "5"
+    assert calls["VNTR_02"]["called_repeat_count"] == "4"
+    assert calls["VNTR_01"]["call_status"] == "PASS"
+    matches = read_tsv(tmp_path / "results" / "profile_matches.tsv")
+    assert matches[0]["best_profile_id"] == "P1"
+    assert matches[0]["distance"] == "0.0"
+    report = result["report"].read_text()
+    assert "Generated MLVA agarose gel comparison" in report
+    assert "P1" in report
+    assert "query-band" in report
+    assert "reference-band" in report
+    assert "query band intensity = fragment read support" in report
+    assert "25 reads" in report
+
+
+def test_dropout_is_reported(tmp_path):
+    loci, _profiles = write_panel(tmp_path)
+    reads = tmp_path / "empty.fastq"
+    reads.write_text("")
+    result = run_call(
+        reads_path=str(reads),
+        loci_path=str(loci),
+        outdir=str(tmp_path / "dropout"),
+        sample_id="EMPTY",
+        min_read_length=20,
+    )
+    statuses = {row["locus_id"]: row["call_status"] for row in read_tsv(result["allele_calls"])}
+    assert statuses == {"VNTR_01": "LOCUS_DROPOUT", "VNTR_02": "LOCUS_DROPOUT"}
+
+
+def test_amplirust_primer_export_and_command(tmp_path):
+    loci_path, _profiles = write_panel(tmp_path)
+    loci = read_loci(loci_path)
+    primers = write_amplirust_primers(loci, tmp_path / "amplirust_primers.csv")
+    primer_rows = list(csv.DictReader(primers.open()))
+    assert primer_rows[0] == {"name": "VNTR_01", "forward": "ACGTTGCAAC", "reverse": "TGCATGCAAA"}
+    assert expected_amplicon_bounds(loci) == (30, 90)
+
+    command = build_amplirust_command(
+        input_path="assembly.fasta",
+        primers_path=primers,
+        output_fasta=tmp_path / "products.fasta",
+        stats_tsv=tmp_path / "stats.tsv",
+        min_len=30,
+        max_len=90,
+        max_errors=3,
+        circular=True,
+    )
+    assert command[:7] == [
+        "amplirust",
+        "--input",
+        "assembly.fasta",
+        "--primers",
+        str(primers),
+        "--output",
+        str(tmp_path / "products.fasta"),
+    ]
+    assert "--search-rc" in command
+    assert "--circular" in command
+    assert command[command.index("--max-errors") + 1] == "3"
+
+
+def test_sassy_is_preferred_for_approximate_matching(monkeypatch):
+    class FakeSearcher:
+        def __init__(self, alphabet, rc=False):
+            self.alphabet = alphabet
+            self.rc = rc
+
+        def search(self, pattern, text, k):
+            return [
+                SimpleNamespace(text_start=7, cost=1),
+                SimpleNamespace(text_start=3, cost=0),
+            ]
+
+    fake_sassy = SimpleNamespace(Searcher=FakeSearcher)
+    monkeypatch.setattr(sequence, "sassy", fake_sassy)
+    sequence._sassy_searcher.cache_clear()
+    assert sequence.find_best("ACGT", "TTTACGTTT", 1) == (3, 0)
+    sequence._sassy_searcher.cache_clear()
+
+
+def test_cleaned_mlva_seer_primer_tsv_is_ingestible():
+    loci = read_primer_pairs("examples/mlva_seer_primers.example.tsv")
+    assert len(loci) == 31
+    assert loci[0].locus_id == "vrrA_12bp_314bp_10U"
+    assert loci[0].forward_primer == "CACAACTACCACCGATGGCACA"
+    assert loci[0].reverse_primer == "GCGCGTTTCGTTTGATTCATAC"
+    assert len(loci[0].repeat_motif) == 12
+    assert loci[0].expected_amplicon_min_bp == 194
+    assert loci[0].expected_amplicon_max_bp == 434
+
+
+def test_raw_legacy_primer_file_is_ingestible():
+    loci = read_primer_pairs("examples/insilicoMLVAprimers_all.raw.example.csv")
+    assert len(loci) == 31
+    assert loci[-1].locus_id == "Bavntr35_6bp_115bp_5U"
+    assert len(loci[-1].repeat_motif) == 6

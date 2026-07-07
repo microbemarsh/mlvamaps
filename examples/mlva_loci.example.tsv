@@ -1,0 +1,6 @@
+locus_id	chrom_or_contig	start	end	forward_primer	reverse_primer	left_flank_sequence	right_flank_sequence	repeat_motif	expected_min_repeats	expected_max_repeats	expected_amplicon_min_bp	expected_amplicon_max_bp	pool_id
+VNTR_01	chr1	10500	10640	ACGTTGCAACTG	TGCATGCAAAGT	GGTACCTA	CCATGGTA	ATG	3	9	45	75	pool_A
+VNTR_02	chr1	22810	23030	TTGACCGTAAGC	AACCGGTTCATG	CCTAGGTA	TAGGCTAA	GATA	2	7	50	95	pool_A
+VNTR_03	chr2	8100	8330	GCCTATGACCAA	TTAACGGTCCGA	AGTCCTGA	TCAGGACT	CA	8	18	52	90	pool_B
+VNTR_04	chr2	44120	44360	ATCGGTTACGGA	CCGTAACCTTGA	TGACCAAG	CTTGGACT	AAC	4	12	48	80	pool_B
+VNTR_05	plasmid_1	1300	1540	CAGTTCGATGCA	TGCTAACCGTTA	GGATCCAA	TTGGATCC	TCTA	1	6	42	82	pool_C

@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+from collections import defaultdict
+
+from .models import Locus, ReadPrediction
+
+
+def call_loci(
+    predictions: list[ReadPrediction],
+    loci: list[Locus],
+    asv_rows: list[dict],
+    min_depth: int = 10,
+    min_posterior: float = 0.75,
+) -> list[dict]:
+    pred_by_locus: dict[str, list[ReadPrediction]] = defaultdict(list)
+    for prediction in predictions:
+        pred_by_locus[prediction.locus_id].append(prediction)
+
+    asv_by_locus: dict[str, list[dict]] = defaultdict(list)
+    for row in asv_rows:
+        asv_by_locus[row["locus_id"]].append(row)
+
+    rows = []
+    for locus in loci:
+        preds = pred_by_locus.get(locus.locus_id, [])
+        if not preds:
+            rows.append(
+                {
+                    "sample_id": "",
+                    "locus_id": locus.locus_id,
+                    "called_repeat_count": "",
+                    "posterior_probability": 0.0,
+                    "second_best_repeat_count": "",
+                    "second_best_posterior": 0.0,
+                    "read_depth": 0,
+                    "num_vntr_asvs": 0,
+                    "dominant_vntr_asv": "",
+                    "call_status": "LOCUS_DROPOUT",
+                }
+            )
+            continue
+
+        weights = {count: 1e-6 for count in range(locus.expected_min_repeats, locus.expected_max_repeats + 1)}
+        for pred in preds:
+            weights[pred.predicted_repeat_count] = weights.get(pred.predicted_repeat_count, 1e-6) + pred.probability
+            if pred.top_alt_repeat_count is not None:
+                weights[pred.top_alt_repeat_count] = weights.get(pred.top_alt_repeat_count, 1e-6) + pred.top_alt_probability
+        total = sum(weights.values())
+        ranked = sorted(((count, weight / total) for count, weight in weights.items()), key=lambda item: item[1], reverse=True)
+        best = ranked[0]
+        second = ranked[1] if len(ranked) > 1 else ("", 0.0)
+        locus_asvs = sorted(asv_by_locus.get(locus.locus_id, []), key=lambda row: row["support_reads"], reverse=True)
+        dominant = locus_asvs[0]["variant_id"] if locus_asvs else ""
+        dominant_freq = float(locus_asvs[0]["frequency"]) if locus_asvs else 0.0
+        status = "PASS"
+        if len(preds) < min_depth:
+            status = "LOW_DEPTH"
+        elif best[1] < min_posterior or (best[1] - second[1]) < 0.2:
+            status = "AMBIGUOUS"
+        elif best[0] < locus.expected_min_repeats or best[0] > locus.expected_max_repeats:
+            status = "OUT_OF_RANGE"
+        elif len(locus_asvs) > 1 and dominant_freq < 0.8:
+            status = "MULTIPLE_VARIANTS"
+        rows.append(
+            {
+                "sample_id": "",
+                "locus_id": locus.locus_id,
+                "called_repeat_count": best[0],
+                "posterior_probability": round(best[1], 6),
+                "second_best_repeat_count": second[0],
+                "second_best_posterior": round(second[1], 6),
+                "read_depth": len(preds),
+                "num_vntr_asvs": len(locus_asvs),
+                "dominant_vntr_asv": dominant,
+                "call_status": status,
+            }
+        )
+    return rows
