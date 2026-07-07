@@ -127,7 +127,9 @@ If `--bam` is supplied, read depth is estimated from the assembly-aligned
 BAM/SAM. The assembly `report.html` includes a generated gel electrophoresis
 image; band position follows product size and band intensity follows read-depth
 support when FASTQ or BAM/SAM evidence is available. Without depth evidence,
-present loci are drawn with a default band intensity.
+present loci are drawn with a default band intensity. When profile matching is
+available, the closest reference profile is drawn as a neighboring gel lane, and
+band labels are shown on hover to keep the gel readable.
 
 If `--profiles` is supplied, both FASTQ and assembly runs write
 `mlva_fingerprint.tsv`, `profile_matches.tsv`, and closest-profile summaries in

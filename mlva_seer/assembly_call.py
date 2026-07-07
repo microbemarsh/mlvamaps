@@ -450,7 +450,7 @@ def run_assembly_call(
     novelty_rows = score_novelty(sample_id, allele_rows, match_rows)
     write_tsv(novelty_rows, outdir_path / "novelty_scores.tsv", NOVELTY_FIELDS)
     progress.step("Writing HTML report")
-    write_assembly_report(outdir_path, sample_id, call_rows, products, match_rows, profiles, novelty_rows)
+    write_assembly_report(outdir_path, sample_id, call_rows, products, match_rows, profiles, novelty_rows, loci)
     progress.step(f"Done. Main calls: {calls_path}")
     return {
         "outdir": outdir_path,

@@ -42,6 +42,11 @@ def _best_profile(match_rows: list[dict], profiles: list[dict]) -> dict | None:
     return None
 
 
+def _locus_repeat_unit_bp(locus: Locus) -> int | None:
+    repeat_unit_bp = locus.repeat_unit_length_bp or len(locus.repeat_motif)
+    return repeat_unit_bp if repeat_unit_bp > 0 else None
+
+
 def _gel_svg(
     sample_id: str,
     loci: list[Locus],
@@ -109,7 +114,7 @@ def _gel_svg(
             width = 66
             opacity, height = query_intensity(support)
             rects.append(
-                f'<g><title>{_safe(locus_id)}: {size} bp; {support} reads; frequency {frequency:.3f}</title>'
+                f'<g class="band-hit" tabindex="0"><title>{_safe(locus_id)}: {size} bp; {support} reads; frequency {frequency:.3f}</title>'
                 f'<rect class="query-band" x="{x - width / 2:.1f}" y="{y - height / 2:.1f}" '
                 f'width="{width}" height="{height:.1f}" rx="2" opacity="{opacity:.3f}" />'
                 f'<text class="band-label" x="{x + 43}" y="{y + 3:.1f}">{_safe(locus_id)}</text></g>'
@@ -122,7 +127,7 @@ def _gel_svg(
             y = y_for_size(size)
             width = 66
             rects.append(
-                f'<g><title>{_safe(locus_id)} reference: {size} bp</title>'
+                f'<g class="band-hit" tabindex="0"><title>{_safe(locus_id)} reference: {size} bp</title>'
                 f'<rect class="reference-band" x="{x - width / 2:.1f}" y="{y - 3.5:.1f}" '
                 f'width="{width}" height="7" rx="2" />'
                 f'<text class="band-label reference-label" x="{x + 43}" y="{y + 3:.1f}">{_safe(locus_id)}</text></g>'
@@ -167,13 +172,19 @@ def _gel_svg(
     {query_bands_svg(query_bands, 324)}
     {reference_bands_svg(reference_bands, 532)}
   </svg>
-  <figcaption>Generated gel image: band position shows estimated fragment length; query band brightness and thickness scale with reads supporting that fragment. Horizontal alignment between query and reference bands indicates matching VNTR fragment lengths.</figcaption>
+  <figcaption>Generated gel image: band position shows estimated fragment length; query band brightness and thickness scale with reads supporting that fragment. Horizontal alignment between query and reference bands indicates matching VNTR fragment lengths. Hover or focus a band for locus details.</figcaption>
 </figure>
 """
 
 
-def _assembly_gel_svg(sample_id: str, call_rows: list[dict]) -> str:
+def _assembly_gel_svg(
+    sample_id: str,
+    call_rows: list[dict],
+    best_profile: dict | None = None,
+    loci: list[Locus] | None = None,
+) -> str:
     bands = []
+    call_by_locus = {row.get("locus_id", ""): row for row in call_rows}
     for row in call_rows:
         if row.get("present") != "yes":
             continue
@@ -184,11 +195,36 @@ def _assembly_gel_svg(sample_id: str, call_rows: list[dict]) -> str:
         repeat_count = row.get("repeat_count", "")
         bands.append((row.get("locus_id", ""), size, support, repeat_count))
 
-    if not bands:
+    reference_bands = []
+    if best_profile and loci:
+        for locus in loci:
+            reference_repeat = _called_count(best_profile.get(locus.locus_id))
+            repeat_unit_bp = _locus_repeat_unit_bp(locus)
+            if reference_repeat is None or repeat_unit_bp is None:
+                continue
+            call = call_by_locus.get(locus.locus_id, {})
+            query_size = _called_count(call.get("product_size_bp"))
+            query_repeat = _called_count(call.get("repeat_count"))
+            if query_size and query_repeat is not None:
+                reference_size = query_size + ((reference_repeat - query_repeat) * repeat_unit_bp)
+            elif locus.expected_product_size_bp and locus.nominal_repeat_units is not None:
+                reference_size = locus.expected_product_size_bp + (
+                    (reference_repeat - locus.nominal_repeat_units) * repeat_unit_bp
+                )
+            else:
+                continue
+            if reference_size > 0:
+                reference_bands.append((locus.locus_id, int(round(reference_size)), reference_repeat))
+
+    if not bands and not reference_bands:
         return '<p class="terminal-note">No assembly VNTR products were available for gel rendering.</p>'
 
     marker_sizes = [2000, 1500, 1000, 700, 500, 300, 200, 100, 50]
-    all_sizes = [size for _name, size, _support, _repeat_count in bands] + marker_sizes
+    all_sizes = (
+        [size for _name, size, _support, _repeat_count in bands]
+        + [size for _name, size, _repeat_count in reference_bands]
+        + marker_sizes
+    )
     max_size = max(all_sizes)
     min_size = max(20, min(all_sizes))
     gel_top = 78
@@ -223,12 +259,23 @@ def _assembly_gel_svg(sample_id: str, call_rows: list[dict]) -> str:
         label = f"{locus_id} ({repeat_count}U)" if repeat_count != "" else locus_id
         support_label = f"{support} reads" if depth_available else "no depth estimate"
         band_svg.append(
-            f'<g><title>{_safe(label)}: {size} bp; {support_label}</title>'
-            f'<rect class="query-band" x="286" y="{y - height / 2:.1f}" width="92" height="{height:.1f}" '
+            f'<g class="band-hit" tabindex="0"><title>{_safe(label)}: {size} bp; {support_label}</title>'
+            f'<rect class="query-band" x="258" y="{y - height / 2:.1f}" width="92" height="{height:.1f}" '
             f'rx="2" opacity="{opacity:.3f}" />'
-            f'<text class="band-label" x="392" y="{y + 3:.1f}">{_safe(label)}</text></g>'
+            f'<text class="band-label" x="364" y="{y + 3:.1f}">{_safe(label)}</text></g>'
         )
 
+    reference_svg = []
+    for locus_id, size, repeat_count in reference_bands:
+        y = y_for_size(size)
+        label = f"{locus_id} ({repeat_count}U)"
+        reference_svg.append(
+            f'<g class="band-hit" tabindex="0"><title>{_safe(label)} reference: {size} bp</title>'
+            f'<rect class="reference-band" x="468" y="{y - 3.5:.1f}" width="92" height="7" rx="2" />'
+            f'<text class="band-label reference-label" x="574" y="{y + 3:.1f}">{_safe(label)}</text></g>'
+        )
+
+    reference_name = best_profile.get("profile_id", "closest reference") if best_profile else "no reference"
     depth_note = (
         "Band brightness and thickness scale with read depth from FASTQ/BAM support."
         if depth_available
@@ -238,7 +285,7 @@ def _assembly_gel_svg(sample_id: str, call_rows: list[dict]) -> str:
 <figure class="gel-panel" aria-label="Generated assembly gel electrophoresis image">
   <svg viewBox="0 0 720 500" role="img" aria-labelledby="assembly-gel-title assembly-gel-desc">
     <title id="assembly-gel-title">Generated MLVA assembly gel electrophoresis image</title>
-    <desc id="assembly-gel-desc">Marker and assembly VNTR product bands estimated from primer product sizes. Band intensity reflects read-depth support when available.</desc>
+    <desc id="assembly-gel-desc">Marker, assembly VNTR product bands, and closest reference profile bands estimated from primer product sizes. Band intensity reflects read-depth support when available.</desc>
     <defs>
       <filter id="assembly-glow"><feGaussianBlur stdDeviation="2.4" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
       <linearGradient id="assembly-gel-bg" x1="0" x2="1" y1="0" y2="1">
@@ -255,14 +302,17 @@ def _assembly_gel_svg(sample_id: str, call_rows: list[dict]) -> str:
     <rect x="42" y="54" width="636" height="388" rx="6" fill="url(#assembly-scanlines)"/>
     <line class="well-line" x1="62" y1="72" x2="658" y2="72"/>
     <rect class="well" x="80" y="58" width="60" height="20" rx="3"/>
-    <rect class="well" x="296" y="58" width="72" height="20" rx="3"/>
+    <rect class="well" x="268" y="58" width="72" height="20" rx="3"/>
+    <rect class="well" x="478" y="58" width="72" height="20" rx="3"/>
     <text class="lane-title" x="110" y="466">LADDER</text>
-    <text class="lane-title" x="332" y="466">{_safe(sample_id)}</text>
-    <text class="gel-legend" x="332" y="42">VNTR product bands // intensity = depth support</text>
+    <text class="lane-title" x="304" y="466">{_safe(sample_id)}</text>
+    <text class="lane-title" x="514" y="466">{_safe(reference_name)}</text>
+    <text class="gel-legend" x="360" y="42">VNTR product bands // intensity = depth support // hover bands for labels</text>
     {marker}
     {"".join(band_svg)}
+    {"".join(reference_svg)}
   </svg>
-  <figcaption>{depth_note}</figcaption>
+  <figcaption>{depth_note} Closest-reference bands are drawn in magenta when a profile match is available. Hover or focus a band for locus details.</figcaption>
 </figure>
 """
 
@@ -368,7 +418,9 @@ def write_report(
     .reference-band {{ fill: var(--magenta); filter: url(#glow); opacity: 0.88; }}
     .lane-title {{ fill: var(--amber); text-anchor: middle; font: 700 15px "Courier New", monospace; }}
     .gel-legend {{ fill: var(--muted); text-anchor: middle; font: 12px "Courier New", monospace; }}
-    .band-label {{ fill: #d6ffe2; font: 10px "Courier New", monospace; opacity: 0.85; }}
+    .band-hit .band-label {{ fill: #d6ffe2; font: 10px "Courier New", monospace; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }}
+    .band-hit:hover .band-label, .band-hit:focus .band-label {{ opacity: 0.95; }}
+    .band-hit:focus {{ outline: none; }}
     .reference-label {{ fill: #ffd5f3; }}
     .marker-label {{ fill: #b6d8ff; font: 11px "Courier New", monospace; text-anchor: end; }}
   </style>
@@ -408,6 +460,7 @@ def write_assembly_report(
     match_rows: list[dict] | None = None,
     profiles: list[dict] | None = None,
     novelty_rows: list[dict] | None = None,
+    loci: list[Locus] | None = None,
 ) -> None:
     outdir = Path(outdir)
     match_rows = match_rows or []
@@ -416,8 +469,9 @@ def write_assembly_report(
     present = sum(1 for row in call_rows if row.get("present") == "yes")
     not_found = sum(1 for row in call_rows if row.get("present") != "yes")
     with_depth = sum(1 for row in call_rows if _called_count(row.get("read_depth")))
-    gel = _assembly_gel_svg(sample_id, call_rows)
     best_match = match_rows[0] if match_rows else {}
+    best_profile = _best_profile(match_rows, profiles)
+    gel = _assembly_gel_svg(sample_id, call_rows, best_profile, loci)
     novelty = novelty_rows[0] if novelty_rows else {}
     table_rows = "\n".join(
         "<tr>"
@@ -483,6 +537,7 @@ def write_assembly_report(
       --phosphor: #62ff9b;
       --amber: #ffc857;
       --cyan: #5fe8ff;
+      --magenta: #ff5fc8;
       --muted: #8dd7aa;
       --line: #245c3a;
     }}
@@ -539,9 +594,13 @@ def write_assembly_report(
     .well {{ fill: #03030c; stroke: #7e8cff; opacity: 0.75; }}
     .marker-band {{ fill: #b6d8ff; filter: url(#assembly-glow); opacity: 0.92; }}
     .query-band {{ fill: var(--phosphor); filter: url(#assembly-glow); }}
+    .reference-band {{ fill: var(--magenta); filter: url(#assembly-glow); opacity: 0.88; }}
     .lane-title {{ fill: var(--amber); text-anchor: middle; font: 700 15px "Courier New", monospace; }}
     .gel-legend {{ fill: var(--muted); text-anchor: middle; font: 12px "Courier New", monospace; }}
-    .band-label {{ fill: #d6ffe2; font: 10px "Courier New", monospace; opacity: 0.85; }}
+    .band-hit .band-label {{ fill: #d6ffe2; font: 10px "Courier New", monospace; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }}
+    .band-hit:hover .band-label, .band-hit:focus .band-label {{ opacity: 0.95; }}
+    .band-hit:focus {{ outline: none; }}
+    .reference-label {{ fill: #ffd5f3; }}
     .marker-label {{ fill: #b6d8ff; font: 11px "Courier New", monospace; text-anchor: end; }}
   </style>
 </head>

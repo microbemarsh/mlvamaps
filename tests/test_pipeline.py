@@ -187,6 +187,8 @@ def test_assembly_call_from_primer_products(tmp_path):
     assert "Assembly Amplicons" in report
     assert "Generated MLVA assembly gel electrophoresis image" in report
     assert "intensity = depth support" in report
+    assert "reference-band" in report
+    assert "Closest-reference bands are drawn in magenta" in report
     assert "Closest MLVA Profiles" in report
     assert "ASM_MATCH" in report
     matches = read_tsv(result["profile_matches"])
