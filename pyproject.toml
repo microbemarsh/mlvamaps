@@ -45,6 +45,7 @@ dev = [
 ]
 
 [project.scripts]
+mlva-seer = "mlva_nanopore.cli:main"
 mlva-nanopore = "mlva_nanopore.cli:main"
 
 [tool.setuptools.packages.find]

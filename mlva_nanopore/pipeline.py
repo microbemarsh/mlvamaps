@@ -91,6 +91,42 @@ MATCH_FIELDS = [
 
 NOVELTY_FIELDS = ["sample_id", "nearest_profile", "novelty_score", "interpretation"]
 
+SIMPLE_CALL_FIELDS = [
+    "sample_id",
+    "locus_id",
+    "present",
+    "repeat_count",
+    "repeat_count_raw",
+    "product_size_bp",
+    "read_depth",
+    "mean_coverage",
+    "status",
+    "evidence",
+]
+
+
+def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> list[dict]:
+    rows = []
+    for row in allele_rows:
+        read_depth = int(row.get("read_depth") or 0)
+        present = read_depth > 0
+        repeat_count = row.get("called_repeat_count", "") if present else ""
+        rows.append(
+            {
+                "sample_id": sample_id,
+                "locus_id": row["locus_id"],
+                "present": "yes" if present else "no",
+                "repeat_count": repeat_count,
+                "repeat_count_raw": repeat_count,
+                "product_size_bp": "",
+                "read_depth": read_depth,
+                "mean_coverage": "",
+                "status": row["call_status"],
+                "evidence": f"{read_depth} assigned reads" if present else "no assigned reads",
+            }
+        )
+    return rows
+
 
 def run_call(
     reads_path: str,
@@ -139,6 +175,7 @@ def run_call(
     for row in allele_rows:
         row["sample_id"] = sample_id
     write_tsv(allele_rows, outdir_path / "allele_calls.tsv", ALLELE_FIELDS)
+    write_tsv(simple_call_rows_from_alleles(sample_id, allele_rows), outdir_path / "calls.tsv", SIMPLE_CALL_FIELDS)
 
     fingerprint_rows, probabilistic_rows = build_fingerprint(sample_id, allele_rows, loci)
     fingerprint_fields = ["sample_id"] + [locus.locus_id for locus in loci]
@@ -157,6 +194,7 @@ def run_call(
 
     return {
         "outdir": outdir_path,
+        "calls": outdir_path / "calls.tsv",
         "allele_calls": outdir_path / "allele_calls.tsv",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "report": outdir_path / "report.html",

@@ -65,6 +65,9 @@ def _locus_from_primer_row(
         expected_max_repeats=expected_max,
         expected_amplicon_min_bp=expected_min_bp,
         expected_amplicon_max_bp=expected_max_bp,
+        repeat_unit_length_bp=repeat_bp or 0,
+        expected_product_size_bp=amplicon_bp or 0,
+        nominal_repeat_units=units or 0,
     )
 
 

@@ -27,6 +27,9 @@ class Locus:
     expected_amplicon_min_bp: int = 0
     expected_amplicon_max_bp: int = 100000
     pool_id: str = ""
+    repeat_unit_length_bp: int = 0
+    expected_product_size_bp: int = 0
+    nominal_repeat_units: int = 0
 
 
 @dataclass(frozen=True)

@@ -25,23 +25,18 @@ file. Despite the `.csv` suffix, it is whitespace-delimited:
 locus_id forward_primer reverse_primer
 ```
 
-MLVA Seer can ingest either file with `--primers`.
+MLVA Seer can ingest either file.
 
-For assembly/contig/reference extraction, only `--input` and `--primers` are
-required:
+For assembly calls:
 
 ```bash
-mlva-nanopore extract-amplicons \
-  --input assembly.fasta \
-  --primers examples/mlva_seer_primers.example.tsv
+mlva-seer call examples/seer_lab_Ba/mlva_seer_primers.example.tsv assembly.fasta
 ```
 
 For FASTQ reads:
 
 ```bash
-mlva-nanopore call \
-  --input reads.fastq.gz \
-  --primers examples/mlva_seer_primers.example.tsv
+mlva-seer call examples/seer_lab_Ba/mlva_seer_primers.example.tsv reads.fastq.gz
 ```
 
 `mlva_loci.example.tsv` is the richer optional format for MLVA Seer. It includes
@@ -55,6 +50,5 @@ Optional columns:
 - `pool_id`: primer-pool or multiplex identifier.
 
 `amplirust_primers.example.csv` shows the comma-delimited CSV shape that MLVA
-Seer writes internally for `amplirust`. Users normally provide
-`mlva_seer_primers.example.tsv`, the raw legacy primer file, or `mlva_loci.tsv`;
-the `extract-amplicons` command converts it to the amplirust primer CSV.
+Seer can write for `amplirust`. Users normally provide
+`mlva_seer_primers.example.tsv`, the raw legacy primer file, or `mlva_loci.tsv`.

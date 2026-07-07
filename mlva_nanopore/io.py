@@ -30,6 +30,25 @@ def read_fastq(path: str | Path) -> Iterator[ReadRecord]:
             yield ReadRecord(read_id, sequence.upper(), quality)
 
 
+def read_fasta(path: str | Path) -> Iterator[tuple[str, str]]:
+    with open_text(path, "rt") as handle:
+        name = ""
+        parts: list[str] = []
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                if name:
+                    yield name, "".join(parts).upper()
+                name = line[1:].strip().split()[0]
+                parts = []
+            else:
+                parts.append(line)
+        if name:
+            yield name, "".join(parts).upper()
+
+
 def write_fastq(reads: Iterable[ReadRecord], path: str | Path) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open_text(path, "wt") as handle:
@@ -70,6 +89,9 @@ def read_loci(path: str | Path) -> list[Locus]:
                     expected_amplicon_min_bp=_int_or_default(row.get("expected_amplicon_min_bp"), 0),
                     expected_amplicon_max_bp=_int_or_default(row.get("expected_amplicon_max_bp"), 100000),
                     pool_id=row.get("pool_id", ""),
+                    repeat_unit_length_bp=_int_or_default(row.get("repeat_unit_length_bp"), 0),
+                    expected_product_size_bp=_int_or_default(row.get("expected_product_size_bp"), 0),
+                    nominal_repeat_units=_int_or_default(row.get("nominal_repeat_units"), 0),
                 )
             )
     return loci

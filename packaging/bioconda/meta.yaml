@@ -14,6 +14,7 @@ build:
   number: 0
   script: {{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
   entry_points:
+    - mlva-seer = mlva_nanopore.cli:main
     - mlva-nanopore = mlva_nanopore.cli:main
 
 requirements:
@@ -24,6 +25,7 @@ requirements:
   run:
     - python >=3.10
     - amplirust
+    - minimap2
     - sassy
     - edlib
 
@@ -31,6 +33,8 @@ test:
   imports:
     - mlva_nanopore
   commands:
+    - mlva-seer --help
+    - mlva-seer call --help
     - mlva-nanopore --help
     - mlva-nanopore call --help
     - mlva-nanopore simulate --help

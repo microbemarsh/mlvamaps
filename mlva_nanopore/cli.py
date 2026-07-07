@@ -1,18 +1,106 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
+from .assembly_call import run_assembly_call
 from .in_silico_pcr import run_amplirust
+from .io import open_text
 from .pipeline import run_call
 from .simulation import simulate_reads
 
 
+def _sample_id_from_path(path: str) -> str:
+    sample = Path(path).name
+    for suffix in (".fastq.gz", ".fq.gz", ".fasta.gz", ".fa.gz", ".fna.gz"):
+        if sample.endswith(suffix):
+            return sample[: -len(suffix)]
+    return Path(sample).stem
+
+
+def _input_kind(path: str) -> str:
+    lower = path.lower()
+    if lower.endswith((".fastq", ".fq", ".fastq.gz", ".fq.gz")):
+        return "fastq"
+    if lower.endswith((".fasta", ".fa", ".fna", ".fas", ".fasta.gz", ".fa.gz", ".fna.gz")):
+        return "fasta"
+    with open(path) as handle:
+        first = handle.read(1)
+    if first == "@":
+        return "fastq"
+    if first == ">":
+        return "fasta"
+    raise ValueError(f"Could not tell whether {path!r} is FASTQ reads or FASTA assembly.")
+
+
+def _looks_like_loci_file(path: str) -> bool:
+    with open_text(path, "rt") as handle:
+        header = handle.readline().strip().lower().replace(",", "\t").split("\t")
+    return "locus_id" in header and (
+        "repeat_motif" in header
+        or "left_flank_sequence" in header
+        or "expected_min_repeats" in header
+        or "chrom_or_contig" in header
+    )
+
+
+def _set_panel_path(args: argparse.Namespace, path: str) -> None:
+    if _looks_like_loci_file(path):
+        args.loci = path
+    else:
+        args.primers = path
+
+
+def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    paths = list(args.paths)
+    if len(paths) > 2:
+        parser.error("call accepts at most two positional paths: primers.tsv and sample.fastq.gz or assembly.fasta")
+    if len(paths) == 2:
+        if not args.loci and not args.primers:
+            _set_panel_path(args, paths[0])
+        elif not args.input_path:
+            parser.error("call got two positional paths plus --primers/--loci; pass only the sample path positionally")
+        if not args.input_path:
+            args.input_path = paths[1]
+    elif len(paths) == 1:
+        if args.loci or args.primers:
+            if not args.input_path:
+                args.input_path = paths[0]
+        elif args.input_path:
+            _set_panel_path(args, paths[0])
+        else:
+            parser.error("call needs both a primer file and an input file")
+
+    if not args.input_path and args.reads_path:
+        args.input_path = args.reads_path
+        args.reads_path = None
+    if not args.loci and not args.primers:
+        parser.error("call requires a primer file, for example: mlva-seer call primers.tsv sample.fastq.gz")
+    if not args.input_path:
+        parser.error("call requires an input FASTQ or FASTA file")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="mlva-nanopore", description="Nanopore amplicon MLVA/VNTR typing")
+    parser = argparse.ArgumentParser(
+        prog="mlva-seer",
+        description="Simple MLVA/VNTR calling from primers plus FASTQ or FASTA",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    call = subparsers.add_parser("call", help="Call VNTR alleles from FASTQ reads")
-    call.add_argument("--input", "--reads", dest="reads", required=True, metavar="INPUT")
+    call = subparsers.add_parser(
+        "call",
+        help="Call VNTRs from primers plus FASTQ reads or a FASTA assembly",
+        epilog=(
+            "Examples:\n"
+            "  mlva-seer call primers.tsv sample.fastq.gz\n"
+            "  mlva-seer call primers.tsv assembly.fasta\n"
+            "  mlva-seer call primers.tsv assembly.fasta --reads sample.fastq.gz"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    call.add_argument("paths", nargs="*", metavar="PATH", help="primers.tsv plus sample.fastq.gz or assembly.fasta")
+    call.add_argument("--input", dest="input_path", metavar="PATH", help="FASTQ reads or FASTA assembly")
+    call.add_argument("--reads", dest="reads_path", metavar="FASTQ", help="Reads to map for assembly depth support")
     call.add_argument("--loci")
     call.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
     call.add_argument("--profiles")
@@ -57,25 +145,42 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "call":
-        if not args.loci and not args.primers:
-            parser.error("call requires either --loci or --primers")
-        result = run_call(
-            reads_path=args.reads,
-            loci_path=args.loci,
-            primers_path=args.primers,
-            profiles_path=args.profiles,
-            outdir=args.outdir,
-            sample_id=args.sample_id or "sample",
-            min_read_length=args.min_read_length,
-            max_read_length=args.max_read_length,
-            min_qscore=args.min_qscore,
-            max_primer_mismatches=args.max_primer_mismatches,
-            min_depth=args.min_depth,
-            min_posterior=args.min_posterior,
-            threads=args.threads,
-        )
-        print(f"Wrote MLVA calls to {result['allele_calls']}")
-        print(f"Wrote report to {result['report']}")
+        _resolve_call_args(parser, args)
+        sample_id = args.sample_id or _sample_id_from_path(args.input_path)
+        if _input_kind(args.input_path) == "fastq":
+            result = run_call(
+                reads_path=args.input_path,
+                loci_path=args.loci,
+                primers_path=args.primers,
+                profiles_path=args.profiles,
+                outdir=args.outdir,
+                sample_id=sample_id,
+                min_read_length=args.min_read_length,
+                max_read_length=args.max_read_length,
+                min_qscore=args.min_qscore,
+                max_primer_mismatches=args.max_primer_mismatches,
+                min_depth=args.min_depth,
+                min_posterior=args.min_posterior,
+                threads=args.threads,
+            )
+            print(f"Wrote easy MLVA calls to {result['calls']}")
+            print(f"Wrote detailed allele evidence to {result['allele_calls']}")
+            print(f"Wrote report to {result['report']}")
+        else:
+            result = run_assembly_call(
+                assembly_path=args.input_path,
+                loci_path=args.loci,
+                primers_path=args.primers,
+                outdir=args.outdir,
+                sample_id=sample_id,
+                reads_path=args.reads_path,
+                max_primer_mismatches=args.max_primer_mismatches,
+                threads=args.threads,
+            )
+            print(f"Wrote easy MLVA calls to {result['calls']}")
+            print(f"Wrote assembly amplicons to {result['amplicons']}")
+            if args.reads_path:
+                print(f"Wrote read-depth support to {result['read_support']}")
         return 0
     if args.command == "simulate":
         result = simulate_reads(

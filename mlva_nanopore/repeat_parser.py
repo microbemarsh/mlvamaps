@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
+from .calling import estimate_repeat_count_from_inner_length, repeat_unit_length
 from .concurrency import resolve_threads
 from .models import Assignment, Locus, RepeatFeature
 from .sequence import find_best, hamming_distance, mean_qscore
@@ -42,8 +43,10 @@ def extract_repeat_features(assignments: list[Assignment], loci: list[Locus], th
             return None
         repeat_sequence = sequence[repeat_start:repeat_end]
         motif = locus.repeat_motif or "N"
-        motif_len = max(len(motif), 1)
-        raw_count = len(repeat_sequence) / motif_len
+        motif_len = repeat_unit_length(locus) or max(len(motif), 1)
+        raw_count = estimate_repeat_count_from_inner_length(locus, len(repeat_sequence))
+        if raw_count is None:
+            raw_count = len(repeat_sequence) / motif_len
         nearest = round(raw_count)
         pattern_parts = []
         mismatches = 0

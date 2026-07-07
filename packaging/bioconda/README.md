@@ -7,9 +7,12 @@ repository after MLVA Seer has a tagged GitHub release.
 Current packaging assumptions:
 
 - MLVA Seer is pure Python, so the recipe should use `noarch: python`.
-- `mlva-nanopore` is installed through the `pyproject.toml` console script.
+- `mlva-seer` is the primary console script. `mlva-nanopore` is retained as a
+  backwards-compatible alias.
 - `amplirust` should be a runtime dependency because `extract-amplicons` delegates
   in-silico PCR to the external `amplirust` executable.
+- `minimap2` should be a runtime dependency because assembly calls can use
+  `--reads` to add read-depth support.
 - `sassy` should be a runtime dependency because it is the preferred Rust/SIMD
   approximate DNA matcher and is also used by `amplirust`.
 - `sassy-rs` should be packaged separately or added if it becomes available in

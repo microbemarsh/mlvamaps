@@ -4,6 +4,13 @@ import csv
 from types import SimpleNamespace
 
 from mlva_nanopore import sequence
+from mlva_nanopore.assembly_call import (
+    build_minimap2_command,
+    extract_primer_products,
+    read_minimap2_depth,
+    run_assembly_call,
+)
+from mlva_nanopore.cli import main
 from mlva_nanopore.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
 from mlva_nanopore.io import read_loci
 from mlva_nanopore.pipeline import run_call
@@ -71,6 +78,9 @@ def test_simulate_and_call_pipeline(tmp_path):
     assert calls["VNTR_01"]["called_repeat_count"] == "5"
     assert calls["VNTR_02"]["called_repeat_count"] == "4"
     assert calls["VNTR_01"]["call_status"] == "PASS"
+    easy_calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
+    assert easy_calls["VNTR_01"]["present"] == "yes"
+    assert easy_calls["VNTR_01"]["repeat_count"] == "5"
     matches = read_tsv(tmp_path / "results" / "profile_matches.tsv")
     assert matches[0]["best_profile_id"] == "P1"
     assert matches[0]["distance"] == "0.0"
@@ -96,6 +106,8 @@ def test_dropout_is_reported(tmp_path):
     )
     statuses = {row["locus_id"]: row["call_status"] for row in read_tsv(result["allele_calls"])}
     assert statuses == {"VNTR_01": "LOCUS_DROPOUT", "VNTR_02": "LOCUS_DROPOUT"}
+    easy_calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
+    assert easy_calls["VNTR_01"]["present"] == "no"
 
 
 def test_amplirust_primer_export_and_command(tmp_path):
@@ -130,6 +142,78 @@ def test_amplirust_primer_export_and_command(tmp_path):
     assert command[command.index("--max-errors") + 1] == "3"
 
 
+def test_assembly_call_from_primer_products(tmp_path):
+    primers = tmp_path / "primers.tsv"
+    primers.write_text(
+        "locus_id\tforward_primer\treverse_primer\trepeat_unit_length_bp\texpected_product_size_bp\tnominal_repeat_units\n"
+        "VNTR_01\tACGTTGCAAC\tTGCATGCAAA\t3\t43\t5\n"
+        "VNTR_02\tTTGACCGTAA\tAACCGGTTCA\t4\t34\t4\n"
+    )
+    assembly = tmp_path / "assembly.fasta"
+    assembly.write_text(">contig1\nNNNNACGTTGCAACGGTA" + "ATG" * 7 + "CCATTTGCATGCAANNNN\n")
+
+    result = run_assembly_call(
+        assembly_path=str(assembly),
+        loci_path=None,
+        primers_path=str(primers),
+        outdir=str(tmp_path / "assembly_results"),
+        sample_id="ASM1",
+    )
+
+    calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
+    assert calls["VNTR_01"]["present"] == "yes"
+    assert calls["VNTR_01"]["repeat_count"] == "7"
+    assert calls["VNTR_01"]["product_size_bp"] == "48"
+    assert calls["VNTR_02"]["present"] == "no"
+
+
+def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
+    loci, profiles = write_panel(tmp_path)
+    sim = simulate_reads(
+        loci_path=str(loci),
+        profiles_path=str(profiles),
+        profile_id="P1",
+        outdir=str(tmp_path / "sim"),
+        sample_id="SIM1",
+        depth=12,
+        error_rate=0.0,
+    )
+    exit_code = main(
+        [
+            "call",
+            str(loci),
+            str(sim["reads"]),
+            "--outdir",
+            str(tmp_path / "cli_results"),
+            "--sample-id",
+            "SIM1",
+            "--min-read-length",
+            "20",
+            "--min-depth",
+            "5",
+        ]
+    )
+    assert exit_code == 0
+    calls = {row["locus_id"]: row for row in read_tsv(tmp_path / "cli_results" / "calls.tsv")}
+    assert calls["VNTR_01"]["present"] == "yes"
+    assert calls["VNTR_02"]["repeat_count"] == "4"
+
+
+def test_minimap2_depth_parser(tmp_path):
+    sam = tmp_path / "support.sam"
+    sam.write_text(
+        "@SQ\tSN:VNTR_01|contig1|forward|1-39\tLN:39\n"
+        "read1\t0\tVNTR_01|contig1|forward|1-39\t1\t60\t39M\t*\t0\t0\tACGT\tIIII\n"
+        "read2\t256\tVNTR_01|contig1|forward|1-39\t1\t60\t39M\t*\t0\t0\tACGT\tIIII\n"
+        "read3\t4\t*\t0\t0\t*\t*\t0\t0\tACGT\tIIII\n"
+    )
+    depth = read_minimap2_depth(sam, {"VNTR_01|contig1|forward|1-39": 39})
+    assert depth["VNTR_01|contig1|forward|1-39"]["mapped_reads"] == 1
+    assert depth["VNTR_01|contig1|forward|1-39"]["mean_coverage"] == 1.0
+    command = build_minimap2_command("amplicons.fasta", "reads.fastq.gz", threads=2)
+    assert command[:5] == ["minimap2", "-a", "-x", "map-ont", "-t"]
+
+
 def test_sassy_is_preferred_for_approximate_matching(monkeypatch):
     class FakeSearcher:
         def __init__(self, alphabet, rc=False):
@@ -150,7 +234,7 @@ def test_sassy_is_preferred_for_approximate_matching(monkeypatch):
 
 
 def test_cleaned_mlva_seer_primer_tsv_is_ingestible():
-    loci = read_primer_pairs("examples/mlva_seer_primers.example.tsv")
+    loci = read_primer_pairs("examples/seer_lab_Ba/mlva_seer_primers.example.tsv")
     assert len(loci) == 31
     assert loci[0].locus_id == "vrrA_12bp_314bp_10U"
     assert loci[0].forward_primer == "CACAACTACCACCGATGGCACA"
@@ -161,7 +245,7 @@ def test_cleaned_mlva_seer_primer_tsv_is_ingestible():
 
 
 def test_raw_legacy_primer_file_is_ingestible():
-    loci = read_primer_pairs("examples/insilicoMLVAprimers_all.raw.example.csv")
+    loci = read_primer_pairs("examples/seer_lab_Ba/insilicoMLVAprimers_all.raw.example.csv")
     assert len(loci) == 31
     assert loci[-1].locus_id == "Bavntr35_6bp_115bp_5U"
     assert len(loci[-1].repeat_motif) == 6
