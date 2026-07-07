@@ -4,14 +4,27 @@ mlva-seer calls VNTR/MLVA loci from a primer table plus either sequencing reads
 or an assembly. The main output is a small `calls.tsv` table that says whether
 each VNTR was found and, when possible, the repeat count.
 
+<p align="center">
+  <img width="500" height="400" alt="image" src="https://github.com/user-attachments/assets/9d6b1032-d4c2-40c8-9bfd-7c93e4f496dc" />
+</p>
+
 ## Install
 
 The recommended install method is through conda. Please make sure to have a working conda installation first. If you don't, please select the appropriate version found [here](https://github.com/conda-forge/miniforge).
 
-A bioconda release will happen in the future but until then install using this:
+A bioconda release will happen in the future, but until then, install using this:
 
 ```bash
+# clone repo
+git clone https://github.com/microbemarsh/mlva_seer.git
+
+# cd to repo
+cd mlva_seer
+
+# make conda environment
 conda env create -f environment.yml
+
+# activate conda environment
 conda activate mlva-seer
 ```
 
