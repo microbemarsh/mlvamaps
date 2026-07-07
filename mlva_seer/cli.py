@@ -94,13 +94,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  mlva-seer call primers.tsv sample.fastq.gz\n"
             "  mlva-seer call primers.tsv assembly.fasta\n"
-            "  mlva-seer call primers.tsv assembly.fasta --reads sample.fastq.gz"
+            "  mlva-seer call primers.tsv assembly.fasta --reads sample.fastq.gz\n"
+            "  mlva-seer call primers.tsv assembly.fasta --bam assembly_reads.bam"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     call.add_argument("paths", nargs="*", metavar="PATH", help="primers.tsv plus sample.fastq.gz or assembly.fasta")
     call.add_argument("--input", dest="input_path", metavar="PATH", help="FASTQ reads or FASTA assembly")
     call.add_argument("--reads", dest="reads_path", metavar="FASTQ", help="Reads to map for assembly depth support")
+    call.add_argument("--bam", "--alignments", dest="alignments_path", metavar="BAM/SAM", help="Assembly-aligned BAM/SAM for assembly depth support")
     call.add_argument("--loci")
     call.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
     call.add_argument("--profiles")
@@ -114,6 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument("--threads", type=int, default=0, help="Worker threads; 0 uses all available CPUs")
     call.add_argument("--minimap2-preset", help="Optional minimap2 -x preset for assembly read-depth mapping")
+    call.add_argument("--quiet", action="store_true", help="Suppress live progress updates")
 
     simulate = subparsers.add_parser("simulate", help="Simulate amplicon reads for a VNTR panel")
     simulate.add_argument("--loci", required=True)
@@ -148,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "call":
         _resolve_call_args(parser, args)
         sample_id = args.sample_id or _sample_id_from_path(args.input_path)
+        if args.reads_path and args.alignments_path:
+            parser.error("call accepts either --reads or --bam/--alignments for assembly depth support, not both")
         if _input_kind(args.input_path) == "fastq":
             result = run_call(
                 reads_path=args.input_path,
@@ -163,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
                 min_depth=args.min_depth,
                 min_posterior=args.min_posterior,
                 threads=args.threads,
+                show_progress=not args.quiet,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")
@@ -175,13 +181,17 @@ def main(argv: list[str] | None = None) -> int:
                 outdir=args.outdir,
                 sample_id=sample_id,
                 reads_path=args.reads_path,
+                alignments_path=args.alignments_path,
+                profiles_path=args.profiles,
                 max_primer_mismatches=args.max_primer_mismatches,
                 threads=args.threads,
                 minimap2_preset=args.minimap2_preset,
+                show_progress=not args.quiet,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote assembly amplicons to {result['amplicons']}")
-            if args.reads_path:
+            print(f"Wrote report to {result['report']}")
+            if args.reads_path or args.alignments_path:
                 print(f"Wrote read-depth support to {result['read_support']}")
         return 0
     if args.command == "simulate":

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import csv
+from pathlib import Path
 from types import SimpleNamespace
 
 from mlva_seer import sequence
 from mlva_seer.assembly_call import (
     build_minimap2_command,
     extract_primer_products,
+    read_alignment_depth,
     read_minimap2_depth,
     run_assembly_call,
 )
@@ -16,6 +18,7 @@ from mlva_seer.io import read_loci
 from mlva_seer.pipeline import run_call
 from mlva_seer.primers import read_primer_pairs
 from mlva_seer.simulation import simulate_reads
+from scripts.convert_uf_ba_vntrs import convert_profiles
 
 
 def write_panel(tmp_path):
@@ -151,6 +154,15 @@ def test_assembly_call_from_primer_products(tmp_path):
     )
     assembly = tmp_path / "assembly.fasta"
     assembly.write_text(">contig1\nNNNNACGTTGCAACGGTA" + "ATG" * 7 + "CCATTTGCATGCAANNNN\n")
+    sam = tmp_path / "assembly_reads.sam"
+    sam.write_text(
+        "@SQ\tSN:contig1\tLN:56\n"
+        "read1\t0\tcontig1\t5\t60\t48M\t*\t0\t0\tACGT\tIIII\n"
+        "read2\t0\tcontig1\t5\t60\t24M\t*\t0\t0\tACGT\tIIII\n"
+        "read3\t4\t*\t0\t0\t*\t*\t0\t0\tACGT\tIIII\n"
+    )
+    profiles = tmp_path / "profiles.tsv"
+    profiles.write_text("profile_id\tstrain_id\tVNTR_01\tVNTR_02\tmetadata\nASM_MATCH\tstrain_A\t7\t\tassembly profile\n")
 
     result = run_assembly_call(
         assembly_path=str(assembly),
@@ -158,13 +170,48 @@ def test_assembly_call_from_primer_products(tmp_path):
         primers_path=str(primers),
         outdir=str(tmp_path / "assembly_results"),
         sample_id="ASM1",
+        alignments_path=str(sam),
+        profiles_path=str(profiles),
     )
 
     calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
     assert calls["VNTR_01"]["present"] == "yes"
     assert calls["VNTR_01"]["repeat_count"] == "7"
     assert calls["VNTR_01"]["product_size_bp"] == "48"
+    assert calls["VNTR_01"]["read_depth"] == "2"
+    assert calls["VNTR_01"]["mean_coverage"] == "1.5"
     assert calls["VNTR_02"]["present"] == "no"
+    report = result["report"].read_text()
+    assert "MLVA Seer Assembly Report: ASM1" in report
+    assert "VNTR_01" in report
+    assert "Assembly Amplicons" in report
+    assert "Generated MLVA assembly gel electrophoresis image" in report
+    assert "intensity = depth support" in report
+    assert "Closest MLVA Profiles" in report
+    assert "ASM_MATCH" in report
+    matches = read_tsv(result["profile_matches"])
+    assert matches[0]["best_profile_id"] == "ASM_MATCH"
+    assert matches[0]["distance"] == "0.0"
+
+
+def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
+    primers = tmp_path / "primers.tsv"
+    primers.write_text(
+        "locus_id\tforward_primer\treverse_primer\trepeat_unit_length_bp\texpected_product_size_bp\tnominal_repeat_units\n"
+        "VNTR_01\tACGTTGCAAC\tTGCATGCAAA\t3\t43\t5\n"
+    )
+    assembly = tmp_path / "assembly.fasta"
+    assembly.write_text(">contig1\nNNNNACGTTGCAACGGTA" + "ATG" * 7 + "CCATTTGCATGCAANNNN\n")
+    result = run_assembly_call(
+        assembly_path=str(assembly),
+        loci_path=None,
+        primers_path=str(primers),
+        outdir=str(tmp_path / "assembly_no_depth"),
+        sample_id="ASM_NO_DEPTH",
+    )
+    report = result["report"].read_text()
+    assert "uniform default intensity" in report
+    assert 'opacity="0.740"' in report
 
 
 def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
@@ -216,6 +263,29 @@ def test_minimap2_depth_parser(tmp_path):
     assert preset_command == ["minimap2", "-a", "-t", "2", "-x", "sr", "amplicons.fasta", "reads.fastq.gz"]
 
 
+def test_assembly_alignment_depth_from_sam(tmp_path):
+    products = [
+        {
+            "product_id": "VNTR_01|contig1|forward|5-52",
+            "locus_id": "VNTR_01",
+            "contig": "contig1",
+            "contig_start": 5,
+            "contig_end": 52,
+            "product_size_bp": 48,
+        }
+    ]
+    sam = tmp_path / "assembly_reads.sam"
+    sam.write_text(
+        "@SQ\tSN:contig1\tLN:56\n"
+        "read1\t0\tcontig1\t5\t60\t48M\t*\t0\t0\tACGT\tIIII\n"
+        "read2\t0\tcontig1\t20\t60\t10M\t*\t0\t0\tACGT\tIIII\n"
+        "read3\t0\tother\t1\t60\t10M\t*\t0\t0\tACGT\tIIII\n"
+    )
+    depth = read_alignment_depth(sam, products)
+    assert depth["VNTR_01|contig1|forward|5-52"]["mapped_reads"] == 2
+    assert round(depth["VNTR_01|contig1|forward|5-52"]["mean_coverage"], 3) == 1.208
+
+
 def test_sassy_is_preferred_for_approximate_matching(monkeypatch):
     class FakeSearcher:
         def __init__(self, alphabet, rc=False):
@@ -251,3 +321,21 @@ def test_raw_legacy_primer_file_is_ingestible():
     assert len(loci) == 31
     assert loci[-1].locus_id == "Bavntr35_6bp_115bp_5U"
     assert len(loci[-1].repeat_motif) == 6
+
+
+def test_uf_ba_profile_converter_maps_short_locus_names(tmp_path):
+    source = tmp_path / "uf_ba_vntrs.tsv"
+    source.write_text("Access_number\tvrrA\tBams13\nEMPTY\t\t\nUF1\t10\t72\n")
+    output = tmp_path / "profiles.tsv"
+    rows_written, mapped_loci, unmatched = convert_profiles(
+        source,
+        primers_path=Path("examples/seer_lab_Ba/mlva_seer_primers.example.tsv"),
+        output_path=output,
+    )
+    assert rows_written == 1
+    assert mapped_loci == 2
+    assert unmatched == []
+    rows = read_tsv(output)
+    assert rows[0]["profile_id"] == "UF1"
+    assert rows[0]["vrrA_12bp_314bp_10U"] == "10"
+    assert rows[0]["Bams13_9bp_814bp_70U"] == "72"

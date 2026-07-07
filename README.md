@@ -35,6 +35,33 @@ Call from an assembly and use reads to add minimap2 depth support:
 mlva-seer call primers.tsv assembly.fasta --reads sample.fastq.gz
 ```
 
+Or use an existing BAM/SAM aligned to the assembly:
+
+```bash
+mlva-seer call primers.tsv assembly.fasta --bam assembly_reads.bam
+```
+
+For read-depth mapping, minimap2 uses its default alignment settings unless you
+choose a preset with `--minimap2-preset`, for example `--minimap2-preset sr`.
+
+To compare a sample against known MLVA types, add a profile database:
+
+```bash
+mlva-seer call primers.tsv assembly.fasta --profiles mlva_profiles.tsv
+```
+
+This repository includes a converted UF B. anthracis profile database at:
+
+```text
+data/uf_ba_mlva_profiles.tsv
+```
+
+To rebuild it from the original UF table:
+
+```bash
+python scripts/convert_uf_ba_vntrs.py /path/to/uf_ba_vntrs.tsv
+```
+
 By default results go in `results/`. The file most users want first is:
 
 ```text
@@ -57,6 +84,10 @@ evidence
 
 Use `--outdir my_results` to choose a different output folder and `--sample-id`
 to set the sample name.
+
+MLVA Seer prints live progress updates while it runs. Use `--quiet` to suppress
+them in scripts. By default `--threads 0` uses all available CPU cores; pass a
+number such as `--threads 8` to cap worker usage.
 
 ## Primer File
 
@@ -92,6 +123,16 @@ an MLVA fingerprint, optional profile matches, and `report.html`.
 For assembly input, MLVA Seer writes extracted primer products to
 `assembly_amplicons.tsv` and `assembly_amplicons.fasta`. If `--reads` is supplied,
 it maps reads to those products with minimap2 and writes `read_support.tsv`.
+If `--bam` is supplied, read depth is estimated from the assembly-aligned
+BAM/SAM. The assembly `report.html` includes a generated gel electrophoresis
+image; band position follows product size and band intensity follows read-depth
+support when FASTQ or BAM/SAM evidence is available. Without depth evidence,
+present loci are drawn with a default band intensity.
+
+If `--profiles` is supplied, both FASTQ and assembly runs write
+`mlva_fingerprint.tsv`, `profile_matches.tsv`, and closest-profile summaries in
+`report.html`. The profile table should include `profile_id`, optional
+`strain_id`, and one column per VNTR locus.
 
 ## More Commands
 

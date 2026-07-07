@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .calling import estimate_repeat_count_from_inner_length, repeat_unit_length
 from .concurrency import resolve_threads
 from .models import Assignment, Locus, RepeatFeature
+from .progress import ProgressReporter
 from .sequence import find_best, hamming_distance, mean_qscore
 
 
@@ -17,8 +18,14 @@ def _bounded_find(pattern: str, sequence: str, start: int, end: int, max_mismatc
     return start + pos, mismatches
 
 
-def extract_repeat_features(assignments: list[Assignment], loci: list[Locus], threads: int = 0) -> list[RepeatFeature]:
+def extract_repeat_features(
+    assignments: list[Assignment],
+    loci: list[Locus],
+    threads: int = 0,
+    progress: ProgressReporter | None = None,
+) -> list[RepeatFeature]:
     by_locus = {locus.locus_id: locus for locus in loci}
+    progress = progress or ProgressReporter(enabled=False)
 
     def extract_one(assignment: Assignment) -> RepeatFeature | None:
         if not assignment.passes_assignment_qc or assignment.assigned_locus not in by_locus:
@@ -95,9 +102,18 @@ def extract_repeat_features(assignments: list[Assignment], loci: list[Locus], th
         )
 
     thread_count = resolve_threads(threads)
+    total = len(assignments)
+    progress.step(f"Extracting repeat features from {total:,} assignments with {thread_count} worker(s)")
     if thread_count == 1 or len(assignments) <= 1:
-        results = [extract_one(assignment) for assignment in assignments]
+        results = []
+        for idx, assignment in enumerate(assignments, start=1):
+            results.append(extract_one(assignment))
+            progress.count("Parsed repeat features", idx, total)
     else:
         with ThreadPoolExecutor(max_workers=thread_count) as executor:
-            results = list(executor.map(extract_one, assignments))
+            results = []
+            for idx, result in enumerate(executor.map(extract_one, assignments), start=1):
+                results.append(result)
+                progress.count("Parsed repeat features", idx, total)
+    progress.count("Parsed repeat features", total, total, force=True)
     return [feature for feature in results if feature is not None]

@@ -4,11 +4,13 @@ from pathlib import Path
 
 from .bayesian_caller import call_loci
 from .clustering import cluster_vntr_asvs
+from .concurrency import resolve_threads
 from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
 from .locus_assignment import assign_reads
 from .ml_classifier import predict_read_alleles
 from .novelty import score_novelty
 from .profile_matching import build_fingerprint, match_profiles
+from .progress import ProgressReporter
 from .primers import read_loci_or_primers
 from .qc import filter_reads
 from .repeat_parser import extract_repeat_features
@@ -142,31 +144,58 @@ def run_call(
     min_depth: int = 10,
     min_posterior: float = 0.75,
     threads: int = 0,
+    show_progress: bool = False,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
+    progress = ProgressReporter(enabled=show_progress)
+    thread_count = resolve_threads(threads)
+    progress.step(f"Starting FASTQ call for sample {sample_id!r} with {thread_count} worker(s)")
 
+    progress.step("Loading panel")
     loci = read_loci_or_primers(loci_path, primers_path)
     profiles = read_profiles(profiles_path)
-    reads = list(read_fastq(reads_path))
-    filtered_reads, qc_rows = filter_reads(reads, min_read_length, max_read_length, min_qscore)
+    progress.step(f"Loaded {len(loci):,} loci" + (f" and {len(profiles):,} reference profiles" if profiles else ""))
+
+    progress.step(f"Reading reads from {reads_path}")
+    reads = []
+    for idx, read in enumerate(read_fastq(reads_path), start=1):
+        reads.append(read)
+        progress.count("Read FASTQ records", idx)
+    progress.count("Read FASTQ records", len(reads), force=True)
+
+    progress.step("Filtering reads")
+    filtered_reads, qc_rows = filter_reads(reads, min_read_length, max_read_length, min_qscore, progress)
+    progress.step(f"Kept {len(filtered_reads):,}/{len(reads):,} reads after QC")
     write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
 
-    assignments = assign_reads(filtered_reads, loci, sample_id, max_primer_mismatches, threads=threads)
+    assignments = assign_reads(
+        filtered_reads,
+        loci,
+        sample_id,
+        max_primer_mismatches,
+        threads=threads,
+        progress=progress,
+    )
     assignment_rows = [{field: getattr(row, field) for field in ASSIGNMENT_FIELDS} for row in assignments]
     write_tsv(assignment_rows, outdir_path / "read_locus_assignments.tsv", ASSIGNMENT_FIELDS)
+    assigned_count = sum(1 for row in assignments if row.passes_assignment_qc)
+    progress.step(f"Assigned {assigned_count:,}/{len(assignments):,} reads to primer-supported loci")
 
-    features = extract_repeat_features(assignments, loci, threads=threads)
+    features = extract_repeat_features(assignments, loci, threads=threads, progress=progress)
     feature_rows = [{field: getattr(row, field) for field in FEATURE_FIELDS} for row in features]
     write_tsv(feature_rows, outdir_path / "read_repeat_features.tsv", FEATURE_FIELDS)
+    progress.step(f"Extracted {len(features):,} repeat feature records")
 
+    progress.step("Clustering VNTR sequence variants")
     asv_rows, fasta_records = cluster_vntr_asvs(features)
     for row in asv_rows:
         row["sample_id"] = sample_id
     write_tsv(asv_rows, outdir_path / "vntr_asv_table.tsv", ASV_FIELDS)
     write_fasta(fasta_records, outdir_path / "vntr_asv_consensus.fasta")
 
+    progress.step("Calling repeat counts")
     predictions = predict_read_alleles(features, loci)
     prediction_rows = [{field: getattr(row, field) for field in PREDICTION_FIELDS} for row in predictions]
     write_tsv(prediction_rows, outdir_path / "read_level_allele_predictions.tsv", PREDICTION_FIELDS)
@@ -190,7 +219,9 @@ def run_call(
     write_tsv(match_rows, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
     novelty_rows = score_novelty(sample_id, allele_rows, match_rows)
     write_tsv(novelty_rows, outdir_path / "novelty_scores.tsv", NOVELTY_FIELDS)
+    progress.step("Writing HTML report")
     write_report(outdir_path, sample_id, allele_rows, novelty_rows, loci, match_rows, profiles, asv_rows)
+    progress.step(f"Done. Main calls: {outdir_path / 'calls.tsv'}")
 
     return {
         "outdir": outdir_path,
