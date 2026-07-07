@@ -204,7 +204,7 @@ def write_report(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>MLVA Nanopore Report - {sample_id}</title>
+  <title>MLVA Seer Report - {sample_id}</title>
   <style>
     :root {{
       color-scheme: dark;
@@ -280,7 +280,7 @@ def write_report(
 </head>
 <body>
   <main>
-    <h1>MLVA Nanopore Report: {_safe(sample_id)}</h1>
+    <h1>MLVA Seer Report: {_safe(sample_id)}</h1>
     <p class="subhead">VNTR allele terminal // agarose gel comparison // probabilistic fingerprint</p>
     <section class="terminal">
       <div class="summary">

@@ -113,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument("--threads", type=int, default=0, help="Worker threads; 0 uses all available CPUs")
+    call.add_argument("--minimap2-preset", help="Optional minimap2 -x preset for assembly read-depth mapping")
 
     simulate = subparsers.add_parser("simulate", help="Simulate amplicon reads for a VNTR panel")
     simulate.add_argument("--loci", required=True)
@@ -176,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
                 reads_path=args.reads_path,
                 max_primer_mismatches=args.max_primer_mismatches,
                 threads=args.threads,
+                minimap2_preset=args.minimap2_preset,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote assembly amplicons to {result['amplicons']}")

@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mlva-seer"
 version = "0.1.0"
-description = "Nanopore amplicon MLVA/VNTR genotyping prototype"
+description = "MLVA/VNTR genotyping from sequencing reads and assemblies"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "GPL-3.0-only"}
 authors = [{name = "MLVA Seer contributors"}]
-keywords = ["mlva", "vntr", "nanopore", "amplicon", "genotyping", "bioinformatics"]
+keywords = ["mlva", "vntr", "amplicon", "genotyping", "bioinformatics"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -45,11 +45,10 @@ dev = [
 ]
 
 [project.scripts]
-mlva-seer = "mlva_nanopore.cli:main"
-mlva-nanopore = "mlva_nanopore.cli:main"
+mlva-seer = "mlva_seer.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["mlva_nanopore*"]
+include = ["mlva_seer*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

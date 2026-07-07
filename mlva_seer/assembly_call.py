@@ -89,17 +89,22 @@ def extract_primer_products(
     return products
 
 
-def build_minimap2_command(reference_fasta: str | Path, reads_fastq: str | Path, threads: int = 0) -> list[str]:
-    return [
+def build_minimap2_command(
+    reference_fasta: str | Path,
+    reads_fastq: str | Path,
+    threads: int = 0,
+    preset: str | None = None,
+) -> list[str]:
+    command = [
         "minimap2",
         "-a",
-        "-x",
-        "map-ont",
         "-t",
         str(resolve_threads(threads)),
-        str(reference_fasta),
-        str(reads_fastq),
     ]
+    if preset:
+        command.extend(["-x", preset])
+    command.extend([str(reference_fasta), str(reads_fastq)])
+    return command
 
 
 _CIGAR_RE = re.compile(r"(\d+)([MIDNSHP=X])")
@@ -145,10 +150,11 @@ def run_minimap2_depth(
     sam_path: str | Path,
     reference_lengths: dict[str, int],
     threads: int = 0,
+    minimap2_preset: str | None = None,
 ) -> dict[str, dict[str, float]]:
     if shutil.which("minimap2") is None:
         raise RuntimeError("Could not find 'minimap2' on PATH. Install minimap2 or rerun without --reads.")
-    command = build_minimap2_command(reference_fasta, reads_fastq, threads)
+    command = build_minimap2_command(reference_fasta, reads_fastq, threads, minimap2_preset)
     with Path(sam_path).open("w") as handle:
         subprocess.run(command, check=True, stdout=handle)
     return read_minimap2_depth(sam_path, reference_lengths)
@@ -217,6 +223,7 @@ def run_assembly_call(
     reads_path: str | None = None,
     max_primer_mismatches: int = 3,
     threads: int = 0,
+    minimap2_preset: str | None = None,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
@@ -240,6 +247,7 @@ def run_assembly_call(
                 outdir_path / "read_support.sam",
                 reference_lengths,
                 threads,
+                minimap2_preset,
             )
             support_rows = [
                 {

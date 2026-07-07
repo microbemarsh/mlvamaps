@@ -1,21 +1,18 @@
-# MLVA Seer
+# mlva-seer
 
-MLVA Seer calls VNTR/MLVA loci from a primer table plus either sequencing reads
+mlva-seer calls VNTR/MLVA loci from a primer table plus either sequencing reads
 or an assembly. The main output is a small `calls.tsv` table that says whether
 each VNTR was found and, when possible, the repeat count.
 
 ## Install
 
+The recommended install method is through conda. Please make sure to have a working conda installation first. If you don't, please select the appropriate version found [here](https://github.com/conda-forge/miniforge).
+
+A bioconda release will happen in the future but until then install using this:
+
 ```bash
 conda env create -f environment.yml
 conda activate mlva-seer
-```
-
-For development from this repository:
-
-```bash
-python3 -m pip install -e ".[dev]"
-pytest
 ```
 
 ## Quick Start
@@ -116,4 +113,6 @@ mlva-seer extract-amplicons \
   --primers examples/seer_lab_Ba/mlva_seer_primers.example.tsv
 ```
 
-`mlva-nanopore` remains available as a backwards-compatible command name.
+## Motivation and recognition
+
+mlva-seer was designed to speed up the current MLVA typing process in the Seer Lab at the University of Florida. It was heavily influenced by [MLVA_finder](https://github.com/i2bc/MLVA_finder) and [amplirust](https://github.com/erdikilic/amplirust), the latter being a dependency. 

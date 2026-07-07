@@ -7,8 +7,7 @@ repository after MLVA Seer has a tagged GitHub release.
 Current packaging assumptions:
 
 - MLVA Seer is pure Python, so the recipe should use `noarch: python`.
-- `mlva-seer` is the primary console script. `mlva-nanopore` is retained as a
-  backwards-compatible alias.
+- `mlva-seer` is the console script.
 - `amplirust` should be a runtime dependency because `extract-amplicons` delegates
   in-silico PCR to the external `amplirust` executable.
 - `minimap2` should be a runtime dependency because assembly calls can use

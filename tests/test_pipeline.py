@@ -3,19 +3,19 @@ from __future__ import annotations
 import csv
 from types import SimpleNamespace
 
-from mlva_nanopore import sequence
-from mlva_nanopore.assembly_call import (
+from mlva_seer import sequence
+from mlva_seer.assembly_call import (
     build_minimap2_command,
     extract_primer_products,
     read_minimap2_depth,
     run_assembly_call,
 )
-from mlva_nanopore.cli import main
-from mlva_nanopore.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
-from mlva_nanopore.io import read_loci
-from mlva_nanopore.pipeline import run_call
-from mlva_nanopore.primers import read_primer_pairs
-from mlva_nanopore.simulation import simulate_reads
+from mlva_seer.cli import main
+from mlva_seer.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
+from mlva_seer.io import read_loci
+from mlva_seer.pipeline import run_call
+from mlva_seer.primers import read_primer_pairs
+from mlva_seer.simulation import simulate_reads
 
 
 def write_panel(tmp_path):
@@ -211,7 +211,9 @@ def test_minimap2_depth_parser(tmp_path):
     assert depth["VNTR_01|contig1|forward|1-39"]["mapped_reads"] == 1
     assert depth["VNTR_01|contig1|forward|1-39"]["mean_coverage"] == 1.0
     command = build_minimap2_command("amplicons.fasta", "reads.fastq.gz", threads=2)
-    assert command[:5] == ["minimap2", "-a", "-x", "map-ont", "-t"]
+    assert command == ["minimap2", "-a", "-t", "2", "amplicons.fasta", "reads.fastq.gz"]
+    preset_command = build_minimap2_command("amplicons.fasta", "reads.fastq.gz", threads=2, preset="sr")
+    assert preset_command == ["minimap2", "-a", "-t", "2", "-x", "sr", "amplicons.fasta", "reads.fastq.gz"]
 
 
 def test_sassy_is_preferred_for_approximate_matching(monkeypatch):
