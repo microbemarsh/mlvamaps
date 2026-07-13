@@ -12,5 +12,5 @@ dependencies:
   - minimap2
   - pysam
   - pip:
-      - sassy-rs
+      - sassy-rs>=0.2.4
       - -e .

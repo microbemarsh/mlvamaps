@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 from types import SimpleNamespace
 
 from mlva_seer import sequence
@@ -15,6 +17,8 @@ from mlva_seer.assembly_call import (
 from mlva_seer.cli import build_parser, main
 from mlva_seer.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
 from mlva_seer.io import read_loci
+from mlva_seer.locus_assignment import assign_reads
+from mlva_seer.models import Locus, ReadRecord
 from mlva_seer.pipeline import run_call
 from mlva_seer.primers import read_primer_pairs
 from mlva_seer.simulation import simulate_reads
@@ -316,9 +320,84 @@ def test_sassy_is_preferred_for_approximate_matching(monkeypatch):
 
     fake_sassy = SimpleNamespace(Searcher=FakeSearcher)
     monkeypatch.setattr(sequence, "sassy", fake_sassy)
-    sequence._sassy_searcher.cache_clear()
+    sequence._clear_sassy_searchers()
     assert sequence.find_best("ACGT", "TTTACGTTT", 1) == (3, 0)
-    sequence._sassy_searcher.cache_clear()
+    sequence._clear_sassy_searchers()
+
+
+def test_sassy_searchers_are_thread_local(monkeypatch):
+    class FakeSearcher:
+        rendezvous = Barrier(2)
+
+        def __init__(self, alphabet, rc=False):
+            self.active = False
+
+        def search(self, pattern, text, k):
+            if self.active:
+                raise RuntimeError("Already borrowed")
+            self.active = True
+            try:
+                self.rendezvous.wait(timeout=2)
+                return [SimpleNamespace(text_start=3, cost=0)]
+            finally:
+                self.active = False
+
+    monkeypatch.setattr(sequence, "sassy", SimpleNamespace(Searcher=FakeSearcher))
+    sequence._clear_sassy_searchers()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: sequence.find_best("ACGT", "TTTACGTTT", 1), range(2)))
+    assert results == [(3, 0), (3, 0)]
+
+
+def test_sassy_batch_search_owns_requested_threads(monkeypatch):
+    class FakeSearcher:
+        calls = []
+
+        def __init__(self, alphabet, rc=False):
+            self.rc = rc
+
+        def search_many(self, patterns, texts, k, threads, mode):
+            self.calls.append((threads, mode, self.rc, len(patterns), len(texts)))
+            matches = []
+            for pattern_idx, pattern in enumerate(patterns):
+                reverse_pattern = sequence.revcomp(pattern.decode()).encode()
+                for text_idx, text in enumerate(texts):
+                    for strand, query in (("+", pattern), ("-", reverse_pattern)):
+                        position = text.find(query)
+                        if position >= 0:
+                            matches.append(
+                                SimpleNamespace(
+                                    pattern_idx=pattern_idx,
+                                    text_idx=text_idx,
+                                    text_start=position,
+                                    text_end=position + len(query),
+                                    cost=0,
+                                    strand=strand,
+                                )
+                            )
+            return matches
+
+    monkeypatch.setattr(sequence, "sassy", SimpleNamespace(Searcher=FakeSearcher))
+    sequence._clear_sassy_searchers()
+    locus = Locus(
+        locus_id="VNTR",
+        forward_primer="ACGTAC",
+        reverse_primer="AACCGT",
+        expected_amplicon_min_bp=10,
+        expected_amplicon_max_bp=30,
+    )
+    amplicon = "ACGTAC" + "GATA" * 2 + sequence.revcomp(locus.reverse_primer)
+    reads = [
+        ReadRecord("forward", amplicon, "I" * len(amplicon)),
+        ReadRecord("reverse", sequence.revcomp(amplicon), "I" * len(amplicon)),
+    ]
+
+    assignments = assign_reads(reads, [locus], "SAMPLE", max_primer_mismatches=0, threads=7)
+
+    assert FakeSearcher.calls == [(7, "batch_texts", True, 2, 2)]
+    assert [assignment.orientation for assignment in assignments] == ["forward", "reverse"]
+    assert all(assignment.assigned_locus == "VNTR" for assignment in assignments)
+    assert all(assignment.passes_assignment_qc for assignment in assignments)
 
 
 def test_cleaned_mlva_seer_primer_tsv_is_ingestible():

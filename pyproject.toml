@@ -34,13 +34,13 @@ Issues = "https://github.com/microbemarsh/mlva_seer/issues"
 
 [project.optional-dependencies]
 bio = [
-    "sassy-rs",
+    "sassy-rs>=0.2.4",
     "edlib>=1.3.9",
     "pysam>=0.22",
 ]
 dev = [
     "pytest",
-    "sassy-rs",
+    "sassy-rs>=0.2.4",
     "edlib>=1.3.9",
 ]
 

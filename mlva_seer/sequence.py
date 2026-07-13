@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from functools import lru_cache
+from threading import local
 from typing import Optional, Tuple
 
 try:
@@ -16,6 +16,7 @@ except ImportError:  # pragma: no cover - depends on optional C extension
 
 
 _RC = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+_SASSY_LOCAL = local()
 
 
 def revcomp(sequence: str) -> str:
@@ -33,15 +34,27 @@ def hamming_distance(a: str, b: str) -> int:
     return sum(1 for i in range(length) if a[i] != b[i]) + abs(len(a) - len(b))
 
 
-@lru_cache(maxsize=2)
-def _sassy_searcher(alphabet: str):
+def _sassy_searcher(alphabet: str, rc: bool = False):
     if sassy is None:
         return None
+    searchers = getattr(_SASSY_LOCAL, "searchers", None)
+    if searchers is None:
+        searchers = {}
+        _SASSY_LOCAL.searchers = searchers
+    cache_key = (alphabet, rc, id(sassy))
+    if cache_key in searchers:
+        return searchers[cache_key]
     try:
-        return sassy.Searcher(alphabet, rc=False)
+        searcher = sassy.Searcher(alphabet, rc=rc)
     except TypeError:
         searcher = sassy.Searcher(alphabet)
-        return searcher
+    searchers[cache_key] = searcher
+    return searcher
+
+
+def _clear_sassy_searchers() -> None:
+    """Clear searchers cached by the calling thread (primarily for tests)."""
+    _SASSY_LOCAL.searchers = {}
 
 
 def _find_best_sassy(pattern: str, sequence: str, max_mismatches: int) -> Tuple[Optional[int], Optional[int]]:
@@ -53,6 +66,45 @@ def _find_best_sassy(pattern: str, sequence: str, max_mismatches: int) -> Tuple[
         return None, None
     best = min(matches, key=lambda match: (match.cost, match.text_start))
     return int(best.text_start), int(best.cost)
+
+
+def find_best_many(
+    patterns: list[str],
+    texts: list[str],
+    max_mismatches: int,
+    threads: int,
+) -> dict[tuple[int, int, str], tuple[int, int]] | None:
+    """Search all patterns and texts in Sassy using Rust-owned threading.
+
+    The result maps ``(pattern index, text index, orientation)`` to the best
+    ``(position, edit distance)``. A return value of ``None`` means the
+    installed Sassy binding does not provide the batched API.
+    """
+    searcher = _sassy_searcher("iupac", rc=True)
+    if searcher is None or not hasattr(searcher, "search_many"):
+        return None
+    encoded_patterns = [pattern.upper().encode() for pattern in patterns]
+    encoded_texts = [text.upper().encode() for text in texts]
+    matches = searcher.search_many(
+        encoded_patterns,
+        encoded_texts,
+        k=max_mismatches,
+        threads=max(1, threads),
+        mode="batch_texts",
+    )
+    best_matches: dict[tuple[int, int, str], tuple[int, int]] = {}
+    for match in matches:
+        orientation = "reverse" if match.strand == "-" else "forward"
+        if orientation == "reverse":
+            position = len(encoded_texts[match.text_idx]) - int(match.text_end)
+        else:
+            position = int(match.text_start)
+        key = (int(match.pattern_idx), int(match.text_idx), orientation)
+        candidate = (position, int(match.cost))
+        current = best_matches.get(key)
+        if current is None or (candidate[1], candidate[0]) < (current[1], current[0]):
+            best_matches[key] = candidate
+    return best_matches
 
 
 def _find_best_edlib(pattern: str, sequence: str, max_mismatches: int) -> Tuple[Optional[int], Optional[int]]:
