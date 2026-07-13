@@ -12,7 +12,7 @@ from mlva_seer.assembly_call import (
     read_minimap2_depth,
     run_assembly_call,
 )
-from mlva_seer.cli import main
+from mlva_seer.cli import build_parser, main
 from mlva_seer.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
 from mlva_seer.io import read_loci
 from mlva_seer.pipeline import run_call
@@ -246,6 +246,20 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
     calls = {row["locus_id"]: row for row in read_tsv(tmp_path / "cli_results" / "calls.tsv")}
     assert calls["VNTR_01"]["present"] == "yes"
     assert calls["VNTR_02"]["repeat_count"] == "4"
+
+
+def test_cli_has_conventional_output_and_thread_options():
+    parser = build_parser()
+    call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz", "-o", "run", "-t", "4"])
+    assert call_args.outdir == "run"
+    assert call_args.threads == 4
+
+    default_call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz"])
+    assert default_call_args.outdir == "results"
+    assert default_call_args.threads == 32
+
+    extract_args = parser.parse_args(["extract-amplicons", "--input", "assembly.fasta", "--primers", "p.tsv"])
+    assert extract_args.threads == 32
 
 
 def test_minimap2_depth_parser(tmp_path):

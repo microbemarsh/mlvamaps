@@ -95,12 +95,14 @@ status
 evidence
 ```
 
-Use `--outdir my_results` to choose a different output folder and `--sample-id`
+Use `-o my_results` (or `--output my_results`) to choose a different output
+folder and `--sample-id`
 to set the sample name.
 
 MLVA Seer prints live progress updates while it runs. Use `--quiet` to suppress
-them in scripts. By default `--threads 0` uses all available CPU cores; pass a
-number such as `--threads 8` to cap worker usage.
+them in scripts. It uses 32 worker threads by default; pass a different number
+with `-t`/`--threads`, or explicitly use `--threads 0` to use all available CPU
+cores.
 
 ## Primer File
 
@@ -158,7 +160,7 @@ mlva-seer simulate \
   --loci examples/mlva_loci.example.tsv \
   --sample-id SIM1 \
   --depth 500 \
-  --outdir simulated
+  -o simulated
 ```
 
 Export amplirust products from assemblies:

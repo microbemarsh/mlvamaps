@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from .calling import estimate_repeat_count_from_product_length
-from .concurrency import resolve_threads
+from .concurrency import DEFAULT_THREADS, resolve_threads
 from .io import read_fasta, read_profiles, write_fasta, write_tsv
 from .models import Locus
 from .pipeline import MATCH_FIELDS, NOVELTY_FIELDS, SIMPLE_CALL_FIELDS
@@ -112,7 +112,7 @@ def extract_primer_products(
 def build_minimap2_command(
     reference_fasta: str | Path,
     reads_fastq: str | Path,
-    threads: int = 0,
+    threads: int = DEFAULT_THREADS,
     preset: str | None = None,
 ) -> list[str]:
     command = [
@@ -169,7 +169,7 @@ def run_minimap2_depth(
     reads_fastq: str | Path,
     sam_path: str | Path,
     reference_lengths: dict[str, int],
-    threads: int = 0,
+    threads: int = DEFAULT_THREADS,
     minimap2_preset: str | None = None,
     progress: ProgressReporter | None = None,
 ) -> dict[str, dict[str, float]]:
@@ -382,7 +382,7 @@ def run_assembly_call(
     alignments_path: str | None = None,
     profiles_path: str | None = None,
     max_primer_mismatches: int = 3,
-    threads: int = 0,
+    threads: int = DEFAULT_THREADS,
     minimap2_preset: str | None = None,
     show_progress: bool = False,
 ) -> dict[str, Path]:

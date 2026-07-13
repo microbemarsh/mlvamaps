@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .bayesian_caller import call_loci
 from .clustering import cluster_vntr_asvs
-from .concurrency import resolve_threads
+from .concurrency import DEFAULT_THREADS, resolve_threads
 from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
 from .locus_assignment import assign_reads
 from .ml_classifier import predict_read_alleles
@@ -143,7 +143,7 @@ def run_call(
     max_primer_mismatches: int = 3,
     min_depth: int = 10,
     min_posterior: float = 0.75,
-    threads: int = 0,
+    threads: int = DEFAULT_THREADS,
     show_progress: bool = False,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)

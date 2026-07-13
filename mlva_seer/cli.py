@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from .assembly_call import run_assembly_call
+from .concurrency import DEFAULT_THREADS
 from .in_silico_pcr import run_amplirust
 from .io import open_text
 from .pipeline import run_call
@@ -106,7 +107,15 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--loci")
     call.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
     call.add_argument("--profiles")
-    call.add_argument("--outdir", default="results")
+    call.add_argument(
+        "-o",
+        "--output",
+        "--outdir",
+        dest="outdir",
+        default="results",
+        metavar="DIR",
+        help="Output directory (default: %(default)s)",
+    )
     call.add_argument("--sample-id")
     call.add_argument("--min-read-length", type=int, default=50)
     call.add_argument("--max-read-length", type=int, default=100000)
@@ -114,7 +123,13 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--max-primer-mismatches", type=int, default=3)
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
-    call.add_argument("--threads", type=int, default=0, help="Worker threads; 0 uses all available CPUs")
+    call.add_argument(
+        "-t",
+        "--threads",
+        type=int,
+        default=DEFAULT_THREADS,
+        help="Worker threads (default: %(default)s; 0 uses all available CPUs)",
+    )
     call.add_argument("--minimap2-preset", help="Optional minimap2 -x preset for assembly read-depth mapping")
     call.add_argument("--quiet", action="store_true", help="Suppress live progress updates")
 
@@ -126,7 +141,9 @@ def build_parser() -> argparse.ArgumentParser:
     simulate.add_argument("--depth", type=int, default=200)
     simulate.add_argument("--error-rate", type=float, default=0.03)
     simulate.add_argument("--seed", type=int, default=13)
-    simulate.add_argument("--outdir", required=True)
+    simulate.add_argument(
+        "-o", "--output", "--outdir", dest="outdir", required=True, metavar="DIR", help="Output directory"
+    )
 
     extract = subparsers.add_parser(
         "extract-amplicons",
@@ -135,9 +152,23 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--input", required=True, help="FASTA/GenBank input or amplirust-supported glob")
     extract.add_argument("--loci")
     extract.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
-    extract.add_argument("--outdir", default="assembly_amplicons")
+    extract.add_argument(
+        "-o",
+        "--output",
+        "--outdir",
+        dest="outdir",
+        default="assembly_amplicons",
+        metavar="DIR",
+        help="Output directory (default: %(default)s)",
+    )
     extract.add_argument("--max-errors", type=int, default=2)
-    extract.add_argument("--threads", type=int, default=0, help="amplirust threads; 0 lets amplirust auto-detect CPUs")
+    extract.add_argument(
+        "-t",
+        "--threads",
+        type=int,
+        default=DEFAULT_THREADS,
+        help="amplirust threads (default: %(default)s; 0 lets amplirust auto-detect CPUs)",
+    )
     extract.add_argument("--circular", action="store_true")
     extract.add_argument("--no-search-rc", action="store_true")
     extract.add_argument("--trim-primers", action="store_true")

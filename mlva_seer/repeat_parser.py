@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 from .calling import estimate_repeat_count_from_inner_length, repeat_unit_length
-from .concurrency import resolve_threads
+from .concurrency import DEFAULT_THREADS, resolve_threads
 from .models import Assignment, Locus, RepeatFeature
 from .progress import ProgressReporter
 from .sequence import find_best, hamming_distance, mean_qscore
@@ -21,7 +21,7 @@ def _bounded_find(pattern: str, sequence: str, start: int, end: int, max_mismatc
 def extract_repeat_features(
     assignments: list[Assignment],
     loci: list[Locus],
-    threads: int = 0,
+    threads: int = DEFAULT_THREADS,
     progress: ProgressReporter | None = None,
 ) -> list[RepeatFeature]:
     by_locus = {locus.locus_id: locus for locus in loci}

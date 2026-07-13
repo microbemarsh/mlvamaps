@@ -18,6 +18,7 @@ Current backend policy:
 
 Default threading policy:
 
-- CLI options use `--threads 0` by default.
+- CLI options use 32 threads by default. Users can explicitly pass `--threads 0`
+  to use all available CPUs.
 - `0` means auto-detect available CPUs for MLVA Seer workers or delegate
   auto-detection to the external backend, such as `amplirust`.

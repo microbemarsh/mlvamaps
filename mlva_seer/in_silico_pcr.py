@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .concurrency import DEFAULT_THREADS
 from .models import Locus
 from .primers import read_loci_or_primers
 
@@ -41,7 +42,7 @@ def build_amplirust_command(
     min_len: int,
     max_len: int,
     max_errors: int = 2,
-    threads: int = 0,
+    threads: int = DEFAULT_THREADS,
     circular: bool = False,
     search_rc: bool = True,
     trim_primers: bool = False,
@@ -82,7 +83,7 @@ def run_amplirust(
     outdir: str,
     primers_path: str | None = None,
     max_errors: int = 2,
-    threads: int = 0,
+    threads: int = DEFAULT_THREADS,
     circular: bool = False,
     search_rc: bool = True,
     trim_primers: bool = False,

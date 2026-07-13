@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
-from .concurrency import resolve_threads
+from .concurrency import DEFAULT_THREADS, resolve_threads
 from .models import Assignment, Locus, ReadRecord
 from .progress import ProgressReporter
 from . import sequence as sequence_module
@@ -52,7 +52,7 @@ def assign_reads(
     sample_id: str,
     max_primer_mismatches: int = 3,
     min_assignment_score: float = 0.55,
-    threads: int = 0,
+    threads: int = DEFAULT_THREADS,
     progress: ProgressReporter | None = None,
 ) -> list[Assignment]:
     thread_count = resolve_threads(threads)
