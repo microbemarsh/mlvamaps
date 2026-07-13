@@ -66,7 +66,6 @@ class RepeatFeature:
     repeat_pattern: str
     repeat_sequence: str
     mean_qscore: float
-    indel_count_in_repeat_region: int
     mismatch_count_in_repeat_region: int
     motif_kmer_count: int
     left_primer_score: float
@@ -83,3 +82,8 @@ class ReadPrediction:
     probability: float
     top_alt_repeat_count: Optional[int]
     top_alt_probability: float
+    variant_id: str
+    insertions_vs_consensus: int
+    deletions_vs_consensus: int
+    substitutions_vs_consensus: int
+    evidence_weight: float

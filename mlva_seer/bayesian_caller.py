@@ -33,6 +33,7 @@ def call_loci(
                     "second_best_repeat_count": "",
                     "second_best_posterior": 0.0,
                     "read_depth": 0,
+                    "effective_read_depth": 0.0,
                     "num_vntr_asvs": 0,
                     "dominant_vntr_asv": "",
                     "call_status": "LOCUS_DROPOUT",
@@ -41,10 +42,17 @@ def call_loci(
             continue
 
         weights = {count: 1e-6 for count in range(locus.expected_min_repeats, locus.expected_max_repeats + 1)}
+        effective_read_depth = sum(pred.evidence_weight for pred in preds)
         for pred in preds:
-            weights[pred.predicted_repeat_count] = weights.get(pred.predicted_repeat_count, 1e-6) + pred.probability
+            weights[pred.predicted_repeat_count] = (
+                weights.get(pred.predicted_repeat_count, 1e-6)
+                + pred.probability * pred.evidence_weight
+            )
             if pred.top_alt_repeat_count is not None:
-                weights[pred.top_alt_repeat_count] = weights.get(pred.top_alt_repeat_count, 1e-6) + pred.top_alt_probability
+                weights[pred.top_alt_repeat_count] = (
+                    weights.get(pred.top_alt_repeat_count, 1e-6)
+                    + pred.top_alt_probability * pred.evidence_weight
+                )
         total = sum(weights.values())
         ranked = sorted(((count, weight / total) for count, weight in weights.items()), key=lambda item: item[1], reverse=True)
         best = ranked[0]
@@ -70,6 +78,7 @@ def call_loci(
                 "second_best_repeat_count": second[0],
                 "second_best_posterior": round(second[1], 6),
                 "read_depth": len(preds),
+                "effective_read_depth": round(effective_read_depth, 4),
                 "num_vntr_asvs": len(locus_asvs),
                 "dominant_vntr_asv": dominant,
                 "call_status": status,

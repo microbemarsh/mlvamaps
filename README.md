@@ -133,7 +133,16 @@ Example primer files are in `examples/seer_lab_Ba/`.
 ## Outputs
 
 For FASTQ input, MLVA Seer also writes detailed evidence tables, filtered reads,
-an MLVA fingerprint, optional profile matches, and `report.html`.
+an MLVA fingerprint, optional profile matches, and `report.html`. VNTR variants
+are clustered within each locus and repeat count using aligned edit distance,
+then summarized with a SpoaRS partial-order consensus. `vntr_asv_table.tsv`
+contains per-cluster read and indel counts, while `vntr_asv_memberships.tsv`
+retains every read's raw/aligned repeat sequence and its insertions, deletions,
+and substitutions relative to the cluster consensus. The default cluster
+threshold is 85% global identity within an identical rounded repeat count; use
+`--min-cluster-identity` to make this more or less stringent. These POA
+alignments are the sole source of indel evidence and directly weight each read
+when locus-level repeat-count evidence is combined.
 
 For assembly input, MLVA Seer writes extracted primer products to
 `assembly_amplicons.tsv` and `assembly_amplicons.fasta`. If `--reads` is supplied,

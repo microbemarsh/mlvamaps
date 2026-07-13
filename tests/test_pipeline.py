@@ -15,10 +15,12 @@ from mlva_seer.assembly_call import (
     run_assembly_call,
 )
 from mlva_seer.cli import build_parser, main
+from mlva_seer.clustering import cluster_vntr_asvs
 from mlva_seer.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
 from mlva_seer.io import read_loci
 from mlva_seer.locus_assignment import assign_reads
-from mlva_seer.models import Locus, ReadRecord
+from mlva_seer.models import Locus, ReadRecord, RepeatFeature
+from mlva_seer.ml_classifier import predict_read_alleles
 from mlva_seer.pipeline import run_call
 from mlva_seer.primers import read_primer_pairs
 from mlva_seer.simulation import simulate_reads
@@ -60,6 +62,77 @@ def read_tsv(path):
         return list(csv.DictReader(handle, delimiter="\t"))
 
 
+def make_repeat_feature(read_id, sequence, repeat_count=4):
+    return RepeatFeature(
+        read_id=read_id,
+        locus_id="VNTR",
+        repeat_region_start=0,
+        repeat_region_end=len(sequence),
+        repeat_region_length_bp=len(sequence),
+        repeat_motif="ATG",
+        raw_repeat_count_estimate=float(repeat_count),
+        nearest_integer_repeat_count=repeat_count,
+        flank_quality_score=1.0,
+        repeat_pattern="ATG-ATG-ATG-ATG",
+        repeat_sequence=sequence,
+        mean_qscore=30.0,
+        mismatch_count_in_repeat_region=0,
+        motif_kmer_count=repeat_count,
+        left_primer_score=1.0,
+        right_primer_score=1.0,
+        left_flank_score=0.0,
+        right_flank_score=0.0,
+    )
+
+
+def test_mlva_clustering_uses_poa_and_retains_indels():
+    reference = "ATG" * 4
+    insertion = reference[:4] + "A" + reference[4:]
+    deletion = reference[:4] + reference[5:]
+    features = [
+        make_repeat_feature("ref1", reference),
+        make_repeat_feature("ref2", reference),
+        make_repeat_feature("ref3", reference),
+        make_repeat_feature("insertion", insertion),
+        make_repeat_feature("deletion", deletion),
+        make_repeat_feature("other", "CCCCCCCCCCCC"),
+    ]
+
+    rows, fasta, memberships = cluster_vntr_asvs(features)
+    reversed_rows, reversed_fasta, _ = cluster_vntr_asvs(list(reversed(features)))
+
+    dominant = rows[0]
+    assert reversed_rows == rows
+    assert reversed_fasta == fasta
+    assert dominant["support_reads"] == 5
+    assert dominant["unique_sequences"] == 3
+    assert dominant["consensus_sequence"] == reference
+    assert dominant["reads_with_indels"] == 2
+    assert dominant["total_insertions"] == 1
+    assert dominant["total_deletions"] == 1
+    assert len(rows) == 2
+    assert fasta[0] == ("VNTR_ASV1", reference)
+
+    insertion_membership = next(row for row in memberships if row["read_id"] == "insertion")
+    assert insertion_membership["variant_id"] == "VNTR_ASV1"
+    assert insertion_membership["insertions_vs_consensus"] == 1
+    assert insertion_membership["deletions_vs_consensus"] == 0
+    assert "-" in insertion_membership["aligned_consensus_sequence"]
+
+    deletion_membership = next(row for row in memberships if row["read_id"] == "deletion")
+    assert deletion_membership["insertions_vs_consensus"] == 0
+    assert deletion_membership["deletions_vs_consensus"] == 1
+    assert "-" in deletion_membership["aligned_repeat_sequence"]
+
+    locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=5)
+    predictions = predict_read_alleles(features, [locus], memberships)
+    by_read = {prediction.read_id: prediction for prediction in predictions}
+    assert by_read["insertion"].insertions_vs_consensus == 1
+    assert by_read["deletion"].deletions_vs_consensus == 1
+    assert by_read["insertion"].evidence_weight < by_read["ref1"].evidence_weight
+    assert by_read["deletion"].evidence_weight < by_read["ref1"].evidence_weight
+
+
 def test_simulate_and_call_pipeline(tmp_path):
     loci, profiles = write_panel(tmp_path)
     sim = simulate_reads(
@@ -85,6 +158,14 @@ def test_simulate_and_call_pipeline(tmp_path):
     assert calls["VNTR_01"]["called_repeat_count"] == "5"
     assert calls["VNTR_02"]["called_repeat_count"] == "4"
     assert calls["VNTR_01"]["call_status"] == "PASS"
+    assert calls["VNTR_01"]["effective_read_depth"] == "25.0"
+    asv_rows = read_tsv(result["asv_table"])
+    assert asv_rows[0]["support_reads"] == "25"
+    assert "total_insertions" in asv_rows[0]
+    memberships = read_tsv(result["asv_memberships"])
+    assert len(memberships) == 50
+    assert {row["sample_id"] for row in memberships} == {"SIM1"}
+    assert all("aligned_repeat_sequence" in row for row in memberships)
     easy_calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
     assert easy_calls["VNTR_01"]["present"] == "yes"
     assert easy_calls["VNTR_01"]["repeat_count"] == "5"
@@ -261,6 +342,7 @@ def test_cli_has_conventional_output_and_thread_options():
     default_call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz"])
     assert default_call_args.outdir == "results"
     assert default_call_args.threads == 32
+    assert default_call_args.min_cluster_identity == 0.85
 
     extract_args = parser.parse_args(["extract-amplicons", "--input", "assembly.fasta", "--primers", "p.tsv"])
     assert extract_args.threads == 32

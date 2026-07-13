@@ -15,6 +15,8 @@ Current backend policy:
   when `sassy-rs` is not available.
 - `minimap2` plus `pysam` are the preferred low-level alignment stack for
   future read-to-reference-amplicon and assembly evidence.
+- `spoars>=0.1.3` provides weighted partial-order alignment and indel-aware
+  consensus generation after MLVA-specific locus/repeat-count clustering.
 
 Default threading policy:
 

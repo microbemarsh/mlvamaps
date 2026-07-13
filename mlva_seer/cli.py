@@ -19,6 +19,13 @@ def _sample_id_from_path(path: str) -> str:
     return Path(sample).stem
 
 
+def _fraction(value: str) -> float:
+    parsed = float(value)
+    if not 0 <= parsed <= 1:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return parsed
+
+
 def _input_kind(path: str) -> str:
     lower = path.lower()
     if lower.endswith((".fastq", ".fq", ".fastq.gz", ".fq.gz")):
@@ -124,6 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
+        "--min-cluster-identity",
+        type=_fraction,
+        default=0.85,
+        help="Minimum global identity for reads in the same VNTR cluster (default: %(default)s)",
+    )
+    call.add_argument(
         "-t",
         "--threads",
         type=int,
@@ -198,11 +211,14 @@ def main(argv: list[str] | None = None) -> int:
                 max_primer_mismatches=args.max_primer_mismatches,
                 min_depth=args.min_depth,
                 min_posterior=args.min_posterior,
+                min_cluster_identity=args.min_cluster_identity,
                 threads=args.threads,
                 show_progress=not args.quiet,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")
+            print(f"Wrote VNTR variant clusters to {result['asv_table']}")
+            print(f"Wrote per-read cluster and indel evidence to {result['asv_memberships']}")
             print(f"Wrote report to {result['report']}")
         else:
             result = run_assembly_call(

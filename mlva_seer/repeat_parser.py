@@ -70,7 +70,6 @@ def extract_repeat_features(
             else:
                 pattern_parts.append(chunk)
                 mismatches += distance
-        indels = len(repeat_sequence) % motif_len
         left_score = 1 - ((assignment.forward_mismatches or 0) / max(len(locus.forward_primer), 1))
         right_score = 1 - ((assignment.reverse_mismatches or 0) / max(len(locus.reverse_primer), 1))
         flank_scores = [left_score, right_score]
@@ -92,7 +91,6 @@ def extract_repeat_features(
             "-".join(pattern_parts),
             repeat_sequence,
             round(mean_qscore(assignment.oriented_quality), 3),
-            indels,
             mismatches,
             motif_kmers,
             round(left_score, 4),

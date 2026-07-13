@@ -39,8 +39,8 @@ FEATURE_FIELDS = [
     "nearest_integer_repeat_count",
     "flank_quality_score",
     "repeat_pattern",
+    "repeat_sequence",
     "mean_qscore",
-    "indel_count_in_repeat_region",
     "mismatch_count_in_repeat_region",
     "motif_kmer_count",
     "left_primer_score",
@@ -55,8 +55,32 @@ ASV_FIELDS = [
     "variant_id",
     "repeat_count",
     "support_reads",
+    "unique_sequences",
     "frequency",
     "consensus_pattern",
+    "consensus_sequence",
+    "consensus_length_bp",
+    "reads_with_indels",
+    "total_insertions",
+    "total_deletions",
+    "total_substitutions",
+    "mean_edit_distance_to_consensus",
+    "max_edit_distance_to_consensus",
+]
+
+ASV_MEMBERSHIP_FIELDS = [
+    "sample_id",
+    "read_id",
+    "locus_id",
+    "variant_id",
+    "repeat_count",
+    "repeat_sequence",
+    "aligned_repeat_sequence",
+    "aligned_consensus_sequence",
+    "insertions_vs_consensus",
+    "deletions_vs_consensus",
+    "substitutions_vs_consensus",
+    "edit_distance_to_consensus",
 ]
 
 PREDICTION_FIELDS = [
@@ -66,6 +90,11 @@ PREDICTION_FIELDS = [
     "probability",
     "top_alt_repeat_count",
     "top_alt_probability",
+    "variant_id",
+    "insertions_vs_consensus",
+    "deletions_vs_consensus",
+    "substitutions_vs_consensus",
+    "evidence_weight",
 ]
 
 ALLELE_FIELDS = [
@@ -76,6 +105,7 @@ ALLELE_FIELDS = [
     "second_best_repeat_count",
     "second_best_posterior",
     "read_depth",
+    "effective_read_depth",
     "num_vntr_asvs",
     "dominant_vntr_asv",
     "call_status",
@@ -143,6 +173,7 @@ def run_call(
     max_primer_mismatches: int = 3,
     min_depth: int = 10,
     min_posterior: float = 0.75,
+    min_cluster_identity: float = 0.85,
     threads: int = DEFAULT_THREADS,
     show_progress: bool = False,
 ) -> dict[str, Path]:
@@ -189,14 +220,24 @@ def run_call(
     progress.step(f"Extracted {len(features):,} repeat feature records")
 
     progress.step("Clustering VNTR sequence variants")
-    asv_rows, fasta_records = cluster_vntr_asvs(features)
+    asv_rows, fasta_records, asv_memberships = cluster_vntr_asvs(
+        features,
+        min_identity=min_cluster_identity,
+    )
     for row in asv_rows:
         row["sample_id"] = sample_id
+    for row in asv_memberships:
+        row["sample_id"] = sample_id
     write_tsv(asv_rows, outdir_path / "vntr_asv_table.tsv", ASV_FIELDS)
+    write_tsv(
+        asv_memberships,
+        outdir_path / "vntr_asv_memberships.tsv",
+        ASV_MEMBERSHIP_FIELDS,
+    )
     write_fasta(fasta_records, outdir_path / "vntr_asv_consensus.fasta")
 
     progress.step("Calling repeat counts")
-    predictions = predict_read_alleles(features, loci)
+    predictions = predict_read_alleles(features, loci, asv_memberships)
     prediction_rows = [{field: getattr(row, field) for field in PREDICTION_FIELDS} for row in predictions]
     write_tsv(prediction_rows, outdir_path / "read_level_allele_predictions.tsv", PREDICTION_FIELDS)
 
@@ -227,6 +268,9 @@ def run_call(
         "outdir": outdir_path,
         "calls": outdir_path / "calls.tsv",
         "allele_calls": outdir_path / "allele_calls.tsv",
+        "asv_table": outdir_path / "vntr_asv_table.tsv",
+        "asv_memberships": outdir_path / "vntr_asv_memberships.tsv",
+        "asv_consensus": outdir_path / "vntr_asv_consensus.fasta",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "report": outdir_path / "report.html",
     }
