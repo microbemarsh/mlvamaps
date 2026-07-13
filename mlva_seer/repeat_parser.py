@@ -78,6 +78,14 @@ def extract_repeat_features(
         if locus.right_flank_sequence:
             flank_scores.append(right_flank_score)
         flank_quality = sum(flank_scores) / len(flank_scores)
+        amplicon_start = assignment.forward_start or 0
+        amplicon_end = assignment.reverse_end if assignment.reverse_end is not None else len(sequence)
+        amplicon_sequence = sequence[amplicon_start:amplicon_end]
+        amplicon_quality = (
+            assignment.oriented_quality[amplicon_start:amplicon_end]
+            if assignment.oriented_quality is not None
+            else None
+        )
         return RepeatFeature(
             assignment.read_id,
             locus.locus_id,
@@ -97,6 +105,8 @@ def extract_repeat_features(
             round(right_score, 4),
             round(left_flank_score, 4),
             round(right_flank_score, 4),
+            amplicon_sequence,
+            amplicon_quality,
         )
 
     thread_count = resolve_threads(threads)

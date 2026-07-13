@@ -134,15 +134,17 @@ Example primer files are in `examples/seer_lab_Ba/`.
 
 For FASTQ input, MLVA Seer also writes detailed evidence tables, filtered reads,
 an MLVA fingerprint, optional profile matches, and `report.html`. VNTR variants
-are clustered within each locus and repeat count using aligned edit distance,
-then summarized with a SpoaRS partial-order consensus. `vntr_asv_table.tsv`
-contains per-cluster read and indel counts, while `vntr_asv_memberships.tsv`
-retains every read's raw/aligned repeat sequence and its insertions, deletions,
-and substitutions relative to the cluster consensus. The default cluster
-threshold is 85% global identity within an identical rounded repeat count; use
-`--min-cluster-identity` to make this more or less stringent. These POA
-alignments are the sole source of indel evidence and directly weight each read
-when locus-level repeat-count evidence is combined.
+are called by Savont from quality-bearing, primer-trimmed amplicons. MLVA Seer
+writes one FASTQ per locus and submits them together as a single pooled Savont
+run, so Savont owns the complete `-t`/`--threads` allocation without nested
+Python chunking. Savont's EM-refined abundance table supplies ASV support and
+frequency, and its final cluster assignments supply read membership.
+`vntr_asv_table.tsv` contains per-ASV read and indel counts, while
+`vntr_asv_memberships.tsv` retains each clustered read's raw/aligned repeat
+sequence and its insertions, deletions, and substitutions relative to the
+Savont consensus. The raw Savont outputs are retained under `results/savont/`.
+Savont 0.6.1 or newer is required. ASVs require two supporting reads by
+default; change this with `--savont-min-cluster-size`.
 
 For assembly input, MLVA Seer writes extracted primer products to
 `assembly_amplicons.tsv` and `assembly_amplicons.fasta`. If `--reads` is supplied,

@@ -15,7 +15,7 @@ from mlva_seer.assembly_call import (
     run_assembly_call,
 )
 from mlva_seer.cli import build_parser, main
-from mlva_seer.clustering import cluster_vntr_asvs
+from mlva_seer.clustering import build_savont_command, cluster_vntr_asvs
 from mlva_seer.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
 from mlva_seer.io import read_loci
 from mlva_seer.locus_assignment import assign_reads
@@ -82,10 +82,50 @@ def make_repeat_feature(read_id, sequence, repeat_count=4):
         right_primer_score=1.0,
         left_flank_score=0.0,
         right_flank_score=0.0,
+        amplicon_sequence=sequence,
+        amplicon_quality="I" * len(sequence),
     )
 
 
-def test_mlva_clustering_uses_poa_and_retains_indels():
+def write_fake_savont(tmp_path):
+    executable = tmp_path / "savont"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import collections, pathlib, sys
+if '--version' in sys.argv:
+    print('savont 0.6.1')
+    raise SystemExit(0)
+args = sys.argv[2:]
+flag = args.index('--output-dir')
+inputs = [pathlib.Path(value) for value in args[:flag]]
+out = pathlib.Path(args[flag + 1]); out.mkdir(parents=True, exist_ok=True)
+samples = [path.stem for path in inputs]
+clusters = []
+for path in inputs:
+    lines = path.read_text().splitlines()
+    reads = [(lines[i][1:].split()[0], lines[i + 1]) for i in range(0, len(lines), 4)]
+    consensus = collections.Counter(sequence for _, sequence in reads).most_common(1)[0][0]
+    clusters.append((reads, consensus))
+with (out / 'final_asvs.fasta').open('w') as handle:
+    for idx, (reads, consensus) in enumerate(clusters):
+        handle.write(f'>final_consensus_{idx}_depth_{len(reads)}\\n{consensus}\\n')
+with (out / 'feature-table.tsv').open('w') as handle:
+    handle.write('#OTU ID\\t' + '\\t'.join(samples) + '\\n')
+    for idx, (reads, _consensus) in enumerate(clusters):
+        depths = ['0'] * len(samples); depths[idx] = str(len(reads))
+        handle.write(f'final_consensus_{idx}_depth_{len(reads)}\\t' + '\\t'.join(depths) + '\\n')
+with (out / 'final_clusters.tsv').open('w') as handle:
+    for idx, (reads, _consensus) in enumerate(clusters):
+        handle.write(f'final_cluster_{idx}\\tsize_{len(reads)}\\trepresentative_0\\tmembers\\n')
+        for read_id, _sequence in reads:
+            handle.write(f'{read_id} 100\\n')
+"""
+    )
+    executable.chmod(0o755)
+    return executable
+
+
+def test_mlva_clustering_uses_savont_and_retains_indels(tmp_path):
     reference = "ATG" * 4
     insertion = reference[:4] + "A" + reference[4:]
     deletion = reference[:4] + reference[5:]
@@ -95,22 +135,21 @@ def test_mlva_clustering_uses_poa_and_retains_indels():
         make_repeat_feature("ref3", reference),
         make_repeat_feature("insertion", insertion),
         make_repeat_feature("deletion", deletion),
-        make_repeat_feature("other", "CCCCCCCCCCCC"),
     ]
-
-    rows, fasta, memberships = cluster_vntr_asvs(features)
-    reversed_rows, reversed_fasta, _ = cluster_vntr_asvs(list(reversed(features)))
+    savont = write_fake_savont(tmp_path)
+    locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=5)
+    rows, fasta, memberships = cluster_vntr_asvs(
+        features, [locus], tmp_path / "savont-out", threads=4, executable=str(savont)
+    )
 
     dominant = rows[0]
-    assert reversed_rows == rows
-    assert reversed_fasta == fasta
     assert dominant["support_reads"] == 5
     assert dominant["unique_sequences"] == 3
     assert dominant["consensus_sequence"] == reference
     assert dominant["reads_with_indels"] == 2
     assert dominant["total_insertions"] == 1
     assert dominant["total_deletions"] == 1
-    assert len(rows) == 2
+    assert len(rows) == 1
     assert fasta[0] == ("VNTR_ASV1", reference)
 
     insertion_membership = next(row for row in memberships if row["read_id"] == "insertion")
@@ -124,13 +163,28 @@ def test_mlva_clustering_uses_poa_and_retains_indels():
     assert deletion_membership["deletions_vs_consensus"] == 1
     assert "-" in deletion_membership["aligned_repeat_sequence"]
 
-    locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=5)
     predictions = predict_read_alleles(features, [locus], memberships)
     by_read = {prediction.read_id: prediction for prediction in predictions}
     assert by_read["insertion"].insertions_vs_consensus == 1
     assert by_read["deletion"].deletions_vs_consensus == 1
     assert by_read["insertion"].evidence_weight < by_read["ref1"].evidence_weight
     assert by_read["deletion"].evidence_weight < by_read["ref1"].evidence_weight
+
+
+def test_savont_receives_all_loci_and_full_thread_count(tmp_path):
+    inputs = [tmp_path / "locus_0000.fastq", tmp_path / "locus_0001.fastq"]
+    command = build_savont_command(
+        inputs,
+        tmp_path / "savont",
+        threads=32,
+        min_read_length=60,
+        max_read_length=400,
+        min_cluster_size=2,
+    )
+    assert command[:4] == ["savont", "asv", str(inputs[0]), str(inputs[1])]
+    assert command[command.index("--threads") + 1] == "32"
+    assert "--pooled-samples" in command
+    assert "--single-strand" in command
 
 
 def test_simulate_and_call_pipeline(tmp_path):
@@ -144,6 +198,7 @@ def test_simulate_and_call_pipeline(tmp_path):
         depth=25,
         error_rate=0.0,
     )
+    savont = write_fake_savont(tmp_path)
     result = run_call(
         reads_path=str(sim["reads"]),
         loci_path=str(loci),
@@ -152,6 +207,7 @@ def test_simulate_and_call_pipeline(tmp_path):
         sample_id="SIM1",
         min_read_length=20,
         min_depth=5,
+        savont_bin=str(savont),
     )
 
     calls = {row["locus_id"]: row for row in read_tsv(result["allele_calls"])}
@@ -303,6 +359,7 @@ def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
 
 def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
     loci, profiles = write_panel(tmp_path)
+    savont = write_fake_savont(tmp_path)
     sim = simulate_reads(
         loci_path=str(loci),
         profiles_path=str(profiles),
@@ -325,6 +382,8 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
             "20",
             "--min-depth",
             "5",
+            "--savont-bin",
+            str(savont),
         ]
     )
     assert exit_code == 0
@@ -342,7 +401,8 @@ def test_cli_has_conventional_output_and_thread_options():
     default_call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz"])
     assert default_call_args.outdir == "results"
     assert default_call_args.threads == 32
-    assert default_call_args.min_cluster_identity == 0.85
+    assert default_call_args.savont_min_cluster_size == 2
+    assert default_call_args.savont_bin == "savont"
 
     extract_args = parser.parse_args(["extract-amplicons", "--input", "assembly.fasta", "--primers", "p.tsv"])
     assert extract_args.threads == 32

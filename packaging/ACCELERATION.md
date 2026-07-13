@@ -11,12 +11,13 @@ Current backend policy:
   searches. The assembly extraction path already gets sassy-backed matching via
   `amplirust`; the direct FASTQ read-assignment path uses the `sassy-rs>=0.2.4`
   batched API and gives Sassy ownership of all requested worker threads.
-- `edlib` is only a C-backed fallback for approximate primer/flank alignment
-  when `sassy-rs` is not available.
+- `savont>=0.6.1` is the required multithreaded ASV clustering, variant
+  detection, consensus, and EM abundance backend for FASTQ calls. All locus
+  FASTQs are submitted in one pooled invocation.
+- `edlib` is the C-backed fallback for approximate primer/flank alignment and
+  annotates per-read indels against final Savont repeat consensuses.
 - `minimap2` plus `pysam` are the preferred low-level alignment stack for
   future read-to-reference-amplicon and assembly evidence.
-- `spoars>=0.1.3` provides weighted partial-order alignment and indel-aware
-  consensus generation after MLVA-specific locus/repeat-count clustering.
 
 Default threading policy:
 
@@ -27,3 +28,5 @@ Default threading policy:
 - Native backends receive the resolved thread count directly. MLVA Seer does
   not place a Python thread pool around Sassy's internally threaded batch
   search, which avoids nested parallelism and CPU oversubscription.
+- Savont likewise receives the full resolved thread count in one process; MLVA
+  Seer does not launch one competing Savont process per locus.

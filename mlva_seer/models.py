@@ -72,6 +72,8 @@ class RepeatFeature:
     right_primer_score: float
     left_flank_score: float
     right_flank_score: float
+    amplicon_sequence: str = ""
+    amplicon_quality: Optional[str] = None
 
 
 @dataclass(frozen=True)

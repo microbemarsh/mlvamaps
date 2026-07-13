@@ -19,10 +19,10 @@ def _sample_id_from_path(path: str) -> str:
     return Path(sample).stem
 
 
-def _fraction(value: str) -> float:
-    parsed = float(value)
-    if not 0 <= parsed <= 1:
-        raise argparse.ArgumentTypeError("must be between 0 and 1")
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
     return parsed
 
 
@@ -131,10 +131,16 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
-        "--min-cluster-identity",
-        type=_fraction,
-        default=0.85,
-        help="Minimum global identity for reads in the same VNTR cluster (default: %(default)s)",
+        "--savont-min-cluster-size",
+        type=_positive_int,
+        default=2,
+        help="Minimum read support for a Savont ASV (default: %(default)s)",
+    )
+    call.add_argument(
+        "--savont-bin",
+        default="savont",
+        metavar="PATH",
+        help="Savont executable (requires version >=0.6.1; default: %(default)s)",
     )
     call.add_argument(
         "-t",
@@ -211,7 +217,8 @@ def main(argv: list[str] | None = None) -> int:
                 max_primer_mismatches=args.max_primer_mismatches,
                 min_depth=args.min_depth,
                 min_posterior=args.min_posterior,
-                min_cluster_identity=args.min_cluster_identity,
+                savont_min_cluster_size=args.savont_min_cluster_size,
+                savont_bin=args.savont_bin,
                 threads=args.threads,
                 show_progress=not args.quiet,
             )

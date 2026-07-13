@@ -1,208 +1,319 @@
 from __future__ import annotations
 
+import csv
+import re
+import shutil
+import subprocess
 from collections import Counter, defaultdict
-
-from .models import RepeatFeature
+from pathlib import Path
 
 try:
     import edlib
-except ImportError:  # pragma: no cover - optional accelerated backend
+except ImportError:  # pragma: no cover - packaging supplies the accelerated aligner
     edlib = None
 
-try:
-    import spoars
-except ImportError:  # pragma: no cover - dependency error is reported when clustering is used
-    spoars = None
+from .models import Locus, RepeatFeature
+from .sequence import find_best, revcomp
 
 
-def _edit_distance(a: str, b: str) -> int:
-    if edlib is not None:
-        return int(edlib.align(a, b, mode="NW", task="distance")["editDistance"])
-    if len(a) > len(b):
-        a, b = b, a
-    previous = list(range(len(a) + 1))
-    for b_idx, b_base in enumerate(b, start=1):
-        current = [b_idx]
-        for a_idx, a_base in enumerate(a, start=1):
-            current.append(
-                min(
-                    current[-1] + 1,
-                    previous[a_idx] + 1,
-                    previous[a_idx - 1] + (a_base != b_base),
-                )
-            )
-        previous = current
-    return previous[-1]
+MIN_SAVONT_VERSION = (0, 6, 1)
 
 
-def _aligned_identity(a: str, b: str) -> float:
-    length = max(len(a), len(b))
-    if length == 0:
-        return 1.0
-    return 1 - (_edit_distance(a, b) / length)
+def _version_tuple(value: str) -> tuple[int, ...]:
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", value)
+    return tuple(map(int, match.groups())) if match else ()
 
 
-def _poa_consensus(
-    sequence_counts: Counter[str],
-) -> tuple[str, dict[str, dict[str, int | str]]]:
-    if spoars is None:
+def _check_savont(executable: str) -> None:
+    path = shutil.which(executable)
+    if path is None:
         raise RuntimeError(
-            "VNTR consensus generation requires spoars>=0.1.3; install mlva-seer with its current dependencies"
+            f"Savont executable {executable!r} was not found. Install savont>=0.6.1 "
+            "from Bioconda or pass --savont-bin."
         )
-    sequences = sorted(sequence_counts, key=lambda sequence: (-sequence_counts[sequence], sequence))
-    weights = [sequence_counts[sequence] for sequence in sequences]
-    graph = spoars.poa(sequences, alignment_type="global", weights=weights)
-    consensus = graph.consensus()
-    alignment = graph.msa(include_consensus=True)
-    aligned_consensus = alignment[-1]
-    metrics: dict[str, dict[str, int | str]] = {}
-    for sequence, aligned_sequence in zip(sequences, alignment[:-1]):
-        insertions = sum(
-            sequence_base != "-" and consensus_base == "-"
-            for sequence_base, consensus_base in zip(aligned_sequence, aligned_consensus)
-        )
-        deletions = sum(
-            sequence_base == "-" and consensus_base != "-"
-            for sequence_base, consensus_base in zip(aligned_sequence, aligned_consensus)
-        )
-        substitutions = sum(
-            sequence_base != "-" and consensus_base != "-" and sequence_base != consensus_base
-            for sequence_base, consensus_base in zip(aligned_sequence, aligned_consensus)
-        )
-        metrics[sequence] = {
-            "aligned_repeat_sequence": aligned_sequence,
-            "aligned_consensus_sequence": aligned_consensus,
-            "insertions_vs_consensus": insertions,
-            "deletions_vs_consensus": deletions,
-            "substitutions_vs_consensus": substitutions,
-            "edit_distance_to_consensus": insertions + deletions + substitutions,
-        }
-    return consensus, metrics
+    result = subprocess.run(
+        [path, "--version"], capture_output=True, text=True, check=False
+    )
+    version = _version_tuple(result.stdout + result.stderr)
+    if not version or version < MIN_SAVONT_VERSION:
+        found = ".".join(map(str, version)) if version else "unknown"
+        raise RuntimeError(f"mlva-seer requires savont>=0.6.1; found {found} at {path}")
 
 
-def _cluster_partition(
-    features: list[RepeatFeature], min_identity: float
-) -> list[list[RepeatFeature]]:
-    by_sequence: dict[str, list[RepeatFeature]] = defaultdict(list)
+def build_savont_command(
+    input_paths: list[Path],
+    output_dir: Path,
+    threads: int,
+    min_read_length: int,
+    max_read_length: int,
+    min_cluster_size: int,
+    executable: str = "savont",
+) -> list[str]:
+    """Build the single pooled Savont ASV command used by the read pipeline."""
+    return [
+        executable,
+        "asv",
+        *map(str, input_paths),
+        "--output-dir",
+        str(output_dir),
+        "--threads",
+        str(threads),
+        "--pooled-samples",
+        "--single-strand",
+        "--min-read-length",
+        str(min_read_length),
+        "--max-read-length",
+        str(max_read_length),
+        "--min-cluster-size",
+        str(min_cluster_size),
+    ]
+
+
+def _write_locus_fastqs(
+    features: list[RepeatFeature], work_dir: Path
+) -> tuple[list[Path], dict[str, RepeatFeature], dict[str, str]]:
+    by_locus: dict[str, list[RepeatFeature]] = defaultdict(list)
     for feature in features:
-        by_sequence[feature.repeat_sequence].append(feature)
-    sequence_bins = sorted(by_sequence.values(), key=lambda items: (-len(items), items[0].repeat_sequence))
+        by_locus[feature.locus_id].append(feature)
 
-    clusters: list[list[RepeatFeature]] = []
-    representatives: list[str] = []
-    for sequence_bin in sequence_bins:
-        sequence = sequence_bin[0].repeat_sequence
-        ranked_matches = [
-            (_aligned_identity(sequence, representative), cluster_idx)
-            for cluster_idx, representative in enumerate(representatives)
-        ]
-        eligible = [match for match in ranked_matches if match[0] >= min_identity]
-        if eligible:
-            _identity, cluster_idx = max(eligible, key=lambda item: (item[0], -item[1]))
-            clusters[cluster_idx].extend(sequence_bin)
-        else:
-            representatives.append(sequence)
-            clusters.append(list(sequence_bin))
+    inputs: list[Path] = []
+    feature_by_safe_id: dict[str, RepeatFeature] = {}
+    sample_to_locus: dict[str, str] = {}
+    input_dir = work_dir / "inputs"
+    input_dir.mkdir(parents=True, exist_ok=True)
+    read_idx = 0
+    for locus_idx, (locus_id, locus_features) in enumerate(sorted(by_locus.items())):
+        stem = f"locus_{locus_idx:04d}"
+        path = input_dir / f"{stem}.fastq"
+        sample_to_locus[stem] = locus_id
+        with path.open("w") as handle:
+            for feature in locus_features:
+                safe_id = f"mlva_read_{read_idx}"
+                read_idx += 1
+                sequence = feature.amplicon_sequence
+                if not sequence:
+                    raise RuntimeError(
+                        f"Read {feature.read_id!r} has no primer-trimmed amplicon for Savont"
+                    )
+                quality = feature.amplicon_quality or ("I" * len(sequence))
+                if len(quality) != len(sequence):
+                    raise RuntimeError(f"Sequence/quality lengths differ for read {feature.read_id!r}")
+                handle.write(f"@{safe_id}\n{sequence}\n+\n{quality}\n")
+                feature_by_safe_id[safe_id] = feature
+        inputs.append(path)
+    return inputs, feature_by_safe_id, sample_to_locus
+
+
+def _read_feature_table(path: Path) -> tuple[list[str], dict[int, list[float]]]:
+    depths: dict[int, list[float]] = {}
+    with path.open() as handle:
+        reader = csv.reader(handle, delimiter="\t")
+        header = next(reader, None)
+        if not header or header[0] != "#OTU ID":
+            raise RuntimeError(f"Unexpected Savont feature table format in {path}")
+        samples = header[1:]
+        for row in reader:
+            match = re.match(r"final_consensus_(\d+)_depth_", row[0])
+            if match:
+                depths[int(match.group(1))] = [float(value) for value in row[1:]]
+    return samples, depths
+
+
+def _read_savont_clusters(path: Path) -> dict[int, list[str]]:
+    clusters: dict[int, list[str]] = {}
+    current: int | None = None
+    with path.open() as handle:
+        for line in handle:
+            fields = line.rstrip().split("\t")
+            match = re.match(r"final_cluster_(\d+)$", fields[0])
+            if match:
+                current = int(match.group(1))
+                clusters[current] = []
+            elif current is not None and fields[0]:
+                clusters[current].append(fields[0].split()[0])
     return clusters
 
 
+def _read_fasta(path: Path) -> dict[int, str]:
+    records: dict[int, str] = {}
+    current: int | None = None
+    parts: list[str] = []
+    with path.open() as handle:
+        for line in handle:
+            line = line.strip()
+            if line.startswith(">"):
+                if current is not None:
+                    records[current] = "".join(parts)
+                match = re.match(r">final_consensus_(\d+)_depth_", line)
+                current = int(match.group(1)) if match else None
+                parts = []
+            elif current is not None:
+                parts.append(line.upper())
+    if current is not None:
+        records[current] = "".join(parts)
+    return records
+
+
+def _repeat_from_amplicon(sequence: str, locus: Locus) -> str:
+    start = 0
+    end = len(sequence)
+    if locus.forward_primer:
+        pos, _ = find_best(locus.forward_primer, sequence, 5)
+        start = (pos + len(locus.forward_primer)) if pos is not None else len(locus.forward_primer)
+    reverse_binding = revcomp(locus.reverse_primer) if locus.reverse_primer else ""
+    if reverse_binding:
+        pos, _ = find_best(reverse_binding, sequence[start:], 5)
+        end = start + pos if pos is not None else max(start, len(sequence) - len(reverse_binding))
+    if locus.left_flank_sequence:
+        pos, _ = find_best(locus.left_flank_sequence, sequence[start:end], 3)
+        if pos is not None:
+            start += pos + len(locus.left_flank_sequence)
+    if locus.right_flank_sequence:
+        pos, _ = find_best(locus.right_flank_sequence, sequence[start:end], 3)
+        if pos is not None:
+            end = start + pos
+    return sequence[start:end]
+
+
+def _alignment_metrics(query: str, target: str) -> dict[str, int | str]:
+    if edlib is None:
+        raise RuntimeError("Per-read Savont ASV annotation requires edlib>=1.3.9")
+    result = edlib.align(query, target, mode="NW", task="path")
+    cigar = result.get("cigar") or ""
+    aligned_query: list[str] = []
+    aligned_target: list[str] = []
+    query_idx = target_idx = 0
+    insertions = deletions = substitutions = 0
+    for length_text, operation in re.findall(r"(\d+)([=XID])", cigar):
+        length = int(length_text)
+        if operation in "=X":
+            aligned_query.append(query[query_idx : query_idx + length])
+            aligned_target.append(target[target_idx : target_idx + length])
+            query_idx += length
+            target_idx += length
+            substitutions += length if operation == "X" else 0
+        elif operation == "I":  # read has bases absent from the ASV
+            aligned_query.append(query[query_idx : query_idx + length])
+            aligned_target.append("-" * length)
+            query_idx += length
+            insertions += length
+        else:  # ASV has bases absent from the read
+            aligned_query.append("-" * length)
+            aligned_target.append(target[target_idx : target_idx + length])
+            target_idx += length
+            deletions += length
+    return {
+        "aligned_repeat_sequence": "".join(aligned_query),
+        "aligned_consensus_sequence": "".join(aligned_target),
+        "insertions_vs_consensus": insertions,
+        "deletions_vs_consensus": deletions,
+        "substitutions_vs_consensus": substitutions,
+        "edit_distance_to_consensus": int(result["editDistance"]),
+    }
+
+
 def cluster_vntr_asvs(
-    features: list[RepeatFeature], min_identity: float = 0.85
+    features: list[RepeatFeature],
+    loci: list[Locus],
+    work_dir: str | Path,
+    threads: int,
+    min_cluster_size: int = 2,
+    executable: str = "savont",
 ) -> tuple[list[dict], list[tuple[str, str]], list[dict]]:
-    """Cluster VNTR reads by locus/count and generate indel-aware POA consensuses."""
-    if not 0 <= min_identity <= 1:
-        raise ValueError("min_identity must be between 0 and 1")
-    grouped: dict[tuple[str, int], list[RepeatFeature]] = defaultdict(list)
-    locus_depths: Counter[str] = Counter()
-    for feature in features:
-        grouped[(feature.locus_id, feature.nearest_integer_repeat_count)].append(feature)
-        locus_depths[feature.locus_id] += 1
+    """Call MLVA ASVs with Savont and annotate per-read indels against its consensuses."""
+    if not features:
+        return [], [], []
+    if min_cluster_size < 1:
+        raise ValueError("min_cluster_size must be at least 1")
+    _check_savont(executable)
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    inputs, feature_by_id, sample_to_locus = _write_locus_fastqs(features, work_dir)
+    lengths = [len(feature.amplicon_sequence) for feature in features]
+    command = build_savont_command(
+        inputs, work_dir, threads, min(lengths), max(lengths), min_cluster_size, executable
+    )
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip()
+        raise RuntimeError(f"Savont ASV calling failed (exit {result.returncode}): {detail}")
 
-    clusters_by_locus: dict[str, list[list[RepeatFeature]]] = defaultdict(list)
-    for (locus_id, _repeat_count), partition in sorted(grouped.items()):
-        clusters_by_locus[locus_id].extend(_cluster_partition(partition, min_identity))
+    required = [work_dir / name for name in ("final_asvs.fasta", "feature-table.tsv", "final_clusters.tsv")]
+    missing = [str(path) for path in required if not path.exists()]
+    if missing:
+        raise RuntimeError("Savont completed without required output(s): " + ", ".join(missing))
 
+    samples, depths = _read_feature_table(work_dir / "feature-table.tsv")
+    clusters = _read_savont_clusters(work_dir / "final_clusters.tsv")
+    consensuses = _read_fasta(work_dir / "final_asvs.fasta")
+    sample_indexes = {sample_to_locus[name]: idx for idx, name in enumerate(samples) if name in sample_to_locus}
+    locus_by_id = {locus.locus_id: locus for locus in loci}
+    locus_totals = Counter(feature.locus_id for feature in features)
+    per_locus_number: Counter[str] = Counter()
     table: list[dict] = []
     fasta: list[tuple[str, str]] = []
     memberships: list[dict] = []
-    for locus_id, locus_clusters in sorted(clusters_by_locus.items()):
-        locus_clusters.sort(
-            key=lambda cluster: (
-                -len(cluster),
-                cluster[0].nearest_integer_repeat_count,
-                min(feature.repeat_sequence for feature in cluster),
+
+    for cluster_idx in sorted(consensuses):
+        member_features = [feature_by_id[read_id] for read_id in clusters.get(cluster_idx, []) if read_id in feature_by_id]
+        member_loci = {feature.locus_id for feature in member_features}
+        nonzero = {
+            locus_id for locus_id, sample_idx in sample_indexes.items()
+            if cluster_idx in depths
+            and sample_idx < len(depths[cluster_idx])
+            and depths[cluster_idx][sample_idx] > 0
+        }
+        observed_loci = member_loci | nonzero
+        if len(observed_loci) > 1:
+            raise RuntimeError(
+                f"Savont ASV {cluster_idx} mixed MLVA loci: {', '.join(sorted(observed_loci))}"
             )
-        )
-        depth = locus_depths[locus_id]
-        for idx, cluster in enumerate(locus_clusters, start=1):
-            variant_id = f"{locus_id}_ASV{idx}"
-            sequence_counts = Counter(feature.repeat_sequence for feature in cluster)
-            consensus, sequence_metrics = _poa_consensus(sequence_counts)
-            representative = max(
-                cluster,
-                key=lambda feature: (
-                    sequence_counts[feature.repeat_sequence],
-                    feature.repeat_sequence,
-                ),
-            )
-            pattern_counts = Counter(feature.repeat_pattern for feature in cluster)
-            consensus_pattern = min(
-                pattern_counts,
-                key=lambda pattern: (-pattern_counts[pattern], pattern),
-            )
-            total_insertions = sum(
-                int(sequence_metrics[sequence]["insertions_vs_consensus"]) * count
-                for sequence, count in sequence_counts.items()
-            )
-            total_deletions = sum(
-                int(sequence_metrics[sequence]["deletions_vs_consensus"]) * count
-                for sequence, count in sequence_counts.items()
-            )
-            total_substitutions = sum(
-                int(sequence_metrics[sequence]["substitutions_vs_consensus"]) * count
-                for sequence, count in sequence_counts.items()
-            )
-            edit_distances = [
-                int(sequence_metrics[feature.repeat_sequence]["edit_distance_to_consensus"])
-                for feature in cluster
-            ]
-            reads_with_indels = sum(
-                1
-                for feature in cluster
-                if int(sequence_metrics[feature.repeat_sequence]["insertions_vs_consensus"])
-                or int(sequence_metrics[feature.repeat_sequence]["deletions_vs_consensus"])
-            )
-            row = {
+        if not member_loci:
+            if len(nonzero) != 1:
+                continue
+            locus_id = next(iter(nonzero))
+        else:
+            locus_id = next(iter(member_loci))
+        locus = locus_by_id[locus_id]
+        per_locus_number[locus_id] += 1
+        variant_id = f"{locus_id}_ASV{per_locus_number[locus_id]}"
+        repeat_consensus = _repeat_from_amplicon(consensuses[cluster_idx], locus)
+        count_counts = Counter(feature.nearest_integer_repeat_count for feature in member_features)
+        repeat_count = min(count_counts, key=lambda count: (-count_counts[count], count)) if count_counts else round(len(repeat_consensus) / max(len(locus.repeat_motif), 1))
+        pattern_counts = Counter(feature.repeat_pattern for feature in member_features)
+        consensus_pattern = min(pattern_counts, key=lambda pattern: (-pattern_counts[pattern], pattern)) if pattern_counts else ""
+        metrics_by_read: dict[str, dict[str, int | str]] = {}
+        for feature in member_features:
+            metrics = _alignment_metrics(feature.repeat_sequence, repeat_consensus)
+            metrics_by_read[feature.read_id] = metrics
+            memberships.append({
                 "sample_id": "",
+                "read_id": feature.read_id,
                 "locus_id": locus_id,
                 "variant_id": variant_id,
-                "repeat_count": representative.nearest_integer_repeat_count,
-                "support_reads": len(cluster),
-                "unique_sequences": len(sequence_counts),
-                "frequency": round(len(cluster) / depth, 6) if depth else 0,
-                "consensus_pattern": consensus_pattern,
-                "consensus_sequence": consensus,
-                "consensus_length_bp": len(consensus),
-                "reads_with_indels": reads_with_indels,
-                "total_insertions": total_insertions,
-                "total_deletions": total_deletions,
-                "total_substitutions": total_substitutions,
-                "mean_edit_distance_to_consensus": round(sum(edit_distances) / len(edit_distances), 4),
-                "max_edit_distance_to_consensus": max(edit_distances, default=0),
-            }
-            table.append(row)
-            fasta.append((variant_id, consensus))
-            for feature in cluster:
-                metrics = sequence_metrics[feature.repeat_sequence]
-                memberships.append(
-                    {
-                        "sample_id": "",
-                        "read_id": feature.read_id,
-                        "locus_id": locus_id,
-                        "variant_id": variant_id,
-                        "repeat_count": feature.nearest_integer_repeat_count,
-                        "repeat_sequence": feature.repeat_sequence,
-                        **metrics,
-                    }
-                )
+                "repeat_count": feature.nearest_integer_repeat_count,
+                "repeat_sequence": feature.repeat_sequence,
+                **metrics,
+            })
+        locus_depth = float(depths.get(cluster_idx, [0.0] * len(samples))[sample_indexes[locus_id]]) if locus_id in sample_indexes else float(len(member_features))
+        edit_distances = [int(value["edit_distance_to_consensus"]) for value in metrics_by_read.values()]
+        table.append({
+            "sample_id": "",
+            "locus_id": locus_id,
+            "variant_id": variant_id,
+            "repeat_count": repeat_count,
+            "support_reads": int(round(locus_depth)),
+            "unique_sequences": len({feature.repeat_sequence for feature in member_features}),
+            "frequency": round(locus_depth / locus_totals[locus_id], 6) if locus_totals[locus_id] else 0,
+            "consensus_pattern": consensus_pattern,
+            "consensus_sequence": repeat_consensus,
+            "consensus_length_bp": len(repeat_consensus),
+            "reads_with_indels": sum(1 for value in metrics_by_read.values() if value["insertions_vs_consensus"] or value["deletions_vs_consensus"]),
+            "total_insertions": sum(int(value["insertions_vs_consensus"]) for value in metrics_by_read.values()),
+            "total_deletions": sum(int(value["deletions_vs_consensus"]) for value in metrics_by_read.values()),
+            "total_substitutions": sum(int(value["substitutions_vs_consensus"]) for value in metrics_by_read.values()),
+            "mean_edit_distance_to_consensus": round(sum(edit_distances) / len(edit_distances), 4) if edit_distances else 0,
+            "max_edit_distance_to_consensus": max(edit_distances, default=0),
+        })
+        fasta.append((variant_id, repeat_consensus))
     return table, fasta, memberships
