@@ -38,6 +38,25 @@ def _check_savont(executable: str) -> None:
         raise RuntimeError(f"mlva-seer requires savont>=0.6.1; found {found} at {path}")
 
 
+def _is_pooled_quantification_index_panic(detail: str) -> bool:
+    return (
+        "panicked at" in detail
+        and "index out of bounds" in detail
+        and "Per-sample quantification" in detail
+    )
+
+
+def _clear_partial_savont_outputs(work_dir: Path) -> None:
+    """Remove failed Savont outputs while retaining MLVA Seer's input FASTQs."""
+    for path in work_dir.iterdir():
+        if path.name == "inputs":
+            continue
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
 def build_savont_command(
     input_paths: list[Path],
     output_dir: Path,
@@ -258,14 +277,34 @@ def cluster_vntr_asvs(
     _check_savont(executable)
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    _clear_partial_savont_outputs(work_dir)
+    shutil.rmtree(work_dir / "inputs", ignore_errors=True)
     inputs, feature_by_id, sample_to_locus = _write_locus_fastqs(features, work_dir)
     lengths = [len(feature.amplicon_sequence) for feature in features]
     command = build_savont_command(
         inputs, work_dir, threads, min(lengths), max(lengths), min_cluster_size, executable
     )
     result = subprocess.run(command, capture_output=True, text=True, check=False)
+    pooled_failure_detail = ""
+    if result.returncode:
+        pooled_failure_detail = (result.stderr or result.stdout).strip()
+        if _is_pooled_quantification_index_panic(pooled_failure_detail):
+            _clear_partial_savont_outputs(work_dir)
+            fallback_command = [argument for argument in command if argument != "--pooled-samples"]
+            result = subprocess.run(
+                fallback_command, capture_output=True, text=True, check=False
+            )
+            if not result.returncode:
+                (work_dir / "pooled_quantification_fallback.log").write_text(
+                    pooled_failure_detail + "\n"
+                )
     if result.returncode:
         detail = (result.stderr or result.stdout).strip()
+        if pooled_failure_detail:
+            detail = (
+                "pooled run failed with a Savont per-sample index panic; "
+                f"non-pooled retry also failed:\n{detail}"
+            )
         raise RuntimeError(f"Savont ASV calling failed (exit {result.returncode}): {detail}")
 
     required = [work_dir / name for name in ("final_asvs.fasta", "feature-table.tsv", "final_clusters.tsv")]
@@ -338,7 +377,13 @@ def cluster_vntr_asvs(
                 "repeat_sequence": feature.repeat_sequence,
                 **metrics,
             })
-        locus_depth = float(depths.get(cluster_idx, [0.0] * len(samples))[sample_indexes[locus_id]]) if locus_id in sample_indexes else float(len(member_features))
+        cluster_depths = depths.get(cluster_idx, [])
+        if locus_id in sample_indexes and sample_indexes[locus_id] < len(cluster_depths):
+            locus_depth = float(cluster_depths[sample_indexes[locus_id]])
+        elif len(cluster_depths) == 1:
+            locus_depth = float(cluster_depths[0])
+        else:
+            locus_depth = float(len(member_features))
         edit_distances = [int(value["edit_distance_to_consensus"]) for value in metrics_by_read.values()]
         table.append({
             "sample_id": "",

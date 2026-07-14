@@ -85,7 +85,7 @@ def make_repeat_feature(read_id, sequence, repeat_count=4):
     )
 
 
-def write_fake_savont(tmp_path):
+def write_fake_savont(tmp_path, panic_on_pooled=False):
     executable = tmp_path / "savont"
     executable.write_text(
         """#!/usr/bin/env python3
@@ -94,6 +94,17 @@ if '--version' in sys.argv:
     print('savont 0.6.1')
     raise SystemExit(0)
 args = sys.argv[2:]
+"""
+        + (
+            """if '--pooled-samples' in args:
+    print('=== STAGE 7b: Per-sample quantification ===', file=sys.stderr)
+    print("thread 'main' panicked at alignment.rs: index out of bounds", file=sys.stderr)
+    raise SystemExit(101)
+"""
+            if panic_on_pooled
+            else ""
+        )
+        + """
 flag = args.index('--output-dir')
 inputs = [pathlib.Path(value) for value in args[:flag]]
 out = pathlib.Path(args[flag + 1]); out.mkdir(parents=True, exist_ok=True)
@@ -251,6 +262,26 @@ def test_savont_receives_all_loci_and_full_thread_count(tmp_path):
     assert command[command.index("--threads") + 1] == "32"
     assert "--pooled-samples" in command
     assert "--single-strand" in command
+
+
+def test_savont_pooled_index_panic_retries_without_per_sample_quantification(tmp_path):
+    reference = "ATG" * 4
+    features = [make_repeat_feature("ref1", reference), make_repeat_feature("ref2", reference)]
+    savont = write_fake_savont(tmp_path, panic_on_pooled=True)
+    locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=5)
+    retry_dir = tmp_path / "savont-retry"
+    retry_dir.mkdir()
+    (retry_dir / "stale-partial-output.tsv").write_text("incomplete\n")
+
+    rows, _fasta, memberships = cluster_vntr_asvs(
+        features, [locus], retry_dir, threads=2, executable=str(savont)
+    )
+
+    assert rows[0]["support_reads"] == 2
+    assert len(memberships) == 2
+    assert not (retry_dir / "stale-partial-output.tsv").exists()
+    retry_log = retry_dir / "pooled_quantification_fallback.log"
+    assert "index out of bounds" in retry_log.read_text()
 
 
 def test_simulate_and_call_pipeline(tmp_path):
