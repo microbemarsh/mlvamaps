@@ -14,7 +14,12 @@ from mlva_seer.assembly_call import (
     run_assembly_call,
 )
 from mlva_seer.cli import build_parser, main
-from mlva_seer.clustering import _alignment_metrics, build_savont_command, cluster_vntr_asvs
+from mlva_seer.clustering import (
+    _alignment_metrics,
+    build_vsearch_cluster_command,
+    build_vsearch_derep_command,
+    cluster_vntr_asvs,
+)
 from mlva_seer.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
 from mlva_seer.io import read_loci
 from mlva_seer.models import Locus, ReadRecord, RepeatFeature
@@ -85,51 +90,44 @@ def make_repeat_feature(read_id, sequence, repeat_count=4):
     )
 
 
-def write_fake_savont(tmp_path, panic_on_pooled=False):
-    executable = tmp_path / "savont"
+def write_fake_vsearch(tmp_path):
+    executable = tmp_path / "vsearch"
     executable.write_text(
         """#!/usr/bin/env python3
 import collections, pathlib, sys
 if '--version' in sys.argv:
-    print('savont 0.6.1')
+    print('vsearch v2.30.0_linux_x86_64')
     raise SystemExit(0)
-args = sys.argv[2:]
-"""
-        + (
-            """if '--pooled-samples' in args:
-    print('=== STAGE 7b: Per-sample quantification ===', file=sys.stderr)
-    print("thread 'main' panicked at alignment.rs: index out of bounds", file=sys.stderr)
-    raise SystemExit(101)
-"""
-            if panic_on_pooled
-            else ""
-        )
-        + """
-flag = args.index('--output-dir')
-inputs = [pathlib.Path(value) for value in args[:flag]]
-out = pathlib.Path(args[flag + 1]); out.mkdir(parents=True, exist_ok=True)
-samples = [path.stem for path in inputs]
-clusters = []
-for path in inputs:
-    lines = path.read_text().splitlines()
-    reads = [(lines[i][1:].split()[0], lines[i + 1]) for i in range(0, len(lines), 4)]
-    # Deliberately emit a synthetic sequence that is not a cluster member.
-    # MLVA Seer must ignore it and select an observed representative itself.
-    consensus = 'N' * len(reads[0][1])
-    clusters.append((reads, consensus))
-with (out / 'final_asvs.fasta').open('w') as handle:
-    for idx, (reads, consensus) in enumerate(clusters):
-        handle.write(f'>final_consensus_{idx}_depth_{len(reads)}\\n{consensus}\\n')
-with (out / 'feature-table.tsv').open('w') as handle:
-    handle.write('#OTU ID\\t' + '\\t'.join(samples) + '\\n')
-    for idx, (reads, _consensus) in enumerate(clusters):
-        depths = ['0'] * len(samples); depths[idx] = str(len(reads))
-        handle.write(f'final_consensus_{idx}_depth_{len(reads)}\\t' + '\\t'.join(depths) + '\\n')
-with (out / 'final_clusters.tsv').open('w') as handle:
-    for idx, (reads, _consensus) in enumerate(clusters):
-        handle.write(f'final_cluster_{idx}\\tsize_{len(reads)}\\trepresentative_0\\tmembers\\n')
-        for read_id, _sequence in reads:
-            handle.write(f'{read_id} 100\\n')
+args = sys.argv[1:]
+def value(flag): return args[args.index(flag) + 1]
+def uc(kind, query, target='*', cluster=0, length='*', identity='*'):
+    return '\\t'.join([kind, str(cluster), str(length), str(identity), '+', '0', '0', '*', query, target]) + '\\n'
+if '--fastx_uniques' in args:
+    lines = pathlib.Path(value('--fastx_uniques')).read_text().splitlines()
+    records = [(lines[i][1:].split()[0], lines[i + 1]) for i in range(0, len(lines), 4)]
+    groups = collections.OrderedDict()
+    for read_id, sequence in records: groups.setdefault(sequence, []).append(read_id)
+    ordered = sorted(groups.items(), key=lambda item: -len(item[1]))
+    with pathlib.Path(value('--fastaout')).open('w') as fasta, pathlib.Path(value('--uc')).open('w') as out:
+        for cluster, (sequence, read_ids) in enumerate(ordered):
+            centroid = read_ids[0]
+            fasta.write(f'>{centroid};size={len(read_ids)};\\n{sequence}\\n')
+            out.write(uc('S', centroid, cluster=cluster, length=len(sequence)))
+            for read_id in read_ids[1:]:
+                out.write(uc('H', read_id, centroid, cluster, len(sequence), '100.0'))
+    raise SystemExit(0)
+if '--cluster_size' in args:
+    lines = pathlib.Path(value('--cluster_size')).read_text().splitlines()
+    records = [(lines[i][1:].split()[0], lines[i + 1]) for i in range(0, len(lines), 2)]
+    centroid, centroid_sequence = records[0]
+    with pathlib.Path(value('--centroids')).open('w') as fasta:
+        fasta.write(f'>{centroid}\\n{centroid_sequence}\\n')
+    with pathlib.Path(value('--uc')).open('w') as out:
+        out.write(uc('S', centroid, cluster=0, length=len(centroid_sequence)))
+        for query, sequence in records[1:]:
+            out.write(uc('H', query, centroid, 0, len(sequence), '99.0'))
+    raise SystemExit(0)
+raise SystemExit(2)
 """
     )
     executable.chmod(0o755)
@@ -188,7 +186,7 @@ with pathlib.Path(value('--tsv')).open('w') as stats:
     return executable
 
 
-def test_mlva_clustering_uses_only_savont_memberships_and_retains_indels(tmp_path):
+def test_vsearch_clustering_uses_observed_centroid_and_retains_indels(tmp_path):
     reference = "ATG" * 4
     insertion = reference[:4] + "A" + reference[4:]
     deletion = reference[:4] + reference[5:]
@@ -199,10 +197,10 @@ def test_mlva_clustering_uses_only_savont_memberships_and_retains_indels(tmp_pat
         make_repeat_feature("insertion", insertion),
         make_repeat_feature("deletion", deletion),
     ]
-    savont = write_fake_savont(tmp_path)
+    vsearch = write_fake_vsearch(tmp_path)
     locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=5)
     rows, fasta, memberships = cluster_vntr_asvs(
-        features, [locus], tmp_path / "savont-out", threads=4, executable=str(savont)
+        features, [locus], tmp_path / "vsearch-out", threads=4, executable=str(vsearch)
     )
 
     dominant = rows[0]
@@ -268,40 +266,49 @@ def test_native_repeat_motif_statistics_preserve_patterns_and_partials():
     assert sequence.mean_qscore("IIII") == 40.0
 
 
-def test_savont_receives_all_loci_and_full_thread_count(tmp_path):
-    inputs = [tmp_path / "locus_0000.fastq", tmp_path / "locus_0001.fastq"]
-    command = build_savont_command(
-        inputs,
-        tmp_path / "savont",
-        threads=32,
-        min_read_length=60,
-        max_read_length=400,
-        min_cluster_size=2,
+def test_vsearch_commands_use_native_dereplication_and_full_thread_count(tmp_path):
+    input_path = tmp_path / "locus_0000.fastq"
+    derep = build_vsearch_derep_command(
+        input_path,
+        tmp_path / "uniques.fasta",
+        tmp_path / "derep.uc",
     )
-    assert command[:4] == ["savont", "asv", str(inputs[0]), str(inputs[1])]
+    command = build_vsearch_cluster_command(
+        tmp_path / "uniques.fasta",
+        tmp_path / "centroids.fasta",
+        tmp_path / "clusters.uc",
+        threads=32,
+        min_identity=0.97,
+    )
+    assert derep[:3] == ["vsearch", "--fastx_uniques", str(input_path)]
+    assert "--sizeout" in derep
+    assert command[:2] == ["vsearch", "--cluster_size"]
     assert command[command.index("--threads") + 1] == "32"
-    assert "--pooled-samples" in command
-    assert "--single-strand" in command
+    assert command[command.index("--id") + 1] == "0.97"
+    assert command[command.index("--iddef") + 1] == "1"
+    assert command[command.index("--qmask") + 1] == "none"
+    assert command[command.index("--wordlength") + 1] == "3"
+    assert command[command.index("--minwordmatches") + 1] == "1"
+    assert command[command.index("--gapopen") + 1] == "4"
+    assert "--sizein" in command
 
 
-def test_savont_pooled_index_panic_retries_without_per_sample_quantification(tmp_path):
+def test_vsearch_work_directory_is_reset_before_clustering(tmp_path):
     reference = "ATG" * 4
     features = [make_repeat_feature("ref1", reference), make_repeat_feature("ref2", reference)]
-    savont = write_fake_savont(tmp_path, panic_on_pooled=True)
+    vsearch = write_fake_vsearch(tmp_path)
     locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=5)
-    retry_dir = tmp_path / "savont-retry"
+    retry_dir = tmp_path / "vsearch-retry"
     retry_dir.mkdir()
     (retry_dir / "stale-partial-output.tsv").write_text("incomplete\n")
 
     rows, _fasta, memberships = cluster_vntr_asvs(
-        features, [locus], retry_dir, threads=2, executable=str(savont)
+        features, [locus], retry_dir, threads=2, executable=str(vsearch)
     )
 
     assert rows[0]["support_reads"] == 2
     assert len(memberships) == 2
     assert not (retry_dir / "stale-partial-output.tsv").exists()
-    retry_log = retry_dir / "pooled_quantification_fallback.log"
-    assert "index out of bounds" in retry_log.read_text()
 
 
 def test_simulate_and_call_pipeline(tmp_path):
@@ -315,7 +322,7 @@ def test_simulate_and_call_pipeline(tmp_path):
         depth=25,
         error_rate=0.0,
     )
-    savont = write_fake_savont(tmp_path)
+    vsearch = write_fake_vsearch(tmp_path)
     amplirust = write_fake_amplirust(tmp_path)
     result = run_call(
         reads_path=str(sim["reads"]),
@@ -325,7 +332,7 @@ def test_simulate_and_call_pipeline(tmp_path):
         sample_id="SIM1",
         min_read_length=20,
         min_depth=5,
-        savont_bin=str(savont),
+        vsearch_bin=str(vsearch),
         amplirust_bin=str(amplirust),
     )
 
@@ -488,7 +495,7 @@ def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
 
 def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
     loci, profiles = write_panel(tmp_path)
-    savont = write_fake_savont(tmp_path)
+    vsearch = write_fake_vsearch(tmp_path)
     amplirust = write_fake_amplirust(tmp_path)
     sim = simulate_reads(
         loci_path=str(loci),
@@ -512,8 +519,8 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
             "20",
             "--min-depth",
             "5",
-            "--savont-bin",
-            str(savont),
+            "--vsearch-bin",
+            str(vsearch),
             "--amplirust-bin",
             str(amplirust),
         ]
@@ -533,8 +540,9 @@ def test_cli_has_conventional_output_and_thread_options():
     default_call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz"])
     assert default_call_args.outdir == "results"
     assert default_call_args.threads == 32
-    assert default_call_args.savont_min_cluster_size == 2
-    assert default_call_args.savont_bin == "savont"
+    assert default_call_args.min_cluster_size == 2
+    assert default_call_args.cluster_min_identity == 0.97
+    assert default_call_args.vsearch_bin == "vsearch"
     assert default_call_args.amplirust_bin == "amplirust"
 
     extract_args = parser.parse_args(["extract-amplicons", "--input", "assembly.fasta", "--primers", "p.tsv"])

@@ -175,8 +175,9 @@ def run_call(
     max_primer_mismatches: int = 3,
     min_depth: int = 10,
     min_posterior: float = 0.75,
-    savont_min_cluster_size: int = 2,
-    savont_bin: str = "savont",
+    min_cluster_size: int = 2,
+    cluster_min_identity: float = 0.97,
+    vsearch_bin: str = "vsearch",
     amplirust_bin: str = "amplirust",
     threads: int = DEFAULT_THREADS,
     show_progress: bool = False,
@@ -236,15 +237,18 @@ def run_call(
     write_tsv(feature_rows, outdir_path / "read_repeat_features.tsv", FEATURE_FIELDS)
     progress.step(f"Extracted {len(features):,} repeat feature records")
 
-    savont_dir = outdir_path / "savont"
-    progress.step(f"Clustering VNTR reads with Savont using {thread_count} thread(s)")
+    vsearch_dir = outdir_path / "vsearch"
+    progress.step(
+        f"Clustering VNTR reads per locus with VSEARCH using {thread_count} thread(s)"
+    )
     asv_rows, fasta_records, asv_memberships = cluster_vntr_asvs(
         features,
         loci,
-        savont_dir,
+        vsearch_dir,
         threads=thread_count,
-        min_cluster_size=savont_min_cluster_size,
-        executable=savont_bin,
+        min_cluster_size=min_cluster_size,
+        min_identity=cluster_min_identity,
+        executable=vsearch_bin,
     )
     for row in asv_rows:
         row["sample_id"] = sample_id
@@ -293,7 +297,7 @@ def run_call(
         "asv_table": outdir_path / "vntr_asv_table.tsv",
         "asv_memberships": outdir_path / "vntr_asv_memberships.tsv",
         "asv_representatives": outdir_path / "vntr_asv_representatives.fasta",
-        "savont": savont_dir,
+        "vsearch": vsearch_dir,
         "amplirust": outdir_path / "amplirust",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "report": outdir_path / "report.html",

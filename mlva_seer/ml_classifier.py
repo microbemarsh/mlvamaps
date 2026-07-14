@@ -20,7 +20,7 @@ def predict_read_alleles(
         locus = by_locus[feature.locus_id]
         membership = membership_by_read.get((feature.locus_id, feature.read_id))
         if membership is None:
-            # Savont deliberately removes reads that do not support a retained ASV.
+            # Clustering deliberately removes reads that do not support a retained variant.
             continue
         insertions = int(membership["insertions_vs_representative"])
         deletions = int(membership["deletions_vs_representative"])

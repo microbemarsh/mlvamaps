@@ -26,6 +26,13 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _fraction(value: str) -> float:
+    parsed = float(value)
+    if not 0.0 <= parsed <= 1.0:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return parsed
+
+
 def _input_kind(path: str) -> str:
     lower = path.lower()
     if lower.endswith((".fastq", ".fq", ".fastq.gz", ".fq.gz")):
@@ -131,16 +138,22 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
-        "--savont-min-cluster-size",
+        "--min-cluster-size",
         type=_positive_int,
         default=2,
-        help="Minimum read support for a Savont ASV (default: %(default)s)",
+        help="Minimum read support for a retained VNTR cluster (default: %(default)s)",
     )
     call.add_argument(
-        "--savont-bin",
-        default="savont",
+        "--cluster-min-identity",
+        type=_fraction,
+        default=0.97,
+        help="Minimum VSEARCH global identity within a locus (default: %(default)s)",
+    )
+    call.add_argument(
+        "--vsearch-bin",
+        default="vsearch",
         metavar="PATH",
-        help="Savont executable (requires version >=0.6.1; default: %(default)s)",
+        help="VSEARCH executable (default: %(default)s)",
     )
     call.add_argument(
         "--amplirust-bin",
@@ -223,8 +236,9 @@ def main(argv: list[str] | None = None) -> int:
                 max_primer_mismatches=args.max_primer_mismatches,
                 min_depth=args.min_depth,
                 min_posterior=args.min_posterior,
-                savont_min_cluster_size=args.savont_min_cluster_size,
-                savont_bin=args.savont_bin,
+                min_cluster_size=args.min_cluster_size,
+                cluster_min_identity=args.cluster_min_identity,
+                vsearch_bin=args.vsearch_bin,
                 amplirust_bin=args.amplirust_bin,
                 threads=args.threads,
                 show_progress=not args.quiet,
