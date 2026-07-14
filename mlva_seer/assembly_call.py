@@ -7,7 +7,8 @@ from pathlib import Path
 
 from .calling import estimate_repeat_count_from_product_length
 from .concurrency import DEFAULT_THREADS, resolve_threads
-from .io import read_fasta, read_profiles, write_fasta, write_tsv
+from .in_silico_pcr import read_amplirust_results, run_amplirust_loci
+from .io import read_profiles, write_fasta, write_tsv
 from .models import Locus
 from .pipeline import MATCH_FIELDS, NOVELTY_FIELDS, SIMPLE_CALL_FIELDS
 from .progress import ProgressReporter
@@ -15,7 +16,6 @@ from .profile_matching import build_fingerprint, match_profiles
 from .primers import read_loci_or_primers
 from .novelty import score_novelty
 from .report import write_assembly_report
-from .sequence import find_best, revcomp
 
 
 AMPLICON_FIELDS = [
@@ -40,72 +40,46 @@ def _format_float(value: float | None, digits: int = 3) -> str:
     return f"{value:.{digits}f}".rstrip("0").rstrip(".")
 
 
-def _find_product(sequence: str, locus: Locus, max_primer_mismatches: int) -> tuple[int, int, int, int] | None:
-    f_pos, f_mm = find_best(locus.forward_primer, sequence, max_primer_mismatches)
-    if f_pos is None:
-        return None
-    reverse_site = revcomp(locus.reverse_primer)
-    search_start = f_pos + len(locus.forward_primer)
-    r_rel, r_mm = find_best(reverse_site, sequence[search_start:], max_primer_mismatches)
-    if r_rel is None:
-        return None
-    r_pos = search_start + r_rel
-    end = r_pos + len(reverse_site)
-    product_size = end - f_pos
-    min_len = locus.expected_amplicon_min_bp or len(locus.forward_primer) + len(locus.reverse_primer)
-    max_len = locus.expected_amplicon_max_bp or 100000
-    if product_size < min_len or product_size > max_len:
-        return None
-    return f_pos, end, f_mm or 0, r_mm or 0
-
-
-def extract_primer_products(
-    assembly_path: str | Path,
+def amplirust_rows_to_products(
+    rows: list[dict[str, str | int]],
     loci: list[Locus],
     sample_id: str,
-    max_primer_mismatches: int = 3,
-    progress: ProgressReporter | None = None,
 ) -> list[dict]:
-    progress = progress or ProgressReporter(enabled=False)
+    """Convert Amplirust output into MLVA Seer's assembly-product records."""
+    locus_by_id = {locus.locus_id: locus for locus in loci}
     products = []
-    for contig_idx, (contig_name, sequence) in enumerate(read_fasta(assembly_path), start=1):
-        contig_len = len(sequence)
-        progress.step(f"Scanning contig {contig_idx:,}: {contig_name} ({len(sequence):,} bp)")
-        for locus in loci:
-            candidates = [
-                ("forward", sequence),
-                ("reverse", revcomp(sequence)),
-            ]
-            for orientation, oriented_sequence in candidates:
-                found = _find_product(oriented_sequence, locus, max_primer_mismatches)
-                if found is None:
-                    continue
-                start, end, f_mm, r_mm = found
-                if orientation == "forward":
-                    contig_start = start + 1
-                    contig_end = end
-                else:
-                    contig_start = contig_len - end + 1
-                    contig_end = contig_len - start
-                product_id = f"{locus.locus_id}|{contig_name}|{orientation}|{contig_start}-{contig_end}"
-                products.append(
-                    {
-                        "sample_id": sample_id,
-                        "locus_id": locus.locus_id,
-                        "product_id": product_id,
-                        "contig": contig_name,
-                        "contig_start": contig_start,
-                        "contig_end": contig_end,
-                        "orientation": orientation,
-                        "product_size_bp": end - start,
-                        "forward_mismatches": f_mm,
-                        "reverse_mismatches": r_mm,
-                        "sequence": oriented_sequence[start:end],
-                    }
-                )
-                break
-        progress.count("Scanned assembly contigs", contig_idx)
-    progress.step(f"Found {len(products):,} primer product(s)")
+    for row in rows:
+        locus_id = str(row.get("primer_name", ""))
+        locus = locus_by_id.get(locus_id)
+        if locus is None or str(row.get("is_circular_wrap", "false")).lower() == "true":
+            continue
+        product_size = int(row["full_len"])
+        min_len = locus.expected_amplicon_min_bp or len(locus.forward_primer) + len(locus.reverse_primer)
+        max_len = locus.expected_amplicon_max_bp or 100000
+        if not min_len <= product_size <= max_len:
+            continue
+        contig = str(row["reference_id"]).split()[0]
+        contig_start = int(row["original_start"]) + 1
+        contig_end = int(row["original_end"])
+        if contig_end < contig_start:
+            continue
+        orientation = "reverse" if row.get("strand") == "-" else "forward"
+        product_id = f"{locus_id}|{contig}|{orientation}|{contig_start}-{contig_end}"
+        products.append(
+            {
+                "sample_id": sample_id,
+                "locus_id": locus_id,
+                "product_id": product_id,
+                "contig": contig,
+                "contig_start": contig_start,
+                "contig_end": contig_end,
+                "orientation": orientation,
+                "product_size_bp": product_size,
+                "forward_mismatches": int(row["fwd_mismatches"]),
+                "reverse_mismatches": int(row["rev_mismatches"]),
+                "sequence": str(row["product_seq"]).upper(),
+            }
+        )
     return products
 
 
@@ -384,6 +358,7 @@ def run_assembly_call(
     max_primer_mismatches: int = 3,
     threads: int = DEFAULT_THREADS,
     minimap2_preset: str | None = None,
+    amplirust_bin: str = "amplirust",
     show_progress: bool = False,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
@@ -396,7 +371,21 @@ def run_assembly_call(
     loci = read_loci_or_primers(loci_path, primers_path)
     profiles = read_profiles(profiles_path)
     progress.step(f"Loaded {len(loci):,} loci" + (f" and {len(profiles):,} reference profiles" if profiles else ""))
-    products = extract_primer_products(assembly_path, loci, sample_id, max_primer_mismatches, progress)
+    progress.step("Finding degenerate-primer products with Amplirust")
+    amplirust_paths = run_amplirust_loci(
+        assembly_path,
+        loci,
+        outdir_path / "amplirust",
+        max_errors=max_primer_mismatches,
+        threads=threads,
+        executable=amplirust_bin,
+    )
+    products = amplirust_rows_to_products(
+        read_amplirust_results(amplirust_paths["stats"], amplirust_paths["products"]),
+        loci,
+        sample_id,
+    )
+    progress.step(f"Found {len(products):,} primer product(s)")
     write_tsv(products, outdir_path / "assembly_amplicons.tsv", AMPLICON_FIELDS)
 
     progress.step("Writing assembly amplicon FASTA")
@@ -457,6 +446,7 @@ def run_assembly_call(
         "calls": calls_path,
         "amplicons": outdir_path / "assembly_amplicons.tsv",
         "amplicon_fasta": product_fasta,
+        "amplirust": outdir_path / "amplirust",
         "read_support": support_path,
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "profile_matches": outdir_path / "profile_matches.tsv",

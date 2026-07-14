@@ -7,10 +7,7 @@ import subprocess
 from collections import Counter, defaultdict
 from pathlib import Path
 
-try:
-    import edlib
-except ImportError:  # pragma: no cover - packaging supplies the accelerated aligner
-    edlib = None
+from sequence_align.pairwise import needleman_wunsch
 
 from .models import Locus, RepeatFeature
 from .sequence import find_best, revcomp
@@ -176,39 +173,33 @@ def _repeat_from_amplicon(sequence: str, locus: Locus) -> str:
 
 
 def _alignment_metrics(query: str, target: str) -> dict[str, int | str]:
-    if edlib is None:
-        raise RuntimeError("Per-read Savont ASV annotation requires edlib>=1.3.9")
-    result = edlib.align(query, target, mode="NW", task="path")
-    cigar = result.get("cigar") or ""
-    aligned_query: list[str] = []
-    aligned_target: list[str] = []
-    query_idx = target_idx = 0
-    insertions = deletions = substitutions = 0
-    for length_text, operation in re.findall(r"(\d+)([=XID])", cigar):
-        length = int(length_text)
-        if operation in "=X":
-            aligned_query.append(query[query_idx : query_idx + length])
-            aligned_target.append(target[target_idx : target_idx + length])
-            query_idx += length
-            target_idx += length
-            substitutions += length if operation == "X" else 0
-        elif operation == "I":  # read has bases absent from the ASV
-            aligned_query.append(query[query_idx : query_idx + length])
-            aligned_target.append("-" * length)
-            query_idx += length
-            insertions += length
-        else:  # ASV has bases absent from the read
-            aligned_query.append("-" * length)
-            aligned_target.append(target[target_idx : target_idx + length])
-            target_idx += length
-            deletions += length
+    aligned_query, aligned_target = needleman_wunsch(
+        list(query),
+        list(target),
+        "-",
+        match_score=0.0,
+        mismatch_score=-1.0,
+        indel_score=-1.0,
+    )
+    pairs = list(zip(aligned_query, aligned_target))
+    insertions = sum(
+        1 for query_base, target_base in pairs if query_base != "-" and target_base == "-"
+    )
+    deletions = sum(
+        1 for query_base, target_base in pairs if query_base == "-" and target_base != "-"
+    )
+    substitutions = sum(
+        1
+        for query_base, target_base in pairs
+        if query_base != "-" and target_base != "-" and query_base != target_base
+    )
     return {
         "aligned_repeat_sequence": "".join(aligned_query),
         "aligned_consensus_sequence": "".join(aligned_target),
         "insertions_vs_consensus": insertions,
         "deletions_vs_consensus": deletions,
         "substitutions_vs_consensus": substitutions,
-        "edit_distance_to_consensus": int(result["editDistance"]),
+        "edit_distance_to_consensus": insertions + deletions + substitutions,
     }
 
 

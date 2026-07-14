@@ -8,17 +8,15 @@ Current packaging assumptions:
 
 - MLVA Seer is pure Python, so the recipe should use `noarch: python`.
 - `mlva-seer` is the console script.
-- `amplirust` should be a runtime dependency because `extract-amplicons` delegates
-  in-silico PCR to the external `amplirust` executable.
+- `amplirust` is a runtime dependency because assembly extraction and FASTQ
+  paired-primer assignment delegate IUPAC matching to its executable.
 - `minimap2` should be a runtime dependency because assembly calls can use
   `--reads` to add read-depth support.
-- `sassy` should be a runtime dependency because it is the preferred Rust/SIMD
-  approximate DNA matcher and is also used by `amplirust`.
-- `sassy-rs` should be packaged separately or added if it becomes available in
-  conda, because direct FASTQ primer/flank matching uses the Python binding
-  preferentially.
-- `edlib` is retained as a fallback runtime dependency in the conda recipe until
-  `sassy-rs` is available through conda.
+- `sassy-rs` must be packaged separately for Bioconda because bounded flank
+  localization within assigned amplicons uses its Python binding.
+- `sequence-align` supplies Rust-backed global alignment tracebacks for per-read
+  substitutions and indels against each Savont consensus. It must be packaged
+  for Bioconda before this staged recipe can be submitted.
 - Release source should use a stable GitHub archive URL for a tag, with a
   `sha256` checksum filled in before submission.
 - bioconda tests should avoid requiring local data. Import checks and CLI help

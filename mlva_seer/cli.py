@@ -143,6 +143,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Savont executable (requires version >=0.6.1; default: %(default)s)",
     )
     call.add_argument(
+        "--amplirust-bin",
+        default="amplirust",
+        metavar="PATH",
+        help="Amplirust executable used for degenerate primer pairing (default: %(default)s)",
+    )
+    call.add_argument(
         "-t",
         "--threads",
         type=int,
@@ -219,6 +225,7 @@ def main(argv: list[str] | None = None) -> int:
                 min_posterior=args.min_posterior,
                 savont_min_cluster_size=args.savont_min_cluster_size,
                 savont_bin=args.savont_bin,
+                amplirust_bin=args.amplirust_bin,
                 threads=args.threads,
                 show_progress=not args.quiet,
             )
@@ -240,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_primer_mismatches=args.max_primer_mismatches,
                 threads=args.threads,
                 minimap2_preset=args.minimap2_preset,
+                amplirust_bin=args.amplirust_bin,
                 show_progress=not args.quiet,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")

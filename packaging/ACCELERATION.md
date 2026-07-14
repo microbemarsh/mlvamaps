@@ -6,16 +6,17 @@ possible, and avoid generic fuzzy-string packages for core matching.
 Current backend policy:
 
 - `amplirust` is the required in-silico PCR backend for assembly, contig, and
-  reference product extraction.
+  reference product extraction and for paired-primer assignment of FASTQ reads
+  after a lossless FASTA projection. It owns IUPAC primer interpretation,
+  product-length constraints, strand handling, and primer alignment CIGARs.
 - `sassy` is the preferred Rust/SIMD approximate DNA matcher for primer-style
-  searches. The assembly extraction path already gets sassy-backed matching via
-  `amplirust`; the direct FASTQ read-assignment path uses the `sassy-rs>=0.2.4`
-  batched API and gives Sassy ownership of all requested worker threads.
+  searches within already assigned amplicons, such as optional locus-flank
+  localization. Degenerate primer pairing is delegated to `amplirust`.
 - `savont>=0.6.1` is the required multithreaded ASV clustering, variant
   detection, consensus, and EM abundance backend for FASTQ calls. All locus
   FASTQs are submitted in one pooled invocation.
-- `edlib` is the C-backed fallback for approximate primer/flank alignment and
-  annotates per-read indels against final Savont repeat consensuses.
+- `sequence-align` provides Rust-backed Needleman-Wunsch tracebacks used to
+  annotate per-read indels against final Savont repeat consensuses.
 - `minimap2` plus `pysam` are the preferred low-level alignment stack for
   future read-to-reference-amplicon and assembly evidence.
 

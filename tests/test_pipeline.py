@@ -9,7 +9,6 @@ from types import SimpleNamespace
 from mlva_seer import sequence
 from mlva_seer.assembly_call import (
     build_minimap2_command,
-    extract_primer_products,
     read_alignment_depth,
     read_minimap2_depth,
     run_assembly_call,
@@ -18,7 +17,6 @@ from mlva_seer.cli import build_parser, main
 from mlva_seer.clustering import build_savont_command, cluster_vntr_asvs
 from mlva_seer.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
 from mlva_seer.io import read_loci
-from mlva_seer.locus_assignment import assign_reads
 from mlva_seer.models import Locus, ReadRecord, RepeatFeature
 from mlva_seer.ml_classifier import predict_read_alleles
 from mlva_seer.pipeline import run_call
@@ -125,6 +123,58 @@ with (out / 'final_clusters.tsv').open('w') as handle:
     return executable
 
 
+def write_fake_amplirust(tmp_path):
+    executable = tmp_path / "amplirust"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import csv, pathlib, sys
+args = sys.argv[1:]
+def value(flag): return args[args.index(flag) + 1]
+def rc(seq): return seq.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
+records = []
+name = None
+parts = []
+for line in pathlib.Path(value('--input')).read_text().splitlines():
+    if line.startswith('>'):
+        if name is not None: records.append((name, ''.join(parts)))
+        name = line[1:].split()[0]; parts = []
+    else: parts.append(line.strip())
+if name is not None: records.append((name, ''.join(parts)))
+with pathlib.Path(value('--primers')).open() as handle:
+    primers = list(csv.DictReader(handle))
+products = []
+for reference, original in records:
+    case = 0
+    for primer in primers:
+        for strand, sequence in [('+', original), ('-', rc(original))]:
+            fwd = sequence.find(primer['forward'])
+            rev_seq = rc(primer['reverse'])
+            rev = sequence.find(rev_seq, fwd + len(primer['forward'])) if fwd >= 0 else -1
+            if fwd < 0 or rev < 0: continue
+            end = rev + len(rev_seq); full_len = end - fwd
+            min_len = int(value('--min-len')); max_len = int(value('--max-len'))
+            if not min_len <= full_len <= max_len: continue
+            case += 1
+            start0, end0 = (fwd, end) if strand == '+' else (len(original) - end, len(original) - fwd)
+            suffix = '_rc' if strand == '-' else ''
+            amplicon_id = f"{reference}:{primer['name']}{suffix}:{case}"
+            product = sequence[fwd:end]
+            products.append((amplicon_id, reference, primer['name'], product, full_len, fwd, rev, strand, start0, end0, len(primer['forward']), len(rev_seq)))
+            break
+with pathlib.Path(value('--output')).open('w') as fasta:
+    for row in products:
+        fasta.write(f'>{row[0]}\\tpos={row[8]}-{row[9]}\\tstrand={row[7]}\\tlen={row[4]}\\n{row[3]}\\n')
+header = 'amplicon_id\treference_id\tsource_file\tprimer_name\tproduct_len\tfull_len\tfwd_start\tfwd_end\tfwd_mismatches\tfwd_identity\tfwd_cigar\trev_start\trev_end\trev_mismatches\trev_identity\trev_cigar\tstrand\tis_circular_wrap\tproduct_seq\\n'
+with pathlib.Path(value('--tsv')).open('w') as stats:
+    stats.write(header)
+    for row in products:
+        stats.write(f'{row[0]}\t{row[1]}\tfake.fa\t{row[2]}\t{len(row[3])}\t{row[4]}\t{row[5]}\t{row[5] + row[10]}\t0\t1.0\t{row[10]}=\t{row[6]}\t{row[6] + row[11]}\t0\t1.0\t{row[11]}=\t{row[7]}\tfalse\t{row[3]}\\n')
+"""
+    )
+    executable.chmod(0o755)
+    return executable
+
+
 def test_mlva_clustering_uses_savont_and_retains_indels(tmp_path):
     reference = "ATG" * 4
     insertion = reference[:4] + "A" + reference[4:]
@@ -199,6 +249,7 @@ def test_simulate_and_call_pipeline(tmp_path):
         error_rate=0.0,
     )
     savont = write_fake_savont(tmp_path)
+    amplirust = write_fake_amplirust(tmp_path)
     result = run_call(
         reads_path=str(sim["reads"]),
         loci_path=str(loci),
@@ -208,6 +259,7 @@ def test_simulate_and_call_pipeline(tmp_path):
         min_read_length=20,
         min_depth=5,
         savont_bin=str(savont),
+        amplirust_bin=str(amplirust),
     )
 
     calls = {row["locus_id"]: row for row in read_tsv(result["allele_calls"])}
@@ -284,9 +336,11 @@ def test_amplirust_primer_export_and_command(tmp_path):
     assert "--search-rc" in command
     assert "--circular" in command
     assert command[command.index("--max-errors") + 1] == "3"
+    assert command[command.index("--max-n-fraction") + 1] == "0.0"
 
 
 def test_assembly_call_from_primer_products(tmp_path):
+    amplirust = write_fake_amplirust(tmp_path)
     primers = tmp_path / "primers.tsv"
     primers.write_text(
         "locus_id\tforward_primer\treverse_primer\trepeat_unit_length_bp\texpected_product_size_bp\tnominal_repeat_units\n"
@@ -313,6 +367,7 @@ def test_assembly_call_from_primer_products(tmp_path):
         sample_id="ASM1",
         alignments_path=str(sam),
         profiles_path=str(profiles),
+        amplirust_bin=str(amplirust),
     )
 
     calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
@@ -338,6 +393,7 @@ def test_assembly_call_from_primer_products(tmp_path):
 
 
 def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
+    amplirust = write_fake_amplirust(tmp_path)
     primers = tmp_path / "primers.tsv"
     primers.write_text(
         "locus_id\tforward_primer\treverse_primer\trepeat_unit_length_bp\texpected_product_size_bp\tnominal_repeat_units\n"
@@ -351,6 +407,7 @@ def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
         primers_path=str(primers),
         outdir=str(tmp_path / "assembly_no_depth"),
         sample_id="ASM_NO_DEPTH",
+        amplirust_bin=str(amplirust),
     )
     report = result["report"].read_text()
     assert "uniform default intensity" in report
@@ -360,6 +417,7 @@ def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
 def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
     loci, profiles = write_panel(tmp_path)
     savont = write_fake_savont(tmp_path)
+    amplirust = write_fake_amplirust(tmp_path)
     sim = simulate_reads(
         loci_path=str(loci),
         profiles_path=str(profiles),
@@ -384,6 +442,8 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
             "5",
             "--savont-bin",
             str(savont),
+            "--amplirust-bin",
+            str(amplirust),
         ]
     )
     assert exit_code == 0
@@ -403,6 +463,7 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.threads == 32
     assert default_call_args.savont_min_cluster_size == 2
     assert default_call_args.savont_bin == "savont"
+    assert default_call_args.amplirust_bin == "amplirust"
 
     extract_args = parser.parse_args(["extract-amplicons", "--input", "assembly.fasta", "--primers", "p.tsv"])
     assert extract_args.threads == 32
@@ -489,57 +550,6 @@ def test_sassy_searchers_are_thread_local(monkeypatch):
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _index: sequence.find_best("ACGT", "TTTACGTTT", 1), range(2)))
     assert results == [(3, 0), (3, 0)]
-
-
-def test_sassy_batch_search_owns_requested_threads(monkeypatch):
-    class FakeSearcher:
-        calls = []
-
-        def __init__(self, alphabet, rc=False):
-            self.rc = rc
-
-        def search_many(self, patterns, texts, k, threads, mode):
-            self.calls.append((threads, mode, self.rc, len(patterns), len(texts)))
-            matches = []
-            for pattern_idx, pattern in enumerate(patterns):
-                reverse_pattern = sequence.revcomp(pattern.decode()).encode()
-                for text_idx, text in enumerate(texts):
-                    for strand, query in (("+", pattern), ("-", reverse_pattern)):
-                        position = text.find(query)
-                        if position >= 0:
-                            matches.append(
-                                SimpleNamespace(
-                                    pattern_idx=pattern_idx,
-                                    text_idx=text_idx,
-                                    text_start=position,
-                                    text_end=position + len(query),
-                                    cost=0,
-                                    strand=strand,
-                                )
-                            )
-            return matches
-
-    monkeypatch.setattr(sequence, "sassy", SimpleNamespace(Searcher=FakeSearcher))
-    sequence._clear_sassy_searchers()
-    locus = Locus(
-        locus_id="VNTR",
-        forward_primer="ACGTAC",
-        reverse_primer="AACCGT",
-        expected_amplicon_min_bp=10,
-        expected_amplicon_max_bp=30,
-    )
-    amplicon = "ACGTAC" + "GATA" * 2 + sequence.revcomp(locus.reverse_primer)
-    reads = [
-        ReadRecord("forward", amplicon, "I" * len(amplicon)),
-        ReadRecord("reverse", sequence.revcomp(amplicon), "I" * len(amplicon)),
-    ]
-
-    assignments = assign_reads(reads, [locus], "SAMPLE", max_primer_mismatches=0, threads=7)
-
-    assert FakeSearcher.calls == [(7, "batch_texts", True, 2, 2)]
-    assert [assignment.orientation for assignment in assignments] == ["forward", "reverse"]
-    assert all(assignment.assigned_locus == "VNTR" for assignment in assignments)
-    assert all(assignment.passes_assignment_qc for assignment in assignments)
 
 
 def test_cleaned_mlva_seer_primer_tsv_is_ingestible():

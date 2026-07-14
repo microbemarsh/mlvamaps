@@ -5,13 +5,11 @@ channels:
 dependencies:
   - python>=3.12
   - pip
-  - twine
+  - setuptools>=68
   - amplirust
-  - sassy
   - savont>=0.6.1
-  - edlib
   - minimap2
   - pysam
   - pip:
       - sassy-rs>=0.2.4
-      - -e .
+      - sequence-align>=0.4.0

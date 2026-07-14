@@ -5,8 +5,9 @@ from pathlib import Path
 from .bayesian_caller import call_loci
 from .clustering import cluster_vntr_asvs
 from .concurrency import DEFAULT_THREADS, resolve_threads
+from .in_silico_pcr import read_amplirust_results, run_amplirust_loci
 from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
-from .locus_assignment import assign_reads
+from .locus_assignment import assignments_from_amplirust
 from .ml_classifier import predict_read_alleles
 from .novelty import score_novelty
 from .profile_matching import build_fingerprint, match_profiles
@@ -175,6 +176,7 @@ def run_call(
     min_posterior: float = 0.75,
     savont_min_cluster_size: int = 2,
     savont_bin: str = "savont",
+    amplirust_bin: str = "amplirust",
     threads: int = DEFAULT_THREADS,
     show_progress: bool = False,
 ) -> dict[str, Path]:
@@ -202,14 +204,27 @@ def run_call(
     write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
 
-    assignments = assign_reads(
-        filtered_reads,
-        loci,
-        sample_id,
-        max_primer_mismatches,
-        threads=threads,
-        progress=progress,
-    )
+    if filtered_reads:
+        progress.step("Assigning reads by degenerate primer pairs with Amplirust")
+        assignment_fasta = outdir_path / "filtered_reads.fasta"
+        write_fasta(((read.read_id, read.sequence) for read in filtered_reads), assignment_fasta)
+        amplirust_paths = run_amplirust_loci(
+            assignment_fasta,
+            loci,
+            outdir_path / "amplirust",
+            max_errors=max_primer_mismatches,
+            threads=threads,
+            executable=amplirust_bin,
+        )
+        assignments = assignments_from_amplirust(
+            filtered_reads,
+            loci,
+            read_amplirust_results(amplirust_paths["stats"], amplirust_paths["products"]),
+            sample_id,
+            progress=progress,
+        )
+    else:
+        assignments = []
     assignment_rows = [{field: getattr(row, field) for field in ASSIGNMENT_FIELDS} for row in assignments]
     write_tsv(assignment_rows, outdir_path / "read_locus_assignments.tsv", ASSIGNMENT_FIELDS)
     assigned_count = sum(1 for row in assignments if row.passes_assignment_qc)
@@ -278,6 +293,7 @@ def run_call(
         "asv_memberships": outdir_path / "vntr_asv_memberships.tsv",
         "asv_consensus": outdir_path / "vntr_asv_consensus.fasta",
         "savont": savont_dir,
+        "amplirust": outdir_path / "amplirust",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "report": outdir_path / "report.html",
     }

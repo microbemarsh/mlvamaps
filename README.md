@@ -26,6 +26,9 @@ conda env create -f environment.yml
 
 # activate conda environment
 conda activate mlva-seer
+
+# install mlva-seer without invoking the PEP 517/pyproject build path
+python setup.py install
 ```
 
 ## Quick Start
@@ -134,7 +137,10 @@ Example primer files are in `examples/seer_lab_Ba/`.
 
 For FASTQ input, MLVA Seer also writes detailed evidence tables, filtered reads,
 an MLVA fingerprint, optional profile matches, and `report.html`. VNTR variants
-are called by Savont from quality-bearing, primer-trimmed amplicons. MLVA Seer
+are called by Savont from quality-bearing, primer-trimmed amplicons. Degenerate
+primer pairing and read-to-locus assignment are performed by Amplirust using a
+lossless FASTA projection of the filtered reads; the original FASTQ qualities
+remain attached to the assigned reads. MLVA Seer
 writes one FASTQ per locus and submits them together as a single pooled Savont
 run, so Savont owns the complete `-t`/`--threads` allocation without nested
 Python chunking. Savont's EM-refined abundance table supplies ASV support and
