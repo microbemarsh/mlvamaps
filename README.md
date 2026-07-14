@@ -136,19 +136,25 @@ Example primer files are in `examples/seer_lab_Ba/`.
 ## Outputs
 
 For FASTQ input, MLVA Seer also writes detailed evidence tables, filtered reads,
-an MLVA fingerprint, optional profile matches, and `report.html`. VNTR variants
-are called by Savont from quality-bearing, primer-trimmed amplicons. Degenerate
+an MLVA fingerprint, optional profile matches, and `report.html`. VNTR reads
+are clustered by Savont from quality-bearing, primer-trimmed amplicons. Degenerate
 primer pairing and read-to-locus assignment are performed by Amplirust using a
 lossless FASTA projection of the filtered reads; the original FASTQ qualities
 remain attached to the assigned reads. MLVA Seer
 writes one FASTQ per locus and submits them together as a single pooled Savont
 run, so Savont owns the complete `-t`/`--threads` allocation without nested
-Python chunking. Savont's EM-refined abundance table supplies ASV support and
-frequency, and its final cluster assignments supply read membership.
+Python chunking. Only Savont's retained cluster assignments are consumed.
+MLVA Seer independently calculates support, frequency, repeat count, and edit
+evidence. Each cluster is represented by its most-supported observed repeat
+sequence, using mean read quality and sequence as deterministic tie breakers.
+Savont's synthesized consensus is never used as the reported ASV sequence, so
+the selected representative's actual indel state is preserved.
+`vntr_asv_representatives.fasta` contains those observed sequences.
 `vntr_asv_table.tsv` contains per-ASV read and indel counts, while
 `vntr_asv_memberships.tsv` retains each clustered read's raw/aligned repeat
 sequence and its insertions, deletions, and substitutions relative to the
-Savont consensus. The raw Savont outputs are retained under `results/savont/`.
+selected representative. Raw Savont outputs are retained under `results/savont/`
+for diagnostics but are not used for downstream abundance or sequence analysis.
 Savont 0.6.1 or newer is required. ASVs require two supporting reads by
 default; change this with `--savont-min-cluster-size`.
 

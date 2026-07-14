@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import csv
-import gzip
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
+
+import pysam
 
 from .models import Locus, ReadRecord
 
 
 def open_text(path: str | Path, mode: str = "rt"):
+    import gzip
+
     path = Path(path)
     if path.suffix == ".gz":
         return gzip.open(path, mode)
@@ -16,37 +19,17 @@ def open_text(path: str | Path, mode: str = "rt"):
 
 
 def read_fastq(path: str | Path) -> Iterator[ReadRecord]:
-    with open_text(path, "rt") as handle:
-        while True:
-            header = handle.readline()
-            if not header:
-                break
-            sequence = handle.readline().strip()
-            plus = handle.readline()
-            quality = handle.readline().strip()
-            if not header.startswith("@") or not plus.startswith("+"):
-                raise ValueError(f"Malformed FASTQ record near {header.strip()!r}")
-            read_id = header[1:].strip().split()[0]
-            yield ReadRecord(read_id, sequence.upper(), quality)
+    with pysam.FastxFile(str(path), persist=False) as handle:
+        for record in handle:
+            if record.quality is None:
+                raise ValueError(f"Expected FASTQ qualities for record {record.name!r}")
+            yield ReadRecord(record.name, record.sequence.upper(), record.quality)
 
 
 def read_fasta(path: str | Path) -> Iterator[tuple[str, str]]:
-    with open_text(path, "rt") as handle:
-        name = ""
-        parts: list[str] = []
-        for line in handle:
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith(">"):
-                if name:
-                    yield name, "".join(parts).upper()
-                name = line[1:].strip().split()[0]
-                parts = []
-            else:
-                parts.append(line)
-        if name:
-            yield name, "".join(parts).upper()
+    with pysam.FastxFile(str(path), persist=False) as handle:
+        for record in handle:
+            yield record.name, record.sequence.upper()
 
 
 def write_fastq(reads: Iterable[ReadRecord], path: str | Path) -> None:

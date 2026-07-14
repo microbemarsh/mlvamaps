@@ -6,7 +6,7 @@ from .calling import estimate_repeat_count_from_inner_length, repeat_unit_length
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .models import Assignment, Locus, RepeatFeature
 from .progress import ProgressReporter
-from .sequence import find_best, hamming_distance, mean_qscore
+from .sequence import find_best, mean_qscore, repeat_motif_statistics
 
 
 def _bounded_find(pattern: str, sequence: str, start: int, end: int, max_mismatches: int):
@@ -55,21 +55,9 @@ def extract_repeat_features(
         if raw_count is None:
             raw_count = len(repeat_sequence) / motif_len
         nearest = round(raw_count)
-        pattern_parts = []
-        mismatches = 0
-        motif_kmers = 0
-        for idx in range(0, len(repeat_sequence), motif_len):
-            chunk = repeat_sequence[idx : idx + motif_len]
-            if len(chunk) < motif_len:
-                pattern_parts.append(f"{chunk}:partial")
-                continue
-            distance = hamming_distance(chunk, motif)
-            if distance == 0:
-                pattern_parts.append(motif)
-                motif_kmers += 1
-            else:
-                pattern_parts.append(chunk)
-                mismatches += distance
+        pattern_parts, mismatches, motif_kmers = repeat_motif_statistics(
+            repeat_sequence, motif, motif_len
+        )
         left_score = 1 - ((assignment.forward_mismatches or 0) / max(len(locus.forward_primer), 1))
         right_score = 1 - ((assignment.reverse_mismatches or 0) / max(len(locus.reverse_primer), 1))
         flank_scores = [left_score, right_score]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+import numpy as np
 
 from .models import Locus, ReadPrediction, RepeatFeature
 
@@ -22,12 +22,12 @@ def predict_read_alleles(
         if membership is None:
             # Savont deliberately removes reads that do not support a retained ASV.
             continue
-        insertions = int(membership["insertions_vs_consensus"])
-        deletions = int(membership["deletions_vs_consensus"])
-        substitutions = int(membership["substitutions_vs_consensus"])
+        insertions = int(membership["insertions_vs_representative"])
+        deletions = int(membership["deletions_vs_representative"])
+        substitutions = int(membership["substitutions_vs_representative"])
         aligned_length = max(
             len(str(membership["aligned_repeat_sequence"])),
-            len(str(membership["aligned_consensus_sequence"])),
+            len(str(membership["aligned_representative_sequence"])),
             1,
         )
         alignment_identity = max(0.0, 1 - ((insertions + deletions + substitutions) / aligned_length))
@@ -35,20 +35,27 @@ def predict_read_alleles(
         flank_weight = max(0.0, min(feature.flank_quality_score, 1.0))
         evidence_weight = flank_weight * quality_weight * alignment_identity
         sigma = max(0.18, 0.65 - min(feature.mean_qscore, 30) / 80)
-        weights = {}
-        for count in range(locus.expected_min_repeats, locus.expected_max_repeats + 1):
-            distance = feature.raw_repeat_count_estimate - count
-            likelihood = math.exp(-(distance * distance) / (2 * sigma * sigma))
-            weights[count] = likelihood + 1e-9
-        total = sum(weights.values())
-        ranked = sorted(((count, weight / total) for count, weight in weights.items()), key=lambda item: item[1], reverse=True)
-        alt = ranked[1] if len(ranked) > 1 else (None, 0.0)
+        counts = np.arange(
+            locus.expected_min_repeats,
+            locus.expected_max_repeats + 1,
+            dtype=np.int64,
+        )
+        distances = feature.raw_repeat_count_estimate - counts
+        weights = np.exp(-(distances * distances) / (2 * sigma * sigma)) + 1e-9
+        probabilities = weights / weights.sum(dtype=np.float64)
+        ranking = np.argsort(-probabilities, kind="stable")
+        best_idx = int(ranking[0])
+        if len(ranking) > 1:
+            alt_idx = int(ranking[1])
+            alt = (int(counts[alt_idx]), float(probabilities[alt_idx]))
+        else:
+            alt = (None, 0.0)
         predictions.append(
             ReadPrediction(
                 feature.read_id,
                 feature.locus_id,
-                ranked[0][0],
-                round(ranked[0][1], 6),
+                int(counts[best_idx]),
+                round(float(probabilities[best_idx]), 6),
                 alt[0],
                 round(alt[1], 6),
                 str(membership["variant_id"]),

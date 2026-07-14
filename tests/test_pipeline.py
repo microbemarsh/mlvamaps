@@ -113,7 +113,9 @@ clusters = []
 for path in inputs:
     lines = path.read_text().splitlines()
     reads = [(lines[i][1:].split()[0], lines[i + 1]) for i in range(0, len(lines), 4)]
-    consensus = collections.Counter(sequence for _, sequence in reads).most_common(1)[0][0]
+    # Deliberately emit a synthetic sequence that is not a cluster member.
+    # MLVA Seer must ignore it and select an observed representative itself.
+    consensus = 'N' * len(reads[0][1])
     clusters.append((reads, consensus))
 with (out / 'final_asvs.fasta').open('w') as handle:
     for idx, (reads, consensus) in enumerate(clusters):
@@ -186,7 +188,7 @@ with pathlib.Path(value('--tsv')).open('w') as stats:
     return executable
 
 
-def test_mlva_clustering_uses_savont_and_retains_indels(tmp_path):
+def test_mlva_clustering_uses_only_savont_memberships_and_retains_indels(tmp_path):
     reference = "ATG" * 4
     insertion = reference[:4] + "A" + reference[4:]
     deletion = reference[:4] + reference[5:]
@@ -206,7 +208,8 @@ def test_mlva_clustering_uses_savont_and_retains_indels(tmp_path):
     dominant = rows[0]
     assert dominant["support_reads"] == 5
     assert dominant["unique_sequences"] == 3
-    assert dominant["consensus_sequence"] == reference
+    assert dominant["representative_sequence"] == reference
+    assert dominant["representative_read_id"] == "ref1"
     assert dominant["reads_with_indels"] == 2
     assert dominant["total_insertions"] == 1
     assert dominant["total_deletions"] == 1
@@ -215,37 +218,54 @@ def test_mlva_clustering_uses_savont_and_retains_indels(tmp_path):
 
     insertion_membership = next(row for row in memberships if row["read_id"] == "insertion")
     assert insertion_membership["variant_id"] == "VNTR_ASV1"
-    assert insertion_membership["insertions_vs_consensus"] == 1
-    assert insertion_membership["deletions_vs_consensus"] == 0
-    assert "-" in insertion_membership["aligned_consensus_sequence"]
+    assert insertion_membership["insertions_vs_representative"] == 1
+    assert insertion_membership["deletions_vs_representative"] == 0
+    assert "-" in insertion_membership["aligned_representative_sequence"]
 
     deletion_membership = next(row for row in memberships if row["read_id"] == "deletion")
-    assert deletion_membership["insertions_vs_consensus"] == 0
-    assert deletion_membership["deletions_vs_consensus"] == 1
+    assert deletion_membership["insertions_vs_representative"] == 0
+    assert deletion_membership["deletions_vs_representative"] == 1
     assert "-" in deletion_membership["aligned_repeat_sequence"]
 
     predictions = predict_read_alleles(features, [locus], memberships)
     by_read = {prediction.read_id: prediction for prediction in predictions}
-    assert by_read["insertion"].insertions_vs_consensus == 1
-    assert by_read["deletion"].deletions_vs_consensus == 1
+    assert by_read["insertion"].insertions_vs_representative == 1
+    assert by_read["deletion"].deletions_vs_representative == 1
     assert by_read["insertion"].evidence_weight < by_read["ref1"].evidence_weight
     assert by_read["deletion"].evidence_weight < by_read["ref1"].evidence_weight
 
 
-def test_wfa2_global_alignment_retains_indels_and_substitutions():
+def test_parasail_global_alignment_retains_indels_and_substitutions():
     insertion = _alignment_metrics("AACGT", "ACGT")
     deletion = _alignment_metrics("ACGT", "AACGT")
     substitution = _alignment_metrics("ACAT", "ACGT")
     empty = _alignment_metrics("", "ACGT")
 
-    assert insertion["insertions_vs_consensus"] == 1
-    assert "-" in insertion["aligned_consensus_sequence"]
-    assert deletion["deletions_vs_consensus"] == 1
+    assert insertion["insertions_vs_representative"] == 1
+    assert "-" in insertion["aligned_representative_sequence"]
+    assert deletion["deletions_vs_representative"] == 1
     assert "-" in deletion["aligned_repeat_sequence"]
-    assert substitution["substitutions_vs_consensus"] == 1
-    assert substitution["edit_distance_to_consensus"] == 1
+    assert substitution["substitutions_vs_representative"] == 1
+    assert substitution["edit_distance_to_representative"] == 1
     assert empty["aligned_repeat_sequence"] == "----"
-    assert empty["deletions_vs_consensus"] == 4
+    assert empty["deletions_vs_representative"] == 4
+
+
+def test_native_repeat_motif_statistics_preserve_patterns_and_partials():
+    parts, mismatches, motif_kmers = sequence.repeat_motif_statistics(
+        "ATGATCAT", "ATG", 3
+    )
+    assert parts == ["ATG", "ATC", "AT:partial"]
+    assert mismatches == 1
+    assert motif_kmers == 1
+
+    parts, mismatches, motif_kmers = sequence.repeat_motif_statistics(
+        "ACGT", "N", 2
+    )
+    assert parts == ["AC", "GT"]
+    assert mismatches == 4
+    assert motif_kmers == 0
+    assert sequence.mean_qscore("IIII") == 40.0
 
 
 def test_savont_receives_all_loci_and_full_thread_count(tmp_path):
@@ -316,11 +336,16 @@ def test_simulate_and_call_pipeline(tmp_path):
     assert calls["VNTR_01"]["effective_read_depth"] == "25.0"
     asv_rows = read_tsv(result["asv_table"])
     assert asv_rows[0]["support_reads"] == "25"
+    assert asv_rows[0]["representative_read_id"]
+    assert asv_rows[0]["representative_sequence"]
     assert "total_insertions" in asv_rows[0]
+    assert result["asv_representatives"].exists()
+    assert not (tmp_path / "results" / "vntr_asv_consensus.fasta").exists()
     memberships = read_tsv(result["asv_memberships"])
     assert len(memberships) == 50
     assert {row["sample_id"] for row in memberships} == {"SIM1"}
     assert all("aligned_repeat_sequence" in row for row in memberships)
+    assert all("aligned_representative_sequence" in row for row in memberships)
     easy_calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
     assert easy_calls["VNTR_01"]["present"] == "yes"
     assert easy_calls["VNTR_01"]["repeat_count"] == "5"

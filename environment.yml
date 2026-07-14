@@ -7,9 +7,10 @@ dependencies:
   - pip
   - setuptools>=68
   - amplirust
-  - savont>=0.6.1
+  - savont>=0.6.1c
   - minimap2
-  - pywfa>=0.5.1
+  - numpy>=1.24
+  - parasail>=1.3.4
   - pysam
   - pip:
       - sassy-rs>=0.2.4

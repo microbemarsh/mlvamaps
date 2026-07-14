@@ -35,9 +35,13 @@ setup(
     ],
     python_requires=">=3.10",
     packages=find_packages(include=["mlva_seer", "mlva_seer.*"]),
-    install_requires=["pywfa>=0.5.1", "sassy-rs>=0.2.4"],
+    install_requires=[
+        "numpy>=1.24",
+        "parasail>=1.3.4",
+        "pysam>=0.22",
+        "sassy-rs>=0.2.4",
+    ],
     extras_require={
-        "bio": ["pysam>=0.22"],
         "dev": ["pytest"],
     },
     entry_points={"console_scripts": ["mlva-seer=mlva_seer.cli:main"]},

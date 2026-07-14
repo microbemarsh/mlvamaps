@@ -4,6 +4,7 @@ from collections import Counter
 from threading import local
 from typing import Optional, Tuple
 
+import numpy as np
 import sassy
 
 
@@ -18,12 +19,51 @@ def revcomp(sequence: str) -> str:
 def mean_qscore(quality: Optional[str]) -> float:
     if not quality:
         return 0.0
-    return sum(ord(ch) - 33 for ch in quality) / len(quality)
+    values = np.frombuffer(quality.encode("ascii"), dtype=np.uint8)
+    return float(values.mean(dtype=np.float64) - 33.0)
 
 
 def hamming_distance(a: str, b: str) -> int:
     length = min(len(a), len(b))
-    return sum(1 for i in range(length) if a[i] != b[i]) + abs(len(a) - len(b))
+    if not length:
+        return abs(len(a) - len(b))
+    left = np.frombuffer(a[:length].encode("ascii"), dtype=np.uint8)
+    right = np.frombuffer(b[:length].encode("ascii"), dtype=np.uint8)
+    return int(np.count_nonzero(left != right)) + abs(len(a) - len(b))
+
+
+def repeat_motif_statistics(
+    sequence: str, motif: str, motif_length: int
+) -> tuple[list[str], int, int]:
+    """Compute motif comparisons in NumPy's native loops, retaining labels."""
+    full_chunks = len(sequence) // motif_length
+    full_length = full_chunks * motif_length
+    if full_chunks:
+        bases = np.frombuffer(
+            sequence[:full_length].encode("ascii"), dtype=np.uint8
+        ).reshape(full_chunks, motif_length)
+        motif_bases = np.frombuffer(motif.encode("ascii"), dtype=np.uint8)
+        shared_length = min(motif_length, len(motif))
+        equal = bases[:, :shared_length] == motif_bases[:shared_length]
+        exact_chunks = (
+            np.all(equal, axis=1)
+            if motif_length == len(motif)
+            else np.zeros(full_chunks, dtype=np.bool_)
+        )
+        mismatches = int(equal.size - np.count_nonzero(equal))
+        mismatches += full_chunks * abs(motif_length - len(motif))
+        motif_kmers = int(np.count_nonzero(exact_chunks))
+        pattern_parts = [
+            motif if bool(exact_chunks[idx]) else sequence[idx * motif_length : (idx + 1) * motif_length]
+            for idx in range(full_chunks)
+        ]
+    else:
+        pattern_parts = []
+        mismatches = 0
+        motif_kmers = 0
+    if full_length < len(sequence):
+        pattern_parts.append(f"{sequence[full_length:]}:partial")
+    return pattern_parts, mismatches, motif_kmers
 
 
 def _sassy_searcher(alphabet: str, rc: bool = False):

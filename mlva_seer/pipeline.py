@@ -58,15 +58,16 @@ ASV_FIELDS = [
     "support_reads",
     "unique_sequences",
     "frequency",
-    "consensus_pattern",
-    "consensus_sequence",
-    "consensus_length_bp",
+    "representative_read_id",
+    "representative_pattern",
+    "representative_sequence",
+    "representative_length_bp",
     "reads_with_indels",
     "total_insertions",
     "total_deletions",
     "total_substitutions",
-    "mean_edit_distance_to_consensus",
-    "max_edit_distance_to_consensus",
+    "mean_edit_distance_to_representative",
+    "max_edit_distance_to_representative",
 ]
 
 ASV_MEMBERSHIP_FIELDS = [
@@ -77,11 +78,11 @@ ASV_MEMBERSHIP_FIELDS = [
     "repeat_count",
     "repeat_sequence",
     "aligned_repeat_sequence",
-    "aligned_consensus_sequence",
-    "insertions_vs_consensus",
-    "deletions_vs_consensus",
-    "substitutions_vs_consensus",
-    "edit_distance_to_consensus",
+    "aligned_representative_sequence",
+    "insertions_vs_representative",
+    "deletions_vs_representative",
+    "substitutions_vs_representative",
+    "edit_distance_to_representative",
 ]
 
 PREDICTION_FIELDS = [
@@ -92,9 +93,9 @@ PREDICTION_FIELDS = [
     "top_alt_repeat_count",
     "top_alt_probability",
     "variant_id",
-    "insertions_vs_consensus",
-    "deletions_vs_consensus",
-    "substitutions_vs_consensus",
+    "insertions_vs_representative",
+    "deletions_vs_representative",
+    "substitutions_vs_representative",
     "evidence_weight",
 ]
 
@@ -236,7 +237,7 @@ def run_call(
     progress.step(f"Extracted {len(features):,} repeat feature records")
 
     savont_dir = outdir_path / "savont"
-    progress.step(f"Calling VNTR sequence variants with Savont using {thread_count} thread(s)")
+    progress.step(f"Clustering VNTR reads with Savont using {thread_count} thread(s)")
     asv_rows, fasta_records, asv_memberships = cluster_vntr_asvs(
         features,
         loci,
@@ -255,7 +256,7 @@ def run_call(
         outdir_path / "vntr_asv_memberships.tsv",
         ASV_MEMBERSHIP_FIELDS,
     )
-    write_fasta(fasta_records, outdir_path / "vntr_asv_consensus.fasta")
+    write_fasta(fasta_records, outdir_path / "vntr_asv_representatives.fasta")
 
     progress.step("Calling repeat counts")
     predictions = predict_read_alleles(features, loci, asv_memberships)
@@ -291,7 +292,7 @@ def run_call(
         "allele_calls": outdir_path / "allele_calls.tsv",
         "asv_table": outdir_path / "vntr_asv_table.tsv",
         "asv_memberships": outdir_path / "vntr_asv_memberships.tsv",
-        "asv_consensus": outdir_path / "vntr_asv_consensus.fasta",
+        "asv_representatives": outdir_path / "vntr_asv_representatives.fasta",
         "savont": savont_dir,
         "amplirust": outdir_path / "amplirust",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",

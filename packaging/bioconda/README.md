@@ -14,8 +14,10 @@ Current packaging assumptions:
   `--reads` to add read-depth support.
 - `sassy-rs` must be packaged separately for Bioconda because bounded flank
   localization within assigned amplicons uses its Python binding.
-- `pywfa` supplies WFA2 exact global alignment tracebacks for per-read
-  substitutions and indels against each Savont consensus.
+- `parasail` supplies SIMD C global-alignment tracebacks for per-read
+  substitutions and indels against each observed cluster representative.
+- `pysam`/htslib handles FASTA, FASTQ, SAM, and BAM parsing, while NumPy moves
+  quality, motif, and repeat-likelihood reductions out of Python loops.
 - Release source should use a stable GitHub archive URL for a tag, with a
   `sha256` checksum filled in before submission.
 - bioconda tests should avoid requiring local data. Import checks and CLI help
