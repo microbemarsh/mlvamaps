@@ -5,9 +5,10 @@ import re
 import shutil
 import subprocess
 from collections import Counter, defaultdict
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-from sequence_align.pairwise import needleman_wunsch
+from pywfa import WavefrontAligner
 
 from .models import Locus, RepeatFeature
 from .sequence import find_best, revcomp
@@ -173,14 +174,48 @@ def _repeat_from_amplicon(sequence: str, locus: Locus) -> str:
 
 
 def _alignment_metrics(query: str, target: str) -> dict[str, int | str]:
-    aligned_query, aligned_target = needleman_wunsch(
-        list(query),
-        list(target),
-        "-",
-        match_score=0.0,
-        mismatch_score=-1.0,
-        indel_score=-1.0,
-    )
+    """Return exact edit metrics from an end-to-end WFA2 traceback."""
+    if not query or not target:
+        aligned_query = list(query or ("-" * len(target)))
+        aligned_target = list(target or ("-" * len(query)))
+    else:
+        aligner = WavefrontAligner(
+            pattern=query,
+            distance="affine",
+            match=0,
+            mismatch=1,
+            gap_opening=0,
+            gap_extension=1,
+            scope="full",
+            span="end-to-end",
+            heuristic=None,
+        )
+        result = aligner(target, clip_cigar=False)
+        if result.status != 0:
+            raise RuntimeError(f"WFA2 global alignment failed with status {result.status}")
+        query_index = 0
+        target_index = 0
+        aligned_query = []
+        aligned_target = []
+        for operation, length in result.cigartuples:
+            if operation in (0, 7, 8):  # M, =, X
+                aligned_query.extend(query[query_index : query_index + length])
+                aligned_target.extend(target[target_index : target_index + length])
+                query_index += length
+                target_index += length
+            elif operation == 2:  # D: pattern/query base opposite a text gap
+                aligned_query.extend(query[query_index : query_index + length])
+                aligned_target.extend("-" * length)
+                query_index += length
+            elif operation == 1:  # I: text/target base opposite a pattern gap
+                aligned_query.extend("-" * length)
+                aligned_target.extend(target[target_index : target_index + length])
+                target_index += length
+            else:
+                raise RuntimeError(f"Unexpected WFA2 CIGAR operation {operation}")
+        if query_index != len(query) or target_index != len(target):
+            raise RuntimeError("WFA2 returned an incomplete end-to-end traceback")
+
     pairs = list(zip(aligned_query, aligned_target))
     insertions = sum(
         1 for query_base, target_base in pairs if query_base != "-" and target_base == "-"
@@ -201,6 +236,10 @@ def _alignment_metrics(query: str, target: str) -> dict[str, int | str]:
         "substitutions_vs_consensus": substitutions,
         "edit_distance_to_consensus": insertions + deletions + substitutions,
     }
+
+
+def _alignment_metrics_pair(pair: tuple[str, str]) -> dict[str, int | str]:
+    return _alignment_metrics(*pair)
 
 
 def cluster_vntr_asvs(
@@ -245,6 +284,7 @@ def cluster_vntr_asvs(
     fasta: list[tuple[str, str]] = []
     memberships: list[dict] = []
 
+    alignment_executor: ProcessPoolExecutor | None = None
     for cluster_idx in sorted(consensuses):
         member_features = [feature_by_id[read_id] for read_id in clusters.get(cluster_idx, []) if read_id in feature_by_id]
         member_loci = {feature.locus_id for feature in member_features}
@@ -273,9 +313,21 @@ def cluster_vntr_asvs(
         repeat_count = min(count_counts, key=lambda count: (-count_counts[count], count)) if count_counts else round(len(repeat_consensus) / max(len(locus.repeat_motif), 1))
         pattern_counts = Counter(feature.repeat_pattern for feature in member_features)
         consensus_pattern = min(pattern_counts, key=lambda pattern: (-pattern_counts[pattern], pattern)) if pattern_counts else ""
+        unique_repeat_sequences = sorted({feature.repeat_sequence for feature in member_features})
+        alignment_pairs = [(sequence, repeat_consensus) for sequence in unique_repeat_sequences]
+        if threads > 1 and len(alignment_pairs) > 1:
+            if alignment_executor is None:
+                alignment_executor = ProcessPoolExecutor(max_workers=threads)
+            aligned_metrics = alignment_executor.map(_alignment_metrics_pair, alignment_pairs)
+            metrics_by_sequence = dict(zip(unique_repeat_sequences, aligned_metrics))
+        else:
+            metrics_by_sequence = {
+                sequence: _alignment_metrics(sequence, repeat_consensus)
+                for sequence in unique_repeat_sequences
+            }
         metrics_by_read: dict[str, dict[str, int | str]] = {}
         for feature in member_features:
-            metrics = _alignment_metrics(feature.repeat_sequence, repeat_consensus)
+            metrics = metrics_by_sequence[feature.repeat_sequence]
             metrics_by_read[feature.read_id] = metrics
             memberships.append({
                 "sample_id": "",
@@ -307,4 +359,6 @@ def cluster_vntr_asvs(
             "max_edit_distance_to_consensus": max(edit_distances, default=0),
         })
         fasta.append((variant_id, repeat_consensus))
+    if alignment_executor is not None:
+        alignment_executor.shutdown()
     return table, fasta, memberships

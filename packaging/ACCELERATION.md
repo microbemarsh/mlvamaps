@@ -15,8 +15,10 @@ Current backend policy:
 - `savont>=0.6.1` is the required multithreaded ASV clustering, variant
   detection, consensus, and EM abundance backend for FASTQ calls. All locus
   FASTQs are submitted in one pooled invocation.
-- `sequence-align` provides Rust-backed Needleman-Wunsch tracebacks used to
-  annotate per-read indels against final Savont repeat consensuses.
+- WFA2, through `pywfa`, provides exact end-to-end Levenshtein tracebacks used
+  to annotate per-read indels against final Savont repeat consensuses.
+  Identical repeat sequences are aligned once per consensus, and independent
+  unique sequences use the resolved worker allocation.
 - `minimap2` plus `pysam` are the preferred low-level alignment stack for
   future read-to-reference-amplicon and assembly evidence.
 
@@ -31,3 +33,6 @@ Default threading policy:
   search, which avoids nested parallelism and CPU oversubscription.
 - Savont likewise receives the full resolved thread count in one process; MLVA
   Seer does not launch one competing Savont process per locus.
+- After Savont completes, WFA2 alignments for independent unique repeat
+  sequences use up to the resolved number of worker processes. This phase does
+  not overlap Savont.

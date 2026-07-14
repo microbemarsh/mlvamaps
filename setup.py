@@ -35,7 +35,7 @@ setup(
     ],
     python_requires=">=3.10",
     packages=find_packages(include=["mlva_seer", "mlva_seer.*"]),
-    install_requires=["sassy-rs>=0.2.4", "sequence-align>=0.4.0"],
+    install_requires=["pywfa>=0.5.1", "sassy-rs>=0.2.4"],
     extras_require={
         "bio": ["pysam>=0.22"],
         "dev": ["pytest"],

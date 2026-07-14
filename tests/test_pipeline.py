@@ -14,7 +14,7 @@ from mlva_seer.assembly_call import (
     run_assembly_call,
 )
 from mlva_seer.cli import build_parser, main
-from mlva_seer.clustering import build_savont_command, cluster_vntr_asvs
+from mlva_seer.clustering import _alignment_metrics, build_savont_command, cluster_vntr_asvs
 from mlva_seer.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
 from mlva_seer.io import read_loci
 from mlva_seer.models import Locus, ReadRecord, RepeatFeature
@@ -219,6 +219,22 @@ def test_mlva_clustering_uses_savont_and_retains_indels(tmp_path):
     assert by_read["deletion"].deletions_vs_consensus == 1
     assert by_read["insertion"].evidence_weight < by_read["ref1"].evidence_weight
     assert by_read["deletion"].evidence_weight < by_read["ref1"].evidence_weight
+
+
+def test_wfa2_global_alignment_retains_indels_and_substitutions():
+    insertion = _alignment_metrics("AACGT", "ACGT")
+    deletion = _alignment_metrics("ACGT", "AACGT")
+    substitution = _alignment_metrics("ACAT", "ACGT")
+    empty = _alignment_metrics("", "ACGT")
+
+    assert insertion["insertions_vs_consensus"] == 1
+    assert "-" in insertion["aligned_consensus_sequence"]
+    assert deletion["deletions_vs_consensus"] == 1
+    assert "-" in deletion["aligned_repeat_sequence"]
+    assert substitution["substitutions_vs_consensus"] == 1
+    assert substitution["edit_distance_to_consensus"] == 1
+    assert empty["aligned_repeat_sequence"] == "----"
+    assert empty["deletions_vs_consensus"] == 4
 
 
 def test_savont_receives_all_loci_and_full_thread_count(tmp_path):

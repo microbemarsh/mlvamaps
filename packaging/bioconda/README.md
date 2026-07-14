@@ -14,9 +14,8 @@ Current packaging assumptions:
   `--reads` to add read-depth support.
 - `sassy-rs` must be packaged separately for Bioconda because bounded flank
   localization within assigned amplicons uses its Python binding.
-- `sequence-align` supplies Rust-backed global alignment tracebacks for per-read
-  substitutions and indels against each Savont consensus. It must be packaged
-  for Bioconda before this staged recipe can be submitted.
+- `pywfa` supplies WFA2 exact global alignment tracebacks for per-read
+  substitutions and indels against each Savont consensus.
 - Release source should use a stable GitHub archive URL for a tag, with a
   `sha256` checksum filled in before submission.
 - bioconda tests should avoid requiring local data. Import checks and CLI help

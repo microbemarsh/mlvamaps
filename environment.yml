@@ -9,7 +9,7 @@ dependencies:
   - amplirust
   - savont>=0.6.1
   - minimap2
+  - pywfa>=0.5.1
   - pysam
   - pip:
       - sassy-rs>=0.2.4
-      - sequence-align>=0.4.0
