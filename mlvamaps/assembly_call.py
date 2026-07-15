@@ -45,7 +45,7 @@ def amplirust_rows_to_products(
     loci: list[Locus],
     sample_id: str,
 ) -> list[dict]:
-    """Convert Amplirust output into MLVA Seer's assembly-product records."""
+    """Convert Amplirust output into MLVAMaps assembly-product records."""
     locus_by_id = {locus.locus_id: locus for locus in loci}
     products = []
     for row in rows:

@@ -78,9 +78,9 @@ def convert_profiles(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Convert the UF B. anthracis VNTR table into mlva-seer profiles.")
+    parser = argparse.ArgumentParser(description="Convert the UF B. anthracis VNTR table into mlvamaps profiles.")
     parser.add_argument("input", type=Path)
-    parser.add_argument("--primers", type=Path, default=Path("examples/seer_lab_Ba/mlva_seer_primers.example.tsv"))
+    parser.add_argument("--primers", type=Path, default=Path("examples/seer_lab_Ba/mlvamaps_primers.example.tsv"))
     parser.add_argument("--output", type=Path, default=Path("data/uf_ba_mlva_profiles.tsv"))
     parser.add_argument("--keep-empty", action="store_true", help="Keep accessions with no VNTR values")
     args = parser.parse_args()

@@ -26,6 +26,13 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be at least 0")
+    return parsed
+
+
 def _fraction(value: str) -> float:
     parsed = float(value)
     if not 0.0 <= parsed <= 1.0:
@@ -90,14 +97,14 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         args.input_path = args.reads_path
         args.reads_path = None
     if not args.loci and not args.primers:
-        parser.error("call requires a primer file, for example: mlva-seer call primers.tsv sample.fastq.gz")
+        parser.error("call requires a primer file, for example: mlvamaps call primers.tsv sample.fastq.gz")
     if not args.input_path:
         parser.error("call requires an input FASTQ or FASTA file")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mlva-seer",
+        prog="mlvamaps",
         description="Simple MLVA/VNTR calling from primers plus FASTQ or FASTA",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -107,10 +114,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Call VNTRs from primers plus FASTQ reads or a FASTA assembly",
         epilog=(
             "Examples:\n"
-            "  mlva-seer call primers.tsv sample.fastq.gz\n"
-            "  mlva-seer call primers.tsv assembly.fasta\n"
-            "  mlva-seer call primers.tsv assembly.fasta --reads sample.fastq.gz\n"
-            "  mlva-seer call primers.tsv assembly.fasta --bam assembly_reads.bam"
+            "  mlvamaps call primers.tsv sample.fastq.gz\n"
+            "  mlvamaps call primers.tsv assembly.fasta\n"
+            "  mlvamaps call primers.tsv assembly.fasta --reads sample.fastq.gz\n"
+            "  mlvamaps call primers.tsv assembly.fasta --bam assembly_reads.bam"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -160,6 +167,47 @@ def build_parser() -> argparse.ArgumentParser:
         default="amplirust",
         metavar="PATH",
         help="Amplirust executable used for degenerate primer pairing (default: %(default)s)",
+    )
+    call.add_argument(
+        "--minibwa-bin",
+        default="minibwa",
+        metavar="PATH",
+        help="minibwa executable for locus representative mapping (default: %(default)s)",
+    )
+    call.add_argument(
+        "--no-locus-mapping",
+        action="store_true",
+        help="Skip minibwa representative mapping and SNP evidence generation",
+    )
+    call.add_argument(
+        "--min-mapping-quality",
+        type=_nonnegative_int,
+        default=0,
+        help="Minimum minibwa MAPQ used for locus mapping evidence (default: %(default)s)",
+    )
+    call.add_argument(
+        "--min-base-quality",
+        type=_nonnegative_int,
+        default=20,
+        help="Minimum base quality used for coverage and SNP evidence (default: %(default)s)",
+    )
+    call.add_argument(
+        "--min-snp-depth",
+        type=_positive_int,
+        default=3,
+        help="Minimum quality-filtered depth for a SNP call (default: %(default)s)",
+    )
+    call.add_argument(
+        "--min-snp-alternate-reads",
+        type=_positive_int,
+        default=2,
+        help="Minimum reads supporting a non-reference SNP allele (default: %(default)s)",
+    )
+    call.add_argument(
+        "--min-snp-frequency",
+        type=_fraction,
+        default=0.2,
+        help="Minimum non-reference allele frequency for a SNP call (default: %(default)s)",
     )
     call.add_argument(
         "-t",
@@ -240,6 +288,13 @@ def main(argv: list[str] | None = None) -> int:
                 cluster_min_identity=args.cluster_min_identity,
                 vsearch_bin=args.vsearch_bin,
                 amplirust_bin=args.amplirust_bin,
+                minibwa_bin=args.minibwa_bin,
+                locus_mapping=not args.no_locus_mapping,
+                min_mapping_quality=args.min_mapping_quality,
+                min_base_quality=args.min_base_quality,
+                min_snp_depth=args.min_snp_depth,
+                min_snp_alternate_reads=args.min_snp_alternate_reads,
+                min_snp_frequency=args.min_snp_frequency,
                 threads=args.threads,
                 show_progress=not args.quiet,
             )
@@ -247,6 +302,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")
             print(f"Wrote VNTR variant clusters to {result['asv_table']}")
             print(f"Wrote per-read cluster and indel evidence to {result['asv_memberships']}")
+            if not args.no_locus_mapping:
+                print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
+                print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
             print(f"Wrote report to {result['report']}")
         else:
             result = run_assembly_call(

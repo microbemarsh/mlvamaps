@@ -6,27 +6,32 @@ from pathlib import Path
 from threading import Barrier
 from types import SimpleNamespace
 
-from mlva_seer import sequence
-from mlva_seer.assembly_call import (
+from mlvamaps import sequence
+from mlvamaps.assembly_call import (
     build_minimap2_command,
     read_alignment_depth,
     read_minimap2_depth,
     run_assembly_call,
 )
-from mlva_seer.cli import build_parser, main
-from mlva_seer.clustering import (
+from mlvamaps.cli import build_parser, main
+from mlvamaps.clustering import (
     _alignment_metrics,
     build_vsearch_cluster_command,
     build_vsearch_derep_command,
     cluster_vntr_asvs,
 )
-from mlva_seer.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
-from mlva_seer.io import read_loci
-from mlva_seer.models import Locus, ReadRecord, RepeatFeature
-from mlva_seer.ml_classifier import predict_read_alleles
-from mlva_seer.pipeline import run_call
-from mlva_seer.primers import read_primer_pairs
-from mlva_seer.simulation import simulate_reads
+from mlvamaps.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
+from mlvamaps.io import read_loci
+from mlvamaps.mapping import (
+    build_minibwa_index_command,
+    build_minibwa_map_command,
+    parse_minibwa_sam,
+)
+from mlvamaps.models import Locus, ReadRecord, RepeatFeature
+from mlvamaps.ml_classifier import predict_read_alleles
+from mlvamaps.pipeline import run_call
+from mlvamaps.primers import read_primer_pairs
+from mlvamaps.simulation import simulate_reads
 from scripts.convert_uf_ba_vntrs import convert_profiles
 
 
@@ -334,6 +339,7 @@ def test_simulate_and_call_pipeline(tmp_path):
         min_depth=5,
         vsearch_bin=str(vsearch),
         amplirust_bin=str(amplirust),
+        locus_mapping=False,
     )
 
     calls = {row["locus_id"]: row for row in read_tsv(result["allele_calls"])}
@@ -457,7 +463,7 @@ def test_assembly_call_from_primer_products(tmp_path):
     assert calls["VNTR_01"]["mean_coverage"] == "1.5"
     assert calls["VNTR_02"]["present"] == "no"
     report = result["report"].read_text()
-    assert "MLVA Seer Assembly Report: ASM1" in report
+    assert "MLVAMaps Assembly Report: ASM1" in report
     assert "VNTR_01" in report
     assert "Assembly Amplicons" in report
     assert "Generated MLVA assembly gel electrophoresis image" in report
@@ -523,6 +529,7 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
             str(vsearch),
             "--amplirust-bin",
             str(amplirust),
+            "--no-locus-mapping",
         ]
     )
     assert exit_code == 0
@@ -544,6 +551,13 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.cluster_min_identity == 0.97
     assert default_call_args.vsearch_bin == "vsearch"
     assert default_call_args.amplirust_bin == "amplirust"
+    assert default_call_args.minibwa_bin == "minibwa"
+    assert default_call_args.no_locus_mapping is False
+    assert default_call_args.min_mapping_quality == 0
+    assert default_call_args.min_base_quality == 20
+    assert default_call_args.min_snp_depth == 3
+    assert default_call_args.min_snp_alternate_reads == 2
+    assert default_call_args.min_snp_frequency == 0.2
 
     extract_args = parser.parse_args(["extract-amplicons", "--input", "assembly.fasta", "--primers", "p.tsv"])
     assert extract_args.threads == 32
@@ -564,6 +578,78 @@ def test_minimap2_depth_parser(tmp_path):
     assert command == ["minimap2", "-a", "-t", "2", "amplicons.fasta", "reads.fastq.gz"]
     preset_command = build_minimap2_command("amplicons.fasta", "reads.fastq.gz", threads=2, preset="sr")
     assert preset_command == ["minimap2", "-a", "-t", "2", "-x", "sr", "amplicons.fasta", "reads.fastq.gz"]
+
+
+def test_minibwa_commands_and_reference_relative_snp_parser(tmp_path):
+    reference = tmp_path / "references.fasta"
+    reads = tmp_path / "reads.fastq"
+    assert build_minibwa_index_command(reference, 4) == [
+        "minibwa",
+        "index",
+        "-t4",
+        str(reference),
+    ]
+    assert build_minibwa_map_command(reference, reads, 4) == [
+        "minibwa",
+        "map",
+        "-t4",
+        str(reference),
+        str(reads),
+    ]
+
+    sam = tmp_path / "locus.sam"
+    sam.write_text(
+        "@HD\tVN:1.6\tSO:unsorted\n"
+        "@SQ\tSN:VNTR_ASV1\tLN:4\n"
+        "q1\t0\tVNTR_ASV1\t1\t60\t4M\t*\t0\t0\tACGT\tIIII\n"
+        "q2\t0\tVNTR_ASV1\t1\t60\t4M\t*\t0\t0\tACGT\tIIII\n"
+        "q3\t0\tVNTR_ASV1\t1\t60\t4M\t*\t0\t0\tACGA\tIIII\n"
+        "q4\t0\tVNTR_ASV1\t1\t60\t4M\t*\t0\t0\tACGA\tIIII\n"
+    )
+    references = {
+        "VNTR_ASV1": {
+            "reference_name": "VNTR_ASV1",
+            "locus_id": "VNTR",
+            "reference_variant_id": "VNTR_ASV1",
+            "reference_read_id": "q1",
+            "sequence": "ACGT",
+        }
+    }
+    queries = {
+        query_id: {
+            "read_id": query_id,
+            "locus_id": "VNTR",
+            "expected_reference": "VNTR_ASV1",
+        }
+        for query_id in ("q1", "q2", "q3", "q4")
+    }
+    summary, snps = parse_minibwa_sam(
+        sam,
+        references,
+        queries,
+        "SAMPLE",
+        min_snp_depth=4,
+        min_snp_alternate_reads=2,
+        min_snp_frequency=0.4,
+    )
+    assert summary[0]["mapped_reads"] == 4
+    assert summary[0]["mean_depth"] == 4.0
+    assert summary[0]["coverage_percent"] == 100.0
+    assert summary[0]["snp_count"] == 1
+    assert snps == [
+        {
+            "sample_id": "SAMPLE",
+            "locus_id": "VNTR",
+            "reference_variant_id": "VNTR_ASV1",
+            "position": 4,
+            "reference_base": "T",
+            "alternate_base": "A",
+            "depth": 4,
+            "alternate_depth": 2,
+            "alternate_frequency": 0.5,
+            "mean_alternate_base_quality": 40.0,
+        }
+    ]
 
 
 def test_assembly_alignment_depth_from_sam(tmp_path):
@@ -632,8 +718,8 @@ def test_sassy_searchers_are_thread_local(monkeypatch):
     assert results == [(3, 0), (3, 0)]
 
 
-def test_cleaned_mlva_seer_primer_tsv_is_ingestible():
-    loci = read_primer_pairs("examples/seer_lab_Ba/mlva_seer_primers.example.tsv")
+def test_cleaned_mlvamaps_primer_tsv_is_ingestible():
+    loci = read_primer_pairs("examples/seer_lab_Ba/mlvamaps_primers.example.tsv")
     assert len(loci) == 31
     assert loci[0].locus_id == "vrrA_12bp_314bp_10U"
     assert loci[0].forward_primer == "CACAACTACCACCGATGGCACA"
@@ -656,7 +742,7 @@ def test_uf_ba_profile_converter_maps_short_locus_names(tmp_path):
     output = tmp_path / "profiles.tsv"
     rows_written, mapped_loci, unmatched = convert_profiles(
         source,
-        primers_path=Path("examples/seer_lab_Ba/mlva_seer_primers.example.tsv"),
+        primers_path=Path("examples/seer_lab_Ba/mlvamaps_primers.example.tsv"),
         output_path=output,
     )
     assert rows_written == 1

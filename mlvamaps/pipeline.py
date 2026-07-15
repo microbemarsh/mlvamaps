@@ -8,6 +8,11 @@ from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_amplirust_results, run_amplirust_loci
 from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
 from .locus_assignment import assignments_from_amplirust
+from .mapping import (
+    MAPPING_SUMMARY_FIELDS,
+    SNP_FIELDS,
+    run_locus_mapping,
+)
 from .ml_classifier import predict_read_alleles
 from .novelty import score_novelty
 from .profile_matching import build_fingerprint, match_profiles
@@ -179,6 +184,13 @@ def run_call(
     cluster_min_identity: float = 0.97,
     vsearch_bin: str = "vsearch",
     amplirust_bin: str = "amplirust",
+    minibwa_bin: str = "minibwa",
+    locus_mapping: bool = True,
+    min_mapping_quality: int = 0,
+    min_base_quality: int = 20,
+    min_snp_depth: int = 3,
+    min_snp_alternate_reads: int = 2,
+    min_snp_frequency: float = 0.2,
     threads: int = DEFAULT_THREADS,
     show_progress: bool = False,
 ) -> dict[str, Path]:
@@ -262,6 +274,35 @@ def run_call(
     )
     write_fasta(fasta_records, outdir_path / "vntr_asv_representatives.fasta")
 
+    mapping_rows: list[dict] = []
+    snp_rows: list[dict] = []
+    if locus_mapping:
+        progress.step(
+            "Mapping locus reads to dominant VSEARCH representatives with minibwa"
+        )
+        mapping_rows, snp_rows, _mapping_paths = run_locus_mapping(
+            features,
+            asv_rows,
+            outdir_path,
+            sample_id,
+            thread_count,
+            executable=minibwa_bin,
+            min_mapping_quality=min_mapping_quality,
+            min_base_quality=min_base_quality,
+            min_snp_depth=min_snp_depth,
+            min_snp_alternate_reads=min_snp_alternate_reads,
+            min_snp_frequency=min_snp_frequency,
+        )
+        progress.step(
+            f"Mapped reads at {len(mapping_rows):,} loci and retained {len(snp_rows):,} SNP call(s)"
+        )
+    write_tsv(
+        mapping_rows,
+        outdir_path / "locus_mapping_summary.tsv",
+        MAPPING_SUMMARY_FIELDS,
+    )
+    write_tsv(snp_rows, outdir_path / "locus_snps.tsv", SNP_FIELDS)
+
     progress.step("Calling repeat counts")
     predictions = predict_read_alleles(features, loci, asv_memberships)
     prediction_rows = [{field: getattr(row, field) for field in PREDICTION_FIELDS} for row in predictions]
@@ -287,7 +328,18 @@ def run_call(
     novelty_rows = score_novelty(sample_id, allele_rows, match_rows)
     write_tsv(novelty_rows, outdir_path / "novelty_scores.tsv", NOVELTY_FIELDS)
     progress.step("Writing HTML report")
-    write_report(outdir_path, sample_id, allele_rows, novelty_rows, loci, match_rows, profiles, asv_rows)
+    write_report(
+        outdir_path,
+        sample_id,
+        allele_rows,
+        novelty_rows,
+        loci,
+        match_rows,
+        profiles,
+        asv_rows,
+        mapping_rows,
+        snp_rows,
+    )
     progress.step(f"Done. Main calls: {outdir_path / 'calls.tsv'}")
 
     return {
@@ -297,6 +349,11 @@ def run_call(
         "asv_table": outdir_path / "vntr_asv_table.tsv",
         "asv_memberships": outdir_path / "vntr_asv_memberships.tsv",
         "asv_representatives": outdir_path / "vntr_asv_representatives.fasta",
+        "mapping_summary": outdir_path / "locus_mapping_summary.tsv",
+        "mapping_snps": outdir_path / "locus_snps.tsv",
+        "mapping_references": outdir_path / "locus_mapping_references.fasta",
+        "mapping_alignments": outdir_path / "locus_read_alignments.sam",
+        "minibwa": outdir_path / "minibwa",
         "vsearch": vsearch_dir,
         "amplirust": outdir_path / "amplirust",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",

@@ -1,6 +1,6 @@
 # acceleration backends
 
-MLVA Seer should use biological sequence tooling implemented in Rust or C where
+MLVAMaps should use biological sequence tooling implemented in Rust or C where
 possible, and avoid generic fuzzy-string packages for core matching.
 
 Current backend policy:
@@ -14,7 +14,7 @@ Current backend policy:
   localization. Degenerate primer pairing is delegated to `amplirust`.
 - `vsearch>=2.30` performs exact dereplication and abundance-sorted global
   clustering independently for each locus. Its SIMD alignment and identity
-  calculation include gaps. MLVA Seer consumes UC memberships and uses the
+  calculation include gaps. MLVAMaps consumes UC memberships and uses the
   observed cluster seed as the representative; it never uses a consensus.
 - Parasail's SIMD C implementation provides exact end-to-end Needleman-Wunsch
   tracebacks used to annotate per-read indels against the selected observed
@@ -25,16 +25,19 @@ Current backend policy:
 - NumPy performs quality-score reductions, batched repeat-motif comparisons,
   and per-read repeat-count likelihood vectors in compiled loops.
   `pysam.FastxFile` delegates FASTA/FASTQ parsing to htslib.
-- `minimap2` plus `pysam` are the preferred low-level alignment stack for
-  future read-to-reference-amplicon and assembly evidence.
+- `minibwa` maps FASTQ locus reads back to dominant observed VSEARCH
+  representative amplicons; `pysam` parses the resulting SAM for base depth
+  and reference-relative SNP evidence.
+- `minimap2` plus `pysam` provide assembly read-depth support from FASTQ or
+  existing alignment evidence.
 
 Default threading policy:
 
 - CLI options use 32 threads by default. Users can explicitly pass `--threads 0`
   to use all available CPUs.
-- `0` means auto-detect available CPUs for MLVA Seer workers or delegate
+- `0` means auto-detect available CPUs for MLVAMaps workers or delegate
   auto-detection to the external backend, such as `amplirust`.
-- Native backends receive the resolved thread count directly. MLVA Seer does
+- Native backends receive the resolved thread count directly. MLVAMaps does
   not place a Python thread pool around Sassy's internally threaded batch
   search, which avoids nested parallelism and CPU oversubscription.
 - Loci are submitted to VSEARCH sequentially, and each `cluster_size` process

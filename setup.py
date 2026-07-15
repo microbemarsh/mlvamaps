@@ -7,17 +7,17 @@ ROOT = Path(__file__).parent
 
 
 setup(
-    name="mlva-seer",
+    name="mlvamaps",
     version="0.1.0",
     description="MLVA/VNTR genotyping from sequencing reads and assemblies",
     long_description=(ROOT / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
-    url="https://github.com/microbemarsh/mlva_seer",
+    url="https://github.com/microbemarsh/mlvamaps",
     project_urls={
-        "Repository": "https://github.com/microbemarsh/mlva_seer",
-        "Issues": "https://github.com/microbemarsh/mlva_seer/issues",
+        "Repository": "https://github.com/microbemarsh/mlvamaps",
+        "Issues": "https://github.com/microbemarsh/mlvamaps/issues",
     },
-    author="MLVA Seer contributors",
+    author="MLVAMaps contributors",
     license="GPL-3.0-only",
     keywords=["mlva", "vntr", "amplicon", "genotyping", "bioinformatics"],
     classifiers=[
@@ -34,7 +34,7 @@ setup(
         "Topic :: Scientific/Engineering :: Bio-Informatics",
     ],
     python_requires=">=3.10",
-    packages=find_packages(include=["mlva_seer", "mlva_seer.*"]),
+    packages=find_packages(include=["mlvamaps", "mlvamaps.*"]),
     install_requires=[
         "numpy>=1.24",
         "parasail>=1.3.4",
@@ -44,5 +44,5 @@ setup(
     extras_require={
         "dev": ["pytest"],
     },
-    entry_points={"console_scripts": ["mlva-seer=mlva_seer.cli:main"]},
+    entry_points={"console_scripts": ["mlvamaps=mlvamaps.cli:main"]},
 )

@@ -2,16 +2,19 @@
 
 This directory is a staging area for the future bioconda recipe. The actual
 recipe should be submitted to the external `bioconda/bioconda-recipes`
-repository after MLVA Seer has a tagged GitHub release.
+repository after MLVAMaps has a tagged GitHub release.
 
 Current packaging assumptions:
 
-- MLVA Seer is pure Python, so the recipe should use `noarch: python`.
-- `mlva-seer` is the console script.
+- MLVAMaps is pure Python, so the recipe should use `noarch: python`.
+- `mlvamaps` is the console script.
 - `amplirust` is a runtime dependency because assembly extraction and FASTQ
   paired-primer assignment delegate IUPAC matching to its executable.
 - `minimap2` should be a runtime dependency because assembly calls can use
   `--reads` to add read-depth support.
+- `minibwa` should be a runtime dependency because FASTQ calls map all
+  primer-oriented locus reads to the dominant observed representative amplicon
+  and report reference-relative SNP evidence by default.
 - `sassy-rs` must be packaged separately for Bioconda because bounded flank
   localization within assigned amplicons uses its Python binding.
 - `parasail` supplies SIMD C global-alignment tracebacks for per-read
@@ -27,7 +30,7 @@ Before submitting to bioconda:
 
 1. Create a GitHub release tag, for example `v0.1.0`.
 2. Download the release tarball and calculate its `sha256`.
-3. Copy `meta.yaml` into `bioconda-recipes/recipes/mlva-seer/meta.yaml`.
+3. Copy `meta.yaml` into `bioconda-recipes/recipes/mlvamaps/meta.yaml`.
 4. Replace the placeholder checksum.
 5. Run the local bioconda recipe tests from the `bioconda-recipes` checkout.
 

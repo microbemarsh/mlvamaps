@@ -1,14 +1,14 @@
 # Example input files
 
-`mlva_seer_primers.example.tsv` is the recommended minimal primer format for
-MLVA Seer. It is a cleaned, headered version of the legacy MLVA_finder primer
+`mlvamaps_primers.example.tsv` is the recommended minimal primer format for
+MLVAMaps. It is a cleaned, headered version of the legacy MLVA_finder primer
 file and contains one row per VNTR locus.
 
 Required primer columns:
 
 - `locus_id`: stable locus name used in all outputs.
 - `forward_primer`: forward primer sequence, 5' to 3'.
-- `reverse_primer`: reverse primer oligo sequence, 5' to 3'. MLVA Seer searches
+- `reverse_primer`: reverse primer oligo sequence, 5' to 3'. MLVAMaps searches
   for its reverse complement in oriented reads.
 
 Important VNTR columns:
@@ -25,21 +25,21 @@ file. Despite the `.csv` suffix, it is whitespace-delimited:
 locus_id forward_primer reverse_primer
 ```
 
-MLVA Seer can ingest either file.
+MLVAMaps can ingest either file.
 
 For assembly calls:
 
 ```bash
-mlva-seer call examples/seer_lab_Ba/mlva_seer_primers.example.tsv assembly.fasta
+mlvamaps call examples/seer_lab_Ba/mlvamaps_primers.example.tsv assembly.fasta
 ```
 
 For FASTQ reads:
 
 ```bash
-mlva-seer call examples/seer_lab_Ba/mlva_seer_primers.example.tsv reads.fastq.gz
+mlvamaps call examples/seer_lab_Ba/mlvamaps_primers.example.tsv reads.fastq.gz
 ```
 
-`mlva_loci.example.tsv` is the richer optional format for MLVA Seer. It includes
+`mlva_loci.example.tsv` is the richer optional format for MLVAMaps. It includes
 primer sequences plus repeat motif, flank, coordinate, and amplicon metadata.
 
 Optional columns:
@@ -49,6 +49,6 @@ Optional columns:
   the repeat region, used to improve repeat extraction.
 - `pool_id`: primer-pool or multiplex identifier.
 
-`amplirust_primers.example.csv` shows the comma-delimited CSV shape that MLVA
-Seer can write for `amplirust`. Users normally provide
-`mlva_seer_primers.example.tsv`, the raw legacy primer file, or `mlva_loci.tsv`.
+`amplirust_primers.example.csv` shows the comma-delimited CSV shape that
+MLVAMaps can write for `amplirust`. Users normally provide
+`mlvamaps_primers.example.tsv`, the raw legacy primer file, or `mlva_loci.tsv`.

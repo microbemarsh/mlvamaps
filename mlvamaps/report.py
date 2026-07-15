@@ -326,12 +326,16 @@ def write_report(
     match_rows: list[dict] | None = None,
     profiles: list[dict] | None = None,
     asv_rows: list[dict] | None = None,
+    mapping_rows: list[dict] | None = None,
+    snp_rows: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     loci = loci or []
     match_rows = match_rows or []
     profiles = profiles or []
     asv_rows = asv_rows or []
+    mapping_rows = mapping_rows or []
+    snp_rows = snp_rows or []
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
     dropout = sum(1 for row in allele_rows if row.get("call_status") == "LOCUS_DROPOUT")
@@ -345,11 +349,47 @@ def write_report(
         f"<td>{_safe(row['call_status'])}</td></tr>"
         for row in allele_rows
     )
+    mapped_reads = sum(int(row.get("mapped_reads") or 0) for row in mapping_rows)
+    total_mapping_reads = sum(int(row.get("total_reads") or 0) for row in mapping_rows)
+    mapping_table_rows = "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('locus_id', ''))}</td>"
+        f"<td>{_safe(row.get('reference_variant_id', ''))}</td>"
+        f"<td>{_safe(row.get('mapped_reads', ''))}/{_safe(row.get('total_reads', ''))}</td>"
+        f"<td>{_safe(row.get('mapping_rate', ''))}</td>"
+        f"<td>{_safe(row.get('mean_depth', ''))}</td>"
+        f"<td>{_safe(row.get('coverage_percent', ''))}</td>"
+        f"<td>{_safe(row.get('snp_count', ''))}</td>"
+        "</tr>"
+        for row in mapping_rows
+    )
+    if not mapping_table_rows:
+        mapping_table_rows = (
+            '<tr><td colspan="7">Locus representative mapping was disabled or no retained '
+            "representatives were available.</td></tr>"
+        )
+    snp_table_rows = "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('locus_id', ''))}</td>"
+        f"<td>{_safe(row.get('reference_variant_id', ''))}</td>"
+        f"<td>{_safe(row.get('position', ''))}</td>"
+        f"<td>{_safe(row.get('reference_base', ''))}&gt;{_safe(row.get('alternate_base', ''))}</td>"
+        f"<td>{_safe(row.get('alternate_depth', ''))}/{_safe(row.get('depth', ''))}</td>"
+        f"<td>{_safe(row.get('alternate_frequency', ''))}</td>"
+        f"<td>{_safe(row.get('mean_alternate_base_quality', ''))}</td>"
+        "</tr>"
+        for row in snp_rows
+    )
+    if not snp_table_rows:
+        snp_table_rows = (
+            '<tr><td colspan="7">No SNPs passed the configured depth, base-quality, '
+            "support, and allele-frequency thresholds.</td></tr>"
+        )
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>MLVA Seer Report - {sample_id}</title>
+  <title>MLVAMaps Report - {sample_id}</title>
   <style>
     :root {{
       color-scheme: dark;
@@ -427,13 +467,15 @@ def write_report(
 </head>
 <body>
   <main>
-    <h1>MLVA Seer Report: {_safe(sample_id)}</h1>
+    <h1>MLVAMaps Report: {_safe(sample_id)}</h1>
     <p class="subhead">VNTR allele terminal // agarose gel comparison // probabilistic fingerprint</p>
     <section class="terminal">
       <div class="summary">
         <div class="metric"><strong>PASS loci</strong><span>{passed}</span></div>
         <div class="metric"><strong>LOW_DEPTH loci</strong><span>{low_depth}</span></div>
         <div class="metric"><strong>DROPOUT loci</strong><span>{dropout}</span></div>
+        <div class="metric"><strong>Mapped locus reads</strong><span>{mapped_reads}/{total_mapping_reads}</span></div>
+        <div class="metric"><strong>Representative SNPs</strong><span>{len(snp_rows)}</span></div>
         <div class="metric"><strong>Best reference</strong><span>{_safe(best_match.get('best_profile_id', 'NA') or 'NA')}</span></div>
         <div class="metric"><strong>Novelty</strong><span>{_safe(novelty.get('novelty_score', ''))}</span><br>{_safe(novelty.get('interpretation', ''))}</div>
       </div>
@@ -443,6 +485,17 @@ def write_report(
       <table>
         <thead><tr><th>Locus</th><th>Call</th><th>Posterior</th><th>Depth</th><th>Status</th></tr></thead>
         <tbody>{rows}</tbody>
+      </table>
+      <h2>Representative Mapping</h2>
+      <p class="terminal-note">Primer-oriented reads are mapped with minibwa to the dominant observed VSEARCH representative amplicon for their locus. Positions and coverage are relative to that sample-derived amplicon, not to chromosome coordinates.</p>
+      <table>
+        <thead><tr><th>Locus</th><th>Reference ASV</th><th>Mapped</th><th>Rate</th><th>Mean depth</th><th>Covered %</th><th>SNPs</th></tr></thead>
+        <tbody>{mapping_table_rows}</tbody>
+      </table>
+      <h2>SNP Evidence</h2>
+      <table>
+        <thead><tr><th>Locus</th><th>Reference ASV</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
+        <tbody>{snp_table_rows}</tbody>
       </table>
     </section>
   </main>
@@ -528,7 +581,7 @@ def write_assembly_report(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>MLVA Seer Assembly Report - {_safe(sample_id)}</title>
+  <title>MLVAMaps Assembly Report - {_safe(sample_id)}</title>
   <style>
     :root {{
       color-scheme: dark;
@@ -606,7 +659,7 @@ def write_assembly_report(
 </head>
 <body>
   <main>
-    <h1>MLVA Seer Assembly Report: {_safe(sample_id)}</h1>
+    <h1>MLVAMaps Assembly Report: {_safe(sample_id)}</h1>
     <p class="subhead">VNTR primer-product calls from assembly evidence.</p>
     <section class="terminal">
       <div class="summary">
