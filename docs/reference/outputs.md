@@ -45,18 +45,19 @@ size but no read depth unless support data are supplied.
 | `vntr_asv_memberships.tsv` | Cluster membership and per-read substitution/indel evidence. |
 | `vntr_asv_representatives.fasta` | Observed representative repeat sequences. |
 | `locus_mapping_references.fasta` | Dominant observed representative amplicons. |
-| `locus_read_alignments.sam` | minibwa locus-relative mappings. |
+| `locus_read_alignments.sam` | minimap2 locus-relative mappings. |
 | `locus_mapping_summary.tsv` | Mapping rate, depth, coverage, and SNP totals by locus. |
 | `locus_snps.tsv` | Filtered representative-relative SNP evidence. |
 | `read_level_allele_predictions.tsv` | Per-read repeat-count probabilities and evidence weights. |
 | `allele_calls.tsv` | Bayesian locus calls and posterior detail. |
 | `amplirust/` | Native primer-pairing evidence. |
 | `vsearch/` | Native unique sequences, centroids, and memberships. |
-| `minibwa/` | Per-cluster membership alignments plus dominant-locus mapping FASTQ, references, and indexes. |
+| `minimap2/` | Dominant-locus mapping FASTQ and reference diagnostics. |
 
 When `--no-locus-mapping` is used, the mapping summary and SNP tables are
 header-only and the dominant-locus reference/SAM diagnostics are not produced.
-Per-cluster minibwa alignments used for membership edit metrics are still run.
+Parasail global alignments used for membership edit metrics still run because
+they are independent of locus-wide read mapping.
 
 ## Assembly outputs
 
@@ -65,8 +66,7 @@ Per-cluster minibwa alignments used for membership edit metrics are still run.
 | `assembly_amplicons.tsv` | Accepted product coordinates, orientation, size, and primer mismatches. |
 | `assembly_amplicons.fasta` | Extracted assembly primer products. |
 | `read_support.tsv` | Optional mapped reads and mean coverage per product. |
-| `read_support.sam` | minibwa alignments when `--reads` is used. |
-| `minibwa/` | Assembly-product reference and minibwa indexes when `--reads` is used. |
+| `read_support.sam` | minimap2 alignments when `--reads` is used. |
 | `amplirust/` | Native in-silico PCR evidence. |
 
 ## FASTQ call statuses

@@ -44,14 +44,13 @@ This stage returns `calls.tsv`.
 mlvamaps call primers.tsv assembly.fasta --reads sample.fastq.gz
 ```
 
-minibwa indexes `assembly_amplicons.fasta` and maps accurate reads back to the
-products. MLVAMaps counts primary
-alignments and aligned reference bases for each product.
+minimap2 uses `assembly_amplicons.fasta` as its reference and maps accurate
+reads back to the extracted products. MLVAMaps counts primary alignments and
+aligned reference bases for each product.
 
 This stage returns:
 
 - `read_support.sam`
-- Native reference and index files under `minibwa/`
 - `read_support.tsv`
 
 ## 4. Add optional SAM/BAM support

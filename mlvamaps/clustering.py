@@ -4,12 +4,15 @@ import re
 import shutil
 import subprocess
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from .mapping import check_minibwa, map_cluster_members_to_representative
+import parasail
+
 from .models import Locus, RepeatFeature
 
 
+_DNA_MATRIX = parasail.matrix_create("ACGTN", 0, -1)
 _SIZE_SUFFIX = re.compile(r";size=\d+;?$")
 
 
@@ -228,6 +231,36 @@ def _cluster_one_locus(
     return expanded
 
 
+def _alignment_metrics(query: str, target: str) -> dict[str, int | str]:
+    """Return exact edit metrics from a SIMD Parasail global traceback."""
+    if not query or not target:
+        aligned_query = query or ("-" * len(target))
+        aligned_target = target or ("-" * len(query))
+        matches = 0
+    else:
+        result = parasail.nw_trace_scan_32(query, target, 1, 1, _DNA_MATRIX)
+        traceback = result.traceback
+        aligned_query = traceback.query
+        aligned_target = traceback.ref
+        matches = traceback.comp.count("|")
+
+    insertions = aligned_target.count("-")
+    deletions = aligned_query.count("-")
+    substitutions = len(aligned_query) - insertions - deletions - matches
+    return {
+        "aligned_repeat_sequence": aligned_query,
+        "aligned_representative_sequence": aligned_target,
+        "insertions_vs_representative": insertions,
+        "deletions_vs_representative": deletions,
+        "substitutions_vs_representative": substitutions,
+        "edit_distance_to_representative": insertions + deletions + substitutions,
+    }
+
+
+def _alignment_metrics_pair(pair: tuple[str, str]) -> dict[str, int | str]:
+    return _alignment_metrics(*pair)
+
+
 def cluster_vntr_asvs(
     features: list[RepeatFeature],
     loci: list[Locus],
@@ -236,10 +269,8 @@ def cluster_vntr_asvs(
     min_cluster_size: int = 2,
     min_identity: float = 0.97,
     executable: str = "vsearch",
-    alignment_work_dir: str | Path | None = None,
-    minibwa_executable: str = "minibwa",
 ) -> tuple[list[dict], list[tuple[str, str]], list[dict]]:
-    """Cluster with VSEARCH and map members to observed centroids with minibwa."""
+    """Cluster each locus with VSEARCH and analyze observed centroid sequences."""
     if not features:
         return [], [], []
     if min_cluster_size < 1:
@@ -249,10 +280,6 @@ def cluster_vntr_asvs(
     executable = _check_vsearch(executable)
     work_dir = Path(work_dir)
     _reset_work_dir(work_dir)
-    alignment_work_dir = Path(
-        alignment_work_dir or (work_dir.parent / "minibwa_clusters")
-    )
-    _reset_work_dir(alignment_work_dir)
     inputs, feature_by_id = _write_locus_fastqs(features, work_dir)
 
     known_loci = {locus.locus_id for locus in loci}
@@ -260,8 +287,7 @@ def cluster_vntr_asvs(
     table: list[dict] = []
     fasta: list[tuple[str, str]] = []
     memberships: list[dict] = []
-    minibwa_path: str | None = None
-    mapped_cluster_index = 0
+    alignment_executor: ThreadPoolExecutor | None = None
 
     for locus_id, input_path in inputs:
         if locus_id not in known_loci:
@@ -284,20 +310,26 @@ def cluster_vntr_asvs(
             unique_repeat_sequences = sorted(
                 {feature.repeat_sequence for feature in member_features}
             )
-            if minibwa_path is None:
-                minibwa_path = check_minibwa(minibwa_executable)
-            mapped_cluster_index += 1
-            metrics_by_read = map_cluster_members_to_representative(
-                member_features,
-                representative,
-                variant_id,
-                alignment_work_dir / f"cluster_{mapped_cluster_index:04d}",
-                threads,
-                minibwa_path,
-            )
+            alignment_pairs = [
+                (sequence, representative_sequence) for sequence in unique_repeat_sequences
+            ]
+            if threads > 1 and len(alignment_pairs) > 1:
+                if alignment_executor is None:
+                    alignment_executor = ThreadPoolExecutor(max_workers=threads)
+                aligned_metrics = alignment_executor.map(
+                    _alignment_metrics_pair, alignment_pairs
+                )
+                metrics_by_sequence = dict(zip(unique_repeat_sequences, aligned_metrics))
+            else:
+                metrics_by_sequence = {
+                    sequence: _alignment_metrics(sequence, representative_sequence)
+                    for sequence in unique_repeat_sequences
+                }
 
+            metrics_by_read: dict[str, dict[str, int | str]] = {}
             for feature in member_features:
-                metrics = metrics_by_read[feature.read_id]
+                metrics = metrics_by_sequence[feature.repeat_sequence]
+                metrics_by_read[feature.read_id] = metrics
                 memberships.append(
                     {
                         "sample_id": "",
@@ -358,4 +390,6 @@ def cluster_vntr_asvs(
             )
             fasta.append((variant_id, representative_sequence))
 
+    if alignment_executor is not None:
+        alignment_executor.shutdown()
     return table, fasta, memberships

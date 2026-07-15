@@ -84,17 +84,14 @@ This stage returns `vntr_asv_table.tsv` and diagnostic files under
 ## 6. Preserve observed representatives
 
 The VSEARCH centroid is an actual observed read. MLVAMaps never replaces it
-with a generated consensus. minibwa maps every retained cluster member to its
-selected representative amplicon. MLVAMaps reconstructs the repeat-region
-alignment from the SAM CIGAR and annotates substitutions, insertions,
-deletions, and edit distance.
+with a generated consensus. Parasail globally aligns each unique cluster repeat
+sequence to its selected observed representative and annotates substitutions,
+insertions, deletions, and edit distance without clipping sequence ends.
 
 This stage returns:
 
 - `vntr_asv_representatives.fasta`
 - `vntr_asv_memberships.tsv`
-- Per-cluster minibwa references, reads, alignments, and indexes under
-  `minibwa/cluster_memberships/`
 
 The FASTA contains representative repeat regions. The membership table retains
 the raw and aligned sequence evidence for every read in a retained cluster.
@@ -102,7 +99,7 @@ the raw and aligned sequence evidence for every read in a retained cluster.
 ## 7. Map to dominant representatives
 
 The most supported retained VSEARCH variant at each locus supplies its complete
-observed amplicon as a minibwa reference. All usable reads assigned to that
+observed amplicon as a minimap2 reference. All usable reads assigned to that
 locus are mapped back to the representative.
 
 This stage returns:
@@ -111,7 +108,7 @@ This stage returns:
 - `locus_read_alignments.sam`
 - `locus_mapping_summary.tsv`
 - `locus_snps.tsv`
-- Native inputs and indexes under `minibwa/`
+- Native mapping inputs under `minimap2/locus_mapping/`
 
 See [representative mapping and SNP evidence](../concepts/representative-mapping.md)
 for thresholds and interpretation.

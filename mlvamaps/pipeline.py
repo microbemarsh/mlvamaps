@@ -184,7 +184,7 @@ def run_call(
     cluster_min_identity: float = 0.97,
     vsearch_bin: str = "vsearch",
     amplirust_bin: str = "amplirust",
-    minibwa_bin: str = "minibwa",
+    minimap2_bin: str = "minimap2",
     locus_mapping: bool = True,
     min_mapping_quality: int = 0,
     min_base_quality: int = 20,
@@ -261,8 +261,6 @@ def run_call(
         min_cluster_size=min_cluster_size,
         min_identity=cluster_min_identity,
         executable=vsearch_bin,
-        alignment_work_dir=outdir_path / "minibwa" / "cluster_memberships",
-        minibwa_executable=minibwa_bin,
     )
     for row in asv_rows:
         row["sample_id"] = sample_id
@@ -280,7 +278,7 @@ def run_call(
     snp_rows: list[dict] = []
     if locus_mapping:
         progress.step(
-            "Mapping locus reads to dominant VSEARCH representatives with minibwa"
+            "Mapping locus reads to dominant VSEARCH representatives with minimap2"
         )
         mapping_rows, snp_rows, _mapping_paths = run_locus_mapping(
             features,
@@ -288,7 +286,7 @@ def run_call(
             outdir_path,
             sample_id,
             thread_count,
-            executable=minibwa_bin,
+            executable=minimap2_bin,
             min_mapping_quality=min_mapping_quality,
             min_base_quality=min_base_quality,
             min_snp_depth=min_snp_depth,
@@ -355,7 +353,7 @@ def run_call(
         "mapping_snps": outdir_path / "locus_snps.tsv",
         "mapping_references": outdir_path / "locus_mapping_references.fasta",
         "mapping_alignments": outdir_path / "locus_read_alignments.sam",
-        "minibwa": outdir_path / "minibwa",
+        "minimap2": outdir_path / "minimap2",
         "vsearch": vsearch_dir,
         "amplirust": outdir_path / "amplirust",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",

@@ -45,41 +45,38 @@ SNP_FIELDS = [
 ]
 
 
-def check_minibwa(executable: str) -> str:
+def check_minimap2(executable: str) -> str:
     path = shutil.which(executable)
     if path is None:
         raise RuntimeError(
-            f"minibwa executable {executable!r} was not found. Install minibwa "
-            "from Bioconda, pass --minibwa-bin, or disable the requested "
+            f"minimap2 executable {executable!r} was not found. Install minimap2 "
+            "from Bioconda, pass --minimap2-bin, or disable the requested "
             "read-mapping stage."
         )
-    result = subprocess.run([path], capture_output=True, text=True, check=False)
-    # minibwa exits non-zero when invoked without a subcommand, but a working
-    # binary identifies itself in its usage output.
+    result = subprocess.run(
+        [path, "--version"], capture_output=True, text=True, check=False
+    )
     detail = f"{result.stdout}\n{result.stderr}".lower()
-    if "minibwa" not in detail:
-        raise RuntimeError(f"Could not run minibwa at {path}")
+    if result.returncode or not detail.strip():
+        raise RuntimeError(f"Could not run minimap2 at {path}")
     return path
 
 
-def build_minibwa_index_command(
-    reference_path: str | Path,
-    threads: int,
-    executable: str = "minibwa",
-) -> list[str]:
-    return [executable, "index", f"-t{threads}", str(reference_path)]
-
-
-def build_minibwa_map_command(
+def build_minimap2_map_command(
     reference_path: str | Path,
     reads_path: str | Path,
     threads: int,
-    executable: str = "minibwa",
+    executable: str = "minimap2",
+    preset: str | None = None,
 ) -> list[str]:
-    return [executable, "map", f"-t{threads}", str(reference_path), str(reads_path)]
+    command = [executable, "-a", "-t", str(threads)]
+    if preset:
+        command.extend(["-x", preset])
+    command.extend([str(reference_path), str(reads_path)])
+    return command
 
 
-def run_minibwa_command(
+def run_minimap2_command(
     command: list[str], stage: str, stdout_path: Path | None = None
 ) -> None:
     if stdout_path is None:
@@ -96,244 +93,13 @@ def run_minibwa_command(
     if result.returncode:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(
-            f"minibwa {stage} failed (exit {result.returncode}): {detail}"
+            f"minimap2 {stage} failed (exit {result.returncode}): {detail}"
         )
 
 
 def _safe_name(value: str, fallback: str) -> str:
     cleaned = _SAM_NAME.sub("_", value).strip("_")
     return cleaned or fallback
-
-
-def _feature_repeat_bounds(feature: RepeatFeature) -> tuple[int, int]:
-    amplicon = feature.amplicon_sequence or feature.repeat_sequence
-    if (
-        feature.amplicon_repeat_start is not None
-        and feature.amplicon_repeat_end is not None
-    ):
-        start = max(0, min(int(feature.amplicon_repeat_start), len(amplicon)))
-        end = max(start, min(int(feature.amplicon_repeat_end), len(amplicon)))
-        return start, end
-    start = amplicon.find(feature.repeat_sequence)
-    if start < 0:
-        return 0, len(amplicon)
-    return start, start + len(feature.repeat_sequence)
-
-
-def _repeat_metrics_from_cigar(
-    query_sequence: str,
-    reference_sequence: str,
-    cigartuples: list[tuple[int, int]],
-    query_repeat_start: int,
-    query_repeat_end: int,
-    reference_repeat_start: int,
-    reference_repeat_end: int,
-    reference_start: int = 0,
-) -> dict[str, int | str]:
-    """Reconstruct repeat-region edit metrics from a minibwa SAM CIGAR."""
-    aligned_query: list[str] = []
-    aligned_reference: list[str] = []
-    query_coordinates: list[int | None] = []
-    reference_coordinates: list[int | None] = []
-    query_position = 0
-    reference_position = reference_start
-
-    def append(query_base, reference_base, query_coordinate, reference_coordinate):
-        aligned_query.append(query_base)
-        aligned_reference.append(reference_base)
-        query_coordinates.append(query_coordinate)
-        reference_coordinates.append(reference_coordinate)
-
-    for operation, length in cigartuples:
-        if operation in {0, 7, 8}:  # M, =, X
-            for _offset in range(length):
-                if (
-                    query_position >= len(query_sequence)
-                    or reference_position >= len(reference_sequence)
-                ):
-                    raise RuntimeError("minibwa CIGAR extends beyond an amplicon sequence")
-                append(
-                    query_sequence[query_position],
-                    reference_sequence[reference_position],
-                    query_position,
-                    reference_position,
-                )
-                query_position += 1
-                reference_position += 1
-        elif operation == 1:  # I
-            for _offset in range(length):
-                if query_position >= len(query_sequence):
-                    raise RuntimeError("minibwa insertion extends beyond the query")
-                append(query_sequence[query_position], "-", query_position, None)
-                query_position += 1
-        elif operation in {2, 3}:  # D, N
-            for _offset in range(length):
-                if reference_position >= len(reference_sequence):
-                    raise RuntimeError("minibwa deletion extends beyond the reference")
-                append("-", reference_sequence[reference_position], None, reference_position)
-                reference_position += 1
-        elif operation == 4:  # S
-            query_position += length
-        elif operation in {5, 6}:  # H, P
-            continue
-        else:
-            raise RuntimeError(f"Unsupported minibwa CIGAR operation {operation}")
-
-    selected_query = []
-    selected_reference = []
-    for query_base, reference_base, query_coordinate, reference_coordinate in zip(
-        aligned_query,
-        aligned_reference,
-        query_coordinates,
-        reference_coordinates,
-    ):
-        in_query_repeat = (
-            query_coordinate is not None
-            and query_repeat_start <= query_coordinate < query_repeat_end
-        )
-        in_reference_repeat = (
-            reference_coordinate is not None
-            and reference_repeat_start
-            <= reference_coordinate
-            < reference_repeat_end
-        )
-        if in_query_repeat or in_reference_repeat:
-            selected_query.append(query_base)
-            selected_reference.append(reference_base)
-
-    aligned_repeat = "".join(selected_query)
-    aligned_representative = "".join(selected_reference)
-    covered_query_positions = {
-        coordinate
-        for coordinate in query_coordinates
-        if coordinate is not None
-        and query_repeat_start <= coordinate < query_repeat_end
-    }
-    covered_reference_positions = {
-        coordinate
-        for coordinate in reference_coordinates
-        if coordinate is not None
-        and reference_repeat_start <= coordinate < reference_repeat_end
-    }
-    if len(covered_query_positions) != query_repeat_end - query_repeat_start:
-        raise RuntimeError("minibwa alignment soft-clips part of the query repeat")
-    if (
-        len(covered_reference_positions)
-        != reference_repeat_end - reference_repeat_start
-    ):
-        raise RuntimeError(
-            "minibwa alignment does not span the representative repeat"
-        )
-    insertions = aligned_representative.count("-")
-    deletions = aligned_repeat.count("-")
-    substitutions = sum(
-        query_base != reference_base
-        for query_base, reference_base in zip(
-            aligned_repeat, aligned_representative
-        )
-        if query_base != "-" and reference_base != "-"
-    )
-    return {
-        "aligned_repeat_sequence": aligned_repeat,
-        "aligned_representative_sequence": aligned_representative,
-        "insertions_vs_representative": insertions,
-        "deletions_vs_representative": deletions,
-        "substitutions_vs_representative": substitutions,
-        "edit_distance_to_representative": insertions
-        + deletions
-        + substitutions,
-    }
-
-
-def map_cluster_members_to_representative(
-    member_features: list[RepeatFeature],
-    representative: RepeatFeature,
-    variant_id: str,
-    work_dir: str | Path,
-    threads: int,
-    executable: str,
-) -> dict[str, dict[str, int | str]]:
-    """Map one VSEARCH cluster to its observed representative with minibwa."""
-    work_dir = Path(work_dir)
-    if work_dir.exists():
-        shutil.rmtree(work_dir)
-    work_dir.mkdir(parents=True, exist_ok=True)
-    reference_sequence = (
-        representative.amplicon_sequence or representative.repeat_sequence
-    ).upper()
-    reference_name = _safe_name(variant_id, "cluster_representative")
-    reference_path = work_dir / "representative.fasta"
-    reads_path = work_dir / "members.fastq"
-    sam_path = work_dir / "alignments.sam"
-    reference_path.write_text(f">{reference_name}\n{reference_sequence}\n")
-
-    feature_by_query: dict[str, RepeatFeature] = {}
-    with reads_path.open("w") as handle:
-        for index, feature in enumerate(member_features):
-            query_name = f"cluster_read_{index}"
-            sequence = (feature.amplicon_sequence or feature.repeat_sequence).upper()
-            quality = feature.amplicon_quality or ("I" * len(sequence))
-            if len(quality) != len(sequence):
-                quality = "I" * len(sequence)
-            feature_by_query[query_name] = feature
-            handle.write(f"@{query_name}\n{sequence}\n+\n{quality}\n")
-
-    run_minibwa_command(
-        build_minibwa_index_command(reference_path, threads, executable),
-        f"indexing cluster {variant_id}",
-    )
-    run_minibwa_command(
-        build_minibwa_map_command(reference_path, reads_path, threads, executable),
-        f"mapping cluster {variant_id}",
-        stdout_path=sam_path,
-    )
-
-    reference_repeat_start, reference_repeat_end = _feature_repeat_bounds(
-        representative
-    )
-    metrics_by_read: dict[str, dict[str, int | str]] = {}
-    with pysam.AlignmentFile(str(sam_path), "r", check_sq=False) as alignments:
-        for alignment in alignments.fetch(until_eof=True):
-            if (
-                alignment.is_unmapped
-                or alignment.is_secondary
-                or alignment.is_supplementary
-            ):
-                continue
-            feature = feature_by_query.get(alignment.query_name)
-            if feature is None or alignment.reference_name != reference_name:
-                continue
-            if alignment.is_reverse:
-                raise RuntimeError(
-                    f"minibwa reversed an already oriented read in cluster {variant_id}"
-                )
-            query_sequence = alignment.query_sequence or ""
-            if not query_sequence or alignment.cigartuples is None:
-                continue
-            query_repeat_start, query_repeat_end = _feature_repeat_bounds(feature)
-            metrics_by_read[feature.read_id] = _repeat_metrics_from_cigar(
-                query_sequence,
-                reference_sequence,
-                alignment.cigartuples,
-                query_repeat_start,
-                query_repeat_end,
-                reference_repeat_start,
-                reference_repeat_end,
-                reference_start=alignment.reference_start,
-            )
-
-    missing = [
-        feature.read_id
-        for feature in member_features
-        if feature.read_id not in metrics_by_read
-    ]
-    if missing:
-        preview = ", ".join(repr(read_id) for read_id in missing[:5])
-        raise RuntimeError(
-            f"minibwa could not align {len(missing)} member read(s) in cluster "
-            f"{variant_id}: {preview}"
-        )
-    return metrics_by_read
 
 
 def _dominant_references(
@@ -417,7 +183,7 @@ def _write_mapping_inputs(
     return reference_by_name, query_metadata
 
 
-def parse_minibwa_sam(
+def parse_minimap2_sam(
     sam_path: str | Path,
     references: dict[str, dict],
     queries: dict[str, dict],
@@ -569,7 +335,8 @@ def run_locus_mapping(
     outdir: str | Path,
     sample_id: str,
     threads: int,
-    executable: str = "minibwa",
+    executable: str = "minimap2",
+    preset: str | None = "sr",
     min_mapping_quality: int = 0,
     min_base_quality: int = 20,
     min_snp_depth: int = 3,
@@ -578,9 +345,9 @@ def run_locus_mapping(
 ) -> tuple[list[dict], list[dict], dict[str, Path]]:
     """Map locus reads to dominant observed amplicons and report SNP evidence."""
     outdir = Path(outdir)
-    minibwa_root = outdir / "minibwa"
-    minibwa_root.mkdir(parents=True, exist_ok=True)
-    work_dir = minibwa_root / "locus_mapping"
+    minimap2_root = outdir / "minimap2"
+    minimap2_root.mkdir(parents=True, exist_ok=True)
+    work_dir = minimap2_root / "locus_mapping"
     if work_dir.exists():
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -597,25 +364,25 @@ def run_locus_mapping(
     paths = {
         "mapping_references": public_reference,
         "mapping_alignments": sam_path,
-        "minibwa": minibwa_root,
+        "minimap2": minimap2_root,
     }
     if not references or not query_metadata:
         sam_path.write_text("")
         return [], [], paths
 
-    executable_path = check_minibwa(executable)
-    run_minibwa_command(
-        build_minibwa_index_command(internal_reference, threads, executable_path),
-        "indexing",
-    )
-    run_minibwa_command(
-        build_minibwa_map_command(
-            internal_reference, reads_path, threads, executable_path
+    executable_path = check_minimap2(executable)
+    run_minimap2_command(
+        build_minimap2_map_command(
+            internal_reference,
+            reads_path,
+            threads,
+            executable_path,
+            preset=preset,
         ),
         "mapping",
         stdout_path=sam_path,
     )
-    summary_rows, snp_rows = parse_minibwa_sam(
+    summary_rows, snp_rows = parse_minimap2_sam(
         sam_path,
         reference_by_name,
         query_metadata,

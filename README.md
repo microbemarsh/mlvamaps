@@ -6,7 +6,7 @@ assemblies, and assemblies with supporting accurate reads.
 
 It is designed to be organism-agnostic: the same pipeline can be used for any
 microbe with a defined MLVA primer panel and enough repeat metadata to interpret
-the products. MLVAMaps does not hard-code one species, typing scheme, or profile
+the products. mlvamaps does not hard-code one species, typing scheme, or profile
 database.
 
 mlvamaps returns conventional repeat-copy-number fingerprints while preserving
@@ -17,7 +17,8 @@ the sequence evidence behind them:
 - Fast, gap-aware VSEARCH clustering of observed VNTR sequences.
 - Per-read substitution and indel evidence without replacing observed reads
   with a consensus.
-- minibwa mapping to sample-derived representative amplicons and
+- Exact Parasail global alignments against observed cluster representatives.
+- minimap2 mapping to sample-derived representative amplicons and
   reference-relative SNP evidence.
 - Optional read-depth support for assembly products.
 - Probabilistic locus calls, profile matching, novelty summaries, generated gel
@@ -39,7 +40,8 @@ python setup.py install
 The environment includes
 [Amplirust](https://github.com/erdikilic/amplirust),
 [VSEARCH](https://github.com/torognes/vsearch),
-[minibwa](https://github.com/lh3/minibwa), and the Python/native sequence
+[Parasail's Python bindings](https://github.com/jeffdaily/parasail-python),
+[minimap2](https://github.com/lh3/minimap2), and the Python/native sequence
 libraries declared in `environment.yml`.
 
 ## Quick start
@@ -80,8 +82,8 @@ Results are written to `results/` by default. Start with:
 - `mlva_fingerprint.tsv` for the conventional wide fingerprint.
 - `report.html` for the visual summary.
 
-FASTQ runs additionally provide VSEARCH variants, read memberships, minibwa
-alignments, mapping coverage, and SNP evidence. Assembly runs provide extracted
+FASTQ runs additionally provide VSEARCH variants, Parasail-aligned read
+memberships, minimap2 mapping coverage, and SNP evidence. Assembly runs provide extracted
 primer products and optional read support.
 
 ## Supported data
@@ -91,7 +93,7 @@ primer products and optional read support.
 | Amplicon FASTQ/FASTQ.GZ | Primer-supported VNTR reads, sequence variants, repeat counts, representative mapping, and SNP evidence. |
 | Accurate primer-spanning WGS reads | Reads containing both required primers and a valid product are analyzed through the same FASTQ path. |
 | Assembly FASTA | In-silico primer products, product coordinates, sizes, and repeat counts. |
-| Assembly plus accurate FASTQ | Assembly calls plus minibwa read count and mean coverage for extracted products. |
+| Assembly plus accurate FASTQ | Assembly calls plus minimap2 read count and mean coverage for extracted products. |
 | Assembly plus SAM/BAM | Assembly calls plus overlap-based read support from existing alignments. |
 | Known profile TSV | Closest MLVA profiles, mismatched loci, distance, confidence, and novelty context. |
 
@@ -109,8 +111,9 @@ For FASTQ data, mlvamaps:
 2. Uses Amplirust to pair degenerate primers and orient each product.
 3. Locates the repeat region and measures repeat/motif evidence.
 4. Dereplicates and clusters reads by locus with VSEARCH.
-5. Preserves observed cluster representatives and annotates per-read edits.
-6. Maps locus reads to the dominant observed amplicon with minibwa.
+5. Globally aligns repeat sequences to observed representatives with Parasail
+   and annotates complete per-read edits without clipping.
+6. Maps locus reads to the dominant observed amplicon with minimap2.
 7. Reports quality-filtered, representative-relative SNP evidence.
 8. Combines read probabilities into per-locus repeat-count calls.
 9. Builds the fingerprint, compares profiles, scores novelty, and writes HTML.
@@ -120,10 +123,10 @@ For assemblies, mlvamaps:
 1. Finds paired-primer products with Amplirust.
 2. Selects valid products and converts size into repeat count where the panel
    provides enough metadata.
-3. Optionally adds minibwa or existing SAM/BAM read support.
+3. Optionally adds minimap2 or existing SAM/BAM read support.
 4. Builds the same fingerprint, profile comparison, and report formats.
 
-The minibwa mapping coordinates are positions within the sample-derived
+The minimap2 mapping coordinates are positions within the sample-derived
 representative amplicon, not chromosome coordinates. The SNP table is
 transparent within-sample evidence rather than a whole-genome or clinical VCF.
 
@@ -176,7 +179,7 @@ mlvamaps extract-amplicons \
   --primers examples/seer_lab_Ba/mlvamaps_primers.example.tsv
 ```
 
-MLVAMaps uses 32 threads by default. Pass `-t N` or `--threads N`;
+mlvamaps uses 32 threads by default. Pass `-t N` or `--threads N`;
 `--threads 0` uses all available CPUs. Use `--quiet` to suppress progress.
 
 ## Motivation and recognition

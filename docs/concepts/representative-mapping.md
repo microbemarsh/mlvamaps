@@ -18,21 +18,19 @@ Two representative files serve different purposes:
 
 ## Cluster-member alignment
 
-Before locus-wide SNP mapping, minibwa separately indexes every retained
-VSEARCH representative amplicon and maps that cluster's reads back to it.
-MLVAMaps walks each SAM CIGAR across the recorded query and representative
-repeat boundaries to reconstruct the gapped repeat alignment. These alignments
+Before locus-wide SNP mapping, Parasail globally aligns each unique repeat
+sequence in a retained VSEARCH cluster to that cluster's observed repeat
+representative. These exact end-to-end tracebacks
 populate `vntr_asv_memberships.tsv` with substitutions, insertions, deletions,
 and edit distance relative to the read's own selected cluster representative.
 
-This stage requires both repeat regions to be fully spanned. MLVAMaps stops
-with a clear error instead of silently treating a soft-clipped repeat as an
-exact alignment.
+Global Needleman-Wunsch alignment consumes both complete repeat sequences, so
+this stage has no local-alignment or soft-clipping path.
 
 ## Dominant-locus mapping
 
 All usable reads assigned to a locus are written to the internal mapping FASTQ,
-including reads that did not enter a retained cluster. minibwa maps those reads
+including reads that did not enter a retained cluster. minimap2 maps those reads
 against the collection of dominant amplicons. MLVAMaps accepts a primary
 alignment as evidence only when it maps to that read's assigned locus
 representative and passes the MAPQ threshold.

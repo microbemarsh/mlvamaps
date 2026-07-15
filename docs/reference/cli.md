@@ -33,8 +33,8 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--minibwa-bin` | `minibwa` | Executable or path override. |
-| `--no-locus-mapping` | Off | Skip dominant-locus mapping and SNP evidence; per-cluster minibwa alignment remains required. |
+| `--minimap2-bin` | `minimap2` | Executable or path override. |
+| `--no-locus-mapping` | Off | Skip dominant-locus minimap2 mapping and SNP evidence. |
 | `--min-mapping-quality` | `0` | Minimum accepted primary-alignment MAPQ. |
 | `--min-base-quality` | `20` | Minimum base quality used in depth and SNP evidence. |
 | `--min-snp-depth` | `3` | Minimum quality-filtered depth at a position. |
@@ -52,7 +52,7 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 
 | Option | Purpose |
 | --- | --- |
-| `--reads FASTQ` | Map accurate reads to extracted products with minibwa. |
+| `--reads FASTQ` | Map reads to extracted products with minimap2. |
 | `--bam BAM_OR_SAM` | Measure support from existing assembly alignments. |
 | `--alignments BAM_OR_SAM` | Alias for `--bam`. |
 
@@ -62,7 +62,7 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 
 - `--amplirust-bin`
 - `--vsearch-bin`
-- `--minibwa-bin`
+- `--minimap2-bin`
 
 These options are useful for testing, containers, and installations whose
 executables are not on the default `PATH`.

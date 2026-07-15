@@ -123,12 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.add_argument("paths", nargs="*", metavar="PATH", help="primers.tsv plus sample.fastq.gz or assembly.fasta")
     call.add_argument("--input", dest="input_path", metavar="PATH", help="FASTQ reads or FASTA assembly")
-    call.add_argument(
-        "--reads",
-        dest="reads_path",
-        metavar="FASTQ",
-        help="Accurate reads to map with minibwa for assembly depth support",
-    )
+    call.add_argument("--reads", dest="reads_path", metavar="FASTQ", help="Reads to map for assembly depth support")
     call.add_argument("--bam", "--alignments", dest="alignments_path", metavar="BAM/SAM", help="Assembly-aligned BAM/SAM for assembly depth support")
     call.add_argument("--loci")
     call.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
@@ -174,21 +169,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Amplirust executable used for degenerate primer pairing (default: %(default)s)",
     )
     call.add_argument(
-        "--minibwa-bin",
-        default="minibwa",
+        "--minimap2-bin",
+        default="minimap2",
         metavar="PATH",
-        help="minibwa executable for representative and assembly-support mapping (default: %(default)s)",
+        help="minimap2 executable for representative and assembly-support mapping (default: %(default)s)",
     )
     call.add_argument(
         "--no-locus-mapping",
         action="store_true",
-        help="Skip dominant-locus mapping and SNP evidence generation",
+        help="Skip minimap2 representative mapping and SNP evidence generation",
     )
     call.add_argument(
         "--min-mapping-quality",
         type=_nonnegative_int,
         default=0,
-        help="Minimum minibwa MAPQ used for locus mapping evidence (default: %(default)s)",
+        help="Minimum minimap2 MAPQ used for locus mapping evidence (default: %(default)s)",
     )
     call.add_argument(
         "--min-base-quality",
@@ -220,6 +215,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_THREADS,
         help="Worker threads (default: %(default)s; 0 uses all available CPUs)",
+    )
+    call.add_argument(
+        "--minimap2-preset",
+        help="Optional minimap2 -x preset for assembly read-depth mapping",
     )
     call.add_argument("--quiet", action="store_true", help="Suppress live progress updates")
 
@@ -292,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
                 cluster_min_identity=args.cluster_min_identity,
                 vsearch_bin=args.vsearch_bin,
                 amplirust_bin=args.amplirust_bin,
-                minibwa_bin=args.minibwa_bin,
+                minimap2_bin=args.minimap2_bin,
                 locus_mapping=not args.no_locus_mapping,
                 min_mapping_quality=args.min_mapping_quality,
                 min_base_quality=args.min_base_quality,
@@ -322,8 +321,9 @@ def main(argv: list[str] | None = None) -> int:
                 profiles_path=args.profiles,
                 max_primer_mismatches=args.max_primer_mismatches,
                 threads=args.threads,
+                minimap2_preset=args.minimap2_preset,
+                minimap2_bin=args.minimap2_bin,
                 amplirust_bin=args.amplirust_bin,
-                minibwa_bin=args.minibwa_bin,
                 show_progress=not args.quiet,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")

@@ -487,7 +487,7 @@ def write_report(
         <tbody>{rows}</tbody>
       </table>
       <h2>Representative Mapping</h2>
-      <p class="terminal-note">Primer-oriented reads are mapped with minibwa to the dominant observed VSEARCH representative amplicon for their locus. Positions and coverage are relative to that sample-derived amplicon, not to chromosome coordinates.</p>
+      <p class="terminal-note">Primer-oriented reads are mapped with minimap2 to the dominant observed VSEARCH representative amplicon for their locus. Positions and coverage are relative to that sample-derived amplicon, not to chromosome coordinates.</p>
       <table>
         <thead><tr><th>Locus</th><th>Reference ASV</th><th>Mapped</th><th>Rate</th><th>Mean depth</th><th>Covered %</th><th>SNPs</th></tr></thead>
         <tbody>{mapping_table_rows}</tbody>
