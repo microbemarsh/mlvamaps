@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
 from .calling import estimate_repeat_count_from_product_length
@@ -10,6 +9,12 @@ from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_amplirust_results, run_amplirust_loci
 from .io import read_profiles, write_fasta, write_tsv
 from .models import Locus
+from .mapping import (
+    build_minibwa_index_command,
+    build_minibwa_map_command,
+    check_minibwa,
+    run_minibwa_command,
+)
 from .pipeline import MATCH_FIELDS, NOVELTY_FIELDS, SIMPLE_CALL_FIELDS
 from .progress import ProgressReporter
 from .profile_matching import build_fingerprint, match_profiles
@@ -83,24 +88,6 @@ def amplirust_rows_to_products(
     return products
 
 
-def build_minimap2_command(
-    reference_fasta: str | Path,
-    reads_fastq: str | Path,
-    threads: int = DEFAULT_THREADS,
-    preset: str | None = None,
-) -> list[str]:
-    command = [
-        "minimap2",
-        "-a",
-        "-t",
-        str(resolve_threads(threads)),
-    ]
-    if preset:
-        command.extend(["-x", preset])
-    command.extend([str(reference_fasta), str(reads_fastq)])
-    return command
-
-
 _CIGAR_RE = re.compile(r"(\d+)([MIDNSHP=X])")
 
 
@@ -112,7 +99,9 @@ def _reference_bases_from_cigar(cigar: str) -> int:
     return total
 
 
-def read_minimap2_depth(sam_path: str | Path, reference_lengths: dict[str, int]) -> dict[str, dict[str, float]]:
+def read_mapping_depth(
+    sam_path: str | Path, reference_lengths: dict[str, int]
+) -> dict[str, dict[str, float]]:
     support = {name: {"mapped_reads": 0, "aligned_reference_bases": 0} for name in reference_lengths}
     with Path(sam_path).open() as handle:
         for line in handle:
@@ -138,24 +127,42 @@ def read_minimap2_depth(sam_path: str | Path, reference_lengths: dict[str, int])
     }
 
 
-def run_minimap2_depth(
+def run_minibwa_depth(
     reference_fasta: str | Path,
     reads_fastq: str | Path,
     sam_path: str | Path,
+    work_dir: str | Path,
     reference_lengths: dict[str, int],
     threads: int = DEFAULT_THREADS,
-    minimap2_preset: str | None = None,
+    executable: str = "minibwa",
     progress: ProgressReporter | None = None,
 ) -> dict[str, dict[str, float]]:
-    if shutil.which("minimap2") is None:
-        raise RuntimeError("Could not find 'minimap2' on PATH. Install minimap2 or rerun without --reads.")
     progress = progress or ProgressReporter(enabled=False)
-    command = build_minimap2_command(reference_fasta, reads_fastq, threads, minimap2_preset)
-    progress.step("Running minimap2 for read-depth support")
-    with Path(sam_path).open("w") as handle:
-        subprocess.run(command, check=True, stdout=handle)
-    progress.step("Parsing minimap2 alignments")
-    return read_minimap2_depth(sam_path, reference_lengths)
+    thread_count = resolve_threads(threads)
+    executable_path = check_minibwa(executable)
+    work_dir = Path(work_dir)
+    if work_dir.exists():
+        shutil.rmtree(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    internal_reference = work_dir / "assembly_amplicons.fasta"
+    shutil.copyfile(reference_fasta, internal_reference)
+    progress.step("Indexing assembly amplicons with minibwa")
+    run_minibwa_command(
+        build_minibwa_index_command(
+            internal_reference, thread_count, executable_path
+        ),
+        "assembly-amplicon indexing",
+    )
+    progress.step("Running minibwa for assembly read-depth support")
+    run_minibwa_command(
+        build_minibwa_map_command(
+            internal_reference, reads_fastq, thread_count, executable_path
+        ),
+        "assembly read-support mapping",
+        stdout_path=Path(sam_path),
+    )
+    progress.step("Parsing minibwa alignments")
+    return read_mapping_depth(sam_path, reference_lengths)
 
 
 def _alignment_blocks_from_cigar(pos_1based: int, cigar: str) -> list[tuple[int, int]]:
@@ -357,8 +364,8 @@ def run_assembly_call(
     profiles_path: str | None = None,
     max_primer_mismatches: int = 3,
     threads: int = DEFAULT_THREADS,
-    minimap2_preset: str | None = None,
     amplirust_bin: str = "amplirust",
+    minibwa_bin: str = "minibwa",
     show_progress: bool = False,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
@@ -398,14 +405,15 @@ def run_assembly_call(
         support_rows = []
         if products and reads_path:
             reference_lengths = {product["product_id"]: int(product["product_size_bp"]) for product in products}
-            read_support = run_minimap2_depth(
+            read_support = run_minibwa_depth(
                 product_fasta,
                 reads_path,
                 outdir_path / "read_support.sam",
+                outdir_path / "minibwa",
                 reference_lengths,
-                threads,
-                minimap2_preset,
-                progress,
+                threads=threads,
+                executable=minibwa_bin,
+                progress=progress,
             )
         elif products and alignments_path:
             progress.step("Reading alignment depth support")
@@ -447,6 +455,7 @@ def run_assembly_call(
         "amplicons": outdir_path / "assembly_amplicons.tsv",
         "amplicon_fasta": product_fasta,
         "amplirust": outdir_path / "amplirust",
+        "minibwa": outdir_path / "minibwa",
         "read_support": support_path,
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "profile_matches": outdir_path / "profile_matches.tsv",

@@ -10,15 +10,15 @@ Current packaging assumptions:
 - `mlvamaps` is the console script.
 - `amplirust` is a runtime dependency because assembly extraction and FASTQ
   paired-primer assignment delegate IUPAC matching to its executable.
-- `minimap2` should be a runtime dependency because assembly calls can use
-  `--reads` to add read-depth support.
 - `minibwa` should be a runtime dependency because FASTQ calls map all
   primer-oriented locus reads to the dominant observed representative amplicon
-  and report reference-relative SNP evidence by default.
+  and report reference-relative SNP evidence by default. Assembly calls also
+  use it to map accurate reads back to extracted products for depth support.
 - `sassy-rs` must be packaged separately for Bioconda because bounded flank
   localization within assigned amplicons uses its Python binding.
-- `parasail` supplies SIMD C global-alignment tracebacks for per-read
-  substitutions and indels against each observed cluster representative.
+- `minibwa` alignments also supply the CIGAR operations used to reconstruct
+  per-read substitutions and indels against each observed cluster
+  representative.
 - `pysam`/htslib handles FASTA, FASTQ, SAM, and BAM parsing, while NumPy moves
   quality, motif, and repeat-likelihood reductions out of Python loops.
 - Release source should use a stable GitHub archive URL for a tag, with a

@@ -261,6 +261,8 @@ def run_call(
         min_cluster_size=min_cluster_size,
         min_identity=cluster_min_identity,
         executable=vsearch_bin,
+        alignment_work_dir=outdir_path / "minibwa" / "cluster_memberships",
+        minibwa_executable=minibwa_bin,
     )
     for row in asv_rows:
         row["sample_id"] = sample_id

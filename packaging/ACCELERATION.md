@@ -16,20 +16,18 @@ Current backend policy:
   clustering independently for each locus. Its SIMD alignment and identity
   calculation include gaps. MLVAMaps consumes UC memberships and uses the
   observed cluster seed as the representative; it never uses a consensus.
-- Parasail's SIMD C implementation provides exact end-to-end Needleman-Wunsch
-  tracebacks used to annotate per-read indels against the selected observed
-  repeat representative. Its native calls release the GIL, so independent
-  unique sequences are aligned with threads rather than serialized processes.
-  Identical repeat sequences are aligned once per representative, and independent
-  unique sequences use the resolved worker allocation.
+- `minibwa` maps every retained VSEARCH cluster back to its observed centroid
+  amplicon. MLVAMaps reconstructs the repeat-region traceback from SAM CIGAR
+  operations to annotate substitutions, insertions, deletions, and edit
+  distance without a separate pairwise-alignment backend.
 - NumPy performs quality-score reductions, batched repeat-motif comparisons,
   and per-read repeat-count likelihood vectors in compiled loops.
   `pysam.FastxFile` delegates FASTA/FASTQ parsing to htslib.
 - `minibwa` maps FASTQ locus reads back to dominant observed VSEARCH
   representative amplicons; `pysam` parses the resulting SAM for base depth
   and reference-relative SNP evidence.
-- `minimap2` plus `pysam` provide assembly read-depth support from FASTQ or
-  existing alignment evidence.
+- `minibwa` also maps accurate reads to extracted assembly products for depth
+  support. `pysam` handles existing SAM/BAM support supplied by the user.
 
 Default threading policy:
 
@@ -43,6 +41,5 @@ Default threading policy:
 - Loci are submitted to VSEARCH sequentially, and each `cluster_size` process
   receives the full resolved thread count. This avoids competing native thread
   pools while keeping locus membership isolated.
-- After VSEARCH clustering completes, Parasail alignments for independent unique
-  repeat sequences use up to the resolved number of worker threads. This phase
-  does not overlap VSEARCH.
+- After VSEARCH clustering, minibwa receives the resolved thread count for each
+  retained cluster alignment. This phase does not overlap VSEARCH.

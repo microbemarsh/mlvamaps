@@ -37,7 +37,6 @@ setup(
     packages=find_packages(include=["mlvamaps", "mlvamaps.*"]),
     install_requires=[
         "numpy>=1.24",
-        "parasail>=1.3.4",
         "pysam>=0.22",
         "sassy-rs>=0.2.4",
     ],

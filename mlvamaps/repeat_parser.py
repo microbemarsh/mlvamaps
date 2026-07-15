@@ -95,6 +95,8 @@ def extract_repeat_features(
             round(right_flank_score, 4),
             amplicon_sequence,
             amplicon_quality,
+            min(len(amplicon_sequence), max(0, repeat_start - amplicon_start)),
+            min(len(amplicon_sequence), max(0, repeat_end - amplicon_start)),
         )
 
     thread_count = resolve_threads(threads)

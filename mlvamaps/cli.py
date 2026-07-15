@@ -123,7 +123,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.add_argument("paths", nargs="*", metavar="PATH", help="primers.tsv plus sample.fastq.gz or assembly.fasta")
     call.add_argument("--input", dest="input_path", metavar="PATH", help="FASTQ reads or FASTA assembly")
-    call.add_argument("--reads", dest="reads_path", metavar="FASTQ", help="Reads to map for assembly depth support")
+    call.add_argument(
+        "--reads",
+        dest="reads_path",
+        metavar="FASTQ",
+        help="Accurate reads to map with minibwa for assembly depth support",
+    )
     call.add_argument("--bam", "--alignments", dest="alignments_path", metavar="BAM/SAM", help="Assembly-aligned BAM/SAM for assembly depth support")
     call.add_argument("--loci")
     call.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
@@ -172,12 +177,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--minibwa-bin",
         default="minibwa",
         metavar="PATH",
-        help="minibwa executable for locus representative mapping (default: %(default)s)",
+        help="minibwa executable for representative and assembly-support mapping (default: %(default)s)",
     )
     call.add_argument(
         "--no-locus-mapping",
         action="store_true",
-        help="Skip minibwa representative mapping and SNP evidence generation",
+        help="Skip dominant-locus mapping and SNP evidence generation",
     )
     call.add_argument(
         "--min-mapping-quality",
@@ -216,7 +221,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_THREADS,
         help="Worker threads (default: %(default)s; 0 uses all available CPUs)",
     )
-    call.add_argument("--minimap2-preset", help="Optional minimap2 -x preset for assembly read-depth mapping")
     call.add_argument("--quiet", action="store_true", help="Suppress live progress updates")
 
     simulate = subparsers.add_parser("simulate", help="Simulate amplicon reads for a VNTR panel")
@@ -318,8 +322,8 @@ def main(argv: list[str] | None = None) -> int:
                 profiles_path=args.profiles,
                 max_primer_mismatches=args.max_primer_mismatches,
                 threads=args.threads,
-                minimap2_preset=args.minimap2_preset,
                 amplirust_bin=args.amplirust_bin,
+                minibwa_bin=args.minibwa_bin,
                 show_progress=not args.quiet,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
