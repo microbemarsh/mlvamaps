@@ -11,6 +11,7 @@ path, intermediate stage, output, and interpretation boundary.
 
 ## Concepts
 
+- [Variant mixture abundance](concepts/variant-mixtures.md)
 - [Representative mapping and SNP evidence](concepts/representative-mapping.md)
 - [Allele calling, profiles, and novelty](concepts/calling-and-profiles.md)
 

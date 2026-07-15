@@ -29,6 +29,15 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | `--cluster-min-identity` | `0.97` | Gap-aware global identity threshold. |
 | `--vsearch-bin` | `vsearch` | Executable or path override. |
 
+## Variant mixture estimation
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--min-mixture-fraction` | `0.01` | Minimum EM-estimated fraction for a variant to affect mixed-locus status and appear separately in the main abundance plot. |
+
+Lower estimates remain in `vntr_mixture_abundance.tsv` as `TRACE` evidence and
+are combined into one trace segment in the report.
+
 ## Representative mapping and SNP evidence
 
 | Option | Default | Purpose |

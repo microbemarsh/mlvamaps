@@ -317,6 +317,189 @@ def _assembly_gel_svg(
 """
 
 
+_STATUS_COLORS = {
+    "PASS": "#62ff9b",
+    "LOW_DEPTH": "#ffc857",
+    "AMBIGUOUS": "#ff9f5f",
+    "MULTIPLE_VARIANTS": "#ff5fc8",
+    "OUT_OF_RANGE": "#ff6b6b",
+    "LOCUS_DROPOUT": "#64748b",
+}
+
+
+def _locus_confidence_svg(allele_rows: list[dict]) -> str:
+    if not allele_rows:
+        return '<p class="terminal-note">No locus calls were available.</p>'
+    rows = sorted(allele_rows, key=lambda row: str(row.get("locus_id", "")))
+    row_height = 30
+    width = 1000
+    plot_left = 190
+    plot_width = 620
+    height = 74 + (len(rows) * row_height)
+    ticks = []
+    for value in (0.0, 0.25, 0.5, 0.75, 1.0):
+        x = plot_left + (value * plot_width)
+        ticks.append(
+            f'<line class="chart-grid" x1="{x:.1f}" y1="38" x2="{x:.1f}" y2="{height - 24}"/>'
+            f'<text class="chart-axis" x="{x:.1f}" y="28" text-anchor="middle">{value:.2g}</text>'
+        )
+    marks = []
+    for index, row in enumerate(rows):
+        y = 54 + (index * row_height)
+        posterior = max(0.0, min(1.0, float(row.get("posterior_probability") or 0)))
+        depth = max(0, int(row.get("read_depth") or 0))
+        radius = min(12.0, 4.5 + math.log10(depth + 1) * 2.2)
+        status = str(row.get("call_status") or "")
+        color = _STATUS_COLORS.get(status, "#8dd7aa")
+        x = plot_left + (posterior * plot_width)
+        marks.append(
+            f'<text class="chart-label" x="8" y="{y + 4:.1f}">{_safe(row.get("locus_id", ""))}</text>'
+            f'<line class="confidence-track" x1="{plot_left}" y1="{y:.1f}" x2="{x:.1f}" y2="{y:.1f}"/>'
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}">'
+            f'<title>{_safe(row.get("locus_id", ""))}: posterior {posterior:.3f}; depth {depth}; {status}</title></circle>'
+            f'<text class="chart-value" x="{plot_left + plot_width + 22}" y="{y + 4:.1f}">'
+            f'{_safe(row.get("called_repeat_count", ""))}U · {_safe(status)}</text>'
+        )
+    return f"""
+<figure class="chart-panel" aria-label="Locus call posterior plot">
+  <svg viewBox="0 0 {width} {height}" role="img">
+    <title>Locus call confidence</title>
+    <desc>Posterior probability by locus. Point size reflects read depth and color reflects call status.</desc>
+    {"".join(ticks)}
+    {"".join(marks)}
+  </svg>
+  <figcaption>Farther right is more confident. Point size scales with read depth; color indicates status.</figcaption>
+</figure>
+"""
+
+
+def _variant_mixture_svg(
+    mixture_rows: list[dict], allele_rows: list[dict]
+) -> str:
+    if not mixture_rows:
+        return '<p class="terminal-note">No retained variants were available for mixture estimation.</p>'
+    by_locus: dict[str, list[dict]] = {}
+    for row in mixture_rows:
+        by_locus.setdefault(str(row.get("locus_id", "")), []).append(row)
+    status_by_locus = {
+        str(row.get("locus_id", "")): str(row.get("call_status", ""))
+        for row in allele_rows
+    }
+    palette = ["#62ff9b", "#5fe8ff", "#ff5fc8", "#ffc857", "#9d8cff", "#ff8f70"]
+    row_height = 36
+    plot_left = 180
+    plot_width = 650
+    loci = sorted(by_locus)
+    height = 70 + (len(loci) * row_height)
+    rows_svg = []
+    for locus_index, locus_id in enumerate(loci):
+        y = 48 + (locus_index * row_height)
+        estimates = sorted(
+            by_locus[locus_id],
+            key=lambda row: float(row.get("estimated_fraction") or 0),
+            reverse=True,
+        )
+        meaningful = [
+            row
+            for row in estimates
+            if str(row.get("meaningful", "")).lower() == "yes"
+            and float(row.get("estimated_fraction") or 0) > 0
+        ]
+        trace_rows = [row for row in estimates if row not in meaningful]
+        segments = [
+            (
+                str(row.get("variant_id", "")),
+                float(row.get("estimated_fraction") or 0),
+                palette[index % len(palette)],
+                f'{row.get("repeat_count", "")}U',
+            )
+            for index, row in enumerate(meaningful)
+        ]
+        trace_fraction = sum(
+            float(row.get("estimated_fraction") or 0) for row in trace_rows
+        )
+        if trace_fraction > 0:
+            segments.append(
+                (f"trace ({len(trace_rows)} variants)", trace_fraction, "#64748b", "trace")
+            )
+        cursor = plot_left
+        segment_svg = []
+        for label, fraction, color, repeat_label in segments:
+            segment_width = max(0.0, fraction * plot_width)
+            if segment_width <= 0:
+                continue
+            segment_svg.append(
+                f'<rect x="{cursor:.2f}" y="{y:.1f}" width="{segment_width:.2f}" height="20" '
+                f'fill="{color}" rx="2"><title>{_safe(locus_id)} · {_safe(label)} · '
+                f'{fraction * 100:.2f}% · {_safe(repeat_label)}</title></rect>'
+            )
+            if segment_width >= 72:
+                segment_svg.append(
+                    f'<text class="segment-label" x="{cursor + segment_width / 2:.2f}" '
+                    f'y="{y + 14:.1f}" text-anchor="middle">{_safe(label.rsplit("_", 1)[-1])} '
+                    f'{fraction * 100:.1f}%</text>'
+                )
+            cursor += segment_width
+        dominant = meaningful[0] if meaningful else estimates[0]
+        dominant_fraction = float(dominant.get("estimated_fraction") or 0)
+        status = status_by_locus.get(locus_id, "")
+        status_color = _STATUS_COLORS.get(status, "#8dd7aa")
+        rows_svg.append(
+            f'<circle cx="12" cy="{y + 10:.1f}" r="5" fill="{status_color}"/>'
+            f'<text class="chart-label" x="24" y="{y + 14:.1f}">{_safe(locus_id)}</text>'
+            f'<rect class="mixture-track" x="{plot_left}" y="{y:.1f}" width="{plot_width}" height="20" rx="2"/>'
+            f'{"".join(segment_svg)}'
+            f'<text class="chart-value" x="{plot_left + plot_width + 18}" y="{y + 14:.1f}">'
+            f'{_safe(dominant.get("variant_id", ""))} {dominant_fraction * 100:.1f}%</text>'
+        )
+    return f"""
+<figure class="chart-panel" aria-label="EM-estimated variant abundance plot">
+  <svg viewBox="0 0 1000 {height}" role="img">
+    <title>Variant mixture abundance</title>
+    <desc>Stacked estimated fractions of meaningful variants at each locus. Trace components are combined.</desc>
+    <text class="chart-axis" x="{plot_left}" y="26">0%</text>
+    <text class="chart-axis" x="{plot_left + plot_width}" y="26" text-anchor="end">100%</text>
+    {"".join(rows_svg)}
+  </svg>
+  <figcaption>Emu-inspired EM estimates from VSEARCH count evidence. Meaningful variants are colored separately; components below the configured threshold are combined as trace.</figcaption>
+</figure>
+"""
+
+
+def _mapping_coverage_svg(mapping_rows: list[dict]) -> str:
+    if not mapping_rows:
+        return '<p class="terminal-note">Representative mapping was disabled or produced no locus summaries.</p>'
+    rows = sorted(mapping_rows, key=lambda row: str(row.get("locus_id", "")))
+    row_height = 31
+    plot_left = 180
+    plot_width = 620
+    height = 66 + (len(rows) * row_height)
+    bars = []
+    for index, row in enumerate(rows):
+        y = 42 + (index * row_height)
+        coverage = max(0.0, min(100.0, float(row.get("coverage_percent") or 0)))
+        bar_width = plot_width * coverage / 100.0
+        snps = int(row.get("snp_count") or 0)
+        bars.append(
+            f'<text class="chart-label" x="8" y="{y + 14:.1f}">{_safe(row.get("locus_id", ""))}</text>'
+            f'<rect class="mapping-track" x="{plot_left}" y="{y:.1f}" width="{plot_width}" height="20" rx="3"/>'
+            f'<rect class="mapping-bar" x="{plot_left}" y="{y:.1f}" width="{bar_width:.2f}" height="20" rx="3">'
+            f'<title>{coverage:.1f}% covered; mean depth {row.get("mean_depth", 0)}; {snps} SNPs</title></rect>'
+            f'<text class="chart-value" x="{plot_left + plot_width + 18}" y="{y + 14:.1f}">'
+            f'{coverage:.1f}% · {snps} SNP</text>'
+        )
+    return f"""
+<figure class="chart-panel" aria-label="Representative mapping coverage plot">
+  <svg viewBox="0 0 1000 {height}" role="img">
+    <title>Representative mapping coverage</title>
+    <desc>Percent of each sample-derived representative covered by quality-filtered aligned bases.</desc>
+    {"".join(bars)}
+  </svg>
+  <figcaption>Coverage is relative to the sample-derived dominant amplicon. Hover bars for depth and SNP counts.</figcaption>
+</figure>
+"""
+
+
 def write_report(
     outdir: str | Path,
     sample_id: str,
@@ -328,6 +511,7 @@ def write_report(
     asv_rows: list[dict] | None = None,
     mapping_rows: list[dict] | None = None,
     snp_rows: list[dict] | None = None,
+    mixture_rows: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     loci = loci or []
@@ -336,19 +520,46 @@ def write_report(
     asv_rows = asv_rows or []
     mapping_rows = mapping_rows or []
     snp_rows = snp_rows or []
+    mixture_rows = mixture_rows or []
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
     dropout = sum(1 for row in allele_rows if row.get("call_status") == "LOCUS_DROPOUT")
+    multiple = sum(
+        1 for row in allele_rows if row.get("call_status") == "MULTIPLE_VARIANTS"
+    )
     novelty = novelty_rows[0] if novelty_rows else {}
     best_match = match_rows[0] if match_rows else {}
     best_profile = _best_profile(match_rows, profiles)
     gel = _gel_svg(sample_id, loci, allele_rows, best_profile, asv_rows)
+    confidence_plot = _locus_confidence_svg(allele_rows)
+    mixture_plot = _variant_mixture_svg(mixture_rows, allele_rows)
+    mapping_plot = _mapping_coverage_svg(mapping_rows)
     rows = "\n".join(
         f"<tr><td>{_safe(row['locus_id'])}</td><td>{_safe(row['called_repeat_count'])}</td>"
         f"<td>{_safe(row['posterior_probability'])}</td><td>{_safe(row['read_depth'])}</td>"
+        f"<td>{_safe(row.get('num_meaningful_variants', ''))}</td>"
+        f"<td>{_safe(row.get('dominant_variant_fraction', ''))}</td>"
         f"<td>{_safe(row['call_status'])}</td></tr>"
         for row in allele_rows
     )
+    mixture_table_rows = "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('locus_id', ''))}</td>"
+        f"<td>{_safe(row.get('variant_id', ''))}</td>"
+        f"<td>{_safe(row.get('repeat_count', ''))}</td>"
+        f"<td>{_safe(row.get('observed_reads', ''))}</td>"
+        f"<td>{float(row.get('observed_fraction') or 0) * 100:.3f}%</td>"
+        f"<td>{_safe(row.get('estimated_reads', ''))}</td>"
+        f"<td>{float(row.get('estimated_fraction') or 0) * 100:.3f}%</td>"
+        f"<td>{_safe(row.get('abundance_class', ''))}</td>"
+        f"<td>{_safe(row.get('meaningful', ''))}</td>"
+        "</tr>"
+        for row in mixture_rows
+    )
+    if not mixture_table_rows:
+        mixture_table_rows = (
+            '<tr><td colspan="9">No retained variants were available for mixture estimation.</td></tr>'
+        )
     mapped_reads = sum(int(row.get("mapped_reads") or 0) for row in mapping_rows)
     total_mapping_reads = sum(int(row.get("total_reads") or 0) for row in mapping_rows)
     mapping_table_rows = "\n".join(
@@ -463,6 +674,21 @@ def write_report(
     .band-hit:focus {{ outline: none; }}
     .reference-label {{ fill: #ffd5f3; }}
     .marker-label {{ fill: #b6d8ff; font: 11px "Courier New", monospace; text-anchor: end; }}
+    .chart-grid {{ stroke: rgba(141, 215, 170, 0.18); stroke-width: 1; }}
+    .chart-axis {{ fill: var(--muted); font: 12px "Courier New", monospace; }}
+    .chart-label {{ fill: #d6ffe2; font: 12px "Courier New", monospace; }}
+    .chart-value {{ fill: var(--muted); font: 11px "Courier New", monospace; }}
+    .segment-label {{ fill: #03130b; font: 700 10px "Courier New", monospace; pointer-events: none; }}
+    .confidence-track {{ stroke: rgba(95, 232, 255, 0.42); stroke-width: 3; }}
+    .mixture-track, .mapping-track {{ fill: rgba(141, 215, 170, 0.1); stroke: var(--line); stroke-width: 1; }}
+    .mapping-bar {{ fill: var(--cyan); opacity: 0.82; }}
+    .chart-panel {{ margin: 0.75rem 0 1.5rem; border: 1px solid var(--line); border-radius: 7px; padding: 0.6rem; background: rgba(3, 12, 8, 0.58); }}
+    .chart-panel svg {{ width: 100%; display: block; min-width: 720px; }}
+    .chart-panel figcaption {{ color: var(--muted); font-size: 0.88rem; margin-top: 0.45rem; }}
+    .chart-scroll {{ overflow-x: auto; }}
+    details {{ border: 1px solid var(--line); border-radius: 6px; margin: 0.7rem 0; padding: 0.65rem 0.8rem; background: rgba(98, 255, 155, 0.035); }}
+    summary {{ color: var(--cyan); cursor: pointer; font-weight: 700; }}
+    .table-scroll {{ overflow-x: auto; }}
   </style>
 </head>
 <body>
@@ -473,30 +699,53 @@ def write_report(
       <div class="summary">
         <div class="metric"><strong>PASS loci</strong><span>{passed}</span></div>
         <div class="metric"><strong>LOW_DEPTH loci</strong><span>{low_depth}</span></div>
+        <div class="metric"><strong>MIXED loci</strong><span>{multiple}</span></div>
         <div class="metric"><strong>DROPOUT loci</strong><span>{dropout}</span></div>
         <div class="metric"><strong>Mapped locus reads</strong><span>{mapped_reads}/{total_mapping_reads}</span></div>
         <div class="metric"><strong>Representative SNPs</strong><span>{len(snp_rows)}</span></div>
         <div class="metric"><strong>Best reference</strong><span>{_safe(best_match.get('best_profile_id', 'NA') or 'NA')}</span></div>
         <div class="metric"><strong>Novelty</strong><span>{_safe(novelty.get('novelty_score', ''))}</span><br>{_safe(novelty.get('interpretation', ''))}</div>
       </div>
+      <h2>Locus Confidence</h2>
+      <div class="chart-scroll">{confidence_plot}</div>
+      <h2>Variant Mixture Abundance</h2>
+      <p class="terminal-note">Fractions are estimated from retained VSEARCH counts with an Emu-inspired expectation-maximization model. Sequence similarity supplies assignment likelihoods; the current abundance estimate supplies the prior for the next iteration.</p>
+      <div class="chart-scroll">{mixture_plot}</div>
+      <h2>Representative Mapping Coverage</h2>
+      <div class="chart-scroll">{mapping_plot}</div>
       <h2>Generated Gel</h2>
       {gel}
-      <h2>Allele Calls</h2>
-      <table>
-        <thead><tr><th>Locus</th><th>Call</th><th>Posterior</th><th>Depth</th><th>Status</th></tr></thead>
-        <tbody>{rows}</tbody>
-      </table>
-      <h2>Representative Mapping</h2>
-      <p class="terminal-note">Primer-oriented reads are mapped with minimap2 to the dominant observed VSEARCH representative amplicon for their locus. Positions and coverage are relative to that sample-derived amplicon, not to chromosome coordinates.</p>
-      <table>
-        <thead><tr><th>Locus</th><th>Reference ASV</th><th>Mapped</th><th>Rate</th><th>Mean depth</th><th>Covered %</th><th>SNPs</th></tr></thead>
-        <tbody>{mapping_table_rows}</tbody>
-      </table>
-      <h2>SNP Evidence</h2>
-      <table>
-        <thead><tr><th>Locus</th><th>Reference ASV</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
-        <tbody>{snp_table_rows}</tbody>
-      </table>
+      <h2>Detailed Evidence</h2>
+      <p class="terminal-note">The plots above are the primary interpretation view. Expand a section below when exact values are needed.</p>
+      <details>
+        <summary>Allele call details</summary>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Call</th><th>Posterior</th><th>Depth</th><th>Meaningful variants</th><th>Dominant fraction</th><th>Status</th></tr></thead>
+          <tbody>{rows}</tbody>
+        </table></div>
+      </details>
+      <details>
+        <summary>Variant mixture details</summary>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Variant</th><th>Repeat</th><th>Observed reads</th><th>Observed %</th><th>EM reads</th><th>EM %</th><th>Class</th><th>Meaningful</th></tr></thead>
+          <tbody>{mixture_table_rows}</tbody>
+        </table></div>
+      </details>
+      <details>
+        <summary>Representative mapping details</summary>
+        <p class="terminal-note">Primer-oriented reads are mapped with minimap2 to the dominant observed VSEARCH representative amplicon. Coordinates are representative-relative, not chromosomal.</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Reference ASV</th><th>Mapped</th><th>Rate</th><th>Mean depth</th><th>Covered %</th><th>SNPs</th></tr></thead>
+          <tbody>{mapping_table_rows}</tbody>
+        </table></div>
+      </details>
+      <details>
+        <summary>SNP evidence details ({len(snp_rows)} rows)</summary>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Reference ASV</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
+          <tbody>{snp_table_rows}</tbody>
+        </table></div>
+      </details>
     </section>
   </main>
 </body>

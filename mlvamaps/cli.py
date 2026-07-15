@@ -157,6 +157,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum VSEARCH global identity within a locus (default: %(default)s)",
     )
     call.add_argument(
+        "--min-mixture-fraction",
+        type=_fraction,
+        default=0.01,
+        help="Minimum EM-estimated fraction for a meaningful variant (default: %(default)s)",
+    )
+    call.add_argument(
         "--vsearch-bin",
         default="vsearch",
         metavar="PATH",
@@ -289,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
                 min_posterior=args.min_posterior,
                 min_cluster_size=args.min_cluster_size,
                 cluster_min_identity=args.cluster_min_identity,
+                min_mixture_fraction=args.min_mixture_fraction,
                 vsearch_bin=args.vsearch_bin,
                 amplirust_bin=args.amplirust_bin,
                 minimap2_bin=args.minimap2_bin,
@@ -304,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")
             print(f"Wrote VNTR variant clusters to {result['asv_table']}")
+            print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
             print(f"Wrote per-read cluster and indel evidence to {result['asv_memberships']}")
             if not args.no_locus_mapping:
                 print(f"Wrote locus mapping summaries to {result['mapping_summary']}")

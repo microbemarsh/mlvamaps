@@ -18,6 +18,8 @@ the sequence evidence behind them:
 - Per-read substitution and indel evidence without replacing observed reads
   with a consensus.
 - Exact Parasail global alignments against observed cluster representatives.
+- Emu-inspired expectation-maximization estimates of meaningful variant
+  fractions from VSEARCH count evidence.
 - minimap2 mapping to sample-derived representative amplicons and
   reference-relative SNP evidence.
 - Optional read-depth support for assembly products.
@@ -83,8 +85,9 @@ Results are written to `results/` by default. Start with:
 - `report.html` for the visual summary.
 
 FASTQ runs additionally provide VSEARCH variants, Parasail-aligned read
-memberships, minimap2 mapping coverage, and SNP evidence. Assembly runs provide extracted
-primer products and optional read support.
+memberships, EM-estimated mixture abundance, minimap2 mapping coverage, and SNP
+evidence. Assembly runs provide extracted primer products and optional read
+support.
 
 ## Supported data
 
@@ -113,10 +116,13 @@ For FASTQ data, mlvamaps:
 4. Dereplicates and clusters reads by locus with VSEARCH.
 5. Globally aligns repeat sequences to observed representatives with Parasail
    and annotates complete per-read edits without clipping.
-6. Maps locus reads to the dominant observed amplicon with minimap2.
-7. Reports quality-filtered, representative-relative SNP evidence.
-8. Combines read probabilities into per-locus repeat-count calls.
-9. Builds the fingerprint, compares profiles, scores novelty, and writes HTML.
+6. Fits an Emu-inspired count mixture to estimate which variants are meaningful
+   and their relative fractions.
+7. Maps locus reads to the dominant observed amplicon with minimap2.
+8. Reports quality-filtered, representative-relative SNP evidence.
+9. Combines read probabilities into per-locus repeat-count calls.
+10. Builds the fingerprint, compares profiles, scores novelty, and writes a
+    plot-first HTML report.
 
 For assemblies, mlvamaps:
 
@@ -156,6 +162,7 @@ recommended metadata, validation, and profile-table setup.
 - [Output file reference](docs/reference/outputs.md)
 - [CLI and thresholds](docs/reference/cli.md)
 - [Representative mapping and SNP evidence](docs/concepts/representative-mapping.md)
+- [Variant mixture abundance](docs/concepts/variant-mixtures.md)
 - [Allele calling, profiles, and novelty](docs/concepts/calling-and-profiles.md)
 - [Adding a new organism or MLVA scheme](docs/guides/new-organism-panel.md)
 

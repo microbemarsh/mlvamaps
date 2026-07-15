@@ -44,12 +44,13 @@ size but no read depth unless support data are supplied.
 | `vntr_asv_table.tsv` | Retained VSEARCH variants and representative statistics. |
 | `vntr_asv_memberships.tsv` | Cluster membership and per-read substitution/indel evidence. |
 | `vntr_asv_representatives.fasta` | Observed representative repeat sequences. |
+| `vntr_mixture_abundance.tsv` | Emu-inspired EM abundance, estimated read count, and meaningful/trace classification for every retained variant. |
 | `locus_mapping_references.fasta` | Dominant observed representative amplicons. |
 | `locus_read_alignments.sam` | minimap2 locus-relative mappings. |
 | `locus_mapping_summary.tsv` | Mapping rate, depth, coverage, and SNP totals by locus. |
 | `locus_snps.tsv` | Filtered representative-relative SNP evidence. |
 | `read_level_allele_predictions.tsv` | Per-read repeat-count probabilities and evidence weights. |
-| `allele_calls.tsv` | Bayesian locus calls and posterior detail. |
+| `allele_calls.tsv` | Bayesian locus calls, posterior detail, meaningful-variant count, and dominant mixture fraction. |
 | `amplirust/` | Native primer-pairing evidence. |
 | `vsearch/` | Native unique sequences, centroids, and memberships. |
 | `minimap2/` | Dominant-locus mapping FASTQ and reference diagnostics. |
@@ -77,7 +78,7 @@ they are independent of locus-wide read mapping.
 | `LOW_DEPTH` | Fewer reads than `--min-depth`. |
 | `AMBIGUOUS` | Weak top posterior or insufficient separation from the second call. |
 | `OUT_OF_RANGE` | Best repeat count lies outside the configured locus range. |
-| `MULTIPLE_VARIANTS` | Several retained variants exist without a sufficiently dominant cluster. |
+| `MULTIPLE_VARIANTS` | Several EM-meaningful variants remain and the dominant estimated fraction is below 0.8. |
 | `LOCUS_DROPOUT` | No retained read evidence produced a prediction. |
 
 ## Assembly call statuses

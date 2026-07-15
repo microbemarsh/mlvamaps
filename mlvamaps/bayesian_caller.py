@@ -11,6 +11,7 @@ def call_loci(
     asv_rows: list[dict],
     min_depth: int = 10,
     min_posterior: float = 0.75,
+    mixture_rows: list[dict] | None = None,
 ) -> list[dict]:
     pred_by_locus: dict[str, list[ReadPrediction]] = defaultdict(list)
     for prediction in predictions:
@@ -19,6 +20,10 @@ def call_loci(
     asv_by_locus: dict[str, list[dict]] = defaultdict(list)
     for row in asv_rows:
         asv_by_locus[row["locus_id"]].append(row)
+
+    mixture_by_locus: dict[str, list[dict]] = defaultdict(list)
+    for row in mixture_rows or []:
+        mixture_by_locus[row["locus_id"]].append(row)
 
     rows = []
     for locus in loci:
@@ -35,7 +40,9 @@ def call_loci(
                     "read_depth": 0,
                     "effective_read_depth": 0.0,
                     "num_vntr_asvs": 0,
+                    "num_meaningful_variants": 0,
                     "dominant_vntr_asv": "",
+                    "dominant_variant_fraction": 0.0,
                     "call_status": "LOCUS_DROPOUT",
                 }
             )
@@ -58,8 +65,22 @@ def call_loci(
         best = ranked[0]
         second = ranked[1] if len(ranked) > 1 else ("", 0.0)
         locus_asvs = sorted(asv_by_locus.get(locus.locus_id, []), key=lambda row: row["support_reads"], reverse=True)
-        dominant = locus_asvs[0]["variant_id"] if locus_asvs else ""
-        dominant_freq = float(locus_asvs[0]["frequency"]) if locus_asvs else 0.0
+        locus_mixture = sorted(
+            mixture_by_locus.get(locus.locus_id, []),
+            key=lambda row: float(row.get("estimated_fraction") or 0),
+            reverse=True,
+        )
+        meaningful_variants = [
+            row for row in locus_mixture if str(row.get("meaningful", "")).lower() == "yes"
+        ]
+        if locus_mixture:
+            dominant = str(locus_mixture[0]["variant_id"])
+            dominant_freq = float(locus_mixture[0].get("estimated_fraction") or 0)
+            meaningful_count = len(meaningful_variants)
+        else:
+            dominant = locus_asvs[0]["variant_id"] if locus_asvs else ""
+            dominant_freq = float(locus_asvs[0]["frequency"]) if locus_asvs else 0.0
+            meaningful_count = len(locus_asvs)
         status = "PASS"
         if len(preds) < min_depth:
             status = "LOW_DEPTH"
@@ -67,7 +88,7 @@ def call_loci(
             status = "AMBIGUOUS"
         elif best[0] < locus.expected_min_repeats or best[0] > locus.expected_max_repeats:
             status = "OUT_OF_RANGE"
-        elif len(locus_asvs) > 1 and dominant_freq < 0.8:
+        elif meaningful_count > 1 and dominant_freq < 0.8:
             status = "MULTIPLE_VARIANTS"
         rows.append(
             {
@@ -80,7 +101,9 @@ def call_loci(
                 "read_depth": len(preds),
                 "effective_read_depth": round(effective_read_depth, 4),
                 "num_vntr_asvs": len(locus_asvs),
+                "num_meaningful_variants": meaningful_count,
                 "dominant_vntr_asv": dominant,
+                "dominant_variant_fraction": round(dominant_freq, 6),
                 "call_status": status,
             }
         )

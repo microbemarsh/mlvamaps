@@ -13,6 +13,7 @@ from .mapping import (
     SNP_FIELDS,
     run_locus_mapping,
 )
+from .mixture import MIXTURE_FIELDS, estimate_variant_mixtures
 from .ml_classifier import predict_read_alleles
 from .novelty import score_novelty
 from .profile_matching import build_fingerprint, match_profiles
@@ -114,7 +115,9 @@ ALLELE_FIELDS = [
     "read_depth",
     "effective_read_depth",
     "num_vntr_asvs",
+    "num_meaningful_variants",
     "dominant_vntr_asv",
+    "dominant_variant_fraction",
     "call_status",
 ]
 
@@ -150,6 +153,16 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
         read_depth = int(row.get("read_depth") or 0)
         present = read_depth > 0
         repeat_count = row.get("called_repeat_count", "") if present else ""
+        if present:
+            dominant = row.get("dominant_vntr_asv", "")
+            dominant_fraction = float(row.get("dominant_variant_fraction") or 0)
+            meaningful = int(row.get("num_meaningful_variants") or 0)
+            evidence = (
+                f"{read_depth} assigned reads; {meaningful} meaningful variant(s); "
+                f"dominant {dominant} at {dominant_fraction:.1%}"
+            )
+        else:
+            evidence = "no assigned reads"
         rows.append(
             {
                 "sample_id": sample_id,
@@ -161,7 +174,7 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
                 "read_depth": read_depth,
                 "mean_coverage": "",
                 "status": row["call_status"],
-                "evidence": f"{read_depth} assigned reads" if present else "no assigned reads",
+                "evidence": evidence,
             }
         )
     return rows
@@ -182,6 +195,7 @@ def run_call(
     min_posterior: float = 0.75,
     min_cluster_size: int = 2,
     cluster_min_identity: float = 0.97,
+    min_mixture_fraction: float = 0.01,
     vsearch_bin: str = "vsearch",
     amplirust_bin: str = "amplirust",
     minimap2_bin: str = "minimap2",
@@ -274,6 +288,16 @@ def run_call(
     )
     write_fasta(fasta_records, outdir_path / "vntr_asv_representatives.fasta")
 
+    progress.step("Estimating meaningful variant fractions with count-based EM")
+    mixture_rows = estimate_variant_mixtures(
+        asv_rows, min_fraction=min_mixture_fraction
+    )
+    write_tsv(
+        mixture_rows,
+        outdir_path / "vntr_mixture_abundance.tsv",
+        MIXTURE_FIELDS,
+    )
+
     mapping_rows: list[dict] = []
     snp_rows: list[dict] = []
     if locus_mapping:
@@ -308,7 +332,14 @@ def run_call(
     prediction_rows = [{field: getattr(row, field) for field in PREDICTION_FIELDS} for row in predictions]
     write_tsv(prediction_rows, outdir_path / "read_level_allele_predictions.tsv", PREDICTION_FIELDS)
 
-    allele_rows = call_loci(predictions, loci, asv_rows, min_depth, min_posterior)
+    allele_rows = call_loci(
+        predictions,
+        loci,
+        asv_rows,
+        min_depth,
+        min_posterior,
+        mixture_rows=mixture_rows,
+    )
     for row in allele_rows:
         row["sample_id"] = sample_id
     write_tsv(allele_rows, outdir_path / "allele_calls.tsv", ALLELE_FIELDS)
@@ -339,6 +370,7 @@ def run_call(
         asv_rows,
         mapping_rows,
         snp_rows,
+        mixture_rows,
     )
     progress.step(f"Done. Main calls: {outdir_path / 'calls.tsv'}")
 
@@ -349,6 +381,7 @@ def run_call(
         "asv_table": outdir_path / "vntr_asv_table.tsv",
         "asv_memberships": outdir_path / "vntr_asv_memberships.tsv",
         "asv_representatives": outdir_path / "vntr_asv_representatives.fasta",
+        "mixture_abundance": outdir_path / "vntr_mixture_abundance.tsv",
         "mapping_summary": outdir_path / "locus_mapping_summary.tsv",
         "mapping_snps": outdir_path / "locus_snps.tsv",
         "mapping_references": outdir_path / "locus_mapping_references.fasta",

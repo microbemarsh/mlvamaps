@@ -7,6 +7,7 @@ from threading import Barrier
 from types import SimpleNamespace
 
 from mlvamaps import sequence
+from mlvamaps.bayesian_caller import call_loci
 from mlvamaps.assembly_call import (
     build_minimap2_command,
     read_alignment_depth,
@@ -27,7 +28,8 @@ from mlvamaps.mapping import (
     build_minimap2_map_command,
     parse_minimap2_sam,
 )
-from mlvamaps.models import Locus, ReadRecord, RepeatFeature
+from mlvamaps.mixture import estimate_variant_mixtures
+from mlvamaps.models import Locus, ReadPrediction, ReadRecord, RepeatFeature
 from mlvamaps.ml_classifier import predict_read_alleles
 from mlvamaps.pipeline import run_call
 from mlvamaps.primers import read_primer_pairs
@@ -254,6 +256,78 @@ def test_parasail_global_alignment_retains_indels_and_substitutions():
     assert empty["deletions_vs_representative"] == 4
 
 
+def test_emu_style_mixture_filters_trace_variants_and_refines_status():
+    asv_rows = [
+        {
+            "sample_id": "S1",
+            "locus_id": "VNTR",
+            "variant_id": "VNTR_ASV1",
+            "repeat_count": 5,
+            "support_reads": 1000,
+            "representative_sequence": "ACGTACGT",
+            "representative_length_bp": 8,
+            "total_insertions": 2,
+            "total_deletions": 2,
+            "total_substitutions": 4,
+        },
+        {
+            "sample_id": "S1",
+            "locus_id": "VNTR",
+            "variant_id": "VNTR_ASV2",
+            "repeat_count": 6,
+            "support_reads": 100,
+            "representative_sequence": "ACGTACGTTTTT",
+            "representative_length_bp": 12,
+            "total_insertions": 1,
+            "total_deletions": 1,
+            "total_substitutions": 2,
+        },
+        {
+            "sample_id": "S1",
+            "locus_id": "VNTR",
+            "variant_id": "VNTR_ASV3",
+            "repeat_count": 5,
+            "support_reads": 2,
+            "representative_sequence": "ACGTACGA",
+            "representative_length_bp": 8,
+            "total_insertions": 0,
+            "total_deletions": 0,
+            "total_substitutions": 0,
+        },
+    ]
+    mixture = estimate_variant_mixtures(asv_rows, min_fraction=0.01)
+    by_variant = {row["variant_id"]: row for row in mixture}
+    assert sum(float(row["estimated_fraction"]) for row in mixture) == 1.0
+    assert by_variant["VNTR_ASV1"]["abundance_class"] == "DOMINANT"
+    assert by_variant["VNTR_ASV2"]["meaningful"] == "yes"
+    assert by_variant["VNTR_ASV3"]["meaningful"] == "no"
+    assert by_variant["VNTR_ASV3"]["estimated_fraction"] == 0.0
+
+    locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=7)
+    predictions = [
+        ReadPrediction(
+            f"read{index}", "VNTR", 5, 1.0, None, 0.0, "VNTR_ASV1", 0, 0, 0, 1.0
+        )
+        for index in range(20)
+    ]
+    call = call_loci(predictions, [locus], asv_rows, mixture_rows=mixture)[0]
+    assert call["call_status"] == "PASS"
+    assert call["num_vntr_asvs"] == 3
+    assert call["num_meaningful_variants"] == 2
+
+    balanced = [dict(row) for row in mixture]
+    balanced[0]["estimated_fraction"] = 0.7
+    balanced[1]["estimated_fraction"] = 0.3
+    call = call_loci(predictions, [locus], asv_rows, mixture_rows=balanced)[0]
+    assert call["call_status"] == "MULTIPLE_VARIANTS"
+
+    dominant_only = [dict(row, meaningful="no") for row in mixture]
+    dominant_only[0]["meaningful"] = "yes"
+    call = call_loci(predictions, [locus], asv_rows, mixture_rows=dominant_only)[0]
+    assert call["call_status"] == "PASS"
+    assert call["num_meaningful_variants"] == 1
+
+
 def test_native_repeat_motif_statistics_preserve_patterns_and_partials():
     parts, mismatches, motif_kmers = sequence.repeat_motif_statistics(
         "ATGATCAT", "ATG", 3
@@ -353,6 +427,9 @@ def test_simulate_and_call_pipeline(tmp_path):
     assert asv_rows[0]["representative_sequence"]
     assert "total_insertions" in asv_rows[0]
     assert result["asv_representatives"].exists()
+    mixture_rows = read_tsv(result["mixture_abundance"])
+    assert {row["abundance_class"] for row in mixture_rows} == {"DOMINANT"}
+    assert all(row["estimated_fraction"] == "1.0" for row in mixture_rows)
     assert not (tmp_path / "results" / "vntr_asv_consensus.fasta").exists()
     memberships = read_tsv(result["asv_memberships"])
     assert len(memberships) == 50
@@ -372,6 +449,10 @@ def test_simulate_and_call_pipeline(tmp_path):
     assert "reference-band" in report
     assert "query band intensity = fragment read support" in report
     assert "25 reads" in report
+    assert "Variant Mixture Abundance" in report
+    assert "EM-estimated variant abundance plot" in report
+    assert "Locus Confidence" in report
+    assert "<details>" in report
 
 
 def test_dropout_is_reported(tmp_path):
@@ -549,6 +630,7 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.threads == 32
     assert default_call_args.min_cluster_size == 2
     assert default_call_args.cluster_min_identity == 0.97
+    assert default_call_args.min_mixture_fraction == 0.01
     assert default_call_args.vsearch_bin == "vsearch"
     assert default_call_args.amplirust_bin == "amplirust"
     assert default_call_args.minimap2_bin == "minimap2"

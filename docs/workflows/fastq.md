@@ -96,7 +96,18 @@ This stage returns:
 The FASTA contains representative repeat regions. The membership table retains
 the raw and aligned sequence evidence for every read in a retained cluster.
 
-## 7. Map to dominant representatives
+## 7. Estimate variant mixture abundance
+
+MLVAMaps fits an Emu-inspired expectation-maximization model to retained
+VSEARCH count evidence. Pairwise representative similarity supplies the
+assignment likelihoods, while the abundance estimate from each iteration
+becomes the prior for the next iteration. This separates meaningful secondary
+variants from trace clusters and estimates the fraction of each component.
+
+This stage returns `vntr_mixture_abundance.tsv`. Control the meaningful/trace
+boundary with `--min-mixture-fraction`.
+
+## 8. Map to dominant representatives
 
 The most supported retained VSEARCH variant at each locus supplies its complete
 observed amplicon as a minimap2 reference. All usable reads assigned to that
@@ -113,7 +124,7 @@ This stage returns:
 See [representative mapping and SNP evidence](../concepts/representative-mapping.md)
 for thresholds and interpretation.
 
-## 8. Predict read alleles
+## 9. Predict read alleles
 
 Every read in a retained cluster contributes a repeat-count probability.
 Representative-relative edits reduce evidence weight so clean observations
@@ -121,7 +132,7 @@ contribute more than heavily edited sequences.
 
 This stage returns `read_level_allele_predictions.tsv`.
 
-## 9. Call each locus
+## 10. Call each locus
 
 The Bayesian caller combines read probabilities and reports the best and
 second-best repeat count, posterior values, raw and effective depth, retained
@@ -135,7 +146,7 @@ This stage returns:
 Statuses include `PASS`, `LOW_DEPTH`, `AMBIGUOUS`, `OUT_OF_RANGE`,
 `MULTIPLE_VARIANTS`, and `LOCUS_DROPOUT`.
 
-## 10. Fingerprint, profiles, and report
+## 11. Fingerprint, profiles, and report
 
 MLVAMaps converts the locus calls to wide and probabilistic fingerprints. If a
 profile database is present, it ranks known rows by repeat-count distance and
@@ -150,5 +161,7 @@ This stage returns:
 - `novelty_scores.tsv`
 - `report.html`
 
-The report includes call status, a generated gel comparison, representative
-mapping coverage, and SNP evidence.
+The report leads with plots for locus confidence, EM-estimated variant
+fractions, representative mapping coverage, and the generated gel. Exact
+allele, mixture, mapping, and SNP tables remain available in collapsed detail
+sections.

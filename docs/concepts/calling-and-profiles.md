@@ -30,8 +30,14 @@ enough reads, it is `AMBIGUOUS` when the top posterior is below
 `--min-posterior` or leads the second-best count by less than 0.2.
 
 An otherwise decisive call is `OUT_OF_RANGE` when it lies outside the panel's
-expected count range. It is `MULTIPLE_VARIANTS` when multiple retained
-variants exist and the dominant variant frequency is below 0.8.
+expected count range. It is `MULTIPLE_VARIANTS` when at least two variants pass
+the EM mixture threshold and the dominant estimated fraction is below 0.8.
+Raw low-count clusters that the mixture model classifies as trace evidence do
+not force this status.
+
+`allele_calls.tsv` records both the raw retained-ASV count and the number of
+EM-meaningful variants, plus the dominant estimated fraction. See
+[variant mixture abundance](variant-mixtures.md) for the model and thresholds.
 
 ## Fingerprints
 
