@@ -23,8 +23,12 @@ the sequence evidence behind them:
 - minimap2 mapping to sample-derived representative amplicons and
   reference-relative SNP evidence.
 - Optional read-depth support for assembly products.
-- Probabilistic locus calls, profile matching, novelty summaries, generated gel
-  comparisons, and a self-contained HTML report.
+- Dedicated individual-locus repeat-count tables and report graphics, separate
+  from the generated gel and SNP evidence.
+- Optional per-locus phylogenetic placement against a sequence database using
+  MAFFT, RAxML-NG, and EPA-ng.
+- Probabilistic locus calls, profile matching, novelty summaries, and a
+  self-contained HTML report.
 
 ## Install
 
@@ -43,8 +47,11 @@ The environment includes
 [Amplirust](https://github.com/erdikilic/amplirust),
 [VSEARCH](https://github.com/torognes/vsearch),
 [Parasail's Python bindings](https://github.com/jeffdaily/parasail-python),
-[minimap2](https://github.com/lh3/minimap2), and the Python/native sequence
-libraries declared in `environment.yml`.
+[minimap2](https://github.com/lh3/minimap2),
+[MAFFT](https://mafft.cbrc.jp/alignment/software/),
+[RAxML-NG](https://github.com/amkozlov/raxml-ng),
+[EPA-ng](https://github.com/pierrebarbera/epa-ng), and the Python/native
+sequence libraries declared in `environment.yml`.
 
 ## Quick start
 
@@ -78,11 +85,37 @@ Compare the fingerprint with known profiles:
 mlvamaps call primers.tsv sample.fastq.gz --profiles profiles.tsv
 ```
 
+Place each callable query locus in fixed reference trees:
+
+```bash
+mlvamaps call primers.tsv sample.fastq.gz \
+  --database reference_sequences \
+  --profiles profiles.tsv
+```
+
+The recommended sequence database is a directory containing one FASTA per
+locus. Filename stems must match panel locus IDs, and FASTA headers must use the
+same reference IDs across loci:
+
+```text
+reference_sequences/VNTR_01.fasta
+reference_sequences/VNTR_02.fasta
+```
+
+Long-form sequence TSV and combined FASTA databases are also supported; see
+[input formats](docs/reference/input-formats.md#phylogenetic-sequence-database).
+
 Results are written to `results/` by default. Start with:
 
 - `calls.tsv` for compact per-locus calls.
+- `locus_repeat_counts.tsv` for explicit individual-locus repeat counts.
 - `mlva_fingerprint.tsv` for the conventional wide fingerprint.
 - `report.html` for the visual summary.
+
+With `--database`, `phylogeny/phylogenetic_matches.tsv` ranks complete
+references by summed distance. Every database locus retains its MAFFT alignment
+and RAxML-NG reference tree/model; callable query loci also retain an EPA-ng
+`.jplace` result.
 
 FASTQ runs additionally provide VSEARCH variants, Parasail-aligned read
 memberships, EM-estimated mixture abundance, minimap2 mapping coverage, and SNP
@@ -99,6 +132,7 @@ support.
 | Assembly plus accurate FASTQ | Assembly calls plus minimap2 read count and mean coverage for extracted products. |
 | Assembly plus SAM/BAM | Assembly calls plus overlap-based read support from existing alignments. |
 | Known profile TSV | Closest MLVA profiles, mismatched loci, distance, confidence, and novelty context. |
+| Per-locus sequence database | Fixed-tree phylogenetic placement and a closest-reference ranking across callable loci. |
 
 FASTQ assignment requires both primers to occur in a valid product. Ordinary
 shotgun reads that do not span the complete target amplicon are therefore not
@@ -126,8 +160,9 @@ For FASTQ data, mlvamaps:
 11. When `--database` is supplied, aligns each reference locus with MAFFT,
     infers its maximum-likelihood tree with RAxML-NG, adds the dominant query
     amplicon with `mafft --add --keeplength`, places it on the fixed reference
-    topology with EPA-ng, and ranks complete references by summed patristic
-    distance across all placed loci.
+    topology with EPA-ng, and ranks references by summed patristic distance.
+    Only references present at every placed locus are ranked, so missing loci
+    cannot produce an artificially small total.
 
 For assemblies, mlvamaps:
 
@@ -195,6 +230,9 @@ mlvamaps extract-amplicons \
 
 mlvamaps uses 32 threads by default. Pass `-t N` or `--threads N`;
 `--threads 0` uses all available CPUs. Use `--quiet` to suppress progress.
+External executables can be overridden with `--amplirust-bin`, `--vsearch-bin`,
+`--minimap2-bin`, `--mafft-bin`, `--raxml-ng-bin`, and `--epa-ng-bin`.
+RAxML-NG uses `GTR+G` by default; change it with `--raxml-model`.
 
 ## Motivation and recognition
 
