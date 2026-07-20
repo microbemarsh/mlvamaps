@@ -12,6 +12,8 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | `--quiet` | Off | Suppress live progress. |
 | `--max-primer-mismatches` | `3` | Allowed primer errors for paired-primer detection. |
 | `--profiles` | None | Known MLVA profile TSV. |
+| `--database` | None | Per-locus reference sequences for MAFFT alignment, RAxML-NG trees, and EPA-ng placement. |
+| `--raxml-model` | `GTR+G` | RAxML-NG nucleotide model used for every locus tree. |
 
 ## FASTQ filtering
 
@@ -72,6 +74,9 @@ are combined into one trace segment in the report.
 - `--amplirust-bin`
 - `--vsearch-bin`
 - `--minimap2-bin`
+- `--mafft-bin`
+- `--raxml-ng-bin`
+- `--epa-ng-bin`
 
 These options are useful for testing, containers, and installations whose
 executables are not on the default `PATH`.

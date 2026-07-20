@@ -123,6 +123,11 @@ For FASTQ data, mlvamaps:
 9. Combines read probabilities into per-locus repeat-count calls.
 10. Builds the fingerprint, compares profiles, scores novelty, and writes a
     plot-first HTML report.
+11. When `--database` is supplied, aligns each reference locus with MAFFT,
+    infers its maximum-likelihood tree with RAxML-NG, adds the dominant query
+    amplicon with `mafft --add --keeplength`, places it on the fixed reference
+    topology with EPA-ng, and ranks complete references by summed patristic
+    distance across all placed loci.
 
 For assemblies, mlvamaps:
 
@@ -131,6 +136,8 @@ For assemblies, mlvamaps:
    provides enough metadata.
 3. Optionally adds minimap2 or existing SAM/BAM read support.
 4. Builds the same fingerprint, profile comparison, and report formats.
+5. Optionally performs the same per-locus MAFFT, RAxML-NG, and EPA-ng fixed-tree
+   placement from extracted assembly products.
 
 The minimap2 mapping coordinates are positions within the sample-derived
 representative amplicon, not chromosome coordinates. The SNP table is

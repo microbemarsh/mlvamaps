@@ -85,6 +85,29 @@ Profile locus names must match the panel. Empty values are skipped during
 comparison. Profile rows from different MLVA schemes should not be mixed unless
 their locus definitions and repeat-number conventions are compatible.
 
+## Phylogenetic sequence database
+
+`--database PATH` enables MAFFT alignment, RAxML-NG maximum-likelihood reference
+trees, and EPA-ng fixed-tree query placement independently of the MLVA profile
+table. The recommended layout is one FASTA per locus in a directory;
+each filename stem must exactly match the panel locus and each FASTA header is
+the reference identifier:
+
+```text
+reference_sequences/
+  VNTR_01.fasta
+  VNTR_02.fasta
+```
+
+A long-form TSV with `reference_id`, `locus_id`, and `sequence` columns is also
+accepted. A single FASTA can be used when every header contains exactly one
+panel locus, for example `>REFERENCE_1|VNTR_01`.
+
+Use the same reference identifiers across locus files. Only references present
+at every successfully placed query locus are included in the summed-distance
+ranking, preventing incomplete references from receiving artificially small
+totals.
+
 ## Existing alignment support
 
 Assembly mode accepts SAM or BAM aligned to the supplied assembly through

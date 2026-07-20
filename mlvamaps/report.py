@@ -327,6 +327,49 @@ _STATUS_COLORS = {
 }
 
 
+def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
+    if not rows:
+        return '<p class="terminal-note">No repeat-count calls were available.</p>'
+    normalized = []
+    for row in sorted(rows, key=lambda item: str(item.get("locus_id", ""))):
+        value_key = "repeat_count" if assembly else "called_repeat_count"
+        raw_key = "repeat_count_raw" if assembly else value_key
+        count = _called_count(row.get(value_key))
+        raw = row.get(raw_key, "")
+        status = str(row.get("status" if assembly else "call_status", ""))
+        normalized.append((str(row.get("locus_id", "")), count, raw, status))
+    max_count = max((count for _locus, count, _raw, _status in normalized if count is not None), default=1)
+    row_height = 29
+    plot_left = 190
+    plot_width = 600
+    height = 65 + len(normalized) * row_height
+    marks = []
+    for index, (locus_id, count, raw, status) in enumerate(normalized):
+        y = 42 + index * row_height
+        color = _STATUS_COLORS.get(status, "#8dd7aa")
+        width = 0 if count is None else (count / max(max_count, 1)) * plot_width
+        exact = "NA" if count is None else f"{count} repeats"
+        if raw not in ("", None) and str(raw) != str(count):
+            exact += f" (raw {raw})"
+        marks.append(
+            f'<text class="chart-label" x="8" y="{y + 14:.1f}">{_safe(locus_id)}</text>'
+            f'<rect class="mapping-track" x="{plot_left}" y="{y:.1f}" width="{plot_width}" height="18" rx="3"/>'
+            f'<rect x="{plot_left}" y="{y:.1f}" width="{width:.2f}" height="18" rx="3" fill="{color}" opacity="0.82">'
+            f'<title>{_safe(locus_id)}: {_safe(exact)}; {_safe(status)}</title></rect>'
+            f'<text class="chart-value" x="{plot_left + plot_width + 18}" y="{y + 13:.1f}">{_safe(exact)} · {_safe(status)}</text>'
+        )
+    return f"""
+<figure class="chart-panel" aria-label="Individual locus repeat counts">
+  <svg viewBox="0 0 1080 {height}" role="img">
+    <title>Individual locus repeat counts</title>
+    <desc>Exact repeat count at every panel locus, shown independently of amplicon SNP bands.</desc>
+    {"".join(marks)}
+  </svg>
+  <figcaption>Bar length represents repeat units, with the exact integer (and raw assembly estimate when applicable) printed at right. Color indicates call status.</figcaption>
+</figure>
+"""
+
+
 def _locus_confidence_svg(allele_rows: list[dict]) -> str:
     if not allele_rows:
         return '<p class="terminal-note">No locus calls were available.</p>'
@@ -512,6 +555,7 @@ def write_report(
     mapping_rows: list[dict] | None = None,
     snp_rows: list[dict] | None = None,
     mixture_rows: list[dict] | None = None,
+    phylogenetic_rows: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     loci = loci or []
@@ -521,6 +565,7 @@ def write_report(
     mapping_rows = mapping_rows or []
     snp_rows = snp_rows or []
     mixture_rows = mixture_rows or []
+    phylogenetic_rows = phylogenetic_rows or []
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
     dropout = sum(1 for row in allele_rows if row.get("call_status") == "LOCUS_DROPOUT")
@@ -530,7 +575,9 @@ def write_report(
     novelty = novelty_rows[0] if novelty_rows else {}
     best_match = match_rows[0] if match_rows else {}
     best_profile = _best_profile(match_rows, profiles)
+    phylogenetic_best = phylogenetic_rows[0] if phylogenetic_rows else {}
     gel = _gel_svg(sample_id, loci, allele_rows, best_profile, asv_rows)
+    repeat_count_plot = _repeat_count_svg(allele_rows)
     confidence_plot = _locus_confidence_svg(allele_rows)
     mixture_plot = _variant_mixture_svg(mixture_rows, allele_rows)
     mapping_plot = _mapping_coverage_svg(mapping_rows)
@@ -596,6 +643,26 @@ def write_report(
             '<tr><td colspan="7">No SNPs passed the configured depth, base-quality, '
             "support, and allele-frequency thresholds.</td></tr>"
         )
+    phylogenetic_table_rows = "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('rank', ''))}</td>"
+        f"<td>{_safe(row.get('reference_id', ''))}</td>"
+        f"<td>{_safe(row.get('total_phylogenetic_distance', ''))}</td>"
+        f"<td>{_safe(row.get('compared_loci', ''))}</td>"
+        f"<td>{_safe(row.get('mean_phylogenetic_distance', ''))}</td>"
+        "</tr>"
+        for row in phylogenetic_rows[:10]
+    )
+    phylogenetic_section = ""
+    if phylogenetic_rows:
+        phylogenetic_section = f"""
+      <h2>Phylogenetic Placement</h2>
+      <p class="terminal-note">Ranked by summed query-to-reference patristic distance across every placed locus. Per-locus MAFFT alignments, RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Rank</th><th>Reference</th><th>Total distance</th><th>Compared loci</th><th>Mean distance</th></tr></thead>
+        <tbody>{phylogenetic_table_rows}</tbody>
+      </table></div>
+"""
     html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -704,8 +771,11 @@ def write_report(
         <div class="metric"><strong>Mapped locus reads</strong><span>{mapped_reads}/{total_mapping_reads}</span></div>
         <div class="metric"><strong>Representative SNPs</strong><span>{len(snp_rows)}</span></div>
         <div class="metric"><strong>Best reference</strong><span>{_safe(best_match.get('best_profile_id', 'NA') or 'NA')}</span></div>
+        <div class="metric"><strong>Phylogenetic reference</strong><span>{_safe(phylogenetic_best.get('reference_id', 'NA') or 'NA')}</span></div>
         <div class="metric"><strong>Novelty</strong><span>{_safe(novelty.get('novelty_score', ''))}</span><br>{_safe(novelty.get('interpretation', ''))}</div>
       </div>
+      <h2>Individual Locus Repeat Counts</h2>
+      <div class="chart-scroll">{repeat_count_plot}</div>
       <h2>Locus Confidence</h2>
       <div class="chart-scroll">{confidence_plot}</div>
       <h2>Variant Mixture Abundance</h2>
@@ -715,6 +785,7 @@ def write_report(
       <div class="chart-scroll">{mapping_plot}</div>
       <h2>Generated Gel</h2>
       {gel}
+      {phylogenetic_section}
       <h2>Detailed Evidence</h2>
       <p class="terminal-note">The plots above are the primary interpretation view. Expand a section below when exact values are needed.</p>
       <details>
@@ -763,17 +834,21 @@ def write_assembly_report(
     profiles: list[dict] | None = None,
     novelty_rows: list[dict] | None = None,
     loci: list[Locus] | None = None,
+    phylogenetic_rows: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     match_rows = match_rows or []
     profiles = profiles or []
     novelty_rows = novelty_rows or []
+    phylogenetic_rows = phylogenetic_rows or []
     present = sum(1 for row in call_rows if row.get("present") == "yes")
     not_found = sum(1 for row in call_rows if row.get("present") != "yes")
     with_depth = sum(1 for row in call_rows if _called_count(row.get("read_depth")))
     best_match = match_rows[0] if match_rows else {}
     best_profile = _best_profile(match_rows, profiles)
+    phylogenetic_best = phylogenetic_rows[0] if phylogenetic_rows else {}
     gel = _assembly_gel_svg(sample_id, call_rows, best_profile, loci)
+    repeat_count_plot = _repeat_count_svg(call_rows, assembly=True)
     novelty = novelty_rows[0] if novelty_rows else {}
     table_rows = "\n".join(
         "<tr>"
@@ -823,6 +898,26 @@ def write_assembly_report(
       <table>
         <thead><tr><th>Profile</th><th>Strain</th><th>Distance</th><th>Matched loci</th><th>Mismatched loci</th><th>Confidence</th></tr></thead>
         <tbody>{match_table_rows}</tbody>
+      </table>
+"""
+    phylogenetic_table_rows = "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('rank', ''))}</td>"
+        f"<td>{_safe(row.get('reference_id', ''))}</td>"
+        f"<td>{_safe(row.get('total_phylogenetic_distance', ''))}</td>"
+        f"<td>{_safe(row.get('compared_loci', ''))}</td>"
+        f"<td>{_safe(row.get('mean_phylogenetic_distance', ''))}</td>"
+        "</tr>"
+        for row in phylogenetic_rows[:10]
+    )
+    phylogenetic_section = ""
+    if phylogenetic_rows:
+        phylogenetic_section = f"""
+      <h2>Phylogenetic Placement</h2>
+      <p class="terminal-note">Ranked by summed patristic distance across every placed locus. Per-locus MAFFT alignments, RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
+      <table>
+        <thead><tr><th>Rank</th><th>Reference</th><th>Total distance</th><th>Compared loci</th><th>Mean distance</th></tr></thead>
+        <tbody>{phylogenetic_table_rows}</tbody>
       </table>
 """
 
@@ -904,6 +999,13 @@ def write_assembly_report(
     .band-hit:focus {{ outline: none; }}
     .reference-label {{ fill: #ffd5f3; }}
     .marker-label {{ fill: #b6d8ff; font: 11px "Courier New", monospace; text-anchor: end; }}
+    .chart-scroll {{ overflow-x: auto; }}
+    .chart-panel {{ margin: 0.75rem 0 1.5rem; border: 1px solid var(--line); border-radius: 7px; padding: 0.6rem; background: rgba(3, 12, 8, 0.58); }}
+    .chart-panel svg {{ width: 100%; display: block; min-width: 720px; }}
+    .chart-panel figcaption {{ color: var(--muted); font-size: 0.88rem; margin-top: 0.45rem; }}
+    .chart-label {{ fill: #d6ffe2; font: 12px "Courier New", monospace; }}
+    .chart-value {{ fill: var(--muted); font: 11px "Courier New", monospace; }}
+    .mapping-track {{ fill: rgba(141, 215, 170, 0.1); stroke: var(--line); stroke-width: 1; }}
   </style>
 </head>
 <body>
@@ -917,9 +1019,12 @@ def write_assembly_report(
         <div class="metric"><strong>Products</strong><span>{len(product_rows)}</span></div>
         <div class="metric"><strong>With read support</strong><span>{with_depth}</span></div>
         <div class="metric"><strong>Best profile</strong><span>{_safe(best_match.get('best_profile_id', 'NA') or 'NA')}</span></div>
+        <div class="metric"><strong>Phylogenetic reference</strong><span>{_safe(phylogenetic_best.get('reference_id', 'NA') or 'NA')}</span></div>
         <div class="metric"><strong>Distance</strong><span>{_safe(best_match.get('distance', ''))}</span></div>
         <div class="metric"><strong>Novelty</strong><span>{_safe(novelty.get('novelty_score', ''))}</span><br>{_safe(novelty.get('interpretation', ''))}</div>
       </div>
+      <h2>Individual Locus Repeat Counts</h2>
+      <div class="chart-scroll">{repeat_count_plot}</div>
       <h2>Generated Gel</h2>
       {gel}
       <h2>Calls</h2>
@@ -933,6 +1038,7 @@ def write_assembly_report(
         <tbody>{product_table_rows}</tbody>
       </table>
       {profile_section}
+      {phylogenetic_section}
     </section>
   </main>
 </body>

@@ -129,6 +129,10 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
     call.add_argument("--profiles")
     call.add_argument(
+        "--database",
+        help="Per-locus reference sequence database for MAFFT alignment and phylogenetic placement",
+    )
+    call.add_argument(
         "-o",
         "--output",
         "--outdir",
@@ -179,6 +183,30 @@ def build_parser() -> argparse.ArgumentParser:
         default="minimap2",
         metavar="PATH",
         help="minimap2 executable for representative and assembly-support mapping (default: %(default)s)",
+    )
+    call.add_argument(
+        "--mafft-bin",
+        default="mafft",
+        metavar="PATH",
+        help="MAFFT executable for optional per-locus phylogenetic placement (default: %(default)s)",
+    )
+    call.add_argument(
+        "--raxml-ng-bin",
+        default="raxml-ng",
+        metavar="PATH",
+        help="RAxML-NG executable for maximum-likelihood locus trees (default: %(default)s)",
+    )
+    call.add_argument(
+        "--epa-ng-bin",
+        default="epa-ng",
+        metavar="PATH",
+        help="EPA-ng executable for fixed-tree query placement (default: %(default)s)",
+    )
+    call.add_argument(
+        "--raxml-model",
+        default="GTR+G",
+        metavar="MODEL",
+        help="RAxML-NG nucleotide model for locus trees (default: %(default)s)",
     )
     call.add_argument(
         "--no-locus-mapping",
@@ -285,6 +313,7 @@ def main(argv: list[str] | None = None) -> int:
                 loci_path=args.loci,
                 primers_path=args.primers,
                 profiles_path=args.profiles,
+                database_path=args.database,
                 outdir=args.outdir,
                 sample_id=sample_id,
                 min_read_length=args.min_read_length,
@@ -299,6 +328,10 @@ def main(argv: list[str] | None = None) -> int:
                 vsearch_bin=args.vsearch_bin,
                 amplirust_bin=args.amplirust_bin,
                 minimap2_bin=args.minimap2_bin,
+                mafft_bin=args.mafft_bin,
+                raxml_ng_bin=args.raxml_ng_bin,
+                epa_ng_bin=args.epa_ng_bin,
+                raxml_model=args.raxml_model,
                 locus_mapping=not args.no_locus_mapping,
                 min_mapping_quality=args.min_mapping_quality,
                 min_base_quality=args.min_base_quality,
@@ -310,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")
+            print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
             print(f"Wrote VNTR variant clusters to {result['asv_table']}")
             print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
             print(f"Wrote per-read cluster and indel evidence to {result['asv_memberships']}")
@@ -317,6 +351,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
                 print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
             print(f"Wrote report to {result['report']}")
+            if args.database:
+                print(f"Wrote per-locus trees to {result['phylogeny']}")
+                print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
         else:
             result = run_assembly_call(
                 assembly_path=args.input_path,
@@ -327,16 +364,25 @@ def main(argv: list[str] | None = None) -> int:
                 reads_path=args.reads_path,
                 alignments_path=args.alignments_path,
                 profiles_path=args.profiles,
+                database_path=args.database,
                 max_primer_mismatches=args.max_primer_mismatches,
                 threads=args.threads,
                 minimap2_preset=args.minimap2_preset,
                 minimap2_bin=args.minimap2_bin,
                 amplirust_bin=args.amplirust_bin,
+                mafft_bin=args.mafft_bin,
+                raxml_ng_bin=args.raxml_ng_bin,
+                epa_ng_bin=args.epa_ng_bin,
+                raxml_model=args.raxml_model,
                 show_progress=not args.quiet,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
+            print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
             print(f"Wrote assembly amplicons to {result['amplicons']}")
             print(f"Wrote report to {result['report']}")
+            if args.database:
+                print(f"Wrote per-locus trees to {result['phylogeny']}")
+                print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
             if args.reads_path or args.alignments_path:
                 print(f"Wrote read-depth support to {result['read_support']}")
         return 0

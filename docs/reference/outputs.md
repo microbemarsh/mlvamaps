@@ -10,6 +10,25 @@
 | `profile_matches.tsv` | Closest profile rows; header-only without a profile database. |
 | `novelty_scores.tsv` | Nearest profile, score, and interpretation. |
 | `report.html` | Self-contained human-readable report. |
+| `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
+
+## Optional phylogenetic placement outputs
+
+When `--database` is supplied, `phylogeny/` contains one directory per reference
+locus. Each directory has the raw references, MAFFT reference alignment,
+RAxML-NG reference search files and best-tree Newick, and—when a query locus
+was callable—the query FASTA, MAFFT `--add --keeplength` alignment, query-only
+aligned FASTA, and EPA-ng `epa_result.jplace`. The default RAxML-NG model is
+`GTR+G` and can be changed with `--raxml-model`. EPA-ng consumes the optimized
+RAxML-NG `.bestModel` file and places the query without changing the reference
+topology. Summed matching distances combine the placement pendant/distal lengths
+with the RAxML-NG reference-tree branch lengths.
+
+| File | Meaning |
+| --- | --- |
+| `phylogeny/locus_status.tsv` | Whether each database locus received a query placement. |
+| `phylogeny/locus_phylogenetic_distances.tsv` | Query-to-reference patristic distance plus EPA-ng edge, likelihood weight, pendant length, and distal length. |
+| `phylogeny/phylogenetic_matches.tsv` | References ranked by the sum of distances across all placed loci. |
 
 ## Compact call columns
 

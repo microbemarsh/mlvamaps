@@ -13,9 +13,10 @@ from .mapping import (
     check_minimap2,
     run_minimap2_command,
 )
-from .pipeline import MATCH_FIELDS, NOVELTY_FIELDS, SIMPLE_CALL_FIELDS
+from .pipeline import MATCH_FIELDS, NOVELTY_FIELDS, REPEAT_COUNT_FIELDS, SIMPLE_CALL_FIELDS
 from .progress import ProgressReporter
 from .profile_matching import build_fingerprint, match_profiles
+from .phylogeny import run_phylogenetic_placement
 from .primers import read_loci_or_primers
 from .novelty import score_novelty
 from .report import write_assembly_report
@@ -370,11 +371,16 @@ def run_assembly_call(
     reads_path: str | None = None,
     alignments_path: str | None = None,
     profiles_path: str | None = None,
+    database_path: str | None = None,
     max_primer_mismatches: int = 3,
     threads: int = DEFAULT_THREADS,
     minimap2_preset: str | None = None,
     minimap2_bin: str = "minimap2",
     amplirust_bin: str = "amplirust",
+    mafft_bin: str = "mafft",
+    raxml_ng_bin: str = "raxml-ng",
+    epa_ng_bin: str = "epa-ng",
+    raxml_model: str = "GTR+G",
     show_progress: bool = False,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
@@ -442,6 +448,7 @@ def run_assembly_call(
     progress.step("Writing calls table")
     call_rows = assembly_call_rows(loci, products, sample_id, read_support)
     write_tsv(call_rows, calls_path, SIMPLE_CALL_FIELDS)
+    write_tsv(call_rows, outdir_path / "locus_repeat_counts.tsv", REPEAT_COUNT_FIELDS)
     allele_rows = allele_rows_from_assembly_calls(call_rows)
     fingerprint_rows, probabilistic_rows = build_fingerprint(sample_id, allele_rows, loci)
     fingerprint_fields = ["sample_id"] + [locus.locus_id for locus in loci]
@@ -455,12 +462,48 @@ def run_assembly_call(
     write_tsv(match_rows, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
     novelty_rows = score_novelty(sample_id, allele_rows, match_rows)
     write_tsv(novelty_rows, outdir_path / "novelty_scores.tsv", NOVELTY_FIELDS)
+    phylogeny_paths: dict[str, Path] = {}
+    phylogenetic_rows: list[dict] = []
+    if database_path:
+        product_by_id = {product["product_id"]: product for product in products}
+        query_sequences = {
+            row["locus_id"]: product_by_id[row["evidence"]]["sequence"]
+            for row in call_rows
+            if row.get("evidence") in product_by_id
+        }
+        progress.step(
+            "Building RAxML-NG reference trees and placing assembly loci with EPA-ng"
+        )
+        phylogeny_paths = run_phylogenetic_placement(
+            query_sequences,
+            database_path,
+            outdir_path,
+            sample_id,
+            {locus.locus_id for locus in loci},
+            thread_count,
+            mafft_bin=mafft_bin,
+            raxml_ng_bin=raxml_ng_bin,
+            epa_ng_bin=epa_ng_bin,
+            raxml_model=raxml_model,
+        )
+        phylogenetic_rows = read_profiles(phylogeny_paths["phylogenetic_matches"])
     progress.step("Writing HTML report")
-    write_assembly_report(outdir_path, sample_id, call_rows, products, match_rows, profiles, novelty_rows, loci)
+    write_assembly_report(
+        outdir_path,
+        sample_id,
+        call_rows,
+        products,
+        match_rows,
+        profiles,
+        novelty_rows,
+        loci,
+        phylogenetic_rows,
+    )
     progress.step(f"Done. Main calls: {calls_path}")
     return {
         "outdir": outdir_path,
         "calls": calls_path,
+        "repeat_counts": outdir_path / "locus_repeat_counts.tsv",
         "amplicons": outdir_path / "assembly_amplicons.tsv",
         "amplicon_fasta": product_fasta,
         "amplirust": outdir_path / "amplirust",
@@ -468,4 +511,5 @@ def run_assembly_call(
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "profile_matches": outdir_path / "profile_matches.tsv",
         "report": outdir_path / "report.html",
+        **phylogeny_paths,
     }
