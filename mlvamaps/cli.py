@@ -8,6 +8,7 @@ from .concurrency import DEFAULT_THREADS
 from .in_silico_pcr import run_amplirust
 from .io import open_text
 from .pipeline import run_call
+from .reference_builder import build_reference_database
 from .simulation import simulate_reads
 
 
@@ -333,6 +334,35 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--no-search-rc", action="store_true")
     extract.add_argument("--trim-primers", action="store_true")
     extract.add_argument("--amplirust-bin", default="amplirust")
+
+    reference = subparsers.add_parser(
+        "build-reference",
+        help="Build a per-locus reference database and reference phylogenies from assemblies",
+    )
+    reference.add_argument("--assemblies", required=True, help="Directory containing reference FASTA assemblies")
+    panel = reference.add_mutually_exclusive_group(required=True)
+    panel.add_argument("--primers", help="Primer-pair CSV/TSV with locus, forward, and reverse columns")
+    panel.add_argument("--loci", help="Rich loci TSV (recommended when repeat motif/flanks are known)")
+    reference.add_argument("--metadata", required=True, help="Reference metadata CSV/TSV")
+    reference.add_argument("-o", "--output", "--outdir", dest="outdir", default="reference_build")
+    reference.add_argument("--max-primer-mismatches", type=_nonnegative_int, default=2)
+    reference.add_argument(
+        "--multiple-products",
+        choices=("exclude", "best", "error"),
+        default="exclude",
+        help="Policy for assembly/locus pairs with multiple products (default: %(default)s)",
+    )
+    reference.add_argument(
+        "--min-references-per-tree",
+        type=_positive_int,
+        default=3,
+        help="Minimum extracted references required to infer a locus tree (default: %(default)s)",
+    )
+    reference.add_argument("-t", "--threads", type=int, default=DEFAULT_THREADS)
+    reference.add_argument("--amplirust-bin", default="amplirust")
+    reference.add_argument("--mafft-bin", default="mafft")
+    reference.add_argument("--raxml-ng-bin", default="raxml-ng")
+    reference.add_argument("--raxml-model", default="GTR+G")
     return parser
 
 
@@ -467,6 +497,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote amplirust primer CSV to {result['primers']}")
         print(f"Wrote extracted amplicons to {result['products']}")
         print(f"Wrote amplirust stats to {result['stats']}")
+        return 0
+    if args.command == "build-reference":
+        result = build_reference_database(
+            assemblies_dir=args.assemblies,
+            primers_path=args.primers or args.loci,
+            loci_path=args.loci,
+            metadata_path=args.metadata,
+            outdir=args.outdir,
+            multiple_products=args.multiple_products,
+            max_primer_mismatches=args.max_primer_mismatches,
+            min_references_per_tree=args.min_references_per_tree,
+            threads=args.threads,
+            amplirust_bin=args.amplirust_bin,
+            mafft_bin=args.mafft_bin,
+            raxml_ng_bin=args.raxml_ng_bin,
+            raxml_model=args.raxml_model,
+        )
+        print(f"Wrote per-locus reference database to {result['database']}")
+        print(f"Wrote reference build QC to {result['manifest']}")
+        print(f"Wrote per-locus reference trees to {result['phylogeny']}")
+        print(f"Wrote MYOGA metadata to {result['myoga_metadata']}")
         return 0
     parser.error("unknown command")
     return 2

@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+
+from mlvamaps.reference_builder import build_reference_database
+
+from test_phylogeny import _fake_mafft, _fake_raxml_ng
+
+
+def _rows(path: Path, delimiter: str = "\t") -> list[dict[str, str]]:
+    with path.open() as handle:
+        return list(csv.DictReader(handle, delimiter=delimiter))
+
+
+def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeypatch):
+    assemblies = tmp_path / "assemblies"
+    assemblies.mkdir()
+    for sample in ("R1", "R2", "R3"):
+        (assemblies / f"{sample}.fasta").write_text(f">{sample}\nACGT\n")
+    primers = tmp_path / "primers.csv"
+    primers.write_text("name,forward,reverse\nL1,AAA,CCC\nL2,GGG,TTT\n")
+    metadata = tmp_path / "metadata.csv"
+    metadata.write_text(
+        "sample_id,collection_date,latitude,longitude\n"
+        "R1,2020-01-01,1,2\nR2,2020-01-02,3,4\nR3,2020-01-03,5,6\n"
+    )
+
+    monkeypatch.setattr(
+        "mlvamaps.reference_builder.run_amplirust_loci",
+        lambda assembly, loci, outdir, **kwargs: {
+            "stats": Path(outdir) / "stats.tsv",
+            "products": Path(outdir) / "products.fasta",
+        },
+    )
+    monkeypatch.setattr("mlvamaps.reference_builder.read_amplirust_results", lambda *args: [])
+
+    def fake_products(rows, loci, sample_id):
+        products = []
+        for index, locus in enumerate(loci):
+            # Make R3/L2 ambiguous so the default QC policy excludes it.
+            copies = 2 if sample_id == "R3" and locus.locus_id == "L2" else 1
+            for copy in range(copies):
+                products.append(
+                    {
+                        "locus_id": locus.locus_id,
+                        "product_id": f"{locus.locus_id}|{sample_id}|{copy}",
+                        "sequence": "AAACCC" if index == 0 else "GGGTTT",
+                        "product_size_bp": 6 + copy,
+                        "forward_mismatches": 0,
+                        "reverse_mismatches": 0,
+                        "primer_error_round": 0,
+                    }
+                )
+        return products
+
+    monkeypatch.setattr("mlvamaps.reference_builder.amplirust_rows_to_products", fake_products)
+    result = build_reference_database(
+        assemblies,
+        primers,
+        metadata,
+        tmp_path / "reference",
+        min_references_per_tree=2,
+        mafft_bin=str(_fake_mafft(tmp_path)),
+        raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
+    )
+
+    assert (result["database"] / "L1.fasta").read_text().count(">") == 3
+    assert (result["database"] / "L2.fasta").read_text().count(">") == 2
+    assert (result["phylogeny"] / "L1" / "reference_tree.nwk").exists()
+    assert (result["phylogeny"] / "L2" / "reference_tree.nwk").exists()
+    assert (result["phylogeny"] / "L1.tree").exists()
+    manifest = _rows(result["manifest"])
+    ambiguous = [row for row in manifest if row["reference_id"] == "R3" and row["locus_id"] == "L2"]
+    assert ambiguous[0]["status"] == "AMBIGUOUS_EXCLUDED"
+    assert ambiguous[0]["best_product_count"] == "2"
+    assert _rows(result["metadata"])[0]["reference_id"] == "R1"
+    assert _rows(result["myoga_metadata"], ",")[0]["genome_id"] == "R1"
+
+
+def test_cli_exposes_reference_builder():
+    from mlvamaps.cli import build_parser
+
+    args = build_parser().parse_args(
+        [
+            "build-reference",
+            "--assemblies",
+            "assemblies",
+            "--primers",
+            "primers.csv",
+            "--metadata",
+            "metadata.csv",
+        ]
+    )
+    assert args.multiple_products == "exclude"
+    assert args.min_references_per_tree == 3

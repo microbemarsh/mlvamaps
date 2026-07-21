@@ -1406,6 +1406,105 @@ def run_phylogenetic_placement(
     }
 
 
+def build_reference_phylogenies(
+    database_path: str | Path,
+    outdir: str | Path,
+    loci: list[Locus],
+    threads: int,
+    *,
+    min_references: int = 3,
+    mafft_bin: str = "mafft",
+    raxml_ng_bin: str = "raxml-ng",
+    raxml_model: str = "GTR+G",
+) -> dict[str, Path]:
+    """Build reusable, repeat-masked reference alignments and locus trees.
+
+    The raw amplicons remain in the database.  Trees use the SNP component
+    when a repeat can be bounded from panel flanks or motif; this prevents
+    variable repeat length from being interpreted as many independent SNPs.
+    """
+    if min_references < 2:
+        raise ValueError("min_references must be at least 2")
+    locus_by_id = {locus.locus_id: locus for locus in loci}
+    references = read_sequence_database(database_path, set(locus_by_id))
+    mafft = check_mafft(mafft_bin)
+    raxml_ng = check_raxml_ng(raxml_ng_bin)
+    output = Path(outdir)
+    output.mkdir(parents=True, exist_ok=True)
+    status_rows: list[dict] = []
+    component_rows: list[dict] = []
+
+    for locus_id in sorted(locus_by_id):
+        records = references.get(locus_id, [])
+        safe_locus = _SAFE_FILE.sub("_", locus_id).strip("_") or "locus"
+        locus_dir = output / safe_locus
+        portable_tree = output / f"{safe_locus}.tree"
+        portable_tree.unlink(missing_ok=True)
+        if len(records) < min_references:
+            status_rows.append(
+                {
+                    "locus_id": locus_id,
+                    "reference_sequences": len(records),
+                    "status": "INSUFFICIENT_REFERENCES",
+                    "tree": "",
+                }
+            )
+            continue
+        locus_dir.mkdir(parents=True, exist_ok=True)
+        masked_records: list[tuple[str, str]] = []
+        for reference_id, sequence in records:
+            components = decompose_marker_sequence(locus_by_id[locus_id], sequence)
+            masked_records.append((reference_id, components.snp_sequence))
+            component_rows.append(
+                _marker_component_row(
+                    "REFERENCE_DATABASE",
+                    locus_by_id[locus_id],
+                    "reference",
+                    reference_id,
+                    components,
+                )
+            )
+        reference_fasta = locus_dir / "references.fasta"
+        alignment = locus_dir / "references.aligned.fasta"
+        tree = locus_dir / "reference_tree.nwk"
+        prefix = locus_dir / "reference"
+        _write_fasta(masked_records, reference_fasta)
+        _run_mafft(
+            build_mafft_reference_command(reference_fasta, threads, mafft),
+            alignment,
+            f"reference alignment for {locus_id}",
+        )
+        _run_raxml_ng(
+            build_raxml_ng_command(alignment, prefix, threads, raxml_ng, raxml_model),
+            prefix,
+            tree,
+            f"reference tree search for {locus_id}",
+        )
+        shutil.copyfile(tree, portable_tree)
+        status_rows.append(
+            {
+                "locus_id": locus_id,
+                "reference_sequences": len(records),
+                "status": "BUILT",
+                "tree": str(portable_tree),
+            }
+        )
+
+    status_path = output / "reference_tree_status.tsv"
+    components_path = output / "reference_marker_components.tsv"
+    _write_tsv(
+        status_rows,
+        status_path,
+        ["locus_id", "reference_sequences", "status", "tree"],
+    )
+    _write_tsv(component_rows, components_path, MARKER_COMPONENT_FIELDS)
+    return {
+        "phylogeny": output,
+        "tree_status": status_path,
+        "marker_components": components_path,
+    }
+
+
 def dominant_read_query_sequences(
     features: list[RepeatFeature], asv_rows: list[dict]
 ) -> dict[str, str]:

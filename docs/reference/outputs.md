@@ -13,6 +13,19 @@
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
 
+## Reference builder outputs
+
+| File | Meaning |
+| --- | --- |
+| `database/LOCUS.fasta` | Unmasked extracted reference amplicons in the format accepted by `--database`. |
+| `database/reference_metadata.tsv` | Metadata normalized to a `reference_id` key. |
+| `reference_build_manifest.tsv` | Per-reference/locus product counts, selected product, primer errors, and exclusion status. |
+| `phylogeny/LOCUS.tree` | Portable Newick SNP tree for the locus. |
+| `phylogeny/LOCUS/references.aligned.fasta` | Repeat-masked MAFFT alignment used for tree inference. |
+| `phylogeny/reference_tree_status.tsv` | Tree completion or insufficient-reference status for every panel locus. |
+| `phylogeny/reference_marker_components.tsv` | Retained repeat measurements and the masking method for each reference marker. |
+| `myoga_metadata.csv` | Metadata with a `genome_id` column matching Newick tip labels. |
+
 ## Optional phylogenetic placement outputs
 
 When `--database` is supplied, `phylogeny/` contains one directory per reference

@@ -216,6 +216,37 @@ recommended metadata, validation, and profile-table setup.
 
 ## Additional commands
 
+Build a reference sequence database and one maximum-likelihood phylogeny per
+locus from a directory of assemblies. Assembly basenames must match the
+metadata identifier unless the metadata has an `assembly_file`, `filename`, or
+`path` column:
+
+```bash
+mlvamaps build-reference \
+  --assemblies reference_assemblies/ \
+  --primers primers.csv \
+  --metadata metadata.csv \
+  -o reference_build \
+  -t 16
+```
+
+The metadata identifier may be named `reference_id`, `genome_id`, `sample_id`,
+`strain`, `accession`, or `id`. The command writes:
+
+- `reference_build/database/LOCUS.fasta`: raw amplicons, one FASTA record per
+  reference, suitable for `mlvamaps call --database`;
+- `reference_build/phylogeny/LOCUS.tree`: a portable Newick tree for each locus;
+- `reference_build/reference_build_manifest.tsv`: extraction and ambiguity QC;
+- `reference_build/database/reference_metadata.tsv`: normalized placement metadata;
+- `reference_build/myoga_metadata.csv`: metadata whose `genome_id` matches tree tips.
+
+Multiple products at the same locus are excluded by default because an
+unresolved paralog is unsafe as a phylogenetic reference. Review the manifest,
+or use `--multiple-products best` only when choosing the best primer match is
+appropriate. A rich `--loci` TSV containing the repeat motif or bounding flanks
+is preferable to a primer-only CSV: it lets the tree builder mask the tandem
+repeat for the SNP tree while retaining the unmasked amplicon in the database.
+
 Simulate amplicon reads for pipeline testing:
 
 ```bash

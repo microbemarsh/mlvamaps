@@ -84,3 +84,17 @@ are combined into one trace segment in the report.
 
 These options are useful for testing, containers, and installations whose
 executables are not on the default `PATH`.
+
+## Reference database builder
+
+`mlvamaps build-reference --assemblies DIR --primers PANEL.csv --metadata
+metadata.csv -o OUT` extracts every locus from each metadata-linked assembly,
+writes the per-locus database, and runs MAFFT plus RAxML-NG. Use `--loci`
+instead of `--primers` when motif or flank definitions are available.
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--multiple-products` | `exclude` | Exclude, choose the best, or fail on equally good multiple products. |
+| `--max-primer-mismatches` | `2` | Maximum Amplirust primer errors. |
+| `--min-references-per-tree` | `3` | Minimum references required to infer a locus tree. |
+| `--raxml-model` | `GTR+G` | Nucleotide model for reference-tree inference. |
