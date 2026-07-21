@@ -80,12 +80,14 @@ class RepeatFeature:
 class ReadPrediction:
     read_id: str
     locus_id: str
-    predicted_repeat_count: int
+    predicted_repeat_count: int | float
     probability: float
-    top_alt_repeat_count: Optional[int]
+    top_alt_repeat_count: Optional[int | float]
     top_alt_probability: float
     variant_id: str
     insertions_vs_representative: int
     deletions_vs_representative: int
     substitutions_vs_representative: int
     evidence_weight: float
+    raw_repeat_count_estimate: Optional[float] = None
+    measurement_sigma: Optional[float] = None

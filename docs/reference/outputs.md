@@ -11,6 +11,7 @@
 | `novelty_scores.tsv` | Nearest profile, score, and interpretation. |
 | `report.html` | Self-contained human-readable report. |
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
+| `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
 
 ## Optional phylogenetic placement outputs
 
@@ -22,13 +23,21 @@ aligned FASTA, and EPA-ng `epa_result.jplace`. The default RAxML-NG model is
 `GTR+G` and can be changed with `--raxml-model`. EPA-ng consumes the optimized
 RAxML-NG `.bestModel` file and places the query without changing the reference
 topology. Summed matching distances combine the placement pendant/distal lengths
-with the RAxML-NG reference-tree branch lengths.
+with the RAxML-NG reference-tree branch lengths. The output retains both the
+highest-likelihood-weight placement distance and the expected distance across
+all candidate placements, weighted by normalized likelihood weight ratios.
+Ranking uses the likelihood-weighted sum and reports its gap to the next
+reference.
 
 | File | Meaning |
 | --- | --- |
 | `phylogeny/locus_status.tsv` | Whether each database locus received a query placement. |
-| `phylogeny/locus_phylogenetic_distances.tsv` | Query-to-reference patristic distance plus EPA-ng edge, likelihood weight, pendant length, and distal length. |
-| `phylogeny/phylogenetic_matches.tsv` | References ranked by the sum of distances across all placed loci. |
+| `phylogeny/locus_phylogenetic_distances.tsv` | Best-placement and likelihood-weighted query-to-reference patristic distances, placement entropy, EPA-ng edge, likelihood weight, pendant length, and distal length. |
+| `phylogeny/phylogenetic_matches.tsv` | Complete references ranked by likelihood-weighted summed distance across all placed loci, with raw best-placement sums and rank gaps. |
+| `phylogeny/marker_components.tsv` | Query and reference repeat counts, repeat-unit haplotypes, masking coordinates, and SNP-sequence lengths. |
+| `phylogeny/locus_marker_distances.tsv` | Per-locus normalized SNP-tree distance and explicit repeat-count distance for every reference. |
+| `phylogeny/combined_marker_matches.tsv` | References ranked by the configurable weighted sum of normalized SNP and repeat distances, with optional date/location metadata. |
+| `phylogeny/combined_markers.tree` | MYOGA-compatible Newick neighbor-joining tree inferred from the combined normalized SNP-plus-repeat distance matrix. Tip labels are reference IDs plus the query sample ID. |
 
 ## Compact call columns
 
@@ -43,6 +52,11 @@ repeat_count_raw
 product_size_bp
 read_depth
 mean_coverage
+allele_confidence
+second_best_repeat_count
+second_best_probability
+inference_method
+allele_distribution
 status
 evidence
 ```
@@ -68,7 +82,7 @@ size but no read depth unless support data are supplied.
 | `locus_read_alignments.sam` | minimap2 locus-relative mappings. |
 | `locus_mapping_summary.tsv` | Mapping rate, depth, coverage, and SNP totals by locus. |
 | `locus_snps.tsv` | Filtered representative-relative SNP evidence. |
-| `read_level_allele_predictions.tsv` | Per-read repeat-count probabilities and evidence weights. |
+| `read_level_allele_predictions.tsv` | Per-read repeat-count probabilities, unrounded measurement, uncertainty, and evidence weights. |
 | `allele_calls.tsv` | Bayesian locus calls, posterior detail, meaningful-variant count, and dominant mixture fraction. |
 | `amplirust/` | Native primer-pairing evidence. |
 | `vsearch/` | Native unique sequences, centroids, and memberships. |
@@ -88,6 +102,10 @@ they are independent of locus-wide read mapping.
 | `read_support.tsv` | Optional mapped reads and mean coverage per product. |
 | `read_support.sam` | minimap2 alignments when `--reads` is used. |
 | `amplirust/` | Native in-silico PCR evidence. |
+| `legacy_output.csv` | Historical row-oriented locus details, including zero-based primer positions and mismatch display. |
+| `legacy_mlva_analysis.csv` | Historical wide repeat-count layout. |
+| `legacy_predicted_pcr_sizes.csv` | Historical wide product-size layout. |
+| `legacy_primer_mismatches.txt` | Historical primer mismatch summary. |
 
 ## FASTQ call statuses
 
@@ -105,5 +123,6 @@ they are independent of locus-wide read mapping.
 | Status | Meaning |
 | --- | --- |
 | `PASS` | Product found and repeat count calculated. |
+| `AMBIGUOUS` | Product found, but the leading allele is below the configured posterior threshold or leads the runner-up by less than 0.2. |
 | `PRESENT_COUNT_UNKNOWN` | Product found but panel metadata cannot convert its size to repeat count. |
 | `NOT_FOUND` | No accepted paired-primer product found. |

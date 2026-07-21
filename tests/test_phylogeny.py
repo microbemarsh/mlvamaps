@@ -15,8 +15,11 @@ from mlvamaps.phylogeny import (
     build_raxml_ng_command,
     read_sequence_database,
     read_epa_ng_placement,
+    read_epa_ng_placement_statistics,
     run_phylogenetic_placement,
+    decompose_marker_sequence,
 )
+from mlvamaps.models import Locus
 
 
 def _read_tsv(path: Path) -> list[dict[str, str]]:
@@ -151,6 +154,8 @@ def test_phylogenetic_placement_ranks_all_locus_distance_sum(tmp_path):
     matches = _read_tsv(result["phylogenetic_matches"])
     assert matches[0]["reference_id"] == "R1"
     assert matches[0]["compared_loci"] == "2"
+    assert matches[0]["total_likelihood_weighted_distance"] == matches[0]["total_phylogenetic_distance"]
+    assert float(matches[0]["distance_gap_to_next"]) > 0
     assert (result["phylogeny"] / "L1" / "reference_tree.nwk").exists()
     assert (result["phylogeny"] / "L1" / "epa-ng" / "epa_result.jplace").exists()
 
@@ -199,3 +204,76 @@ def test_epa_parser_uses_highest_likelihood_weight_placement(tmp_path):
     assert metadata["placement_edge"] == 0
     assert metadata["like_weight_ratio"] == pytest.approx(0.9)
     assert distances["R1"] == pytest.approx(0.05)
+    best, expected, statistics = read_epa_ng_placement_statistics(jplace)
+    assert best == distances
+    assert expected["R1"] == pytest.approx(0.18)
+    assert expected["R2"] == pytest.approx(1.18)
+    assert statistics["placement_count"] == 2
+    assert statistics["placement_entropy"] > 0
+
+
+def test_repeat_masking_and_combined_marker_ranking(tmp_path):
+    locus = Locus(
+        locus_id="L1",
+        forward_primer="ACG",
+        reverse_primer="TTA",
+        left_flank_sequence="TT",
+        right_flank_sequence="CC",
+        repeat_motif="GA",
+        repeat_unit_length_bp=2,
+        expected_min_repeats=1,
+        expected_max_repeats=6,
+    )
+    query = "ACGTTGAGACCTAA"
+    components = decompose_marker_sequence(locus, query)
+    assert components.repeat_sequence == "GAGA"
+    assert components.repeat_count == 2
+    assert components.snp_sequence == "ACGTTCCTAA"
+    assert components.masking_method == "flank_bounded"
+
+    database = tmp_path / "database"
+    database.mkdir()
+    (database / "L1.fasta").write_text(
+        ">R1\nACGTTGAGACCTAA\n>R2\nACGTTGAGAGACCTAA\n"
+    )
+    (database / "reference_metadata.tsv").write_text(
+        "reference_id\tcollection_date\tlatitude\tlongitude\tlocation\tsource\n"
+        "R1\t2024-01-02\t40.0\t-75.0\tSite A\tenvironment\n"
+        "R2\t2023-05-01\t41.0\t-74.0\tSite B\tclinical\n"
+    )
+    result = run_phylogenetic_placement(
+        {"L1": query},
+        database,
+        tmp_path / "out",
+        "sample",
+        [locus],
+        1,
+        str(_fake_mafft(tmp_path)),
+        str(_fake_raxml_ng(tmp_path)),
+        str(_fake_epa_ng(tmp_path)),
+    )
+    marker_rows = _read_tsv(result["marker_components"])
+    query_row = next(row for row in marker_rows if row["record_type"] == "query")
+    assert query_row["repeat_haplotype"] == "GA|GA"
+    assert query_row["snp_sequence_length"] == "10"
+    locus_rows = {
+        row["reference_id"]: row
+        for row in _read_tsv(result["locus_marker_distances"])
+    }
+    assert locus_rows["R1"]["repeat_count_delta"] == "0.000000"
+    assert locus_rows["R2"]["repeat_count_delta"] == "1.000000"
+    combined = _read_tsv(result["combined_marker_matches"])
+    assert combined[0]["reference_id"] == "R1"
+    assert combined[0]["repeat_compared_loci"] == "1"
+    assert combined[0]["collection_date"] == "2024-01-02"
+    assert combined[0]["location"] == "Site A"
+    combined_tree = result["combined_marker_tree"]
+    assert combined_tree.name == "combined_markers.tree"
+    root = _parse_newick(combined_tree.read_text())
+
+    def tips(node):
+        if not node.children:
+            return {node.name}
+        return set().union(*(tips(child) for child, _length in node.children))
+
+    assert tips(root) == {"R1", "R2", "sample"}

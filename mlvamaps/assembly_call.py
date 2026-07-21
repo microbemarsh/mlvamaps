@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import csv
+import math
 import re
 from pathlib import Path
 
-from .calling import estimate_repeat_count_from_product_length
+from .calling import (
+    allele_grid,
+    estimate_repeat_count_from_product_length,
+    gaussian_allele_probabilities,
+    legacy_round_repeat_count,
+    repeat_unit_length,
+)
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_amplirust_results, run_amplirust_loci
 from .io import read_profiles, write_fasta, write_tsv
@@ -13,7 +21,14 @@ from .mapping import (
     check_minimap2,
     run_minimap2_command,
 )
-from .pipeline import MATCH_FIELDS, NOVELTY_FIELDS, REPEAT_COUNT_FIELDS, SIMPLE_CALL_FIELDS
+from .pipeline import (
+    ALLELE_DISTRIBUTION_FIELDS,
+    MATCH_FIELDS,
+    NOVELTY_FIELDS,
+    REPEAT_COUNT_FIELDS,
+    SIMPLE_CALL_FIELDS,
+    allele_distribution_rows,
+)
 from .progress import ProgressReporter
 from .profile_matching import build_fingerprint, match_profiles
 from .phylogeny import run_phylogenetic_placement
@@ -33,9 +48,110 @@ AMPLICON_FIELDS = [
     "product_size_bp",
     "forward_mismatches",
     "reverse_mismatches",
+    "primer_error_round",
+    "size_derived_repeat_count",
+    "forward_primer_match",
+    "reverse_primer_match",
 ]
 
 READ_SUPPORT_FIELDS = ["product_id", "locus_id", "mapped_reads", "mean_coverage"]
+
+LEGACY_DETAIL_FIELDS = [
+    "strain",
+    "primer",
+    "position1",
+    "position2",
+    "size",
+    "allele",
+    "sequence",
+    "nb_mismatch",
+    "primer1",
+    "mismatch1",
+    "primer2",
+    "mismatch2",
+    "predicted PCR target",
+]
+
+
+_IUPAC_BASES = {
+    "A": frozenset("A"),
+    "C": frozenset("C"),
+    "G": frozenset("G"),
+    "T": frozenset("T"),
+    "R": frozenset("AG"),
+    "Y": frozenset("CT"),
+    "S": frozenset("CG"),
+    "W": frozenset("AT"),
+    "K": frozenset("GT"),
+    "M": frozenset("AC"),
+    "B": frozenset("CGT"),
+    "D": frozenset("AGT"),
+    "H": frozenset("ACT"),
+    "V": frozenset("ACG"),
+    "N": frozenset("ACGT"),
+}
+
+_COMPLEMENT = str.maketrans("ACGTRYSWKMBDHVN", "TGCAYRSWMKVHDBN")
+
+
+def _reverse_complement(sequence: str) -> str:
+    return sequence.upper().translate(_COMPLEMENT)[::-1]
+
+
+def _primer_match_display(primer: str, observed: str) -> str:
+    """Render an observed primer match using the legacy case convention.
+
+    Substitutions and insertions are lower-case and deleted primer bases are
+    dots. Amplirust normally reports equal-length matches here; handling the
+    length difference also keeps the compatibility output useful for indels.
+    """
+    primer = primer.upper()
+    observed = observed.upper()
+    rows = len(primer) + 1
+    cols = len(observed) + 1
+    distance = [[0] * cols for _ in range(rows)]
+    trace = [[""] * cols for _ in range(rows)]
+    for index in range(1, rows):
+        distance[index][0] = index
+        trace[index][0] = "deletion"
+    for index in range(1, cols):
+        distance[0][index] = index
+        trace[0][index] = "insertion"
+    for primer_index in range(1, rows):
+        for observed_index in range(1, cols):
+            compatible = observed[observed_index - 1] in _IUPAC_BASES.get(
+                primer[primer_index - 1], frozenset(primer[primer_index - 1])
+            )
+            choices = (
+                (distance[primer_index - 1][observed_index - 1] + (not compatible), "diagonal"),
+                (distance[primer_index - 1][observed_index] + 1, "deletion"),
+                (distance[primer_index][observed_index - 1] + 1, "insertion"),
+            )
+            distance[primer_index][observed_index], trace[primer_index][observed_index] = min(
+                choices, key=lambda choice: choice[0]
+            )
+
+    rendered = []
+    primer_index = len(primer)
+    observed_index = len(observed)
+    while primer_index or observed_index:
+        operation = trace[primer_index][observed_index]
+        if operation == "diagonal":
+            primer_base = primer[primer_index - 1]
+            observed_base = observed[observed_index - 1]
+            compatible = observed_base in _IUPAC_BASES.get(
+                primer_base, frozenset(primer_base)
+            )
+            rendered.append(observed_base if compatible else observed_base.lower())
+            primer_index -= 1
+            observed_index -= 1
+        elif operation == "deletion":
+            rendered.append(".")
+            primer_index -= 1
+        else:
+            rendered.append(observed[observed_index - 1].lower())
+            observed_index -= 1
+    return "".join(reversed(rendered))
 
 
 def _format_float(value: float | None, digits: int = 3) -> str:
@@ -69,6 +185,22 @@ def amplirust_rows_to_products(
             continue
         orientation = "reverse" if row.get("strand") == "-" else "forward"
         product_id = f"{locus_id}|{contig}|{orientation}|{contig_start}-{contig_end}"
+        sequence = str(row["product_seq"]).upper()
+        fwd_start = int(row["fwd_start"])
+        fwd_end = int(row["fwd_end"])
+        rev_start = int(row["rev_start"])
+        rev_end = int(row["rev_end"])
+        forward_match_length = max(0, fwd_end - fwd_start)
+        reverse_match_length = max(0, rev_end - rev_start)
+        original_start = int(row["original_start"])
+        original_end = int(row["original_end"])
+        if orientation == "forward":
+            forward_start_0based = original_start
+            reverse_start_0based = original_end - reverse_match_length
+        else:
+            forward_start_0based = original_end - forward_match_length
+            reverse_start_0based = original_start
+        raw_count = estimate_repeat_count_from_product_length(locus, product_size)
         products.append(
             {
                 "sample_id": sample_id,
@@ -81,7 +213,15 @@ def amplirust_rows_to_products(
                 "product_size_bp": product_size,
                 "forward_mismatches": int(row["fwd_mismatches"]),
                 "reverse_mismatches": int(row["rev_mismatches"]),
-                "sequence": str(row["product_seq"]).upper(),
+                "primer_error_round": max(int(row["fwd_mismatches"]), int(row["rev_mismatches"])),
+                "size_derived_repeat_count": _format_float(raw_count),
+                "forward_primer_match": sequence[:forward_match_length],
+                "reverse_primer_match": _reverse_complement(sequence[-reverse_match_length:])
+                if reverse_match_length
+                else "",
+                "forward_start_0based": forward_start_0based,
+                "reverse_start_0based": reverse_start_0based,
+                "sequence": sequence,
             }
         )
     return products
@@ -291,7 +431,10 @@ def assembly_call_rows(
     products: list[dict],
     sample_id: str,
     read_support: dict[str, dict[str, float]] | None = None,
+    min_posterior: float = 0.75,
 ) -> list[dict]:
+    if not 0 <= min_posterior <= 1:
+        raise ValueError("minimum allele posterior must be between 0 and 1")
     read_support = read_support or {}
     products_by_locus: dict[str, list[dict]] = {}
     for product in products:
@@ -317,27 +460,230 @@ def assembly_call_rows(
             )
             continue
 
-        product = sorted(locus_products, key=lambda item: (item["forward_mismatches"] + item["reverse_mismatches"], item["product_size_bp"]))[0]
+        legacy_ranked = sorted(
+            locus_products,
+            key=lambda item: (
+                item["primer_error_round"],
+                float(item["size_derived_repeat_count"] or "inf"),
+                item["forward_mismatches"] + item["reverse_mismatches"],
+                item["product_size_bp"],
+                item["product_id"],
+            ),
+        )
+        product = legacy_ranked[0]
+        candidates = allele_grid(locus, step=0.5)
+        raw_by_product = {
+            item["product_id"]: estimate_repeat_count_from_product_length(
+                locus, int(item["product_size_bp"])
+            )
+            for item in locus_products
+        }
+        count_known_products = [
+            item
+            for item in locus_products
+            if raw_by_product[item["product_id"]] is not None
+        ]
+        has_depth_support = any(
+            int(read_support.get(item["product_id"], {}).get("mapped_reads", 0)) > 0
+            for item in count_known_products
+        )
+        observations = count_known_products if has_depth_support else (
+            [product] if raw_by_product[product["product_id"]] is not None else []
+        )
+        weights = {
+            item["product_id"]: (
+                float(read_support.get(item["product_id"], {}).get("mapped_reads", 0))
+                + 0.5
+                * math.exp(
+                    -(item["forward_mismatches"] + item["reverse_mismatches"])
+                )
+            )
+            if has_depth_support
+            else 1.0
+            for item in observations
+        }
+        allele_weights = {candidate: 0.0 for candidate in candidates}
+        sigma = max(0.08, 0.5 / max(repeat_unit_length(locus), 1))
+        for item in observations:
+            raw = raw_by_product[item["product_id"]]
+            probabilities = gaussian_allele_probabilities(raw, candidates, sigma)
+            for candidate, probability in zip(candidates, probabilities):
+                allele_weights[candidate] += probability * weights[item["product_id"]]
+        allele_total = sum(allele_weights.values())
+        allele_ranking = sorted(
+            (
+                (candidate, weight / allele_total)
+                for candidate, weight in allele_weights.items()
+            ),
+            key=lambda item: (-item[1], float(item[0])),
+        ) if allele_total else []
+        if allele_ranking:
+            called_count, allele_confidence = allele_ranking[0]
+            second_count, second_probability = (
+                allele_ranking[1] if len(allele_ranking) > 1 else ("", 0.0)
+            )
+            product = min(
+                observations,
+                key=lambda item: (
+                    -weights[item["product_id"]],
+                    abs(float(raw_by_product[item["product_id"]]) - float(called_count)),
+                    item["primer_error_round"],
+                    item["product_id"],
+                ),
+            )
+        else:
+            called_count = ""
+            allele_confidence = 0.0
+            second_count = ""
+            second_probability = 0.0
         raw_count = estimate_repeat_count_from_product_length(locus, int(product["product_size_bp"]))
         support = read_support.get(product["product_id"], {})
         mapped_reads = int(support.get("mapped_reads", 0))
         mean_coverage = support.get("mean_coverage")
         status = "PASS" if raw_count is not None else "PRESENT_COUNT_UNKNOWN"
+        if raw_count is not None and (
+            allele_confidence < min_posterior
+            or allele_confidence - second_probability < 0.2
+        ):
+            status = "AMBIGUOUS"
+        inference_method = (
+            "depth_weighted_product_distribution"
+            if has_depth_support
+            else "assembly_product_length"
+        )
         rows.append(
             {
                 "sample_id": sample_id,
                 "locus_id": locus.locus_id,
                 "present": "yes",
-                "repeat_count": round(raw_count) if raw_count is not None else "",
+                "repeat_count": called_count,
                 "repeat_count_raw": _format_float(raw_count),
                 "product_size_bp": product["product_size_bp"],
                 "read_depth": mapped_reads,
                 "mean_coverage": _format_float(mean_coverage),
+                "allele_confidence": round(allele_confidence, 6),
+                "second_best_repeat_count": second_count,
+                "second_best_probability": round(second_probability, 6),
+                "inference_method": inference_method,
+                "allele_distribution": ";".join(
+                    f"{candidate}:{probability:.6f}"
+                    for candidate, probability in allele_ranking
+                ),
                 "status": status,
                 "evidence": product["product_id"],
             }
         )
     return rows
+
+
+def legacy_detail_rows(
+    loci: list[Locus],
+    products: list[dict],
+    call_rows: list[dict],
+    sample_id: str,
+    round_tolerance: float = 0.25,
+) -> list[dict]:
+    """Build the row-oriented table emitted by the historical caller."""
+    products_by_id = {product["product_id"]: product for product in products}
+    loci_by_id = {locus.locus_id: locus for locus in loci}
+    rows = []
+    for call in call_rows:
+        locus = loci_by_id[call["locus_id"]]
+        product = products_by_id.get(call.get("evidence", ""))
+        if product is None:
+            rows.append(
+                {
+                    "strain": sample_id,
+                    "primer": locus.locus_id,
+                    "allele": "",
+                    "nb_mismatch": "ND",
+                    "primer1": locus.forward_primer,
+                    "primer2": locus.reverse_primer,
+                }
+            )
+            continue
+        forward_errors = int(product["forward_mismatches"])
+        reverse_errors = int(product["reverse_mismatches"])
+        forward_match = product["forward_primer_match"]
+        reverse_match = product["reverse_primer_match"]
+        raw_count = estimate_repeat_count_from_product_length(
+            locus, int(product["product_size_bp"])
+        )
+        rows.append(
+            {
+                "strain": sample_id,
+                "primer": locus.locus_id,
+                "position1": product["forward_start_0based"],
+                "position2": product["reverse_start_0based"],
+                "size": product["product_size_bp"],
+                "allele": legacy_round_repeat_count(raw_count, round_tolerance)
+                if raw_count is not None
+                else "",
+                "sequence": product["contig"],
+                "nb_mismatch": product["primer_error_round"],
+                "primer1": locus.forward_primer,
+                "mismatch1": _primer_match_display(locus.forward_primer, forward_match)
+                if forward_errors
+                else "",
+                "primer2": locus.reverse_primer,
+                "mismatch2": _primer_match_display(locus.reverse_primer, reverse_match)
+                if reverse_errors
+                else "",
+                "predicted PCR target": product["sequence"],
+            }
+        )
+    return rows
+
+
+def write_legacy_assembly_outputs(
+    outdir: str | Path,
+    loci: list[Locus],
+    products: list[dict],
+    call_rows: list[dict],
+    sample_id: str,
+    round_tolerance: float = 0.25,
+) -> dict[str, Path]:
+    """Write stable CSV equivalents of all four useful legacy artifacts."""
+    outdir = Path(outdir)
+    details_path = outdir / "legacy_output.csv"
+    fingerprint_path = outdir / "legacy_mlva_analysis.csv"
+    sizes_path = outdir / "legacy_predicted_pcr_sizes.csv"
+    mismatches_path = outdir / "legacy_primer_mismatches.txt"
+    details = legacy_detail_rows(
+        loci, products, call_rows, sample_id, round_tolerance
+    )
+    with details_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=LEGACY_DETAIL_FIELDS)
+        writer.writeheader()
+        writer.writerows(details)
+
+    locus_ids = [locus.locus_id for locus in loci]
+    with fingerprint_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["key", "Access_number", *locus_ids])
+        writer.writerow(["001", sample_id, *[row["allele"] for row in details]])
+    with sizes_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["key", "Access_number", *locus_ids])
+        writer.writerow(["001", sample_id, *[row.get("size", "") for row in details]])
+
+    mismatch_sections = []
+    for row in details:
+        for suffix, primer_key, mismatch_key in (
+            ("FOR", "primer1", "mismatch1"),
+            ("REV", "primer2", "mismatch2"),
+        ):
+            if row.get(mismatch_key):
+                mismatch_sections.append(
+                    f"{row['primer']}_{suffix}\n{row[primer_key]}\n{row[mismatch_key]}"
+                )
+    mismatches_path.write_text("\n\n".join(mismatch_sections) + ("\n" if mismatch_sections else ""))
+    return {
+        "legacy_details": details_path,
+        "legacy_fingerprint": fingerprint_path,
+        "legacy_product_sizes": sizes_path,
+        "legacy_mismatches": mismatches_path,
+    }
 
 
 def allele_rows_from_assembly_calls(call_rows: list[dict]) -> list[dict]:
@@ -350,12 +696,13 @@ def allele_rows_from_assembly_calls(call_rows: list[dict]) -> list[dict]:
                 "sample_id": row.get("sample_id", ""),
                 "locus_id": row.get("locus_id", ""),
                 "called_repeat_count": row.get("repeat_count", "") if present else "",
-                "posterior_probability": 1.0 if status == "PASS" else 0.0,
-                "second_best_repeat_count": "",
-                "second_best_posterior": 0.0,
+                "posterior_probability": row.get("allele_confidence", 0.0),
+                "second_best_repeat_count": row.get("second_best_repeat_count", ""),
+                "second_best_posterior": row.get("second_best_probability", 0.0),
                 "read_depth": row.get("read_depth", 0),
                 "num_vntr_asvs": 1 if present else 0,
                 "dominant_vntr_asv": row.get("evidence", "") if present else "",
+                "allele_distribution": row.get("allele_distribution", ""),
                 "call_status": status,
             }
         )
@@ -373,6 +720,8 @@ def run_assembly_call(
     profiles_path: str | None = None,
     database_path: str | None = None,
     max_primer_mismatches: int = 3,
+    assembly_round_tolerance: float = 0.25,
+    min_posterior: float = 0.75,
     threads: int = DEFAULT_THREADS,
     minimap2_preset: str | None = None,
     minimap2_bin: str = "minimap2",
@@ -381,6 +730,9 @@ def run_assembly_call(
     raxml_ng_bin: str = "raxml-ng",
     epa_ng_bin: str = "epa-ng",
     raxml_model: str = "GTR+G",
+    phylogeny_snp_weight: float = 1.0,
+    phylogeny_repeat_weight: float = 1.0,
+    reference_metadata_path: str | None = None,
     show_progress: bool = False,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
@@ -446,9 +798,21 @@ def run_assembly_call(
 
     calls_path = outdir_path / "calls.tsv"
     progress.step("Writing calls table")
-    call_rows = assembly_call_rows(loci, products, sample_id, read_support)
+    call_rows = assembly_call_rows(
+        loci,
+        products,
+        sample_id,
+        read_support,
+        min_posterior,
+    )
     write_tsv(call_rows, calls_path, SIMPLE_CALL_FIELDS)
     write_tsv(call_rows, outdir_path / "locus_repeat_counts.tsv", REPEAT_COUNT_FIELDS)
+    allele_distribution_path = outdir_path / "allele_probability_distribution.tsv"
+    write_tsv(
+        allele_distribution_rows(sample_id, call_rows),
+        allele_distribution_path,
+        ALLELE_DISTRIBUTION_FIELDS,
+    )
     allele_rows = allele_rows_from_assembly_calls(call_rows)
     fingerprint_rows, probabilistic_rows = build_fingerprint(sample_id, allele_rows, loci)
     fingerprint_fields = ["sample_id"] + [locus.locus_id for locus in loci]
@@ -462,6 +826,19 @@ def run_assembly_call(
     write_tsv(match_rows, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
     novelty_rows = score_novelty(sample_id, allele_rows, match_rows)
     write_tsv(novelty_rows, outdir_path / "novelty_scores.tsv", NOVELTY_FIELDS)
+    # Re-run product selection without depth so the comparison files retain
+    # historical mismatch-round behavior even when modern calls use support.
+    legacy_call_rows = assembly_call_rows(
+        loci, products, sample_id, min_posterior=min_posterior
+    )
+    legacy_paths = write_legacy_assembly_outputs(
+        outdir_path,
+        loci,
+        products,
+        legacy_call_rows,
+        sample_id,
+        assembly_round_tolerance,
+    )
     phylogeny_paths: dict[str, Path] = {}
     phylogenetic_rows: list[dict] = []
     if database_path:
@@ -479,14 +856,17 @@ def run_assembly_call(
             database_path,
             outdir_path,
             sample_id,
-            {locus.locus_id for locus in loci},
+            loci,
             thread_count,
             mafft_bin=mafft_bin,
             raxml_ng_bin=raxml_ng_bin,
             epa_ng_bin=epa_ng_bin,
             raxml_model=raxml_model,
+            snp_weight=phylogeny_snp_weight,
+            repeat_weight=phylogeny_repeat_weight,
+            reference_metadata_path=reference_metadata_path,
         )
-        phylogenetic_rows = read_profiles(phylogeny_paths["phylogenetic_matches"])
+        phylogenetic_rows = read_profiles(phylogeny_paths["combined_marker_matches"])
     progress.step("Writing HTML report")
     write_assembly_report(
         outdir_path,
@@ -504,6 +884,7 @@ def run_assembly_call(
         "outdir": outdir_path,
         "calls": calls_path,
         "repeat_counts": outdir_path / "locus_repeat_counts.tsv",
+        "allele_distribution": allele_distribution_path,
         "amplicons": outdir_path / "assembly_amplicons.tsv",
         "amplicon_fasta": product_fasta,
         "amplirust": outdir_path / "amplirust",
@@ -511,5 +892,6 @@ def run_assembly_call(
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "profile_matches": outdir_path / "profile_matches.tsv",
         "report": outdir_path / "report.html",
+        **legacy_paths,
         **phylogeny_paths,
     }

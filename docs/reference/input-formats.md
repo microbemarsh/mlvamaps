@@ -108,6 +108,24 @@ at every successfully placed query locus are included in the summed-distance
 ranking, preventing incomplete references from receiving artificially small
 totals.
 
+For repeat-aware phylogenetic analysis, rich panels should provide both flank
+sequences and repeat-unit length or motif. MLVAMaps uses the flanks to remove
+the tandem-repeat tract from the SNP-tree alignment while retaining its repeat
+count and unit haplotype as explicit marker features. Motif-run detection is a
+fallback when flanks are unavailable; sequences that cannot be bounded remain
+unmasked and are labelled as such in the output.
+
+An optional `--reference-metadata` TSV or CSV can associate references with
+space, time, and source information:
+
+```text
+reference_id	collection_date	latitude	longitude	location	source
+R1	2024-01-02	40.0	-75.0	Site A	environment
+```
+
+When the sequence database is a directory, a file named
+`reference_metadata.tsv` is detected automatically.
+
 ## Existing alignment support
 
 Assembly mode accepts SAM or BAM aligned to the supplied assembly through

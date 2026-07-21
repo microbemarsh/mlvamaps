@@ -11,16 +11,17 @@ def _safe(value) -> str:
     return html.escape(str(value))
 
 
-def _called_count(value) -> int | None:
+def _called_count(value) -> int | float | None:
     if value in ("", None):
         return None
     try:
-        return int(round(float(value)))
+        parsed = float(value)
+        return int(parsed) if parsed.is_integer() else parsed
     except (TypeError, ValueError):
         return None
 
 
-def _amplicon_size(locus: Locus, repeat_count: int | None) -> int | None:
+def _amplicon_size(locus: Locus, repeat_count: int | float | None) -> int | float | None:
     if repeat_count is None:
         return None
     return (
@@ -365,7 +366,7 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
     <desc>Exact repeat count at every panel locus, shown independently of amplicon SNP bands.</desc>
     {"".join(marks)}
   </svg>
-  <figcaption>Bar length represents repeat units, with the exact integer (and raw assembly estimate when applicable) printed at right. Color indicates call status.</figcaption>
+  <figcaption>Bar length represents repeat units, with the exact call (and raw assembly estimate when applicable) printed at right. Color indicates call status.</figcaption>
 </figure>
 """
 
@@ -647,9 +648,13 @@ def write_report(
         "<tr>"
         f"<td>{_safe(row.get('rank', ''))}</td>"
         f"<td>{_safe(row.get('reference_id', ''))}</td>"
-        f"<td>{_safe(row.get('total_phylogenetic_distance', ''))}</td>"
+        f"<td>{_safe(row.get('combined_marker_distance', ''))}</td>"
+        f"<td>{_safe(row.get('total_normalized_snp_distance', ''))}</td>"
+        f"<td>{_safe(row.get('total_normalized_repeat_distance', ''))}</td>"
         f"<td>{_safe(row.get('compared_loci', ''))}</td>"
-        f"<td>{_safe(row.get('mean_phylogenetic_distance', ''))}</td>"
+        f"<td>{_safe(row.get('distance_gap_to_next', ''))}</td>"
+        f"<td>{_safe(row.get('collection_date', ''))}</td>"
+        f"<td>{_safe(row.get('location', ''))}</td>"
         "</tr>"
         for row in phylogenetic_rows[:10]
     )
@@ -657,9 +662,9 @@ def write_report(
     if phylogenetic_rows:
         phylogenetic_section = f"""
       <h2>Phylogenetic Placement</h2>
-      <p class="terminal-note">Ranked by summed query-to-reference patristic distance across every placed locus. Per-locus MAFFT alignments, RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
+      <p class="terminal-note">Ranked by the combined normalized SNP-tree and tandem-repeat distance across every placed locus. Component values remain separate for interpretation. Per-locus MAFFT alignments, repeat-masked RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
       <div class="table-scroll"><table>
-        <thead><tr><th>Rank</th><th>Reference</th><th>Total distance</th><th>Compared loci</th><th>Mean distance</th></tr></thead>
+        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Normalized SNP distance</th><th>Normalized repeat distance</th><th>Compared loci</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
         <tbody>{phylogenetic_table_rows}</tbody>
       </table></div>
 """
@@ -859,6 +864,10 @@ def write_assembly_report(
         f"<td>{_safe(row.get('product_size_bp', ''))}</td>"
         f"<td>{_safe(row.get('read_depth', ''))}</td>"
         f"<td>{_safe(row.get('mean_coverage', ''))}</td>"
+        f"<td>{_safe(row.get('allele_confidence', ''))}</td>"
+        f"<td>{_safe(row.get('second_best_repeat_count', ''))}</td>"
+        f"<td>{_safe(row.get('second_best_probability', ''))}</td>"
+        f"<td>{_safe(row.get('inference_method', ''))}</td>"
         f"<td>{_safe(row.get('status', ''))}</td>"
         f"<td>{_safe(row.get('evidence', ''))}</td>"
         "</tr>"
@@ -904,9 +913,13 @@ def write_assembly_report(
         "<tr>"
         f"<td>{_safe(row.get('rank', ''))}</td>"
         f"<td>{_safe(row.get('reference_id', ''))}</td>"
-        f"<td>{_safe(row.get('total_phylogenetic_distance', ''))}</td>"
+        f"<td>{_safe(row.get('combined_marker_distance', ''))}</td>"
+        f"<td>{_safe(row.get('total_normalized_snp_distance', ''))}</td>"
+        f"<td>{_safe(row.get('total_normalized_repeat_distance', ''))}</td>"
         f"<td>{_safe(row.get('compared_loci', ''))}</td>"
-        f"<td>{_safe(row.get('mean_phylogenetic_distance', ''))}</td>"
+        f"<td>{_safe(row.get('distance_gap_to_next', ''))}</td>"
+        f"<td>{_safe(row.get('collection_date', ''))}</td>"
+        f"<td>{_safe(row.get('location', ''))}</td>"
         "</tr>"
         for row in phylogenetic_rows[:10]
     )
@@ -914,9 +927,9 @@ def write_assembly_report(
     if phylogenetic_rows:
         phylogenetic_section = f"""
       <h2>Phylogenetic Placement</h2>
-      <p class="terminal-note">Ranked by summed patristic distance across every placed locus. Per-locus MAFFT alignments, RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
+      <p class="terminal-note">Ranked by combined normalized SNP-tree and tandem-repeat distance across every placed locus. Component values remain separate for interpretation. Per-locus MAFFT alignments, repeat-masked RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
       <table>
-        <thead><tr><th>Rank</th><th>Reference</th><th>Total distance</th><th>Compared loci</th><th>Mean distance</th></tr></thead>
+        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Normalized SNP distance</th><th>Normalized repeat distance</th><th>Compared loci</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
         <tbody>{phylogenetic_table_rows}</tbody>
       </table>
 """
@@ -1029,7 +1042,7 @@ def write_assembly_report(
       {gel}
       <h2>Calls</h2>
       <table>
-        <thead><tr><th>Locus</th><th>Present</th><th>Repeat count</th><th>Raw count</th><th>Product bp</th><th>Reads</th><th>Coverage</th><th>Status</th><th>Evidence</th></tr></thead>
+        <thead><tr><th>Locus</th><th>Present</th><th>Repeat count</th><th>Raw count</th><th>Product bp</th><th>Reads</th><th>Coverage</th><th>Confidence</th><th>Second allele</th><th>Second probability</th><th>Inference</th><th>Status</th><th>Evidence</th></tr></thead>
         <tbody>{table_rows}</tbody>
       </table>
       <h2>Assembly Amplicons</h2>

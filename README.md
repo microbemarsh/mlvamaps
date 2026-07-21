@@ -115,7 +115,11 @@ Results are written to `results/` by default. Start with:
 With `--database`, `phylogeny/phylogenetic_matches.tsv` ranks complete
 references by summed distance. Every database locus retains its MAFFT alignment
 and RAxML-NG reference tree/model; callable query loci also retain an EPA-ng
-`.jplace` result.
+`.jplace` result. Rich panels additionally mask the tandem-repeat tract from
+the SNP tree, preserve repeat count and repeat-unit haplotype separately, and
+rank the combined normalized evidence in
+`phylogeny/combined_marker_matches.tsv`. Optional dated/geocoded reference
+metadata can be joined to `phylogeny/combined_markers.tree` in MYOGA.
 
 FASTQ runs additionally provide VSEARCH variants, Parasail-aligned read
 memberships, EM-estimated mixture abundance, minimap2 mapping coverage, and SNP
@@ -157,12 +161,13 @@ For FASTQ data, mlvamaps:
 9. Combines read probabilities into per-locus repeat-count calls.
 10. Builds the fingerprint, compares profiles, scores novelty, and writes a
     plot-first HTML report.
-11. When `--database` is supplied, aligns each reference locus with MAFFT,
-    infers its maximum-likelihood tree with RAxML-NG, adds the dominant query
-    amplicon with `mafft --add --keeplength`, places it on the fixed reference
-    topology with EPA-ng, and ranks references by summed patristic distance.
-    Only references present at every placed locus are ranked, so missing loci
-    cannot produce an artificially small total.
+11. When `--database` is supplied, separates the tandem-repeat tract from the
+    SNP-bearing sequence, aligns repeat-masked references with MAFFT, infers a
+    maximum-likelihood tree with RAxML-NG, and places the masked query with
+    EPA-ng. It then combines normalized SNP-tree distance with the separately
+    retained repeat-count distance. Only references present at every placed
+    locus are ranked, so missing loci cannot produce an artificially small
+    total.
 
 For assemblies, mlvamaps:
 
@@ -205,6 +210,7 @@ recommended metadata, validation, and profile-table setup.
 - [CLI and thresholds](docs/reference/cli.md)
 - [Representative mapping and SNP evidence](docs/concepts/representative-mapping.md)
 - [Variant mixture abundance](docs/concepts/variant-mixtures.md)
+- [Repeat-aware SNP placement and phylogeography](docs/concepts/repeat-snp-phylogeography.md)
 - [Allele calling, profiles, and novelty](docs/concepts/calling-and-profiles.md)
 - [Adding a new organism or MLVA scheme](docs/guides/new-organism-panel.md)
 

@@ -19,24 +19,45 @@ This stage returns:
 - `assembly_amplicons.fasta`: extracted products.
 - Native evidence under `amplirust/`.
 
-If several products are found for a locus, the compact call uses the product
-with the fewest total primer mismatches and then the shortest product.
-All accepted products remain available in the amplicon table.
+If several products are found for a locus, the compact call first uses the
+lowest successful primer-error round, matching the legacy search. Within that
+round it prefers the smallest derived allele, then total primer errors, product
+size, and a stable product ID. This preserves historical calls while removing
+the old contig-order dependence. All accepted products remain available in the
+amplicon table.
 
 ## 2. Estimate repeat count
 
 MLVAMaps converts product size to repeat count when the panel provides
 repeat-unit length, nominal repeat units, and expected product size. It retains
-the raw estimate and reports the nearest integer as the conventional MLVA call.
+the raw estimate and evaluates it against explicit integer and half-unit allele
+states. The reported probability reflects distance from those states at the
+locus's repeat-unit resolution. Exact midpoint ties remain `AMBIGUOUS` instead
+of being resolved by an arbitrary rounding rule. `--min-posterior` controls
+the confidence required for both FASTQ and assembly calls.
+
+When FASTQ or BAM support is supplied and the assembly contains multiple
+accepted products for a locus, mapped-read counts weight the product-length
+distribution. This lets the supported allele win rather than defaulting to the
+smallest legacy allele. `--assembly-round-tolerance` now affects only the
+legacy comparison CSVs.
 
 Assembly statuses:
 
 - `PASS`: product found and repeat count could be calculated.
+- `AMBIGUOUS`: the leading allele is below `--min-posterior` or leads the
+  runner-up by less than 0.2.
 - `PRESENT_COUNT_UNKNOWN`: product found, but panel metadata was insufficient
   for a repeat-count calculation.
 - `NOT_FOUND`: no accepted paired-primer product was found.
 
 This stage returns `calls.tsv`.
+
+For direct migration checks, every assembly run also writes CSV compatibility
+views: `legacy_output.csv`, `legacy_mlva_analysis.csv`,
+`legacy_predicted_pcr_sizes.csv`, and `legacy_primer_mismatches.txt`. These sit
+alongside the richer TSV, FASTA, evidence, and HTML outputs; they do not replace
+them.
 
 ## 3. Add optional FASTQ support
 

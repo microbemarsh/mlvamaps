@@ -40,6 +40,20 @@ def _fraction(value: str) -> float:
     return parsed
 
 
+def _round_tolerance(value: str) -> float:
+    parsed = float(value)
+    if not 0.0 <= parsed <= 0.5:
+        raise argparse.ArgumentTypeError("must be between 0 and 0.5")
+    return parsed
+
+
+def _nonnegative_float(value: str) -> float:
+    parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be at least 0")
+    return parsed
+
+
 def _input_kind(path: str) -> str:
     lower = path.lower()
     if lower.endswith((".fastq", ".fq", ".fastq.gz", ".fq.gz")):
@@ -133,6 +147,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Per-locus reference sequence database for MAFFT alignment and phylogenetic placement",
     )
     call.add_argument(
+        "--reference-metadata",
+        help="TSV/CSV with reference_id and optional date, coordinates, location, and source",
+    )
+    call.add_argument(
         "-o",
         "--output",
         "--outdir",
@@ -146,6 +164,13 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--max-read-length", type=int, default=100000)
     call.add_argument("--min-qscore", type=float, default=0.0)
     call.add_argument("--max-primer-mismatches", type=int, default=3)
+    call.add_argument(
+        "--assembly-round-tolerance",
+        type=_round_tolerance,
+        default=0.25,
+        metavar="FRACTION",
+        help="Legacy CSV integer tolerance; modern calls use probabilistic half-unit states (default: %(default)s)",
+    )
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
@@ -207,6 +232,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="GTR+G",
         metavar="MODEL",
         help="RAxML-NG nucleotide model for locus trees (default: %(default)s)",
+    )
+    call.add_argument(
+        "--phylogeny-snp-weight",
+        type=_nonnegative_float,
+        default=1.0,
+        help="Weight for normalized SNP-tree distance in combined marker ranking (default: %(default)s)",
+    )
+    call.add_argument(
+        "--phylogeny-repeat-weight",
+        type=_nonnegative_float,
+        default=1.0,
+        help="Weight for normalized tandem-repeat distance in combined marker ranking (default: %(default)s)",
     )
     call.add_argument(
         "--no-locus-mapping",
@@ -332,6 +369,9 @@ def main(argv: list[str] | None = None) -> int:
                 raxml_ng_bin=args.raxml_ng_bin,
                 epa_ng_bin=args.epa_ng_bin,
                 raxml_model=args.raxml_model,
+                phylogeny_snp_weight=args.phylogeny_snp_weight,
+                phylogeny_repeat_weight=args.phylogeny_repeat_weight,
+                reference_metadata_path=args.reference_metadata,
                 locus_mapping=not args.no_locus_mapping,
                 min_mapping_quality=args.min_mapping_quality,
                 min_base_quality=args.min_base_quality,
@@ -354,6 +394,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.database:
                 print(f"Wrote per-locus trees to {result['phylogeny']}")
                 print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
+                print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
+                print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
         else:
             result = run_assembly_call(
                 assembly_path=args.input_path,
@@ -366,6 +408,8 @@ def main(argv: list[str] | None = None) -> int:
                 profiles_path=args.profiles,
                 database_path=args.database,
                 max_primer_mismatches=args.max_primer_mismatches,
+                assembly_round_tolerance=args.assembly_round_tolerance,
+                min_posterior=args.min_posterior,
                 threads=args.threads,
                 minimap2_preset=args.minimap2_preset,
                 minimap2_bin=args.minimap2_bin,
@@ -374,6 +418,9 @@ def main(argv: list[str] | None = None) -> int:
                 raxml_ng_bin=args.raxml_ng_bin,
                 epa_ng_bin=args.epa_ng_bin,
                 raxml_model=args.raxml_model,
+                phylogeny_snp_weight=args.phylogeny_snp_weight,
+                phylogeny_repeat_weight=args.phylogeny_repeat_weight,
+                reference_metadata_path=args.reference_metadata,
                 show_progress=not args.quiet,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
@@ -383,6 +430,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.database:
                 print(f"Wrote per-locus trees to {result['phylogeny']}")
                 print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
+                print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
+                print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
             if args.reads_path or args.alignments_path:
                 print(f"Wrote read-depth support to {result['read_support']}")
         return 0

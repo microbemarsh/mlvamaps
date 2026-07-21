@@ -9,12 +9,15 @@ from types import SimpleNamespace
 from mlvamaps import sequence
 from mlvamaps.bayesian_caller import call_loci
 from mlvamaps.assembly_call import (
+    _primer_match_display,
+    assembly_call_rows,
     build_minimap2_command,
     read_alignment_depth,
     read_minimap2_depth,
     run_assembly_call,
     run_minimap2_depth,
 )
+from mlvamaps.calling import legacy_round_repeat_count
 from mlvamaps.cli import build_parser, main
 from mlvamaps.clustering import (
     _alignment_metrics,
@@ -523,7 +526,7 @@ def test_assembly_call_from_primer_products(tmp_path):
         "read3\t4\t*\t0\t0\t*\t*\t0\t0\tACGT\tIIII\n"
     )
     profiles = tmp_path / "profiles.tsv"
-    profiles.write_text("profile_id\tstrain_id\tVNTR_01\tVNTR_02\tmetadata\nASM_MATCH\tstrain_A\t7\t\tassembly profile\n")
+    profiles.write_text("profile_id\tstrain_id\tVNTR_01\tVNTR_02\tmetadata\nASM_MATCH\tstrain_A\t6.5\t\tassembly profile\n")
 
     result = run_assembly_call(
         assembly_path=str(assembly),
@@ -538,7 +541,7 @@ def test_assembly_call_from_primer_products(tmp_path):
 
     calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
     assert calls["VNTR_01"]["present"] == "yes"
-    assert calls["VNTR_01"]["repeat_count"] == "7"
+    assert calls["VNTR_01"]["repeat_count"] == "6.5"
     assert calls["VNTR_01"]["product_size_bp"] == "48"
     assert calls["VNTR_01"]["read_depth"] == "2"
     assert calls["VNTR_01"]["mean_coverage"] == "1.5"
@@ -556,6 +559,139 @@ def test_assembly_call_from_primer_products(tmp_path):
     matches = read_tsv(result["profile_matches"])
     assert matches[0]["best_profile_id"] == "ASM_MATCH"
     assert matches[0]["distance"] == "0.0"
+    legacy = list(csv.DictReader(result["legacy_details"].open()))
+    assert legacy[0]["size"] == "48"
+    assert legacy[0]["allele"] == "6.5"
+    assert legacy[0]["position1"] == "4"
+    assert legacy[0]["position2"] == "42"
+    assert legacy[0]["predicted PCR target"].startswith("ACGTTGCAAC")
+    legacy_fingerprint = list(csv.reader(result["legacy_fingerprint"].open()))
+    assert legacy_fingerprint == [
+        ["key", "Access_number", "VNTR_01", "VNTR_02"],
+        ["001", "ASM1", "6.5", ""],
+    ]
+    distribution = read_tsv(result["allele_distribution"])
+    assert distribution[0]["allele"] == "6.5"
+    assert distribution[0]["selected"] == "yes"
+    assert distribution[0]["inference_method"] == "depth_weighted_product_distribution"
+
+
+def test_legacy_rounding_and_mismatch_round_product_selection():
+    assert legacy_round_repeat_count(6.24) == 6
+    assert legacy_round_repeat_count(6.25) == 6.5
+    assert legacy_round_repeat_count(6.75) == 6.5
+    assert legacy_round_repeat_count(6.76) == 7
+    assert _primer_match_display("ACGT", "AGGT") == "AgGT"
+    assert _primer_match_display("ACGT", "AGT") == "A.GT"
+    assert _primer_match_display("ACGT", "ACAGT") == "ACaGT"
+
+    locus = Locus(
+        locus_id="VNTR",
+        forward_primer="AAAA",
+        reverse_primer="TTTT",
+        repeat_unit_length_bp=4,
+        expected_product_size_bp=40,
+        nominal_repeat_units=5,
+    )
+    products = [
+        {
+            "locus_id": "VNTR",
+            "product_id": "one-error-small-allele",
+            "primer_error_round": 1,
+            "forward_mismatches": 1,
+            "reverse_mismatches": 0,
+            "size_derived_repeat_count": "2",
+            "product_size_bp": 28,
+        },
+        {
+            "locus_id": "VNTR",
+            "product_id": "perfect-large-allele",
+            "primer_error_round": 0,
+            "forward_mismatches": 0,
+            "reverse_mismatches": 0,
+            "size_derived_repeat_count": "6.25",
+            "product_size_bp": 45,
+        },
+    ]
+    row = assembly_call_rows([locus], products, "S1")[0]
+    assert row["evidence"] == "perfect-large-allele"
+    assert row["repeat_count_raw"] == "6.25"
+    assert row["repeat_count"] == 6
+    assert row["status"] == "AMBIGUOUS"
+
+
+def test_depth_distribution_selects_supported_assembly_allele():
+    locus = Locus(
+        locus_id="VNTR",
+        forward_primer="AAAA",
+        reverse_primer="TTTT",
+        repeat_unit_length_bp=4,
+        expected_product_size_bp=40,
+        nominal_repeat_units=5,
+        expected_min_repeats=2,
+        expected_max_repeats=8,
+    )
+    products = []
+    for product_id, size in (("allele5", 40), ("allele6", 44)):
+        products.append(
+            {
+                "locus_id": "VNTR",
+                "product_id": product_id,
+                "primer_error_round": 0,
+                "forward_mismatches": 0,
+                "reverse_mismatches": 0,
+                "size_derived_repeat_count": str(5 + (size - 40) / 4),
+                "product_size_bp": size,
+            }
+        )
+    support = {
+        "allele5": {"mapped_reads": 2, "mean_coverage": 2.0},
+        "allele6": {"mapped_reads": 18, "mean_coverage": 18.0},
+    }
+    row = assembly_call_rows([locus], products, "S1", support)[0]
+    assert row["repeat_count"] == 6
+    assert row["evidence"] == "allele6"
+    assert row["inference_method"] == "depth_weighted_product_distribution"
+    assert row["allele_confidence"] > 0.85
+
+
+def test_fastq_read_distribution_can_call_half_allele():
+    locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=7)
+    predictions = [
+        ReadPrediction(
+            f"read{index}", "VNTR", 5.5, 0.95, 5, 0.05,
+            "VNTR_ASV1", 0, 0, 0, 1.0,
+            raw_repeat_count_estimate=5.48,
+            measurement_sigma=0.12,
+        )
+        for index in range(20)
+    ]
+    row = call_loci(predictions, [locus], [], min_depth=10)[0]
+    assert row["called_repeat_count"] == 5.5
+    assert row["posterior_probability"] > 0.95
+    assert row["call_status"] == "PASS"
+    assert row["allele_distribution"].startswith("5.5:")
+
+
+def test_read_predictor_retains_unrounded_measurement():
+    locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=7)
+    feature = make_repeat_feature("half", "ATG" * 5 + "A", repeat_count=5.5)
+    memberships = [
+        {
+            "read_id": "half",
+            "locus_id": "VNTR",
+            "variant_id": "VNTR_ASV1",
+            "insertions_vs_representative": 0,
+            "deletions_vs_representative": 0,
+            "substitutions_vs_representative": 0,
+            "aligned_repeat_sequence": "ATG",
+            "aligned_representative_sequence": "ATG",
+        }
+    ]
+    prediction = predict_read_alleles([feature], [locus], memberships)[0]
+    assert prediction.predicted_repeat_count == 5.5
+    assert prediction.raw_repeat_count_estimate == 5.5
+    assert prediction.measurement_sigma is not None
 
 
 def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):

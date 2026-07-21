@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from .calling import allele_grid, gaussian_allele_probabilities
 from .models import Locus, ReadPrediction
 
 
@@ -48,18 +49,34 @@ def call_loci(
             )
             continue
 
-        weights = {count: 1e-6 for count in range(locus.expected_min_repeats, locus.expected_max_repeats + 1)}
+        candidates = allele_grid(locus, step=0.5)
+        weights = {count: 1e-6 for count in candidates}
         effective_read_depth = sum(pred.evidence_weight for pred in preds)
+        measurement_groups: dict[tuple[float, float], float] = defaultdict(float)
         for pred in preds:
-            weights[pred.predicted_repeat_count] = (
-                weights.get(pred.predicted_repeat_count, 1e-6)
-                + pred.probability * pred.evidence_weight
-            )
-            if pred.top_alt_repeat_count is not None:
-                weights[pred.top_alt_repeat_count] = (
-                    weights.get(pred.top_alt_repeat_count, 1e-6)
-                    + pred.top_alt_probability * pred.evidence_weight
+            if pred.raw_repeat_count_estimate is not None and pred.measurement_sigma is not None:
+                measurement_groups[
+                    (pred.raw_repeat_count_estimate, pred.measurement_sigma)
+                ] += pred.evidence_weight
+            else:
+                weights[pred.predicted_repeat_count] = (
+                    weights.get(pred.predicted_repeat_count, 1e-6)
+                    + pred.probability * pred.evidence_weight
                 )
+                if pred.top_alt_repeat_count is not None:
+                    weights[pred.top_alt_repeat_count] = (
+                        weights.get(pred.top_alt_repeat_count, 1e-6)
+                        + pred.top_alt_probability * pred.evidence_weight
+                    )
+        # Identical read lengths and quality-derived sigmas are common at high
+        # depth. Collapse them before evaluating the grid to keep inference
+        # proportional to distinct observations rather than total reads.
+        for (raw_count, sigma), group_weight in measurement_groups.items():
+            probabilities = gaussian_allele_probabilities(
+                raw_count, candidates, sigma
+            )
+            for count, probability in zip(candidates, probabilities):
+                weights[count] += probability * group_weight
         total = sum(weights.values())
         ranked = sorted(((count, weight / total) for count, weight in weights.items()), key=lambda item: item[1], reverse=True)
         best = ranked[0]
@@ -104,6 +121,9 @@ def call_loci(
                 "num_meaningful_variants": meaningful_count,
                 "dominant_vntr_asv": dominant,
                 "dominant_variant_fraction": round(dominant_freq, 6),
+                "allele_distribution": ";".join(
+                    f"{count}:{probability:.6f}" for count, probability in ranked
+                ),
                 "call_status": status,
             }
         )

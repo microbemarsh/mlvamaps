@@ -13,7 +13,10 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | `--max-primer-mismatches` | `3` | Allowed primer errors for paired-primer detection. |
 | `--profiles` | None | Known MLVA profile TSV. |
 | `--database` | None | Per-locus reference sequences for MAFFT alignment, RAxML-NG trees, and EPA-ng placement. |
+| `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
 | `--raxml-model` | `GTR+G` | RAxML-NG nucleotide model used for every locus tree. |
+| `--phylogeny-snp-weight` | `1.0` | Weight of normalized SNP-tree distance in combined marker ranking. |
+| `--phylogeny-repeat-weight` | `1.0` | Weight of normalized tandem-repeat distance in combined marker ranking. |
 
 ## FASTQ filtering
 
@@ -57,15 +60,16 @@ are combined into one trace segment in the report.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `--min-depth` | `10` | Reads required to avoid `LOW_DEPTH`. |
-| `--min-posterior` | `0.75` | Required top repeat-count posterior. |
+| `--min-posterior` | `0.75` | Required top repeat-count probability for FASTQ and assembly calls. |
 
 ## Assembly read support
 
-| Option | Purpose |
-| --- | --- |
-| `--reads FASTQ` | Map reads to extracted products with minimap2. |
-| `--bam BAM_OR_SAM` | Measure support from existing assembly alignments. |
-| `--alignments BAM_OR_SAM` | Alias for `--bam`. |
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--assembly-round-tolerance FRACTION` | `0.25` | Historical rounding tolerance used only in legacy compatibility CSVs. Modern calls use a probabilistic half-unit grid. |
+| `--reads FASTQ` | None | Map reads to extracted products with minimap2. |
+| `--bam BAM_OR_SAM` | None | Measure support from existing assembly alignments. |
+| `--alignments BAM_OR_SAM` | None | Alias for `--bam`. |
 
 `--reads` and `--bam` cannot be used together.
 

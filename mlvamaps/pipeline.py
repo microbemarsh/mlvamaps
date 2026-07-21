@@ -104,6 +104,8 @@ PREDICTION_FIELDS = [
     "deletions_vs_representative",
     "substitutions_vs_representative",
     "evidence_weight",
+    "raw_repeat_count_estimate",
+    "measurement_sigma",
 ]
 
 ALLELE_FIELDS = [
@@ -119,6 +121,7 @@ ALLELE_FIELDS = [
     "num_meaningful_variants",
     "dominant_vntr_asv",
     "dominant_variant_fraction",
+    "allele_distribution",
     "call_status",
 ]
 
@@ -143,6 +146,11 @@ SIMPLE_CALL_FIELDS = [
     "product_size_bp",
     "read_depth",
     "mean_coverage",
+    "allele_confidence",
+    "second_best_repeat_count",
+    "second_best_probability",
+    "inference_method",
+    "allele_distribution",
     "status",
     "evidence",
 ]
@@ -153,8 +161,44 @@ REPEAT_COUNT_FIELDS = [
     "repeat_count",
     "repeat_count_raw",
     "read_depth",
+    "allele_confidence",
     "status",
 ]
+
+ALLELE_DISTRIBUTION_FIELDS = [
+    "sample_id",
+    "locus_id",
+    "allele",
+    "probability",
+    "rank",
+    "selected",
+    "inference_method",
+]
+
+
+def allele_distribution_rows(sample_id: str, call_rows: list[dict]) -> list[dict]:
+    """Expand compact posterior strings into an analysis-friendly long table."""
+    rows = []
+    for call in call_rows:
+        selected = call.get("called_repeat_count", call.get("repeat_count", ""))
+        method = call.get("inference_method", "read_distribution")
+        for rank, entry in enumerate(
+            filter(None, str(call.get("allele_distribution", "")).split(";")),
+            start=1,
+        ):
+            allele, probability = entry.rsplit(":", 1)
+            rows.append(
+                {
+                    "sample_id": sample_id,
+                    "locus_id": call["locus_id"],
+                    "allele": allele,
+                    "probability": probability,
+                    "rank": rank,
+                    "selected": "yes" if str(selected) == allele else "no",
+                    "inference_method": method,
+                }
+            )
+    return rows
 
 
 def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> list[dict]:
@@ -183,6 +227,11 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
                 "product_size_bp": "",
                 "read_depth": read_depth,
                 "mean_coverage": "",
+                "allele_confidence": row.get("posterior_probability", 0.0),
+                "second_best_repeat_count": row.get("second_best_repeat_count", ""),
+                "second_best_probability": row.get("second_best_posterior", 0.0),
+                "inference_method": "read_distribution",
+                "allele_distribution": row.get("allele_distribution", ""),
                 "status": row["call_status"],
                 "evidence": evidence,
             }
@@ -214,6 +263,9 @@ def run_call(
     raxml_ng_bin: str = "raxml-ng",
     epa_ng_bin: str = "epa-ng",
     raxml_model: str = "GTR+G",
+    phylogeny_snp_weight: float = 1.0,
+    phylogeny_repeat_weight: float = 1.0,
+    reference_metadata_path: str | None = None,
     locus_mapping: bool = True,
     min_mapping_quality: int = 0,
     min_base_quality: int = 20,
@@ -358,6 +410,12 @@ def run_call(
     for row in allele_rows:
         row["sample_id"] = sample_id
     write_tsv(allele_rows, outdir_path / "allele_calls.tsv", ALLELE_FIELDS)
+    allele_distribution_path = outdir_path / "allele_probability_distribution.tsv"
+    write_tsv(
+        allele_distribution_rows(sample_id, allele_rows),
+        allele_distribution_path,
+        ALLELE_DISTRIBUTION_FIELDS,
+    )
     simple_call_rows = simple_call_rows_from_alleles(sample_id, allele_rows)
     write_tsv(simple_call_rows, outdir_path / "calls.tsv", SIMPLE_CALL_FIELDS)
     write_tsv(simple_call_rows, outdir_path / "locus_repeat_counts.tsv", REPEAT_COUNT_FIELDS)
@@ -386,14 +444,17 @@ def run_call(
             database_path,
             outdir_path,
             sample_id,
-            {locus.locus_id for locus in loci},
+            loci,
             thread_count,
             mafft_bin=mafft_bin,
             raxml_ng_bin=raxml_ng_bin,
             epa_ng_bin=epa_ng_bin,
             raxml_model=raxml_model,
+            snp_weight=phylogeny_snp_weight,
+            repeat_weight=phylogeny_repeat_weight,
+            reference_metadata_path=reference_metadata_path,
         )
-        phylogenetic_rows = read_profiles(phylogeny_paths["phylogenetic_matches"])
+        phylogenetic_rows = read_profiles(phylogeny_paths["combined_marker_matches"])
     progress.step("Writing HTML report")
     write_report(
         outdir_path,
@@ -416,6 +477,7 @@ def run_call(
         "calls": outdir_path / "calls.tsv",
         "allele_calls": outdir_path / "allele_calls.tsv",
         "repeat_counts": outdir_path / "locus_repeat_counts.tsv",
+        "allele_distribution": allele_distribution_path,
         "asv_table": outdir_path / "vntr_asv_table.tsv",
         "asv_memberships": outdir_path / "vntr_asv_memberships.tsv",
         "asv_representatives": outdir_path / "vntr_asv_representatives.fasta",
