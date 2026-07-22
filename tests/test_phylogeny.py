@@ -138,6 +138,35 @@ pathlib.Path(value('--outdir'), 'epa_result.jplace').write_text(json.dumps(docum
     return executable
 
 
+def _fake_epa_ng_uses_supplied_tree(tmp_path: Path) -> Path:
+    executable = tmp_path / "epa-ng-supplied-tree"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import json, pathlib, re, sys
+if '--version' in sys.argv:
+    print('EPA-ng v0.3.8')
+    raise SystemExit(0)
+args = sys.argv[1:]
+def value(flag): return args[args.index(flag) + 1]
+edge = -1
+def annotate(match):
+    global edge
+    edge += 1
+    return match.group(0) + '{' + str(edge) + '}'
+tree = re.sub(r':[0-9.eE+-]+', annotate, pathlib.Path(value('--tree')).read_text().strip())
+document = {
+    'tree': tree,
+    'placements': [{'p': [[0, -1.0, 1.0, 0.0, 0.0]], 'n': ['QUERY__sample']}],
+    'fields': ['edge_num', 'likelihood', 'like_weight_ratio', 'distal_length', 'pendant_length'],
+    'version': 3,
+}
+pathlib.Path(value('--outdir'), 'epa_result.jplace').write_text(json.dumps(document))
+"""
+    )
+    executable.chmod(0o755)
+    return executable
+
+
 def test_sequence_database_directory_uses_locus_filenames(tmp_path):
     database = tmp_path / "database"
     database.mkdir()
@@ -219,6 +248,7 @@ def test_phylogenetic_placement_ranks_all_locus_distance_sum(tmp_path):
         str(_fake_mafft(tmp_path)),
         str(_fake_raxml_ng(tmp_path)),
         str(_fake_epa_ng(tmp_path)),
+        exact_match_fast_path=False,
     )
     matches = _read_tsv(result["phylogenetic_matches"])
     assert matches[0]["reference_id"] == "R1"
@@ -261,6 +291,112 @@ def test_phylogenetic_placement_reuses_reference_build_trees(
     assert (locus_output / "reference_tree.nwk").read_text() == saved_tree
     assert not (locus_output / "reference.raxml.bestTree").exists()
     assert _read_tsv(result["phylogenetic_status"])[0]["status"] == "PLACED"
+
+
+def test_exact_reference_fast_path_skips_external_placement_tools(
+    tmp_path, monkeypatch
+):
+    locus = Locus(locus_id="L1")
+    database = tmp_path / "database"
+    database.mkdir()
+    (database / "L1.fasta").write_text(
+        ">R1\nAAAA\n>R2\nTTTT\n>R3\nAAAA\n"
+    )
+    index_rows = phylogeny_module.reference_sequence_index_rows(
+        phylogeny_module.read_sequence_database(database, {"L1"}),
+        [locus],
+        database,
+    )
+    phylogeny_module._write_tsv(
+        index_rows,
+        database / "reference_sequence_index.tsv",
+        phylogeny_module.REFERENCE_SEQUENCE_INDEX_FIELDS,
+    )
+    monkeypatch.setattr(
+        phylogeny_module,
+        "read_sequence_database",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("indexed exact lookup must not load the FASTA database")
+        ),
+    )
+
+    result = run_phylogenetic_placement(
+        {"L1": "AAAA"},
+        database,
+        tmp_path / "out",
+        "sample",
+        [locus],
+        1,
+        mafft_bin=str(tmp_path / "mafft-must-not-run"),
+        raxml_ng_bin=str(tmp_path / "raxml-must-not-run"),
+        epa_ng_bin=str(tmp_path / "epa-must-not-run"),
+    )
+
+    combined = _read_tsv(result["combined_marker_matches"])
+    assert [row["reference_id"] for row in combined] == ["R1", "R3"]
+    assert {row["rank"] for row in combined} == {"1"}
+    assert {row["match_status"] for row in combined} == {"EXACT_AMPLICON_MATCH"}
+    assert {row["combined_marker_distance"] for row in combined} == {"0.00000000"}
+    assert _read_tsv(result["phylogenetic_status"])[0]["status"] == "EXACT_AMPLICON_MATCH"
+    assert not (result["phylogeny"] / "L1" / "epa-ng").exists()
+
+
+def test_reference_phylogeny_build_persists_sequence_identity_index(tmp_path):
+    reference_build = tmp_path / "reference_build"
+    database = reference_build / "database"
+    database.mkdir(parents=True)
+    (database / "L1.fasta").write_text(
+        ">R1\nAAAA\n>R2\nAAAA\n>R3\nAAAT\n"
+    )
+
+    result = phylogeny_module.build_reference_phylogenies(
+        database,
+        reference_build / "phylogeny",
+        [Locus(locus_id="L1")],
+        1,
+        min_references=2,
+        mafft_bin=str(_fake_mafft(tmp_path)),
+        raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
+    )
+
+    assert result["sequence_index"] == database / "reference_sequence_index.tsv"
+    index_rows = _read_tsv(result["sequence_index"])
+    assert [row["reference_id"] for row in index_rows] == ["R1", "R2", "R3"]
+    assert all(len(row["amplicon_sha256"]) == 64 for row in index_rows)
+    assert index_rows[0]["amplicon_sha256"] == index_rows[1]["amplicon_sha256"]
+    assert index_rows[0]["amplicon_sha256"] != index_rows[2]["amplicon_sha256"]
+    assert [
+        name
+        for name, _sequence in phylogeny_module._read_fasta(
+            result["phylogeny"] / "L1" / "references.fasta"
+        )
+    ] == ["R1", "R3"]
+    haplotypes = _read_tsv(result["haplotype_groups"])
+    assert [(row["reference_id"], row["haplotype_id"]) for row in haplotypes] == [
+        ("R1", "R1"),
+        ("R2", "R1"),
+        ("R3", "R3"),
+    ]
+
+    placement = run_phylogenetic_placement(
+        {"L1": "AATT"},
+        reference_build,
+        tmp_path / "out",
+        "sample",
+        [Locus(locus_id="L1")],
+        1,
+        mafft_bin=str(_fake_mafft(tmp_path)),
+        raxml_ng_bin=str(tmp_path / "raxml-must-not-run"),
+        epa_ng_bin=str(_fake_epa_ng_uses_supplied_tree(tmp_path)),
+    )
+    distances = {
+        row["reference_id"]: row
+        for row in _read_tsv(placement["phylogenetic_distances"])
+    }
+    assert set(distances) == {"R1", "R2", "R3"}
+    assert distances["R1"]["phylogenetic_distance"] == distances["R2"][
+        "phylogenetic_distance"
+    ]
 
 
 def test_phylogenetic_placement_parallelizes_across_loci(tmp_path, monkeypatch):
@@ -416,6 +552,7 @@ def test_repeat_masking_and_combined_marker_ranking(tmp_path):
         str(_fake_mafft(tmp_path)),
         str(_fake_raxml_ng(tmp_path)),
         str(_fake_epa_ng(tmp_path)),
+        exact_match_fast_path=False,
     )
     marker_rows = _read_tsv(result["marker_components"])
     query_row = next(row for row in marker_rows if row["record_type"] == "query")
@@ -482,6 +619,7 @@ def test_exact_marker_match_overrides_conflicting_epa_ranking(tmp_path):
         str(_fake_mafft(tmp_path)),
         str(_fake_raxml_ng(tmp_path)),
         str(_fake_epa_ng_prefers_r2(tmp_path)),
+        exact_match_fast_path=False,
     )
 
     locus_rows = {

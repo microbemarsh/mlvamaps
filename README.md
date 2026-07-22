@@ -278,6 +278,8 @@ The metadata identifier may be named `reference_id`, `genome_id`, `sample_id`,
 
 - `reference_build/database/LOCUS.fasta`: raw amplicons, one FASTA record per
   reference, suitable for `mlvamaps call --database`;
+- `reference_build/database/reference_sequence_index.tsv`: canonical sequence
+  hashes for the default exact-reference fast path;
 - `reference_build/phylogeny/LOCUS.tree`: a portable Newick tree for each locus;
 - `reference_build/reference_build_manifest.tsv`: extraction and ambiguity QC;
 - `reference_build/database/reference_metadata.tsv`: normalized placement metadata;

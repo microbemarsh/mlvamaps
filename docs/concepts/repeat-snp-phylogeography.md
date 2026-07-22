@@ -6,6 +6,20 @@ changes, and alignment gaps generally do not contribute like substitutions.
 Combining both signals inside one unlabelled tree distance would therefore lose
 biological meaning.
 
+Reference builds persist canonical SHA-256 keys for the oriented unmasked
+amplicon, repeat-masked SNP sequence, and combined SNP/repeat marker. Query
+placement checks these keys first. A reference or tied reference group matching
+at every callable locus receives distance zero and reuses its existing tree
+location without launching MAFFT or EPA-ng. This is the default fast path;
+novel and non-exact queries continue through alignment and phylogenetic
+placement.
+
+Reference-tree construction groups identical repeat-masked SNP sequences and
+uses one deterministic representative ID per haplotype whenever at least two
+distinct haplotypes remain. Placement distances are expanded back to every
+member reference afterward. This removes redundant zero-length tree tips while
+preserving all reference IDs in rankings, metadata joins, and reports.
+
 For loci with defined flanks, MLVAMaps identifies and removes the repeat tract
 before MAFFT reference alignment, RAxML-NG tree inference, and EPA-ng query
 placement. It retains the removed tract as explicit evidence:

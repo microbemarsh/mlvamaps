@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import hashlib
 import json
 import math
 import re
@@ -9,7 +10,7 @@ import shutil
 import statistics
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -117,6 +118,28 @@ CLOSEST_REFERENCE_BAND_FIELDS = [
     "locus_id",
     "product_size_bp",
     "repeat_count",
+]
+
+REFERENCE_SEQUENCE_INDEX_FIELDS = [
+    "index_version",
+    "panel_sha256",
+    "database_signature",
+    "locus_id",
+    "reference_id",
+    "amplicon_sha256",
+    "snp_sha256",
+    "marker_sha256",
+    "product_size_bp",
+    "snp_sequence_length",
+    "repeat_count_raw",
+    "repeat_count",
+]
+
+REFERENCE_HAPLOTYPE_FIELDS = [
+    "locus_id",
+    "haplotype_id",
+    "reference_id",
+    "snp_sha256",
 ]
 
 _FASTA_SUFFIXES = {".fa", ".fas", ".fasta", ".fna", ".ffn"}
@@ -351,6 +374,152 @@ def _aligned_snp_distance(query: str, reference: str) -> float:
         ):
             mismatches += 1
     return mismatches / comparable if comparable else 0.0
+
+
+def _sequence_digest(sequence: str) -> str:
+    return hashlib.sha256(sequence.upper().encode("ascii")).hexdigest()
+
+
+def _marker_digest(components: MarkerComponents) -> str:
+    payload = "\0".join(
+        (
+            components.snp_sequence,
+            components.repeat_sequence,
+            "" if components.repeat_count_raw is None else f"{components.repeat_count_raw:.12g}",
+        )
+    )
+    return _sequence_digest(payload)
+
+
+def _panel_digest(loci: list[Locus]) -> str:
+    payload = json.dumps(
+        [asdict(locus) for locus in sorted(loci, key=lambda item: item.locus_id)],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return _sequence_digest(payload)
+
+
+def _database_stat_digest(database_path: str | Path) -> str:
+    path = Path(database_path)
+    candidates = (
+        sorted(
+            item
+            for item in path.iterdir()
+            if item.is_file() and item.suffix.lower() in _FASTA_SUFFIXES
+        )
+        if path.is_dir()
+        else [path]
+    )
+    payload = "\n".join(
+        f"{item.name}\t{item.stat().st_size}\t{item.stat().st_mtime_ns}"
+        for item in candidates
+    )
+    return _sequence_digest(payload)
+
+
+def reference_sequence_index_rows(
+    references: dict[str, list[tuple[str, str]]],
+    loci: list[Locus],
+    database_path: str | Path | None = None,
+) -> list[dict]:
+    """Build compact canonical identity keys for fast reference lookup."""
+    locus_by_id = {locus.locus_id: locus for locus in loci}
+    panel_sha256 = _panel_digest(loci)
+    database_signature = (
+        _database_stat_digest(database_path) if database_path is not None else ""
+    )
+    rows: list[dict] = []
+    for locus_id in sorted(references):
+        locus = locus_by_id.get(locus_id)
+        if locus is None:
+            continue
+        for reference_id, sequence in references[locus_id]:
+            components = decompose_marker_sequence(locus, sequence)
+            rows.append(
+                {
+                    "index_version": "1",
+                    "panel_sha256": panel_sha256,
+                    "database_signature": database_signature,
+                    "locus_id": locus_id,
+                    "reference_id": reference_id,
+                    "amplicon_sha256": _sequence_digest(components.oriented_sequence),
+                    "snp_sha256": _sequence_digest(components.snp_sequence),
+                    "marker_sha256": _marker_digest(components),
+                    "product_size_bp": len(components.oriented_sequence),
+                    "snp_sequence_length": len(components.snp_sequence),
+                    "repeat_count_raw": ""
+                    if components.repeat_count_raw is None
+                    else f"{components.repeat_count_raw:.6f}",
+                    "repeat_count": ""
+                    if components.repeat_count is None
+                    else components.repeat_count,
+                }
+            )
+    return rows
+
+
+def _read_reference_sequence_index(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if not reader.fieldnames or not set(REFERENCE_SEQUENCE_INDEX_FIELDS).issubset(
+            reader.fieldnames
+        ):
+            return []
+        return [dict(row) for row in reader]
+
+
+def _exact_reference_group(
+    query_sequences: dict[str, str],
+    locus_by_id: dict[str, Locus],
+    index_rows: list[dict[str, str]],
+) -> tuple[str, list[str], list[str], dict[str, MarkerComponents]]:
+    """Return the strongest reference group identical across every callable locus."""
+    rows_by_locus: dict[str, list[dict[str, str]]] = {}
+    for row in index_rows:
+        rows_by_locus.setdefault(str(row["locus_id"]), []).append(row)
+    callable_loci = sorted(
+        locus_id
+        for locus_id, sequence in query_sequences.items()
+        if sequence and locus_id in locus_by_id and locus_id in rows_by_locus
+    )
+    if not callable_loci:
+        return "", [], [], {}
+    query_components = {
+        locus_id: decompose_marker_sequence(locus_by_id[locus_id], query_sequences[locus_id])
+        for locus_id in callable_loci
+    }
+    for match_type, field, query_key in (
+        (
+            "EXACT_AMPLICON_MATCH",
+            "amplicon_sha256",
+            lambda components: _sequence_digest(components.oriented_sequence),
+        ),
+        ("EXACT_MARKER_MATCH", "marker_sha256", _marker_digest),
+    ):
+        matching_references: set[str] | None = None
+        for locus_id in callable_loci:
+            digest = query_key(query_components[locus_id])
+            locus_matches = {
+                str(row["reference_id"])
+                for row in rows_by_locus[locus_id]
+                if row.get(field) == digest
+            }
+            matching_references = (
+                locus_matches
+                if matching_references is None
+                else matching_references & locus_matches
+            )
+        if matching_references:
+            return (
+                match_type,
+                sorted(matching_references),
+                callable_loci,
+                query_components,
+            )
+    return "", [], callable_loci, query_components
 
 
 @dataclass
@@ -1080,6 +1249,229 @@ def read_epa_ng_placement_statistics(
     return best_distances, expected_distances, metadata
 
 
+def _write_exact_match_outputs(
+    outdir: str | Path,
+    sample_id: str,
+    match_type: str,
+    reference_ids: list[str],
+    locus_ids: list[str],
+    locus_by_id: dict[str, Locus],
+    query_components: dict[str, MarkerComponents],
+    index_rows: list[dict[str, str]],
+    reference_metadata: dict[str, dict[str, str]],
+    snp_weight: float,
+    repeat_weight: float,
+    progress: ProgressReporter | None,
+) -> dict[str, Path]:
+    """Write normal placement outputs for a deterministic indexed identity hit."""
+    output = Path(outdir) / "phylogeny"
+    output.mkdir(parents=True, exist_ok=True)
+    row_lookup = {
+        (str(row["locus_id"]), str(row["reference_id"])): row
+        for row in index_rows
+    }
+    query_name = f"QUERY__{_SAFE_FILE.sub('_', sample_id).strip('_') or 'sample'}"
+    detail_rows: list[dict] = []
+    marker_rows: list[dict] = []
+    locus_marker_rows: list[dict] = []
+    status_rows: list[dict] = []
+    for locus_id in locus_ids:
+        components = query_components[locus_id]
+        marker_rows.append(
+            _marker_component_row(
+                sample_id,
+                locus_by_id[locus_id],
+                "query",
+                query_name,
+                components,
+            )
+        )
+        status_rows.append(
+            {
+                "locus_id": locus_id,
+                "reference_sequences": len(reference_ids),
+                "query_sequence": "yes",
+                "status": match_type,
+            }
+        )
+        for reference_id in reference_ids:
+            index_row = row_lookup[(locus_id, reference_id)]
+            marker_rows.append(
+                {
+                    "sample_id": sample_id,
+                    "locus_id": locus_id,
+                    "record_type": "reference",
+                    "reference_id": reference_id,
+                    "repeat_count_raw": index_row.get("repeat_count_raw", ""),
+                    "repeat_count": index_row.get("repeat_count", ""),
+                    "repeat_sequence": "",
+                    "repeat_haplotype": "",
+                    "repeat_region_start": "",
+                    "repeat_region_end": "",
+                    "snp_sequence_length": index_row.get("snp_sequence_length", ""),
+                    "masking_method": "indexed_exact_match",
+                }
+            )
+            detail_rows.append(
+                {
+                    "sample_id": sample_id,
+                    "locus_id": locus_id,
+                    "reference_id": reference_id,
+                    "phylogenetic_distance": "0.00000000",
+                    "likelihood_weighted_phylogenetic_distance": "0.00000000",
+                    "placement_edge": "",
+                    "like_weight_ratio": "1.00000000",
+                    "pendant_length": "0.00000000",
+                    "distal_length": "0.00000000",
+                    "placement_count": 0,
+                    "placement_entropy": "0.00000000",
+                    "reference_tree_scale": "1.00000000",
+                }
+            )
+            reference_count = index_row.get("repeat_count_raw", "")
+            locus_marker_rows.append(
+                {
+                    "sample_id": sample_id,
+                    "locus_id": locus_id,
+                    "reference_id": reference_id,
+                    "query_repeat_count": ""
+                    if components.repeat_count_raw is None
+                    else f"{components.repeat_count_raw:.6f}",
+                    "reference_repeat_count": reference_count,
+                    "repeat_count_delta": "0.000000",
+                    "normalized_repeat_distance": "0.00000000",
+                    "likelihood_weighted_snp_distance": "0.00000000",
+                    "reference_tree_scale": "1.00000000",
+                    "placement_normalized_snp_distance": "0.00000000",
+                    "direct_snp_distance": "0.00000000",
+                    "direct_snp_scale": "1.00000000",
+                    "normalized_direct_snp_distance": "0.00000000",
+                    "exact_snp_match": "yes",
+                    "normalized_snp_distance": "0.00000000",
+                    "placement_entropy": "0.00000000",
+                }
+            )
+
+    detail_path = output / "locus_phylogenetic_distances.tsv"
+    marker_components_path = output / "marker_components.tsv"
+    locus_marker_path = output / "locus_marker_distances.tsv"
+    status_path = output / "locus_status.tsv"
+    _write_tsv(detail_rows, detail_path, PLACEMENT_FIELDS)
+    _write_tsv(marker_rows, marker_components_path, MARKER_COMPONENT_FIELDS)
+    _write_tsv(locus_marker_rows, locus_marker_path, LOCUS_MARKER_DISTANCE_FIELDS)
+    _write_tsv(status_rows, status_path, STATUS_FIELDS)
+
+    summary_rows = [
+        {
+            "sample_id": sample_id,
+            "reference_id": reference_id,
+            "total_phylogenetic_distance": "0.00000000",
+            "total_likelihood_weighted_distance": "0.00000000",
+            "compared_loci": len(locus_ids),
+            "mean_phylogenetic_distance": "0.00000000",
+            "mean_likelihood_weighted_distance": "0.00000000",
+            "distance_gap_to_next": "0.00000000"
+            if index + 1 < len(reference_ids)
+            else "",
+            "relative_distance_gap_to_next": "0.00000000"
+            if index + 1 < len(reference_ids)
+            else "",
+            "rank": 1,
+        }
+        for index, reference_id in enumerate(reference_ids)
+    ]
+    summary_path = output / "phylogenetic_matches.tsv"
+    _write_tsv(summary_rows, summary_path, SUMMARY_FIELDS)
+
+    combined_rows = []
+    for index, reference_id in enumerate(reference_ids):
+        metadata = reference_metadata.get(reference_id, {})
+        combined_rows.append(
+            {
+                "sample_id": sample_id,
+                "reference_id": reference_id,
+                "total_likelihood_weighted_snp_distance": "0.00000000",
+                "total_placement_normalized_snp_distance": "0.00000000",
+                "total_normalized_direct_snp_distance": "0.00000000",
+                "total_normalized_snp_distance": "0.00000000",
+                "total_repeat_count_distance": "0.00000000",
+                "total_normalized_repeat_distance": "0.00000000",
+                "snp_weight": f"{snp_weight:.6f}",
+                "repeat_weight": f"{repeat_weight:.6f}",
+                "combined_marker_distance": "0.00000000",
+                "compared_loci": len(locus_ids),
+                "repeat_compared_loci": sum(
+                    query_components[locus_id].repeat_count_raw is not None
+                    for locus_id in locus_ids
+                ),
+                "exact_snp_loci": len(locus_ids),
+                "exact_marker_loci": len(locus_ids),
+                "match_status": match_type,
+                "ranking_warning": "",
+                "distance_gap_to_next": "0.00000000"
+                if index + 1 < len(reference_ids)
+                else "",
+                "relative_distance_gap_to_next": "0.00000000"
+                if index + 1 < len(reference_ids)
+                else "",
+                "collection_date": metadata.get("collection_date", ""),
+                "latitude": metadata.get("latitude", ""),
+                "longitude": metadata.get("longitude", ""),
+                "location": metadata.get("location", ""),
+                "source": metadata.get("source", ""),
+                "rank": 1,
+            }
+        )
+    combined_path = output / "combined_marker_matches.tsv"
+    _write_tsv(combined_rows, combined_path, COMBINED_MARKER_FIELDS)
+
+    closest_reference_bands_path = output / "closest_reference_bands.tsv"
+    closest_reference_id = reference_ids[0]
+    closest_band_rows = [
+        {
+            "reference_id": closest_reference_id,
+            "locus_id": locus_id,
+            "product_size_bp": row_lookup[(locus_id, closest_reference_id)][
+                "product_size_bp"
+            ],
+            "repeat_count": row_lookup[(locus_id, closest_reference_id)][
+                "repeat_count"
+            ],
+        }
+        for locus_id in locus_ids
+    ]
+    _write_tsv(
+        closest_band_rows,
+        closest_reference_bands_path,
+        CLOSEST_REFERENCE_BAND_FIELDS,
+    )
+
+    query_tree_label = sample_id if sample_id not in reference_ids else query_name
+    tree_labels = [*reference_ids, query_tree_label]
+    combined_tree_path = output / "combined_markers.tree"
+    combined_tree_path.write_text(
+        _neighbor_joining_tree_from_matrix(
+            tree_labels, np.zeros((len(tree_labels), len(tree_labels)), dtype=float)
+        )
+    )
+    if progress is not None:
+        progress.step(
+            f"Resolved {len(reference_ids):,} tied {match_type.lower().replace('_', ' ')} "
+            "reference(s) from the sequence index; skipped MAFFT and EPA-ng"
+        )
+    return {
+        "phylogeny": output,
+        "phylogenetic_distances": detail_path,
+        "phylogenetic_matches": summary_path,
+        "phylogenetic_status": status_path,
+        "marker_components": marker_components_path,
+        "locus_marker_distances": locus_marker_path,
+        "combined_marker_matches": combined_path,
+        "combined_marker_tree": combined_tree_path,
+        "closest_reference_bands": closest_reference_bands_path,
+    }
+
+
 def run_phylogenetic_placement(
     query_sequences: dict[str, str],
     database_path: str | Path,
@@ -1095,6 +1487,7 @@ def run_phylogenetic_placement(
     repeat_weight: float = 1.0,
     reference_metadata_path: str | Path | None = None,
     progress: ProgressReporter | None = None,
+    exact_match_fast_path: bool = True,
 ) -> dict[str, Path]:
     if snp_weight < 0 or repeat_weight < 0 or snp_weight + repeat_weight <= 0:
         raise ValueError("SNP and repeat weights must be non-negative with a positive total")
@@ -1107,12 +1500,71 @@ def run_phylogenetic_placement(
     sequence_database_path, reusable_phylogeny = _resolve_reference_database_layout(
         database_path
     )
-    references = read_sequence_database(sequence_database_path, requested_locus_ids)
+    references: dict[str, list[tuple[str, str]]] | None = None
     if reference_metadata_path is None and sequence_database_path.is_dir():
         automatic_metadata = sequence_database_path / "reference_metadata.tsv"
         if automatic_metadata.exists():
             reference_metadata_path = automatic_metadata
     reference_metadata = read_reference_metadata(reference_metadata_path)
+    if locus_by_id and exact_match_fast_path:
+        sequence_index_path: Path | None = (
+            sequence_database_path / "reference_sequence_index.tsv"
+            if sequence_database_path.is_dir()
+            else None
+        )
+        index_rows = (
+            _read_reference_sequence_index(sequence_index_path)
+            if sequence_index_path is not None
+            else []
+        )
+        if not index_rows:
+            references = read_sequence_database(
+                sequence_database_path, requested_locus_ids
+            )
+            index_rows = reference_sequence_index_rows(
+                references,
+                list(locus_by_id.values()),
+                sequence_database_path,
+            )
+        elif (
+            index_rows[0].get("index_version") != "1"
+            or index_rows[0].get("panel_sha256")
+            != _panel_digest(list(locus_by_id.values()))
+            or index_rows[0].get("database_signature")
+            != _database_stat_digest(sequence_database_path)
+        ):
+            references = read_sequence_database(
+                sequence_database_path, requested_locus_ids
+            )
+            index_rows = reference_sequence_index_rows(
+                references,
+                list(locus_by_id.values()),
+                sequence_database_path,
+            )
+        match_type, exact_references, exact_loci, exact_query_components = (
+            _exact_reference_group(
+                query_sequences,
+                locus_by_id,
+                index_rows,
+            )
+        )
+        if match_type:
+            return _write_exact_match_outputs(
+                outdir,
+                sample_id,
+                match_type,
+                exact_references,
+                exact_loci,
+                locus_by_id,
+                exact_query_components,
+                index_rows,
+                reference_metadata,
+                snp_weight,
+                repeat_weight,
+                progress,
+            )
+    if references is None:
+        references = read_sequence_database(sequence_database_path, requested_locus_ids)
     mafft = check_mafft(mafft_bin)
     epa_ng = check_epa_ng(epa_ng_bin)
     raxml_ng: str | None = None
@@ -1128,6 +1580,7 @@ def run_phylogenetic_placement(
     reference_components_by_locus: dict[str, dict[str, MarkerComponents]] = {}
     reference_distance_matrices: dict[str, tuple[list[str], np.ndarray]] = {}
     direct_snp_distances_by_locus: dict[str, dict[str, float]] = {}
+    placement_members_by_locus: dict[str, dict[str, list[str]]] = {}
     placement_jobs: dict[str, _PlacementJob] = {}
 
     for locus_id in sorted(references):
@@ -1155,10 +1608,38 @@ def run_phylogenetic_placement(
                     )
                 )
                 query_sequence = query_components.snp_sequence
-            locus_references = [
-                (reference_id, reference_components[reference_id].snp_sequence)
+            haplotype_members: dict[str, list[str]] = {}
+            for reference_id, _sequence in locus_references:
+                haplotype_members.setdefault(
+                    reference_components[reference_id].snp_sequence, []
+                ).append(reference_id)
+            if len(haplotype_members) >= 2:
+                placement_members = {
+                    sorted(members)[0]: sorted(members)
+                    for members in haplotype_members.values()
+                }
+                locus_references = [
+                    (
+                        representative,
+                        reference_components[representative].snp_sequence,
+                    )
+                    for representative in sorted(placement_members)
+                ]
+            else:
+                placement_members = {
+                    reference_id: [reference_id]
+                    for reference_id, _sequence in locus_references
+                }
+                locus_references = [
+                    (reference_id, reference_components[reference_id].snp_sequence)
+                    for reference_id, _sequence in locus_references
+                ]
+            placement_members_by_locus[locus_id] = placement_members
+        else:
+            placement_members_by_locus[locus_id] = {
+                reference_id: [reference_id]
                 for reference_id, _sequence in locus_references
-            ]
+            }
         if query_sequence and any(reference_id == query_name for reference_id, _sequence in references[locus_id]):
             raise ValueError(
                 f"Reference id {query_name!r} is reserved for the query sequence"
@@ -1199,6 +1680,19 @@ def run_phylogenetic_placement(
             _copy_reference_artifact(reusable_alignment, reference_alignment)
             _copy_reference_artifact(reusable_tree, reference_tree)
             _copy_reference_artifact(reusable_model, reference_model)
+            reusable_names = {name for name, _sequence in _read_fasta(reference_alignment)}
+            placement_members = placement_members_by_locus[locus_id]
+            if reusable_names == {
+                reference_id for reference_id, _sequence in references[locus_id]
+            }:
+                placement_members_by_locus[locus_id] = {
+                    reference_id: [reference_id] for reference_id in reusable_names
+                }
+            elif reusable_names != set(placement_members):
+                raise RuntimeError(
+                    f"Reusable reference alignment for {locus_id} has tip identifiers "
+                    "that do not match either the raw references or collapsed SNP haplotypes"
+                )
         else:
             _run_mafft(
                 build_mafft_reference_command(reference_fasta, threads, mafft),
@@ -1307,23 +1801,39 @@ def run_phylogenetic_placement(
         ) = read_epa_ng_placement_statistics(jplace_path)
         with Path(jplace_path).open() as jplace_handle:
             jplace_tree = _parse_newick(str(json.load(jplace_handle)["tree"]))
-        reference_distance_matrices[locus_id] = _tip_patristic_distance_matrix(
-            jplace_tree
-        )
-        expected_references = {reference_id for reference_id, _sequence in references[locus_id]}
-        if set(placement_distances) != expected_references:
-            missing = sorted(expected_references - set(placement_distances))
-            unexpected = sorted(set(placement_distances) - expected_references)
+        tree_names, tree_distance_matrix = _tip_patristic_distance_matrix(jplace_tree)
+        placement_members = placement_members_by_locus[locus_id]
+        expected_tree_references = set(placement_members)
+        if set(placement_distances) != expected_tree_references:
+            missing = sorted(expected_tree_references - set(placement_distances))
+            unexpected = sorted(set(placement_distances) - expected_tree_references)
             raise RuntimeError(
                 f"EPA-ng tree/reference mismatch for {locus_id}: missing={missing}, unexpected={unexpected}"
             )
+        representative_by_reference = {
+            reference_id: representative
+            for representative, members in placement_members.items()
+            for reference_id in members
+        }
+        raw_reference_names = sorted(representative_by_reference)
+        tree_indexes = {name: index for index, name in enumerate(tree_names)}
+        representative_indexes = np.asarray(
+            [tree_indexes[representative_by_reference[name]] for name in raw_reference_names],
+            dtype=np.intp,
+        )
+        reference_distance_matrices[locus_id] = (
+            raw_reference_names,
+            tree_distance_matrix[
+                np.ix_(representative_indexes, representative_indexes)
+            ],
+        )
         aligned_records = dict(_read_fasta(placement_jobs[locus_id].placed_alignment))
         aligned_query = aligned_records.get(query_name)
         if aligned_query is None:
             raise RuntimeError(
                 f"MAFFT placement alignment for {locus_id} lacks query {query_name!r}"
             )
-        missing_aligned_references = expected_references - set(aligned_records)
+        missing_aligned_references = expected_tree_references - set(aligned_records)
         if missing_aligned_references:
             raise RuntimeError(
                 f"MAFFT placement alignment for {locus_id} lacks references: "
@@ -1331,29 +1841,31 @@ def run_phylogenetic_placement(
             )
         direct_snp_distances_by_locus[locus_id] = {
             reference_id: _aligned_snp_distance(
-                aligned_query, aligned_records[reference_id]
+                aligned_query,
+                aligned_records[representative_by_reference[reference_id]],
             )
-            for reference_id in expected_references
+            for reference_id in raw_reference_names
         }
-        for reference_id, distance in placement_distances.items():
-            detail_rows.append(
-                {
-                    "sample_id": sample_id,
-                    "locus_id": locus_id,
-                    "reference_id": reference_id,
-                    "phylogenetic_distance": f"{distance:.8f}",
-                    "likelihood_weighted_phylogenetic_distance": (
-                        f"{expected_placement_distances[reference_id]:.8f}"
-                    ),
-                    "placement_edge": placement_metadata["placement_edge"],
-                    "like_weight_ratio": f'{placement_metadata["like_weight_ratio"]:.8f}',
-                    "pendant_length": f'{placement_metadata["pendant_length"]:.8f}',
-                    "distal_length": f'{placement_metadata["distal_length"]:.8f}',
-                    "placement_count": placement_metadata["placement_count"],
-                    "placement_entropy": f'{placement_metadata["placement_entropy"]:.8f}',
-                    "reference_tree_scale": f'{placement_metadata["reference_tree_scale"]:.8f}',
-                }
-            )
+        for representative, distance in placement_distances.items():
+            for reference_id in placement_members[representative]:
+                detail_rows.append(
+                    {
+                        "sample_id": sample_id,
+                        "locus_id": locus_id,
+                        "reference_id": reference_id,
+                        "phylogenetic_distance": f"{distance:.8f}",
+                        "likelihood_weighted_phylogenetic_distance": (
+                            f"{expected_placement_distances[representative]:.8f}"
+                        ),
+                        "placement_edge": placement_metadata["placement_edge"],
+                        "like_weight_ratio": f'{placement_metadata["like_weight_ratio"]:.8f}',
+                        "pendant_length": f'{placement_metadata["pendant_length"]:.8f}',
+                        "distal_length": f'{placement_metadata["distal_length"]:.8f}',
+                        "placement_count": placement_metadata["placement_count"],
+                        "placement_entropy": f'{placement_metadata["placement_entropy"]:.8f}',
+                        "reference_tree_scale": f'{placement_metadata["reference_tree_scale"]:.8f}',
+                    }
+                )
         placed_loci.append(locus_id)
         status_rows.append(
             {
@@ -1840,12 +2352,24 @@ def build_reference_phylogenies(
         raise ValueError("min_references must be at least 2")
     locus_by_id = {locus.locus_id: locus for locus in loci}
     references = read_sequence_database(database_path, set(locus_by_id))
-    mafft = check_mafft(mafft_bin)
-    raxml_ng = check_raxml_ng(raxml_ng_bin)
     output = Path(outdir)
     output.mkdir(parents=True, exist_ok=True)
+    database = Path(database_path)
+    sequence_index_path = (
+        database / "reference_sequence_index.tsv"
+        if database.is_dir()
+        else output / "reference_sequence_index.tsv"
+    )
+    _write_tsv(
+        reference_sequence_index_rows(references, loci, database),
+        sequence_index_path,
+        REFERENCE_SEQUENCE_INDEX_FIELDS,
+    )
+    mafft = check_mafft(mafft_bin)
+    raxml_ng = check_raxml_ng(raxml_ng_bin)
     status_rows: list[dict] = []
     component_rows: list[dict] = []
+    haplotype_rows: list[dict] = []
 
     sorted_locus_ids = sorted(locus_by_id)
     for locus_number, locus_id in enumerate(sorted_locus_ids, start=1):
@@ -1854,11 +2378,50 @@ def build_reference_phylogenies(
         locus_dir = output / safe_locus
         portable_tree = output / f"{safe_locus}.tree"
         portable_tree.unlink(missing_ok=True)
+        components_by_reference = {
+            reference_id: decompose_marker_sequence(locus_by_id[locus_id], sequence)
+            for reference_id, sequence in records
+        }
+        haplotype_members: dict[str, list[str]] = {}
+        for reference_id, components in components_by_reference.items():
+            haplotype_members.setdefault(components.snp_sequence, []).append(reference_id)
+            component_rows.append(
+                _marker_component_row(
+                    "REFERENCE_DATABASE",
+                    locus_by_id[locus_id],
+                    "reference",
+                    reference_id,
+                    components,
+                )
+            )
+        use_collapsed_haplotypes = len(haplotype_members) >= 2
+        masked_records: list[tuple[str, str]] = []
+        for snp_sequence, members in sorted(
+            haplotype_members.items(), key=lambda item: sorted(item[1])[0]
+        ):
+            sorted_members = sorted(members)
+            representative = sorted_members[0]
+            for reference_id in sorted_members:
+                haplotype_rows.append(
+                    {
+                        "locus_id": locus_id,
+                        "haplotype_id": representative,
+                        "reference_id": reference_id,
+                        "snp_sha256": _sequence_digest(snp_sequence),
+                    }
+                )
+            if use_collapsed_haplotypes:
+                masked_records.append((representative, snp_sequence))
+            else:
+                masked_records.extend(
+                    (reference_id, snp_sequence) for reference_id in sorted_members
+                )
         if len(records) < min_references:
             status_rows.append(
                 {
                     "locus_id": locus_id,
                     "reference_sequences": len(records),
+                    "tree_haplotypes": len(masked_records),
                     "status": "INSUFFICIENT_REFERENCES",
                     "tree": "",
                 }
@@ -1871,22 +2434,9 @@ def build_reference_phylogenies(
         if progress is not None:
             progress.step(
                 f"Building tree for {locus_id} ({locus_number}/{len(sorted_locus_ids)}; "
-                f"{len(records):,} references)"
+                f"{len(records):,} references, {len(masked_records):,} SNP haplotypes)"
             )
         locus_dir.mkdir(parents=True, exist_ok=True)
-        masked_records: list[tuple[str, str]] = []
-        for reference_id, sequence in records:
-            components = decompose_marker_sequence(locus_by_id[locus_id], sequence)
-            masked_records.append((reference_id, components.snp_sequence))
-            component_rows.append(
-                _marker_component_row(
-                    "REFERENCE_DATABASE",
-                    locus_by_id[locus_id],
-                    "reference",
-                    reference_id,
-                    components,
-                )
-            )
         reference_fasta = locus_dir / "references.fasta"
         alignment = locus_dir / "references.aligned.fasta"
         tree = locus_dir / "reference_tree.nwk"
@@ -1909,6 +2459,7 @@ def build_reference_phylogenies(
             {
                 "locus_id": locus_id,
                 "reference_sequences": len(records),
+                "tree_haplotypes": len(masked_records),
                 "status": "BUILT",
                 "tree": str(portable_tree),
             }
@@ -1920,16 +2471,20 @@ def build_reference_phylogenies(
 
     status_path = output / "reference_tree_status.tsv"
     components_path = output / "reference_marker_components.tsv"
+    haplotypes_path = output / "reference_haplotype_groups.tsv"
     _write_tsv(
         status_rows,
         status_path,
-        ["locus_id", "reference_sequences", "status", "tree"],
+        ["locus_id", "reference_sequences", "tree_haplotypes", "status", "tree"],
     )
     _write_tsv(component_rows, components_path, MARKER_COMPONENT_FIELDS)
+    _write_tsv(haplotype_rows, haplotypes_path, REFERENCE_HAPLOTYPE_FIELDS)
     return {
         "phylogeny": output,
         "tree_status": status_path,
         "marker_components": components_path,
+        "sequence_index": sequence_index_path,
+        "haplotype_groups": haplotypes_path,
     }
 
 

@@ -19,12 +19,14 @@
 | --- | --- |
 | `database/LOCUS.fasta` | Unmasked extracted reference amplicons in the format accepted by `--database`. |
 | `database/reference_metadata.tsv` | Metadata normalized to a `reference_id` key. |
+| `database/reference_sequence_index.tsv` | Canonical amplicon, repeat-masked SNP, and complete marker SHA-256 keys used by the default exact-match fast path. |
 | `reference_build_manifest.tsv` | Per-reference/locus product counts, selected product, primer errors, and exclusion status. |
 | `phylogeny/LOCUS.tree` | Portable Newick SNP tree for the locus. |
 | `phylogeny/LOCUS/references.aligned.fasta` | Repeat-masked MAFFT alignment used for tree inference. |
 | `phylogeny/LOCUS/reference.mlvamaps.raxml.log` | Full RAxML-NG output for every attempted thread count. |
 | `phylogeny/reference_tree_status.tsv` | Tree completion or insufficient-reference status for every panel locus. |
 | `phylogeny/reference_marker_components.tsv` | Retained repeat measurements and the masking method for each reference marker. |
+| `phylogeny/reference_haplotype_groups.tsv` | Mapping from every reference ID to the representative repeat-masked SNP haplotype used as a tree tip. Identical SNP haplotypes are collapsed when at least two distinct haplotypes remain. |
 | `myoga_metadata.csv` | Metadata with a `genome_id` column matching Newick tip labels. |
 
 ## Optional phylogenetic placement outputs
@@ -49,6 +51,12 @@ highest-likelihood-weight placement distance and the expected distance across
 all candidate placements, weighted by normalized likelihood weight ratios.
 Ranking uses the likelihood-weighted sum and reports its gap to the next
 reference.
+
+Before launching alignment or placement, MLVAMaps checks the persistent sequence
+index. A query matching the same reference or tied reference group at every
+callable locus is reported with zero distance and status `EXACT_AMPLICON_MATCH`
+or `EXACT_MARKER_MATCH`; MAFFT, RAxML-NG, and EPA-ng are skipped for that query.
+Non-exact queries continue through the alignment and EPA-ng workflow below.
 
 | File | Meaning |
 | --- | --- |
