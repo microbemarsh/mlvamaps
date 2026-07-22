@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .assembly_call import run_assembly_call
+from .assembly_call import ASSEMBLY_ALGORITHMS, run_assembly_call
 from .concurrency import DEFAULT_THREADS
 from .in_silico_pcr import run_amplirust
 from .io import open_text
@@ -164,13 +164,23 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--min-read-length", type=int, default=50)
     call.add_argument("--max-read-length", type=int, default=100000)
     call.add_argument("--min-qscore", type=float, default=0.0)
-    call.add_argument("--max-primer-mismatches", type=int, default=3)
+    call.add_argument("--max-primer-mismatches", type=int, default=2)
+    call.add_argument(
+        "--algorithm",
+        "--assembly-algorithm",
+        choices=ASSEMBLY_ALGORITHMS,
+        default="legacy",
+        help=(
+            "FASTA allele caller: exact historical MLVA_finder rules or the "
+            "depth-aware probabilistic caller (default: %(default)s)"
+        ),
+    )
     call.add_argument(
         "--assembly-round-tolerance",
         type=_round_tolerance,
         default=0.25,
         metavar="FRACTION",
-        help="Legacy CSV integer tolerance; modern calls use probabilistic half-unit states (default: %(default)s)",
+        help="Legacy integer-rounding tolerance (default: %(default)s)",
     )
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
@@ -439,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
                 database_path=args.database,
                 max_primer_mismatches=args.max_primer_mismatches,
                 assembly_round_tolerance=args.assembly_round_tolerance,
+                algorithm=args.algorithm,
                 min_posterior=args.min_posterior,
                 threads=args.threads,
                 minimap2_preset=args.minimap2_preset,

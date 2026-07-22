@@ -12,6 +12,7 @@ from mlvamaps.assembly_call import (
     _primer_match_display,
     assembly_call_rows,
     build_minimap2_command,
+    legacy_amplicon_bounds,
     read_alignment_depth,
     read_minimap2_depth,
     run_assembly_call,
@@ -573,7 +574,7 @@ def test_assembly_call_from_primer_products(tmp_path):
     distribution = read_tsv(result["allele_distribution"])
     assert distribution[0]["allele"] == "6.5"
     assert distribution[0]["selected"] == "yes"
-    assert distribution[0]["inference_method"] == "depth_weighted_product_distribution"
+    assert distribution[0]["inference_method"] == "legacy_minimum_allele"
 
 
 def test_legacy_rounding_and_mismatch_round_product_selection():
@@ -613,7 +614,7 @@ def test_legacy_rounding_and_mismatch_round_product_selection():
             "product_size_bp": 45,
         },
     ]
-    row = assembly_call_rows([locus], products, "S1")[0]
+    row = assembly_call_rows([locus], products, "S1", algorithm="novel")[0]
     assert row["evidence"] == "perfect-large-allele"
     assert row["repeat_count_raw"] == "6.25"
     assert row["repeat_count"] == 6
@@ -648,11 +649,96 @@ def test_depth_distribution_selects_supported_assembly_allele():
         "allele5": {"mapped_reads": 2, "mean_coverage": 2.0},
         "allele6": {"mapped_reads": 18, "mean_coverage": 18.0},
     }
-    row = assembly_call_rows([locus], products, "S1", support)[0]
+    row = assembly_call_rows([locus], products, "S1", support, algorithm="novel")[0]
     assert row["repeat_count"] == 6
     assert row["evidence"] == "allele6"
     assert row["inference_method"] == "depth_weighted_product_distribution"
     assert row["allele_confidence"] > 0.85
+
+
+def test_legacy_algorithm_is_default_and_uses_upstream_selection_order():
+    locus = Locus(
+        locus_id="VNTR",
+        forward_primer="AAAA",
+        reverse_primer="TTTT",
+        repeat_unit_length_bp=4,
+        expected_product_size_bp=40,
+        nominal_repeat_units=5,
+    )
+    products = [
+        {
+            "locus_id": "VNTR",
+            "product_id": "allele6",
+            "primer_error_round": 0,
+            "forward_mismatches": 0,
+            "reverse_mismatches": 0,
+            "size_derived_repeat_count": "6",
+            "product_size_bp": 44,
+        },
+        {
+            "locus_id": "VNTR",
+            "product_id": "allele5.25",
+            "primer_error_round": 0,
+            "forward_mismatches": 0,
+            "reverse_mismatches": 0,
+            "size_derived_repeat_count": "5.25",
+            "product_size_bp": 41,
+        },
+        {
+            "locus_id": "VNTR",
+            "product_id": "better-size-but-later-error-round",
+            "primer_error_round": 1,
+            "forward_mismatches": 1,
+            "reverse_mismatches": 0,
+            "size_derived_repeat_count": "2",
+            "product_size_bp": 28,
+        },
+    ]
+
+    row = assembly_call_rows([locus], products, "S1")[0]
+
+    assert row["evidence"] == "allele5.25"
+    assert row["repeat_count_raw"] == "5.25"
+    assert row["repeat_count"] == 5.5
+    assert row["inference_method"] == "legacy_minimum_allele"
+
+
+def test_legacy_search_bounds_cover_all_upstream_eligible_alleles():
+    locus = Locus(
+        locus_id="VNTR",
+        forward_primer="AAAA",
+        reverse_primer="TTTT",
+        repeat_unit_length_bp=4,
+        expected_product_size_bp=40,
+        nominal_repeat_units=5,
+        expected_amplicon_min_bp=20,
+        expected_amplicon_max_bp=80,
+    )
+
+    assert legacy_amplicon_bounds([locus]) == (1, 419)
+
+
+def test_legacy_wide_output_uses_upstream_short_locus_names(tmp_path):
+    from mlvamaps.assembly_call import write_legacy_assembly_outputs
+
+    locus = Locus(
+        locus_id="Lp03_96bp_941bp_8U",
+        forward_primer="AAAA",
+        reverse_primer="TTTT",
+        repeat_unit_length_bp=96,
+        expected_product_size_bp=941,
+        nominal_repeat_units=8,
+    )
+    paths = write_legacy_assembly_outputs(
+        tmp_path,
+        [locus],
+        [],
+        assembly_call_rows([locus], [], "sample"),
+        "sample",
+    )
+
+    rows = list(csv.reader(paths["legacy_fingerprint"].open()))
+    assert rows[0] == ["key", "Access_number", "Lp03"]
 
 
 def test_fastq_read_distribution_can_call_half_allele():
@@ -776,6 +862,13 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.min_snp_depth == 3
     assert default_call_args.min_snp_alternate_reads == 2
     assert default_call_args.min_snp_frequency == 0.2
+    assert default_call_args.algorithm == "legacy"
+    assert default_call_args.max_primer_mismatches == 2
+
+    novel_call_args = parser.parse_args(
+        ["call", "primers.tsv", "assembly.fasta", "--algorithm", "novel"]
+    )
+    assert novel_call_args.algorithm == "novel"
 
     extract_args = parser.parse_args(["extract-amplicons", "--input", "assembly.fasta", "--primers", "p.tsv"])
     assert extract_args.threads == 32

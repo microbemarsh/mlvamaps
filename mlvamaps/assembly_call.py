@@ -32,7 +32,7 @@ from .pipeline import (
 from .progress import ProgressReporter
 from .profile_matching import build_fingerprint, match_profiles
 from .phylogeny import run_phylogenetic_placement
-from .primers import read_loci_or_primers
+from .primers import LEGACY_NAME_RE, read_loci_or_primers
 from .novelty import score_novelty
 from .report import write_assembly_report
 
@@ -55,6 +55,8 @@ AMPLICON_FIELDS = [
 ]
 
 READ_SUPPORT_FIELDS = ["product_id", "locus_id", "mapped_reads", "mean_coverage"]
+
+ASSEMBLY_ALGORITHMS = ("legacy", "novel")
 
 LEGACY_DETAIL_FIELDS = [
     "strain",
@@ -160,10 +162,43 @@ def _format_float(value: float | None, digits: int = 3) -> str:
     return f"{value:.{digits}f}".rstrip("0").rstrip(".")
 
 
+def legacy_amplicon_bounds(loci: list[Locus]) -> tuple[int, int]:
+    """Return global Amplirust bounds covering every MLVA_finder-valid hit."""
+    bounds = []
+    for locus in loci:
+        repeat_bp = repeat_unit_length(locus)
+        if repeat_bp and locus.expected_product_size_bp and locus.nominal_repeat_units:
+            lower_exclusive = locus.expected_product_size_bp - repeat_bp * (
+                locus.nominal_repeat_units + 100
+            )
+            upper_exclusive = locus.expected_product_size_bp + repeat_bp * (
+                100 - locus.nominal_repeat_units
+            )
+            lower = max(1, math.floor(lower_exclusive) + 1)
+            upper = max(lower, math.ceil(upper_exclusive) - 1)
+        else:
+            lower = max(1, locus.expected_amplicon_min_bp)
+            upper = max(lower, locus.expected_amplicon_max_bp or 100000)
+        bounds.append((lower, upper))
+    if not bounds:
+        return (1, 100000)
+    return min(lower for lower, _ in bounds), max(upper for _, upper in bounds)
+
+
+def _product_in_locus_bounds(product: dict, locus: Locus) -> bool:
+    product_size = int(product["product_size_bp"])
+    minimum = locus.expected_amplicon_min_bp or len(locus.forward_primer) + len(
+        locus.reverse_primer
+    )
+    maximum = locus.expected_amplicon_max_bp or 100000
+    return minimum <= product_size <= maximum
+
+
 def amplirust_rows_to_products(
     rows: list[dict[str, str | int]],
     loci: list[Locus],
     sample_id: str,
+    enforce_locus_bounds: bool = True,
 ) -> list[dict]:
     """Convert Amplirust output into MLVAMaps assembly-product records."""
     locus_by_id = {locus.locus_id: locus for locus in loci}
@@ -176,7 +211,7 @@ def amplirust_rows_to_products(
         product_size = int(row["full_len"])
         min_len = locus.expected_amplicon_min_bp or len(locus.forward_primer) + len(locus.reverse_primer)
         max_len = locus.expected_amplicon_max_bp or 100000
-        if not min_len <= product_size <= max_len:
+        if enforce_locus_bounds and not min_len <= product_size <= max_len:
             continue
         contig = str(row["reference_id"]).split()[0]
         contig_start = int(row["original_start"]) + 1
@@ -426,7 +461,90 @@ def _finalize_product_depth(
     }
 
 
-def assembly_call_rows(
+def _not_found_row(sample_id: str, locus_id: str) -> dict:
+    return {
+        "sample_id": sample_id,
+        "locus_id": locus_id,
+        "present": "no",
+        "repeat_count": "",
+        "repeat_count_raw": "",
+        "product_size_bp": "",
+        "read_depth": 0,
+        "mean_coverage": "",
+        "status": "NOT_FOUND",
+        "evidence": "primer pair not found in assembly",
+    }
+
+
+def legacy_assembly_call_rows(
+    loci: list[Locus],
+    products: list[dict],
+    sample_id: str,
+    round_tolerance: float = 0.25,
+    read_support: dict[str, dict[str, float]] | None = None,
+) -> list[dict]:
+    """Call assembly alleles with MLVA_finder's historical decision rules.
+
+    The original script searched successively larger per-primer mismatch
+    rounds.  Within the first successful round it retained the product with
+    the smallest unrounded allele value (preserving discovery order for an
+    exact tie), rejected values of 100 or greater, and only then rounded.
+    """
+    read_support = read_support or {}
+    products_by_locus: dict[str, list[dict]] = {}
+    for product in products:
+        products_by_locus.setdefault(product["locus_id"], []).append(product)
+
+    rows = []
+    for locus in loci:
+        eligible = []
+        for product in products_by_locus.get(locus.locus_id, []):
+            raw_count = estimate_repeat_count_from_product_length(
+                locus, int(product["product_size_bp"])
+            )
+            if raw_count is not None and raw_count < 100:
+                eligible.append((product, raw_count))
+        if not eligible:
+            rows.append(_not_found_row(sample_id, locus.locus_id))
+            continue
+
+        first_error_round = min(
+            int(product["primer_error_round"]) for product, _ in eligible
+        )
+        product, raw_count = min(
+            (
+                (product, raw_count)
+                for product, raw_count in eligible
+                if int(product["primer_error_round"]) == first_error_round
+            ),
+            key=lambda item: item[1],
+        )
+        called_count = legacy_round_repeat_count(raw_count, round_tolerance)
+        support_probability = 1.0
+        support = read_support.get(product["product_id"], {})
+        rows.append(
+            {
+                "sample_id": sample_id,
+                "locus_id": locus.locus_id,
+                "present": "yes",
+                "repeat_count": called_count,
+                "repeat_count_raw": _format_float(raw_count),
+                "product_size_bp": product["product_size_bp"],
+                "read_depth": int(support.get("mapped_reads", 0)),
+                "mean_coverage": _format_float(support.get("mean_coverage")),
+                "allele_confidence": support_probability,
+                "second_best_repeat_count": "",
+                "second_best_probability": 0.0,
+                "inference_method": "legacy_minimum_allele",
+                "allele_distribution": f"{called_count}:{support_probability:.6f}",
+                "status": "PASS",
+                "evidence": product["product_id"],
+            }
+        )
+    return rows
+
+
+def novel_assembly_call_rows(
     loci: list[Locus],
     products: list[dict],
     sample_id: str,
@@ -442,22 +560,13 @@ def assembly_call_rows(
 
     rows = []
     for locus in loci:
-        locus_products = products_by_locus.get(locus.locus_id, [])
+        locus_products = [
+            product
+            for product in products_by_locus.get(locus.locus_id, [])
+            if _product_in_locus_bounds(product, locus)
+        ]
         if not locus_products:
-            rows.append(
-                {
-                    "sample_id": sample_id,
-                    "locus_id": locus.locus_id,
-                    "present": "no",
-                    "repeat_count": "",
-                    "repeat_count_raw": "",
-                    "product_size_bp": "",
-                    "read_depth": 0,
-                    "mean_coverage": "",
-                    "status": "NOT_FOUND",
-                    "evidence": "primer pair not found in assembly",
-                }
-            )
+            rows.append(_not_found_row(sample_id, locus.locus_id))
             continue
 
         legacy_ranked = sorted(
@@ -576,6 +685,32 @@ def assembly_call_rows(
     return rows
 
 
+def assembly_call_rows(
+    loci: list[Locus],
+    products: list[dict],
+    sample_id: str,
+    read_support: dict[str, dict[str, float]] | None = None,
+    min_posterior: float = 0.75,
+    algorithm: str = "legacy",
+    round_tolerance: float = 0.25,
+) -> list[dict]:
+    """Dispatch to the selected assembly allele-calling algorithm."""
+    if algorithm == "legacy":
+        return legacy_assembly_call_rows(
+            loci,
+            products,
+            sample_id,
+            round_tolerance=round_tolerance,
+            read_support=read_support,
+        )
+    if algorithm == "novel":
+        return novel_assembly_call_rows(
+            loci, products, sample_id, read_support, min_posterior
+        )
+    choices = ", ".join(ASSEMBLY_ALGORITHMS)
+    raise ValueError(f"unknown assembly algorithm {algorithm!r}; choose one of: {choices}")
+
+
 def legacy_detail_rows(
     loci: list[Locus],
     products: list[dict],
@@ -657,7 +792,15 @@ def write_legacy_assembly_outputs(
         writer.writeheader()
         writer.writerows(details)
 
-    locus_ids = [locus.locus_id for locus in loci]
+    # MLVA_finder shortened encoded names (for example
+    # ``Lp03_96bp_941bp_8U``) to their first underscore-delimited field in
+    # the wide analysis tables, while retaining the full name in output.csv.
+    locus_ids = [
+        locus.locus_id.split("_", 1)[0]
+        if LEGACY_NAME_RE.match(locus.locus_id)
+        else locus.locus_id
+        for locus in loci
+    ]
     with fingerprint_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(["key", "Access_number", *locus_ids])
@@ -719,8 +862,9 @@ def run_assembly_call(
     alignments_path: str | None = None,
     profiles_path: str | None = None,
     database_path: str | None = None,
-    max_primer_mismatches: int = 3,
+    max_primer_mismatches: int = 2,
     assembly_round_tolerance: float = 0.25,
+    algorithm: str = "legacy",
     min_posterior: float = 0.75,
     threads: int = DEFAULT_THREADS,
     minimap2_preset: str | None = None,
@@ -753,11 +897,13 @@ def run_assembly_call(
         max_errors=max_primer_mismatches,
         threads=threads,
         executable=amplirust_bin,
+        amplicon_bounds=legacy_amplicon_bounds(loci),
     )
     products = amplirust_rows_to_products(
         read_amplirust_results(amplirust_paths["stats"], amplirust_paths["products"]),
         loci,
         sample_id,
+        enforce_locus_bounds=False,
     )
     progress.step(f"Found {len(products):,} primer product(s)")
     write_tsv(products, outdir_path / "assembly_amplicons.tsv", AMPLICON_FIELDS)
@@ -804,6 +950,8 @@ def run_assembly_call(
         sample_id,
         read_support,
         min_posterior,
+        algorithm,
+        assembly_round_tolerance,
     )
     write_tsv(call_rows, calls_path, SIMPLE_CALL_FIELDS)
     write_tsv(call_rows, outdir_path / "locus_repeat_counts.tsv", REPEAT_COUNT_FIELDS)
@@ -828,8 +976,11 @@ def run_assembly_call(
     write_tsv(novelty_rows, outdir_path / "novelty_scores.tsv", NOVELTY_FIELDS)
     # Re-run product selection without depth so the comparison files retain
     # historical mismatch-round behavior even when modern calls use support.
-    legacy_call_rows = assembly_call_rows(
-        loci, products, sample_id, min_posterior=min_posterior
+    legacy_call_rows = legacy_assembly_call_rows(
+        loci,
+        products,
+        sample_id,
+        round_tolerance=assembly_round_tolerance,
     )
     legacy_paths = write_legacy_assembly_outputs(
         outdir_path,

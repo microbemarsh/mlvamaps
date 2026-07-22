@@ -143,6 +143,7 @@ def run_amplirust_loci(
     trim_primers: bool = False,
     max_n_fraction: float = 0.0,
     executable: str = "amplirust",
+    amplicon_bounds: tuple[int, int] | None = None,
 ) -> dict[str, Path]:
     """Run Amplirust for an already-loaded MLVA panel."""
     if shutil.which(executable) is None:
@@ -160,7 +161,7 @@ def run_amplirust_loci(
     # Seed empty outputs so zero-hit runs and reruns cannot expose stale results.
     output_fasta.write_text("")
     stats_tsv.write_text("\t".join(AMPLIRUST_TSV_FIELDS) + "\n")
-    min_len, max_len = expected_amplicon_bounds(loci)
+    min_len, max_len = amplicon_bounds or expected_amplicon_bounds(loci)
     command = build_amplirust_command(
         input_path=input_path,
         primers_path=primers_path,

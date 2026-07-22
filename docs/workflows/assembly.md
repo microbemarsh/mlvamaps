@@ -9,8 +9,9 @@ mlvamaps call primers.tsv assembly.fasta -o results
 ## 1. Find paired-primer products
 
 Amplirust searches both assembly orientations with degenerate-primer and
-primer-error support. MLVAMaps filters circular-wrap records and products
-outside the locus-specific amplicon range.
+primer-error support. MLVAMaps filters circular-wrap records and uses the
+historical raw-allele limit for discovery. Novel calling still enforces each
+locus's configured amplicon range before selecting a product.
 
 This stage returns:
 
@@ -19,28 +20,31 @@ This stage returns:
 - `assembly_amplicons.fasta`: extracted products.
 - Native evidence under `amplirust/`.
 
-If several products are found for a locus, the compact call first uses the
-lowest successful primer-error round, matching the legacy search. Within that
-round it prefers the smallest derived allele, then total primer errors, product
-size, and a stable product ID. This preserves historical calls while removing
-the old contig-order dependence. All accepted products remain available in the
-amplicon table.
+The default `--algorithm legacy` path reproduces MLVA_finder's decision rule:
+it uses the lowest successful primer-error round and retains the smallest raw
+allele in that round. Equal values preserve discovery order, as in the original
+script. `--algorithm novel` selects the probabilistic caller described below.
+All accepted products remain available in the amplicon table.
 
 ## 2. Estimate repeat count
 
-MLVAMaps converts product size to repeat count when the panel provides
+Both algorithms convert product size to repeat count when the panel provides
 repeat-unit length, nominal repeat units, and expected product size. It retains
-the raw estimate and evaluates it against explicit integer and half-unit allele
-states. The reported probability reflects distance from those states at the
-locus's repeat-unit resolution. Exact midpoint ties remain `AMBIGUOUS` instead
-of being resolved by an arbitrary rounding rule. `--min-posterior` controls
-the confidence required for both FASTQ and assembly calls.
+the raw estimate. The default legacy algorithm applies MLVA_finder's strict
+integer tolerance (configured with `--assembly-round-tolerance`) and otherwise
+uses the intervening half allele.
 
-When FASTQ or BAM support is supplied and the assembly contains multiple
-accepted products for a locus, mapped-read counts weight the product-length
-distribution. This lets the supported allele win rather than defaulting to the
-smallest legacy allele. `--assembly-round-tolerance` now affects only the
-legacy comparison CSVs.
+With `--algorithm novel`, MLVAMaps evaluates the raw estimate against explicit
+integer and half-unit allele states. The reported probability reflects distance
+from those states at the locus's repeat-unit resolution. Exact midpoint ties
+remain `AMBIGUOUS` instead of being resolved by an arbitrary rounding rule.
+`--min-posterior` controls the novel caller's required confidence.
+
+In novel mode, when FASTQ or BAM support is supplied and the assembly contains
+multiple accepted products for a locus, mapped-read counts weight the
+product-length distribution. This lets the supported allele win rather than
+defaulting to the smallest legacy allele. Legacy mode records depth for its
+selected product but does not allow depth to change the historical call.
 
 Assembly statuses:
 

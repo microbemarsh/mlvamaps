@@ -16,7 +16,7 @@ Reads with more edits receive less weight. These records are written to
 
 ## Locus posterior
 
-The caller evaluates each unrounded read measurement against an explicit
+The novel caller evaluates each unrounded read measurement against an explicit
 half-unit allele grid with a Gaussian error model. Read quality, primer/flank
 agreement, and representative-alignment identity control the contribution of
 each read. The normalized sum is an abundance-like allele probability

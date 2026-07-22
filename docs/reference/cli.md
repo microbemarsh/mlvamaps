@@ -10,7 +10,7 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | `--sample-id` | Input filename | Sample identifier. |
 | `-t`, `--threads` | `32` | Worker/native threads; `0` uses all CPUs. |
 | `--quiet` | Off | Suppress live progress. |
-| `--max-primer-mismatches` | `3` | Allowed primer errors for paired-primer detection. |
+| `--max-primer-mismatches` | `2` | Allowed primer errors for paired-primer detection, matching MLVA_finder's default. |
 | `--profiles` | None | Known MLVA profile TSV. |
 | `--database` | None | Per-locus reference sequences for MAFFT alignment, RAxML-NG trees, and EPA-ng placement. |
 | `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
@@ -66,7 +66,8 @@ are combined into one trace segment in the report.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--assembly-round-tolerance FRACTION` | `0.25` | Historical rounding tolerance used only in legacy compatibility CSVs. Modern calls use a probabilistic half-unit grid. |
+| `--algorithm {legacy,novel}` | `legacy` | Assembly allele caller. `legacy` reproduces MLVA_finder product selection and rounding; `novel` uses the depth-aware probabilistic half-unit model. |
+| `--assembly-round-tolerance FRACTION` | `0.25` | Integer tolerance for the legacy algorithm and compatibility CSVs. |
 | `--reads FASTQ` | None | Map reads to extracted products with minimap2. |
 | `--bam BAM_OR_SAM` | None | Measure support from existing assembly alignments. |
 | `--alignments BAM_OR_SAM` | None | Alias for `--bam`. |
