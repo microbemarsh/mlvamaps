@@ -58,11 +58,13 @@ If the EPA/tree-only score would rank a complete exact marker match below
 another reference, `combined_marker_matches.tsv` records
 `EXACT_MATCH_OVERRIDES_PLACEMENT` and the HTML report displays a warning. Tied
 exact references are indistinguishable by the marker panel. For assembly
-queries, MLVAmapS then searches the precomputed whole-genome skani database and
-orders that tied group by ANI, minimum aligned fraction, and maximum aligned
-fraction. The marker distance remains zero, and references with identical skani
-values retain the same rank. Read-only amplicon queries remain tied because no
-query whole genome is available.
+queries, MLVAMapS first checks a canonical whole-genome SHA-256 that ignores
+FASTA headers, contig order, and contig orientation. Remaining ties are compared
+with MUMmer4 `dnadiff` and ordered by total whole-genome SNPs, indel bases,
+minimum one-to-one aligned fraction, and maximum aligned fraction. The marker
+distance remains zero, and references with identical whole-genome values retain
+the same rank. Read-only amplicon queries remain tied because no query whole
+genome is available.
 
 Combined ranking requires every candidate reference to be present at all placed
 loci and to have repeat information wherever the query has a repeat call. This

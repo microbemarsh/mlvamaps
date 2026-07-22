@@ -5,7 +5,7 @@ from pathlib import Path
 
 from mlvamaps.reference_builder import build_reference_database
 
-from test_phylogeny import _fake_mafft, _fake_raxml_ng, _fake_skani
+from test_phylogeny import _fake_mafft, _fake_raxml_ng
 
 
 def _rows(path: Path, delimiter: str = "\t") -> list[dict[str, str]]:
@@ -63,7 +63,6 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
         threads=1,
         min_references_per_tree=2,
         mafft_bin=str(_fake_mafft(tmp_path)),
-        skani_bin=str(_fake_skani(tmp_path)),
         raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
     )
 
@@ -72,8 +71,8 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
     assert (result["phylogeny"] / "L1" / "reference_tree.nwk").exists()
     assert (result["phylogeny"] / "L2" / "reference_tree.nwk").exists()
     assert (result["phylogeny"] / "L1.tree").exists()
-    assert result["skani_database"].is_dir()
     assert len(_rows(result["reference_assemblies"])) == 3
+    assert _rows(result["reference_assemblies"])[0]["assembly_sha256"]
     manifest = _rows(result["manifest"])
     ambiguous = [row for row in manifest if row["reference_id"] == "R3" and row["locus_id"] == "L2"]
     assert ambiguous[0]["status"] == "AMBIGUOUS_EXCLUDED"
@@ -125,7 +124,6 @@ def test_reference_extraction_uses_multiple_processes_and_reports_progress(
         threads=2,
         min_references_per_tree=2,
         mafft_bin=str(_fake_mafft(tmp_path)),
-        skani_bin=str(_fake_skani(tmp_path)),
         raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
         show_progress=True,
     )

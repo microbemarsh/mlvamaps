@@ -20,8 +20,7 @@
 | `database/LOCUS.fasta` | Unmasked extracted reference amplicons in the format accepted by `--database`. |
 | `database/reference_metadata.tsv` | Metadata normalized to a `reference_id` key. |
 | `database/reference_sequence_index.tsv` | Canonical amplicon, repeat-masked SNP, and complete marker SHA-256 keys used by the default exact-match fast path. |
-| `database/reference_assemblies.tsv` | Reference-ID to source-assembly mapping used to interpret whole-genome search results. |
-| `skani/` | Precomputed searchable skani database for assembly-query tie breaking. |
+| `database/reference_assemblies.tsv` | Reference-ID, source-assembly path, and canonical whole-genome SHA-256 used for assembly-query tie breaking. |
 | `reference_build_manifest.tsv` | Per-reference/locus product counts, selected product, primer errors, and exclusion status. |
 | `phylogeny/LOCUS.tree` | Portable Newick SNP tree for the locus. |
 | `phylogeny/LOCUS/references.aligned.fasta` | Repeat-masked MAFFT alignment used for tree inference. |
@@ -69,8 +68,8 @@ fast path, and the query continues through the alignment and EPA-ng workflow.
 | `phylogeny/phylogenetic_matches.tsv` | Complete references ranked by likelihood-weighted summed distance across all placed loci, with raw best-placement sums and rank gaps. |
 | `phylogeny/marker_components.tsv` | Query and reference repeat counts, repeat-unit haplotypes, masking coordinates, and SNP-sequence lengths. |
 | `phylogeny/locus_marker_distances.tsv` | Per-locus EPA/tree SNP distance, direct aligned SNP divergence, exact-match status, hybrid normalized SNP distance, and explicit repeat-count distance for every reference. |
-| `phylogeny/combined_marker_matches.tsv` | References ranked by the configurable weighted sum of identity-aware hybrid SNP and repeat distances. Exact assembly-query ties are secondarily ranked by skani ANI and aligned fraction, reported in dedicated columns without changing the marker distance. |
-| `phylogeny/skani_tie_break.tsv` | Interpreted ANI and aligned-fraction results for tied exact references; written only when an assembly query requires the whole-genome tie break. |
+| `phylogeny/combined_marker_matches.tsv` | References ranked by the configurable weighted sum of identity-aware hybrid SNP and repeat distances. Exact assembly-query ties are secondarily ranked by canonical genome identity, MUMmer4 `dnadiff` SNPs, indel bases, and one-to-one aligned fraction without changing the marker distance. |
+| `phylogeny/whole_genome_dnadiff.tsv` | Interpreted whole-genome identity, SNP, indel, and alignment-coverage results for tied exact references. Individual MUMmer reports are retained under `phylogeny/dnadiff/`. |
 | `phylogeny/closest_reference_bands.tsv` | Exact per-locus amplicon sizes and repeat calls for the top combined-marker reference (or top SNP-tree match when repeat-aware ranking is unavailable), used for the reference lane in the generated gel. |
 | `phylogeny/combined_markers.tree` | MYOGA-compatible Newick neighbor-joining tree inferred from the combined normalized SNP-plus-repeat distance matrix. Tip labels are reference IDs plus the query sample ID. |
 

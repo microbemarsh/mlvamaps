@@ -115,29 +115,22 @@ pathlib.Path(value('--outdir'), 'epa_result.jplace').write_text(json.dumps(docum
     return executable
 
 
-def _fake_skani(tmp_path: Path) -> Path:
-    executable = tmp_path / "skani"
+def _fake_dnadiff(tmp_path: Path) -> Path:
+    executable = tmp_path / "dnadiff"
     executable.write_text(
         """#!/usr/bin/env python3
 import pathlib, sys
 if '--version' in sys.argv:
-    print('skani 0.3.1')
+    print('dnadiff 1.3')
     raise SystemExit(0)
 args = sys.argv[1:]
-if args[0] == 'sketch':
-    output = pathlib.Path(args[args.index('-o') + 1])
-    output.mkdir(parents=True)
-    references = args[1:args.index('-o')]
-    (output / 'fake_references.tsv').write_text('\\n'.join(references) + '\\n')
-elif args[0] == 'search':
-    database = pathlib.Path(args[args.index('-d') + 1])
-    output = pathlib.Path(args[args.index('-o') + 1])
-    query = args[args.index('-d') + 2]
-    rows = ['Ref_file\\tQuery_file\\tANI\\tAlign_fraction_ref\\tAlign_fraction_query\\tRef_name\\tQuery_name']
-    for reference in (database / 'fake_references.tsv').read_text().splitlines():
-        ani = '100.00' if pathlib.Path(reference).stem == 'R3' else '99.90'
-        rows.append(f'{reference}\\t{query}\\t{ani}\\t99.00\\t98.00\\tref\\tquery')
-    output.write_text('\\n'.join(rows) + '\\n')
+prefix = pathlib.Path(args[args.index('-p') + 1])
+prefix.parent.mkdir(parents=True, exist_ok=True)
+pathlib.Path(str(prefix) + '.report').write_text(
+    '[Sequences]\\nTotalSeqs 1 1\\n[Bases]\\nTotalBases 5 5\\n'
+    'AlignedBases 5(100.00%) 5(100.00%)\\n[SNPs]\\n'
+    'TotalSNPs 1 1\\nTotalIndels 0 0\\n'
+)
 """
     )
     executable.chmod(0o755)
@@ -391,7 +384,7 @@ def test_exact_reference_label_requires_every_panel_locus():
     assert locus_ids == []
 
 
-def test_exact_amplicon_ties_use_skani_whole_genome_ani(tmp_path):
+def test_exact_amplicon_ties_use_dnadiff_whole_genome_snps(tmp_path):
     locus = Locus(locus_id="L1")
     build = tmp_path / "reference"
     database = build / "database"
@@ -414,16 +407,21 @@ def test_exact_amplicon_ties_use_skani_whole_genome_ani(tmp_path):
     query.write_text(">query\nAAAAA\n")
     phylogeny_module._write_tsv(
         [
-            {"reference_id": "R1", "assembly_file": str(r1.resolve())},
-            {"reference_id": "R3", "assembly_file": str(r3.resolve())},
+            {
+                "reference_id": "R1",
+                "assembly_file": str(r1.resolve()),
+                "assembly_sha256": phylogeny_module.canonical_assembly_digest(r1),
+            },
+            {
+                "reference_id": "R3",
+                "assembly_file": str(r3.resolve()),
+                "assembly_sha256": phylogeny_module.canonical_assembly_digest(r3),
+            },
         ],
         database / "reference_assemblies.tsv",
         phylogeny_module.REFERENCE_ASSEMBLY_FIELDS,
     )
-    fake_skani = _fake_skani(tmp_path)
-    phylogeny_module.build_skani_reference_database(
-        [("R1", r1), ("R3", r3)], build / "skani", 1, str(fake_skani)
-    )
+    fake_dnadiff = _fake_dnadiff(tmp_path)
 
     result = run_phylogenetic_placement(
         {"L1": "AAAA"},
@@ -433,19 +431,28 @@ def test_exact_amplicon_ties_use_skani_whole_genome_ani(tmp_path):
         [locus],
         1,
         query_assembly_path=query,
-        skani_bin=str(fake_skani),
+        dnadiff_bin=str(fake_dnadiff),
     )
 
     combined = _read_tsv(result["combined_marker_matches"])
     assert [row["reference_id"] for row in combined] == ["R3", "R1"]
     assert [row["rank"] for row in combined] == ["1", "2"]
-    assert [row["whole_genome_ani"] for row in combined] == [
-        "100.00000000",
-        "99.90000000",
-    ]
+    assert [row["whole_genome_exact_match"] for row in combined] == ["yes", "no"]
+    assert [row["whole_genome_snps"] for row in combined] == ["0", "1"]
     assert {row["combined_marker_distance"] for row in combined} == {"0.00000000"}
     assert {row["tie_break_status"] for row in combined} == {"APPLIED"}
-    assert result["skani_tie_break"].exists()
+    assert result["whole_genome_dnadiff"].exists()
+
+
+def test_canonical_assembly_digest_ignores_headers_order_and_orientation(tmp_path):
+    first = tmp_path / "first.fa"
+    second = tmp_path / "second.fa"
+    first.write_text(">alpha\nAAGC\n>beta\nTTAA\n")
+    second.write_text(">renamed_beta\nTTAA\n>renamed_alpha\nGCTT\n")
+
+    assert phylogeny_module.canonical_assembly_digest(
+        first
+    ) == phylogeny_module.canonical_assembly_digest(second)
 
 
 def test_reference_phylogeny_build_persists_sequence_identity_index(tmp_path):

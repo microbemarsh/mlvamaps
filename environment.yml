@@ -11,7 +11,7 @@ dependencies:
   - mafft
   - raxml-ng
   - epa-ng
-  - skani>=0.3
+  - mummer4
   - numpy>=1.24
   - parasail-python>=1.3.4
   - pysam

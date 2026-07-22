@@ -16,8 +16,8 @@ Current packaging assumptions:
   binding powers native in-silico PCR and bounded flank localization.
 - `parasail` supplies exact global tracebacks used to reconstruct per-read
   substitutions and indels against each observed cluster representative.
-- `skani>=0.3` pre-sketches reference assemblies and supplies whole-genome ANI
-  and aligned-fraction tie breaking for exact marker matches.
+- `mummer4` supplies `dnadiff` whole-genome SNP, indel, and one-to-one aligned
+  fraction comparisons for exact marker ties.
 - `pysam`/htslib handles FASTA, FASTQ, SAM, and BAM parsing, while NumPy moves
   quality, motif, and repeat-likelihood reductions out of Python loops.
 - Release source should use a stable GitHub archive URL for a tag, with a

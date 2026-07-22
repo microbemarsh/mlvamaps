@@ -11,7 +11,7 @@ from .models import Locus
 from .phylogeny import (
     REFERENCE_ASSEMBLY_FIELDS,
     build_reference_phylogenies,
-    build_skani_reference_database,
+    canonical_assembly_digest,
 )
 from .primers import read_loci_or_primers
 from .progress import ProgressReporter
@@ -231,7 +231,6 @@ def build_reference_database(
     amplirust_bin: str = "amplirust",
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
-    skani_bin: str = "skani",
     raxml_model: str = "DNA",
     show_progress: bool = False,
 ) -> dict[str, Path]:
@@ -372,7 +371,11 @@ def build_reference_database(
     reference_assemblies_path = database_dir / "reference_assemblies.tsv"
     _write_tsv(
         [
-            {"reference_id": reference_id, "assembly_file": str(assembly.resolve())}
+            {
+                "reference_id": reference_id,
+                "assembly_file": str(assembly.resolve()),
+                "assembly_sha256": canonical_assembly_digest(assembly),
+            }
             for reference_id, assembly, _row in matched
         ],
         reference_assemblies_path,
@@ -385,13 +388,6 @@ def build_reference_database(
         writer.writeheader()
         writer.writerows(myoga_metadata)
 
-    progress.step("Pre-sketching whole reference assemblies with skani")
-    skani_database_path = build_skani_reference_database(
-        [(reference_id, assembly) for reference_id, assembly, _row in matched],
-        output / "skani",
-        thread_count,
-        executable=skani_bin,
-    )
     progress.step("Building per-locus reference alignments and trees")
     tree_paths = build_reference_phylogenies(
         database_dir,
@@ -412,6 +408,5 @@ def build_reference_database(
         "myoga_metadata": output / "myoga_metadata.csv",
         "manifest": output / "reference_build_manifest.tsv",
         "reference_assemblies": reference_assemblies_path,
-        "skani_database": skani_database_path,
         **tree_paths,
     }

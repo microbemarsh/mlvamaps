@@ -53,7 +53,7 @@ The environment includes
 [MAFFT](https://mafft.cbrc.jp/alignment/software/),
 [RAxML-NG](https://github.com/amkozlov/raxml-ng),
 [EPA-ng](https://github.com/pierrebarbera/epa-ng),
-[skani](https://github.com/bluenote-1577/skani), and the Python/native
+[MUMmer4](https://github.com/mummer4/mummer), and the Python/native
 sequence libraries declared in `environment.yml`.
 
 ## Quick start
@@ -129,7 +129,9 @@ and fixed RAxML-NG reference tree/model; callable query loci also retain an EPA-
 `.jplace` result. Rich panels additionally mask the tandem-repeat tract from
 the SNP tree, preserve repeat count and repeat-unit haplotype separately, and
 rank the combined normalized evidence in
-`phylogeny/combined_marker_matches.tsv`. Optional dated/geocoded reference
+`phylogeny/combined_marker_matches.tsv`. For assembly queries, exact marker
+ties are resolved by canonical whole-genome identity followed by MUMmer4
+`dnadiff` SNPs, indel bases, and one-to-one aligned fraction. Optional dated/geocoded reference
 metadata can be joined to `phylogeny/combined_markers.tree` in MYOGA.
 
 FASTQ runs additionally provide native primer-pair evidence under
@@ -281,10 +283,8 @@ The metadata identifier may be named `reference_id`, `genome_id`, `sample_id`,
   reference, suitable for `mlvamaps call --database`;
 - `reference_build/database/reference_sequence_index.tsv`: canonical sequence
   hashes for the default exact-reference fast path;
-- `reference_build/database/reference_assemblies.tsv`: stable reference-ID to
-  whole-genome assembly mapping;
-- `reference_build/skani/`: precomputed whole-genome sketches used to resolve
-  exact-marker ties for assembly queries;
+- `reference_build/database/reference_assemblies.tsv`: stable reference-ID,
+  whole-genome assembly path, and canonical assembly SHA-256;
 - `reference_build/phylogeny/LOCUS.tree`: a portable Newick tree for each locus;
 - `reference_build/reference_build_manifest.tsv`: extraction and ambiguity QC;
 - `reference_build/database/reference_metadata.tsv`: normalized placement metadata;
@@ -318,7 +318,7 @@ mlvamaps extract-amplicons \
 mlvamaps uses 32 threads by default. Pass `-t N` or `--threads N`;
 `--threads 0` uses all available CPUs. Use `--quiet` to suppress progress.
 External executables can be overridden with `--vsearch-bin`, `--minimap2-bin`,
-`--mafft-bin`, `--raxml-ng-bin`, `--epa-ng-bin`, and `--skani-bin`.
+`--mafft-bin`, `--raxml-ng-bin`, `--epa-ng-bin`, and `--dnadiff-bin`.
 RAxML-NG uses its `DNA` model-selection set by default to choose a nucleotide
 model independently for each locus; override it with `--raxml-model`.
 

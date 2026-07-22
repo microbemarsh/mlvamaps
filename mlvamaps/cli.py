@@ -239,10 +239,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="EPA-ng executable for fixed-tree query placement (default: %(default)s)",
     )
     call.add_argument(
-        "--skani-bin",
-        default="skani",
+        "--dnadiff-bin",
+        default="dnadiff",
         metavar="PATH",
-        help="skani executable for assembly whole-genome tie breaking (default: %(default)s)",
+        help="MUMmer dnadiff executable for assembly whole-genome SNP tie breaking (default: %(default)s)",
     )
     call.add_argument(
         "--raxml-model",
@@ -385,7 +385,6 @@ def build_parser() -> argparse.ArgumentParser:
     reference.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
     reference.add_argument("--mafft-bin", default="mafft")
     reference.add_argument("--raxml-ng-bin", default="raxml-ng")
-    reference.add_argument("--skani-bin", default="skani")
     reference.add_argument(
         "--raxml-model",
         default="DNA",
@@ -476,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
                 mafft_bin=args.mafft_bin,
                 raxml_ng_bin=args.raxml_ng_bin,
                 epa_ng_bin=args.epa_ng_bin,
-                skani_bin=args.skani_bin,
+                dnadiff_bin=args.dnadiff_bin,
                 raxml_model=args.raxml_model,
                 phylogeny_snp_weight=args.phylogeny_snp_weight,
                 phylogeny_repeat_weight=args.phylogeny_repeat_weight,
@@ -541,7 +540,6 @@ def main(argv: list[str] | None = None) -> int:
             amplirust_bin=args.amplirust_bin,
             mafft_bin=args.mafft_bin,
             raxml_ng_bin=args.raxml_ng_bin,
-            skani_bin=args.skani_bin,
             raxml_model=args.raxml_model,
             show_progress=not args.quiet,
         )

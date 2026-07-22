@@ -24,9 +24,9 @@ Current backend policy:
   and reference-relative SNP evidence.
 - `minimap2` also maps accurate reads to extracted assembly products for depth
   support. `pysam` handles existing SAM/BAM support supplied by the user.
-- `skani>=0.3` builds a reusable whole-genome sketch database during reference
-  construction and searches it only when an assembly query has tied exact
-  marker matches.
+- MUMmer4 `dnadiff` performs exact whole-genome alignments only when an assembly
+  query has tied exact marker matches. Independent tied-reference comparisons
+  share the configured worker pool.
 
 Default threading policy:
 
