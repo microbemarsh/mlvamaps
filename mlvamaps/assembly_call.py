@@ -1086,7 +1086,7 @@ def run_assembly_call(
             if row.get("evidence") in product_by_id
         }
         progress.step(
-            "Building RAxML-NG reference trees and placing assembly loci with EPA-ng"
+            "Placing assembly loci with EPA-ng using reusable reference trees when available"
         )
         phylogeny_paths = run_phylogenetic_placement(
             query_sequences,

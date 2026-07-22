@@ -91,13 +91,18 @@ Place each callable query locus in fixed reference trees:
 
 ```bash
 mlvamaps call primers.tsv sample.fastq.gz \
-  --database reference_sequences \
+  --database reference_build \
   --profiles profiles.tsv
 ```
 
-The recommended sequence database is a directory containing one FASTA per
-locus. Filename stems must match panel locus IDs, and FASTA headers must use the
-same reference IDs across loci:
+The recommended database is the top-level output from `mlvamaps
+build-reference`. MLVAMaps reuses its fixed reference alignments, trees, and
+selected models, then runs only MAFFT query addition and EPA-ng placement. The
+`reference_build/database` subdirectory is also accepted.
+
+For a sequence-only database, use a directory containing one FASTA per locus.
+Filename stems must match panel locus IDs, and FASTA headers must use the same
+reference IDs across loci:
 
 ```text
 reference_sequences/VNTR_01.fasta
@@ -116,7 +121,7 @@ Results are written to `results/` by default. Start with:
 
 With `--database`, `phylogeny/phylogenetic_matches.tsv` ranks complete
 references by summed distance. Every database locus retains its MAFFT alignment
-and RAxML-NG reference tree/model; callable query loci also retain an EPA-ng
+and fixed RAxML-NG reference tree/model; callable query loci also retain an EPA-ng
 `.jplace` result. Rich panels additionally mask the tandem-repeat tract from
 the SNP tree, preserve repeat count and repeat-unit haplotype separately, and
 rank the combined normalized evidence in

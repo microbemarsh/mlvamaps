@@ -202,6 +202,40 @@ def test_phylogenetic_placement_ranks_all_locus_distance_sum(tmp_path):
     assert (result["phylogeny"] / "L1" / "epa-ng" / "epa_result.jplace").exists()
 
 
+@pytest.mark.parametrize("use_build_root", [True, False])
+def test_phylogenetic_placement_reuses_reference_build_trees(
+    tmp_path, use_build_root
+):
+    reference_build = tmp_path / "reference_build"
+    database = reference_build / "database"
+    reference_locus = reference_build / "phylogeny" / "L1"
+    database.mkdir(parents=True)
+    reference_locus.mkdir(parents=True)
+    references = ">R1\nAAAA\n>R2\nTTTT\n"
+    (database / "L1.fasta").write_text(references)
+    (reference_locus / "references.aligned.fasta").write_text(references)
+    saved_tree = "(R1:0.25,R2:1.0);\n"
+    (reference_locus / "reference_tree.nwk").write_text(saved_tree)
+    (reference_locus / "reference.raxml.bestModel").write_text("GTR+G\n")
+
+    result = run_phylogenetic_placement(
+        {"L1": "AAAA"},
+        reference_build if use_build_root else database,
+        tmp_path / ("root-out" if use_build_root else "database-out"),
+        "sample",
+        {"L1"},
+        2,
+        str(_fake_mafft(tmp_path)),
+        str(tmp_path / "raxml-must-not-run"),
+        str(_fake_epa_ng(tmp_path)),
+    )
+
+    locus_output = result["phylogeny"] / "L1"
+    assert (locus_output / "reference_tree.nwk").read_text() == saved_tree
+    assert not (locus_output / "reference.raxml.bestTree").exists()
+    assert _read_tsv(result["phylogenetic_status"])[0]["status"] == "PLACED"
+
+
 def test_missing_query_still_builds_reference_tree(tmp_path):
     database = tmp_path / "database"
     database.mkdir()

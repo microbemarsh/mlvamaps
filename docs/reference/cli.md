@@ -12,9 +12,9 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | `--quiet` | Off | Suppress live progress. |
 | `--max-primer-mismatches` | `2` | Allowed primer errors for paired-primer detection, matching MLVA_finder's default. |
 | `--profiles` | None | Known MLVA profile TSV. |
-| `--database` | None | Per-locus reference sequences for MAFFT alignment, RAxML-NG trees, and EPA-ng placement. |
+| `--database` | None | Reference-build directory whose fixed trees are reused, or a sequence-only database built on demand. |
 | `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
-| `--raxml-model` | `DNA` | RAxML-NG model-selection set used independently for every locus tree. |
+| `--raxml-model` | `DNA` | Model-selection set when a sequence-only database requires new locus trees; ignored for reusable trees. |
 | `--phylogeny-snp-weight` | `1.0` | Weight of normalized SNP-tree distance in combined marker ranking. |
 | `--phylogeny-repeat-weight` | `1.0` | Weight of normalized tandem-repeat distance in combined marker ranking. |
 

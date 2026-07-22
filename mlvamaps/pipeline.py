@@ -436,7 +436,7 @@ def run_call(
     phylogenetic_rows: list[dict] = []
     if database_path:
         progress.step(
-            "Building RAxML-NG reference trees and placing MAFFT-aligned queries with EPA-ng"
+            "Placing MAFFT-aligned queries with EPA-ng using reusable reference trees when available"
         )
         phylogeny_paths = run_phylogenetic_placement(
             dominant_read_query_sequences(features, asv_rows),

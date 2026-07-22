@@ -30,10 +30,12 @@
 ## Optional phylogenetic placement outputs
 
 When `--database` is supplied, `phylogeny/` contains one directory per reference
-locus. Each directory has the raw references, MAFFT reference alignment,
-RAxML-NG reference search files and best-tree Newick, and—when a query locus
+locus. Each directory has the raw references, fixed MAFFT reference alignment,
+RAxML-NG tree/model artifacts, and—when a query locus
 was callable—the query FASTA, MAFFT `--add --keeplength` alignment, query-only
-aligned FASTA, and EPA-ng `epa_result.jplace`. By default, RAxML-NG selects a
+aligned FASTA, and EPA-ng `epa_result.jplace`. Artifacts from a reference-build
+database are copied without rerunning RAxML-NG. For sequence-only databases
+that lack reusable trees, RAxML-NG selects a
 model independently for each locus from its `DNA` set; this can be changed with
 `--raxml-model`. EPA-ng consumes the optimized
 RAxML-NG `.bestModel` file and places the query without changing the reference

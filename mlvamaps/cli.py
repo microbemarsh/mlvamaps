@@ -145,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--profiles")
     call.add_argument(
         "--database",
-        help="Per-locus reference sequence database for MAFFT alignment and phylogenetic placement",
+        help="Reference-build directory or per-locus sequence database for phylogenetic placement",
     )
     call.add_argument(
         "--reference-metadata",

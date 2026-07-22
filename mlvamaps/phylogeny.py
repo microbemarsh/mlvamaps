@@ -584,6 +584,27 @@ def read_sequence_database(
     return by_locus
 
 
+def _resolve_reference_database_layout(
+    database_path: str | Path,
+) -> tuple[Path, Path | None]:
+    """Resolve sequence data and optional reusable trees from a reference build."""
+    path = Path(database_path)
+    bundled_database = path / "database"
+    bundled_phylogeny = path / "phylogeny"
+    if path.is_dir() and bundled_database.is_dir():
+        return bundled_database, bundled_phylogeny if bundled_phylogeny.is_dir() else None
+    sibling_phylogeny = path.parent / "phylogeny"
+    if path.is_dir() and path.name == "database" and sibling_phylogeny.is_dir():
+        return path, sibling_phylogeny
+    return path, None
+
+
+def _copy_reference_artifact(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() != destination.resolve():
+        shutil.copyfile(source, destination)
+
+
 def read_reference_metadata(path: str | Path | None) -> dict[str, dict[str, str]]:
     if path is None:
         return {}
@@ -989,15 +1010,18 @@ def run_phylogenetic_placement(
         else {}
     )
     requested_locus_ids = set(locus_by_id) if locus_by_id else set(locus_ids)
-    references = read_sequence_database(database_path, requested_locus_ids)
-    if reference_metadata_path is None and Path(database_path).is_dir():
-        automatic_metadata = Path(database_path) / "reference_metadata.tsv"
+    sequence_database_path, reusable_phylogeny = _resolve_reference_database_layout(
+        database_path
+    )
+    references = read_sequence_database(sequence_database_path, requested_locus_ids)
+    if reference_metadata_path is None and sequence_database_path.is_dir():
+        automatic_metadata = sequence_database_path / "reference_metadata.tsv"
         if automatic_metadata.exists():
             reference_metadata_path = automatic_metadata
     reference_metadata = read_reference_metadata(reference_metadata_path)
     mafft = check_mafft(mafft_bin)
-    raxml_ng = check_raxml_ng(raxml_ng_bin)
     epa_ng = check_epa_ng(epa_ng_bin)
+    raxml_ng: str | None = None
     output = Path(outdir) / "phylogeny"
     output.mkdir(parents=True, exist_ok=True)
     detail_rows: list[dict] = []
@@ -1056,23 +1080,49 @@ def run_phylogenetic_placement(
         query_alignment = locus_dir / "query.aligned.fasta"
         epa_outdir = locus_dir / "epa-ng"
         _write_fasta(locus_references, reference_fasta)
-        _run_mafft(
-            build_mafft_reference_command(reference_fasta, threads, mafft),
-            reference_alignment,
-            f"reference alignment for {locus_id}",
-        )
-        _run_raxml_ng(
-            build_raxml_ng_command(
+        if reusable_phylogeny is not None:
+            reusable_locus_dir = reusable_phylogeny / safe_locus
+            reusable_alignment = reusable_locus_dir / "references.aligned.fasta"
+            reusable_tree = reusable_locus_dir / "reference_tree.nwk"
+            reusable_model = reusable_locus_dir / "reference.raxml.bestModel"
+            missing_artifacts = [
+                path
+                for path in (reusable_alignment, reusable_tree, reusable_model)
+                if not path.is_file()
+            ]
+            if missing_artifacts:
+                status_rows.append(
+                    {
+                        "locus_id": locus_id,
+                        "reference_sequences": len(references[locus_id]),
+                        "query_sequence": "yes" if query_sequence else "no",
+                        "status": "REFERENCE_TREE_UNAVAILABLE",
+                    }
+                )
+                continue
+            _copy_reference_artifact(reusable_alignment, reference_alignment)
+            _copy_reference_artifact(reusable_tree, reference_tree)
+            _copy_reference_artifact(reusable_model, reference_model)
+        else:
+            _run_mafft(
+                build_mafft_reference_command(reference_fasta, threads, mafft),
                 reference_alignment,
+                f"reference alignment for {locus_id}",
+            )
+            if raxml_ng is None:
+                raxml_ng = check_raxml_ng(raxml_ng_bin)
+            _run_raxml_ng(
+                build_raxml_ng_command(
+                    reference_alignment,
+                    reference_prefix,
+                    threads,
+                    raxml_ng,
+                    raxml_model,
+                ),
                 reference_prefix,
-                threads,
-                raxml_ng,
-                raxml_model,
-            ),
-            reference_prefix,
-            reference_tree,
-            f"reference tree search for {locus_id}",
-        )
+                reference_tree,
+                f"reference tree search for {locus_id}",
+            )
         if not reference_model.exists():
             raise RuntimeError(
                 f"RAxML-NG reference search did not produce model file {reference_model}"
