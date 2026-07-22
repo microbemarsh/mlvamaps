@@ -13,7 +13,8 @@ mlvamaps returns conventional repeat-copy-number fingerprints while preserving
 the sequence evidence behind them:
 
 - Primer-supported locus detection in compressed or uncompressed FASTQ.
-- Assembly in-silico PCR in either orientation.
+- Built-in, SIMD-accelerated in-silico PCR in either orientation, with matching
+  behavior designed for MLVA_finder compatibility.
 - Fast, gap-aware VSEARCH clustering of observed VNTR sequences.
 - Per-read substitution and indel evidence without replacing observed reads
   with a consensus.
@@ -44,7 +45,8 @@ python setup.py install
 ```
 
 The environment includes
-[Amplirust](https://github.com/erdikilic/amplirust),
+[Sassy's Rust/Python bindings](https://github.com/RagnarGrootKoerkamp/sassy),
+[Python regex](https://github.com/mrabarnett/mrab-regex),
 [VSEARCH](https://github.com/torognes/vsearch),
 [Parasail's Python bindings](https://github.com/jeffdaily/parasail-python),
 [minimap2](https://github.com/lh3/minimap2),
@@ -121,10 +123,12 @@ rank the combined normalized evidence in
 `phylogeny/combined_marker_matches.tsv`. Optional dated/geocoded reference
 metadata can be joined to `phylogeny/combined_markers.tree` in MYOGA.
 
-FASTQ runs additionally provide VSEARCH variants, Parasail-aligned read
-memberships, EM-estimated mixture abundance, minimap2 mapping coverage, and SNP
-evidence. Assembly runs provide extracted primer products and optional read
-support.
+FASTQ runs additionally provide native primer-pair evidence under
+`in_silico_pcr/`, VSEARCH variants, Parasail-aligned read memberships,
+EM-estimated mixture abundance, minimap2 mapping coverage, and SNP evidence.
+Assembly runs provide the same native primer-match evidence, extracted
+products, and optional read support. No Amplirust executable is required or
+invoked.
 
 ## Supported data
 
@@ -144,12 +148,42 @@ treated as locus calls. Assembly mode is the appropriate route when the target
 is represented across multiple non-spanning reads. The mapping paths are scoped
 to accurate reads; noisy long-read mapping is not supported.
 
+## MLVA_finder-compatible in-silico PCR
+
+mlvamaps includes its own paired-primer engine for assembly extraction and
+FASTQ locus assignment. Sassy performs SIMD-accelerated approximate matching
+through its Rust Python binding. A small compatibility layer then resolves
+fuzzy-alignment ties with the historical Python `regex` behavior used by
+[i2bc/MLVA_finder](https://github.com/i2bc/MLVA_finder). This keeps the expensive
+sequence scan in native code while retaining legacy match selection.
+
+Compatibility behavior includes:
+
+- deterministic expansion of IUPAC-degenerate primer bases;
+- treating `N` in an input assembly as an error, rather than as a wildcard;
+- successive per-primer error rounds from zero through
+  `--max-primer-mismatches`;
+- forward-strand-first matching with reverse-complement fallback at each error
+  round;
+- preference for equal-length fuzzy matches when both equal-length and indel
+  matches are available at the same threshold;
+- the MLVA_finder product-size formula, which uses configured primer lengths
+  even when an observed primer match contains an insertion or deletion; and
+- legacy assembly result selection rules, including FASTA record order and the
+  smallest eligible unrounded allele on the final matching record.
+
+The engine writes normalized primers, extracted products, coordinates, edit
+costs, identities, CIGAR strings, strand, and product sequence to
+`in_silico_pcr/`. These native files replace the former `amplirust/` evidence
+directory.
+
 ## How it works
 
 For FASTQ data, mlvamaps:
 
 1. Filters reads by length and quality.
-2. Uses Amplirust to pair degenerate primers and orient each product.
+2. Uses the built-in Sassy-backed engine to pair degenerate primers and orient
+   each MLVA_finder-compatible product.
 3. Locates the repeat region and measures repeat/motif evidence.
 4. Dereplicates and clusters reads by locus with VSEARCH.
 5. Globally aligns repeat sequences to observed representatives with Parasail
@@ -171,7 +205,8 @@ For FASTQ data, mlvamaps:
 
 For assemblies, mlvamaps:
 
-1. Finds paired-primer products with Amplirust.
+1. Finds paired-primer products with the built-in Sassy-backed,
+   MLVA_finder-compatible engine.
 2. Selects valid products and converts size into repeat count where the panel
    provides enough metadata.
 3. Optionally adds minimap2 or existing SAM/BAM read support.
@@ -257,7 +292,7 @@ mlvamaps simulate \
   -o simulated
 ```
 
-Export Amplirust products from an assembly:
+Extract MLVA_finder-compatible primer products from an assembly:
 
 ```bash
 mlvamaps extract-amplicons \
@@ -267,8 +302,8 @@ mlvamaps extract-amplicons \
 
 mlvamaps uses 32 threads by default. Pass `-t N` or `--threads N`;
 `--threads 0` uses all available CPUs. Use `--quiet` to suppress progress.
-External executables can be overridden with `--amplirust-bin`, `--vsearch-bin`,
-`--minimap2-bin`, `--mafft-bin`, `--raxml-ng-bin`, and `--epa-ng-bin`.
+External executables can be overridden with `--vsearch-bin`, `--minimap2-bin`,
+`--mafft-bin`, `--raxml-ng-bin`, and `--epa-ng-bin`.
 RAxML-NG uses `GTR+G` by default; change it with `--raxml-model`.
 
 ## Motivation and recognition
@@ -277,4 +312,6 @@ mlvamaps was created to make microbial MLVA data faster to analyze and easier
 to inspect across laboratories, organisms, and sequencing approaches. Its
 design was influenced by
 [MLVA_finder](https://github.com/i2bc/MLVA_finder) and
-[Amplirust](https://github.com/erdikilic/amplirust).
+[Sassy](https://github.com/RagnarGrootKoerkamp/sassy). Earlier mlvamaps
+versions used Amplirust as an external in-silico PCR backend; the built-in
+compatibility engine replaces that dependency.
