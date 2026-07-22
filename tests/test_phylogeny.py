@@ -115,6 +115,35 @@ pathlib.Path(value('--outdir'), 'epa_result.jplace').write_text(json.dumps(docum
     return executable
 
 
+def _fake_skani(tmp_path: Path) -> Path:
+    executable = tmp_path / "skani"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import pathlib, sys
+if '--version' in sys.argv:
+    print('skani 0.3.1')
+    raise SystemExit(0)
+args = sys.argv[1:]
+if args[0] == 'sketch':
+    output = pathlib.Path(args[args.index('-o') + 1])
+    output.mkdir(parents=True)
+    references = args[1:args.index('-o')]
+    (output / 'fake_references.tsv').write_text('\\n'.join(references) + '\\n')
+elif args[0] == 'search':
+    database = pathlib.Path(args[args.index('-d') + 1])
+    output = pathlib.Path(args[args.index('-o') + 1])
+    query = args[args.index('-d') + 2]
+    rows = ['Ref_file\\tQuery_file\\tANI\\tAlign_fraction_ref\\tAlign_fraction_query\\tRef_name\\tQuery_name']
+    for reference in (database / 'fake_references.tsv').read_text().splitlines():
+        ani = '100.00' if pathlib.Path(reference).stem == 'R3' else '99.90'
+        rows.append(f'{reference}\\t{query}\\t{ani}\\t99.00\\t98.00\\tref\\tquery')
+    output.write_text('\\n'.join(rows) + '\\n')
+"""
+    )
+    executable.chmod(0o755)
+    return executable
+
+
 def _fake_epa_ng_prefers_r2(tmp_path: Path) -> Path:
     executable = tmp_path / "epa-ng-prefers-r2"
     executable.write_text(
@@ -337,8 +366,86 @@ def test_exact_reference_fast_path_skips_external_placement_tools(
     assert {row["rank"] for row in combined} == {"1"}
     assert {row["match_status"] for row in combined} == {"EXACT_AMPLICON_MATCH"}
     assert {row["combined_marker_distance"] for row in combined} == {"0.00000000"}
+    assert {row["tie_break_status"] for row in combined} == {"NOT_APPLICABLE"}
     assert _read_tsv(result["phylogenetic_status"])[0]["status"] == "EXACT_AMPLICON_MATCH"
     assert not (result["phylogeny"] / "L1" / "epa-ng").exists()
+
+
+def test_exact_reference_label_requires_every_panel_locus():
+    loci = [Locus(locus_id="L1"), Locus(locus_id="L2")]
+    references = {
+        "L1": [("R1", "AAAA")],
+        "L2": [("R1", "CCCC")],
+    }
+    index_rows = phylogeny_module.reference_sequence_index_rows(references, loci)
+
+    match_type, reference_ids, locus_ids, _components = (
+        phylogeny_module._exact_reference_group(
+            {"L1": "AAAA"},
+            {locus.locus_id: locus for locus in loci},
+            index_rows,
+        )
+    )
+    assert match_type == ""
+    assert reference_ids == []
+    assert locus_ids == []
+
+
+def test_exact_amplicon_ties_use_skani_whole_genome_ani(tmp_path):
+    locus = Locus(locus_id="L1")
+    build = tmp_path / "reference"
+    database = build / "database"
+    database.mkdir(parents=True)
+    (database / "L1.fasta").write_text(">R1\nAAAA\n>R3\nAAAA\n")
+    references = phylogeny_module.read_sequence_database(database, {"L1"})
+    index_rows = phylogeny_module.reference_sequence_index_rows(
+        references, [locus], database
+    )
+    phylogeny_module._write_tsv(
+        index_rows,
+        database / "reference_sequence_index.tsv",
+        phylogeny_module.REFERENCE_SEQUENCE_INDEX_FIELDS,
+    )
+    r1 = tmp_path / "R1.fa"
+    r3 = tmp_path / "R3.fa"
+    query = tmp_path / "query.fa"
+    r1.write_text(">R1\nAAAAT\n")
+    r3.write_text(">R3\nAAAAA\n")
+    query.write_text(">query\nAAAAA\n")
+    phylogeny_module._write_tsv(
+        [
+            {"reference_id": "R1", "assembly_file": str(r1.resolve())},
+            {"reference_id": "R3", "assembly_file": str(r3.resolve())},
+        ],
+        database / "reference_assemblies.tsv",
+        phylogeny_module.REFERENCE_ASSEMBLY_FIELDS,
+    )
+    fake_skani = _fake_skani(tmp_path)
+    phylogeny_module.build_skani_reference_database(
+        [("R1", r1), ("R3", r3)], build / "skani", 1, str(fake_skani)
+    )
+
+    result = run_phylogenetic_placement(
+        {"L1": "AAAA"},
+        database,
+        tmp_path / "out",
+        "sample",
+        [locus],
+        1,
+        query_assembly_path=query,
+        skani_bin=str(fake_skani),
+    )
+
+    combined = _read_tsv(result["combined_marker_matches"])
+    assert [row["reference_id"] for row in combined] == ["R3", "R1"]
+    assert [row["rank"] for row in combined] == ["1", "2"]
+    assert [row["whole_genome_ani"] for row in combined] == [
+        "100.00000000",
+        "99.90000000",
+    ]
+    assert {row["combined_marker_distance"] for row in combined} == {"0.00000000"}
+    assert {row["tie_break_status"] for row in combined} == {"APPLIED"}
+    assert result["skani_tie_break"].exists()
 
 
 def test_reference_phylogeny_build_persists_sequence_identity_index(tmp_path):

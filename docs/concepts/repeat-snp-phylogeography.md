@@ -9,10 +9,10 @@ biological meaning.
 Reference builds persist canonical SHA-256 keys for the oriented unmasked
 amplicon, repeat-masked SNP sequence, and combined SNP/repeat marker. Query
 placement checks these keys first. A reference or tied reference group matching
-at every callable locus receives distance zero and reuses its existing tree
-location without launching MAFFT or EPA-ng. This is the default fast path;
-novel and non-exact queries continue through alignment and phylogenetic
-placement.
+at every configured panel locus receives distance zero and reuses its existing
+tree location without launching MAFFT or EPA-ng. All primer sets must be
+callable and indexed; any missing locus disables the exact label and fast path.
+Novel and non-exact queries continue through alignment and phylogenetic placement.
 
 Reference-tree construction groups identical repeat-masked SNP sequences and
 uses one deterministic representative ID per haplotype whenever at least two
@@ -57,8 +57,12 @@ transparent starting point, not a universal biological constant.
 If the EPA/tree-only score would rank a complete exact marker match below
 another reference, `combined_marker_matches.tsv` records
 `EXACT_MATCH_OVERRIDES_PLACEMENT` and the HTML report displays a warning. Tied
-exact references retain the same rank because sequence evidence cannot
-distinguish them.
+exact references are indistinguishable by the marker panel. For assembly
+queries, MLVAmapS then searches the precomputed whole-genome skani database and
+orders that tied group by ANI, minimum aligned fraction, and maximum aligned
+fraction. The marker distance remains zero, and references with identical skani
+values retain the same rank. Read-only amplicon queries remain tied because no
+query whole genome is available.
 
 Combined ranking requires every candidate reference to be present at all placed
 loci and to have repeat information wherever the query has a repeat call. This

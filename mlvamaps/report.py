@@ -17,15 +17,35 @@ def _phylogenetic_warning_html(rows: list[dict]) -> str:
         for row in rows
         if row.get("ranking_warning") == "EXACT_MATCH_OVERRIDES_PLACEMENT"
     ]
-    if not warned:
-        return ""
-    references = ", ".join(_safe(reference_id) for reference_id in warned)
-    return (
-        '<div class="warning-banner"><strong>Exact-match placement warning:</strong> '
-        "direct sequence identity identified an exact database marker match that "
-        "EPA-ng's likelihood-weighted placement distance would have ranked below "
-        f"another reference. Identity-aware ranking was applied for: {references}.</div>"
+    notices = []
+    if warned:
+        references = ", ".join(_safe(reference_id) for reference_id in warned)
+        notices.append(
+            '<div class="warning-banner"><strong>Exact-match placement warning:</strong> '
+            "direct sequence identity identified an exact database marker match that "
+            "EPA-ng's likelihood-weighted placement distance would have ranked below "
+            f"another reference. Identity-aware ranking was applied for: {references}.</div>"
+        )
+    tie_warning = next(
+        (
+            str(row.get("ranking_warning", ""))
+            for row in rows
+            if str(row.get("ranking_warning", "")).startswith("SKANI_TIE_BREAK_")
+        ),
+        "",
     )
+    if tie_warning:
+        detail = (
+            "the reference build has no whole-genome skani database"
+            if tie_warning == "SKANI_TIE_BREAK_UNAVAILABLE"
+            else "skani did not return a result for every tied reference"
+        )
+        notices.append(
+            '<div class="warning-banner"><strong>Whole-genome tie-break warning:</strong> '
+            f"{detail}; exact marker matches remain tied where whole-genome evidence "
+            "is absent.</div>"
+        )
+    return "".join(notices)
 
 
 def _called_count(value) -> int | float | None:
@@ -723,6 +743,10 @@ def write_report(
         f"<td>{_safe(row.get('compared_loci', ''))}</td>"
         f"<td>{_safe(row.get('exact_marker_loci', ''))}</td>"
         f"<td>{_safe(row.get('match_status', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_ani', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_align_fraction_ref', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_align_fraction_query', ''))}</td>"
+        f"<td>{_safe(row.get('tie_break_status', ''))}</td>"
         f"<td>{_safe(row.get('distance_gap_to_next', ''))}</td>"
         f"<td>{_safe(row.get('collection_date', ''))}</td>"
         f"<td>{_safe(row.get('location', ''))}</td>"
@@ -735,9 +759,9 @@ def write_report(
         phylogenetic_section = f"""
       <h2>Phylogenetic Placement</h2>
       {phylogenetic_warning}
-      <p class="terminal-note">Ranked by identity-aware hybrid SNP distance plus tandem-repeat distance across every placed locus. Exact masked SNP matches contribute zero; non-exact comparisons average normalized EPA/tree distance with normalized direct aligned-sequence divergence. Component values remain separate for interpretation. Per-locus MAFFT alignments, repeat-masked RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
+      <p class="terminal-note">Ranked by identity-aware hybrid SNP distance plus tandem-repeat distance across every placed locus. For assembly inputs, exact marker ties are broken by whole-genome skani ANI, then aligned fraction; the marker distance remains zero. Exact masked SNP matches contribute zero; non-exact comparisons average normalized EPA/tree distance with normalized direct aligned-sequence divergence. Component values remain separate for interpretation. Per-locus files and skani tie-break results are under <code>phylogeny/</code>.</p>
       <div class="table-scroll"><table>
-        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
+        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>skani ANI</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
         <tbody>{phylogenetic_table_rows}</tbody>
       </table></div>
 """
@@ -1003,6 +1027,10 @@ def write_assembly_report(
         f"<td>{_safe(row.get('compared_loci', ''))}</td>"
         f"<td>{_safe(row.get('exact_marker_loci', ''))}</td>"
         f"<td>{_safe(row.get('match_status', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_ani', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_align_fraction_ref', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_align_fraction_query', ''))}</td>"
+        f"<td>{_safe(row.get('tie_break_status', ''))}</td>"
         f"<td>{_safe(row.get('distance_gap_to_next', ''))}</td>"
         f"<td>{_safe(row.get('collection_date', ''))}</td>"
         f"<td>{_safe(row.get('location', ''))}</td>"
@@ -1015,9 +1043,9 @@ def write_assembly_report(
         phylogenetic_section = f"""
       <h2>Phylogenetic Placement</h2>
       {phylogenetic_warning}
-      <p class="terminal-note">Ranked by identity-aware hybrid SNP distance plus tandem-repeat distance across every placed locus. Exact masked SNP matches contribute zero; non-exact comparisons average normalized EPA/tree distance with normalized direct aligned-sequence divergence. Component values remain separate for interpretation. Per-locus MAFFT alignments, repeat-masked RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
+      <p class="terminal-note">Ranked by identity-aware hybrid SNP distance plus tandem-repeat distance across every placed locus. For assembly inputs, exact marker ties are broken by whole-genome skani ANI, then aligned fraction; the marker distance remains zero. Exact masked SNP matches contribute zero; non-exact comparisons average normalized EPA/tree distance with normalized direct aligned-sequence divergence. Component values remain separate for interpretation. Per-locus files and skani tie-break results are under <code>phylogeny/</code>.</p>
       <table>
-        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
+        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>skani ANI</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
         <tbody>{phylogenetic_table_rows}</tbody>
       </table>
 """

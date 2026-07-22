@@ -103,6 +103,11 @@ COMBINED_MARKER_FIELDS = [
     "exact_marker_loci",
     "match_status",
     "ranking_warning",
+    "whole_genome_ani",
+    "whole_genome_align_fraction_ref",
+    "whole_genome_align_fraction_query",
+    "tie_break_method",
+    "tie_break_status",
     "distance_gap_to_next",
     "relative_distance_gap_to_next",
     "collection_date",
@@ -143,6 +148,16 @@ REFERENCE_HAPLOTYPE_FIELDS = [
 ]
 
 _FASTA_SUFFIXES = {".fa", ".fas", ".fasta", ".fna", ".ffn"}
+
+REFERENCE_ASSEMBLY_FIELDS = ["reference_id", "assembly_file"]
+SKANI_RESULT_FIELDS = [
+    "reference_id",
+    "reference_file",
+    "query_file",
+    "ani",
+    "align_fraction_ref",
+    "align_fraction_query",
+]
 _SAFE_FILE = re.compile(r"[^A-Za-z0-9_.-]+")
 _IUPAC = {
     "A": frozenset("A"), "C": frozenset("C"), "G": frozenset("G"),
@@ -480,12 +495,13 @@ def _exact_reference_group(
     rows_by_locus: dict[str, list[dict[str, str]]] = {}
     for row in index_rows:
         rows_by_locus.setdefault(str(row["locus_id"]), []).append(row)
-    callable_loci = sorted(
+    required_loci = sorted(locus_by_id)
+    callable_loci = [
         locus_id
-        for locus_id, sequence in query_sequences.items()
-        if sequence and locus_id in locus_by_id and locus_id in rows_by_locus
-    )
-    if not callable_loci:
+        for locus_id in required_loci
+        if query_sequences.get(locus_id) and locus_id in rows_by_locus
+    ]
+    if not required_loci or callable_loci != required_loci:
         return "", [], [], {}
     query_components = {
         locus_id: decompose_marker_sequence(locus_by_id[locus_id], query_sequences[locus_id])
@@ -527,6 +543,146 @@ class _Node:
     name: str | None
     children: list[tuple["_Node", float]]
     edge_num: int | None = None
+
+
+def check_skani(executable: str) -> str:
+    path = shutil.which(executable)
+    if path is None:
+        raise RuntimeError(
+            f"skani executable {executable!r} was not found. Install skani >=0.3 "
+            "from Bioconda or pass --skani-bin."
+        )
+    result = subprocess.run(
+        [path, "--version"], capture_output=True, text=True, check=False
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"Could not run skani at {path}: {detail}")
+    return path
+
+
+def build_skani_reference_database(
+    assemblies: list[tuple[str, str | Path]],
+    database_dir: str | Path,
+    threads: int,
+    executable: str = "skani",
+) -> Path:
+    """Pre-sketch whole reference assemblies for assembly-only tie breaking."""
+    skani = check_skani(executable)
+    output = Path(database_dir)
+    if output.exists():
+        shutil.rmtree(output)
+    command = [
+        skani,
+        "sketch",
+        *(str(Path(path).resolve()) for _reference_id, path in assemblies),
+        "-o",
+        str(output),
+        "-t",
+        str(max(1, threads)),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(
+            f"skani reference sketching failed (exit {result.returncode}): {detail}"
+        )
+    if not output.is_dir():
+        raise RuntimeError(
+            f"skani reference sketching completed without producing {output}"
+        )
+    return output
+
+
+def _skani_tie_break(
+    query_assembly: str | Path,
+    reference_ids: list[str],
+    sequence_database_path: Path,
+    output_dir: Path,
+    threads: int,
+    executable: str,
+) -> tuple[dict[str, dict[str, float]], Path]:
+    """Search a pre-sketched database and retain only tied marker references."""
+    mapping_path = sequence_database_path / "reference_assemblies.tsv"
+    skani_database = sequence_database_path.parent / "skani"
+    if not mapping_path.exists() or not skani_database.is_dir():
+        return {}, output_dir / "skani_tie_break.tsv"
+
+    with mapping_path.open(newline="") as handle:
+        mapping_rows = list(csv.DictReader(handle, delimiter="\t"))
+    wanted = set(reference_ids)
+    file_to_reference: dict[str, str] = {}
+    basename_to_references: dict[str, set[str]] = {}
+    for row in mapping_rows:
+        reference_id = str(row.get("reference_id", ""))
+        assembly_file = str(row.get("assembly_file", ""))
+        if reference_id not in wanted or not assembly_file:
+            continue
+        path = Path(assembly_file)
+        file_to_reference[assembly_file] = reference_id
+        file_to_reference[str(path.resolve())] = reference_id
+        basename_to_references.setdefault(path.name, set()).add(reference_id)
+
+    skani = check_skani(executable)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = output_dir / "skani_search.tsv"
+    command = [
+        skani,
+        "search",
+        "-d",
+        str(skani_database),
+        str(Path(query_assembly).resolve()),
+        "-o",
+        str(raw_path),
+        "-t",
+        str(max(1, threads)),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(
+            f"skani whole-genome tie break failed (exit {result.returncode}): {detail}"
+        )
+    if not raw_path.exists():
+        raise RuntimeError(f"skani search completed without producing {raw_path}")
+
+    metrics: dict[str, dict[str, float]] = {}
+    result_rows: list[dict] = []
+    with raw_path.open(newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for row in reader:
+            reference_file = str(row.get("Ref_file", ""))
+            reference_id = file_to_reference.get(reference_file)
+            if reference_id is None:
+                reference_id = file_to_reference.get(str(Path(reference_file).resolve()))
+            if reference_id is None:
+                reference_name = Path(reference_file).name
+                candidates = basename_to_references.get(reference_name, set())
+                if not candidates and reference_name.endswith(".sketch"):
+                    candidates = basename_to_references.get(
+                        reference_name[: -len(".sketch")], set()
+                    )
+                if len(candidates) == 1:
+                    reference_id = next(iter(candidates))
+            if reference_id not in wanted:
+                continue
+            values = {
+                "ani": float(row["ANI"]),
+                "align_fraction_ref": float(row["Align_fraction_ref"]),
+                "align_fraction_query": float(row["Align_fraction_query"]),
+            }
+            metrics[reference_id] = values
+            result_rows.append(
+                {
+                    "reference_id": reference_id,
+                    "reference_file": reference_file,
+                    "query_file": row.get("Query_file", ""),
+                    **{key: f"{value:.8f}" for key, value in values.items()},
+                }
+            )
+    interpreted_path = output_dir / "skani_tie_break.tsv"
+    _write_tsv(result_rows, interpreted_path, SKANI_RESULT_FIELDS)
+    return metrics, interpreted_path
 
 
 def check_mafft(executable: str) -> str:
@@ -1262,8 +1418,50 @@ def _write_exact_match_outputs(
     snp_weight: float,
     repeat_weight: float,
     progress: ProgressReporter | None,
+    skani_metrics: dict[str, dict[str, float]] | None = None,
+    skani_result_path: Path | None = None,
+    skani_available: bool = False,
+    skani_applicable: bool = False,
 ) -> dict[str, Path]:
     """Write normal placement outputs for a deterministic indexed identity hit."""
+    skani_metrics = skani_metrics or {}
+    if len(reference_ids) > 1 and skani_metrics:
+        def tie_key(reference_id: str) -> tuple[float, float, float]:
+            values = skani_metrics.get(reference_id)
+            if values is None:
+                return (float("inf"), float("inf"), float("inf"))
+            ref_af = values["align_fraction_ref"]
+            query_af = values["align_fraction_query"]
+            return (-values["ani"], -min(ref_af, query_af), -max(ref_af, query_af))
+
+        reference_ids = sorted(reference_ids, key=lambda item: (tie_key(item), item))
+        rank_by_reference: dict[str, int] = {}
+        previous_key: tuple[float, float, float] | None = None
+        previous_rank = 0
+        for position, reference_id in enumerate(reference_ids, start=1):
+            current_key = tie_key(reference_id)
+            if current_key != previous_key:
+                previous_rank = position
+                previous_key = current_key
+            rank_by_reference[reference_id] = previous_rank
+    else:
+        rank_by_reference = {reference_id: 1 for reference_id in reference_ids}
+
+    if len(reference_ids) <= 1:
+        tie_break_status = "NOT_NEEDED"
+        ranking_warning = ""
+    elif not skani_applicable:
+        tie_break_status = "NOT_APPLICABLE"
+        ranking_warning = ""
+    elif len(skani_metrics) == len(reference_ids):
+        tie_break_status = "APPLIED"
+        ranking_warning = ""
+    elif skani_available:
+        tie_break_status = "INCOMPLETE"
+        ranking_warning = "SKANI_TIE_BREAK_INCOMPLETE"
+    else:
+        tie_break_status = "UNAVAILABLE"
+        ranking_warning = "SKANI_TIE_BREAK_UNAVAILABLE"
     output = Path(outdir) / "phylogeny"
     output.mkdir(parents=True, exist_ok=True)
     row_lookup = {
@@ -1376,7 +1574,7 @@ def _write_exact_match_outputs(
             "relative_distance_gap_to_next": "0.00000000"
             if index + 1 < len(reference_ids)
             else "",
-            "rank": 1,
+            "rank": rank_by_reference[reference_id],
         }
         for index, reference_id in enumerate(reference_ids)
     ]
@@ -1407,7 +1605,20 @@ def _write_exact_match_outputs(
                 "exact_snp_loci": len(locus_ids),
                 "exact_marker_loci": len(locus_ids),
                 "match_status": match_type,
-                "ranking_warning": "",
+                "ranking_warning": ranking_warning,
+                "whole_genome_ani": ""
+                if reference_id not in skani_metrics
+                else f"{skani_metrics[reference_id]['ani']:.8f}",
+                "whole_genome_align_fraction_ref": ""
+                if reference_id not in skani_metrics
+                else f"{skani_metrics[reference_id]['align_fraction_ref']:.8f}",
+                "whole_genome_align_fraction_query": ""
+                if reference_id not in skani_metrics
+                else f"{skani_metrics[reference_id]['align_fraction_query']:.8f}",
+                "tie_break_method": "skani_ani_then_aligned_fraction"
+                if len(reference_ids) > 1 and skani_applicable
+                else "",
+                "tie_break_status": tie_break_status,
                 "distance_gap_to_next": "0.00000000"
                 if index + 1 < len(reference_ids)
                 else "",
@@ -1419,7 +1630,7 @@ def _write_exact_match_outputs(
                 "longitude": metadata.get("longitude", ""),
                 "location": metadata.get("location", ""),
                 "source": metadata.get("source", ""),
-                "rank": 1,
+                "rank": rank_by_reference[reference_id],
             }
         )
     combined_path = output / "combined_marker_matches.tsv"
@@ -1455,11 +1666,16 @@ def _write_exact_match_outputs(
         )
     )
     if progress is not None:
+        tie_detail = (
+            "; resolved by whole-genome skani ANI/aligned fraction"
+            if tie_break_status == "APPLIED"
+            else ""
+        )
         progress.step(
             f"Resolved {len(reference_ids):,} tied {match_type.lower().replace('_', ' ')} "
-            "reference(s) from the sequence index; skipped MAFFT and EPA-ng"
+            f"reference(s) from the sequence index{tie_detail}; skipped MAFFT and EPA-ng"
         )
-    return {
+    paths = {
         "phylogeny": output,
         "phylogenetic_distances": detail_path,
         "phylogenetic_matches": summary_path,
@@ -1470,6 +1686,9 @@ def _write_exact_match_outputs(
         "combined_marker_tree": combined_tree_path,
         "closest_reference_bands": closest_reference_bands_path,
     }
+    if skani_result_path is not None and skani_result_path.exists():
+        paths["skani_tie_break"] = skani_result_path
+    return paths
 
 
 def run_phylogenetic_placement(
@@ -1488,6 +1707,8 @@ def run_phylogenetic_placement(
     reference_metadata_path: str | Path | None = None,
     progress: ProgressReporter | None = None,
     exact_match_fast_path: bool = True,
+    query_assembly_path: str | Path | None = None,
+    skani_bin: str = "skani",
 ) -> dict[str, Path]:
     if snp_weight < 0 or repeat_weight < 0 or snp_weight + repeat_weight <= 0:
         raise ValueError("SNP and repeat weights must be non-negative with a positive total")
@@ -1549,6 +1770,22 @@ def run_phylogenetic_placement(
             )
         )
         if match_type:
+            skani_metrics: dict[str, dict[str, float]] = {}
+            skani_result_path: Path | None = None
+            skani_available = False
+            if query_assembly_path is not None and len(exact_references) > 1:
+                mapping_path = sequence_database_path / "reference_assemblies.tsv"
+                skani_database = sequence_database_path.parent / "skani"
+                skani_available = mapping_path.exists() and skani_database.is_dir()
+                if skani_available:
+                    skani_metrics, skani_result_path = _skani_tie_break(
+                        query_assembly_path,
+                        exact_references,
+                        sequence_database_path,
+                        Path(outdir) / "phylogeny",
+                        threads,
+                        skani_bin,
+                    )
             return _write_exact_match_outputs(
                 outdir,
                 sample_id,
@@ -1562,6 +1799,10 @@ def run_phylogenetic_placement(
                 snp_weight,
                 repeat_weight,
                 progress,
+                skani_metrics,
+                skani_result_path,
+                skani_available,
+                query_assembly_path is not None,
             )
     if references is None:
         references = read_sequence_database(sequence_database_path, requested_locus_ids)

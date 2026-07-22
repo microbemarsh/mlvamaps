@@ -52,7 +52,8 @@ The environment includes
 [minimap2](https://github.com/lh3/minimap2),
 [MAFFT](https://mafft.cbrc.jp/alignment/software/),
 [RAxML-NG](https://github.com/amkozlov/raxml-ng),
-[EPA-ng](https://github.com/pierrebarbera/epa-ng), and the Python/native
+[EPA-ng](https://github.com/pierrebarbera/epa-ng),
+[skani](https://github.com/bluenote-1577/skani), and the Python/native
 sequence libraries declared in `environment.yml`.
 
 ## Quick start
@@ -280,6 +281,10 @@ The metadata identifier may be named `reference_id`, `genome_id`, `sample_id`,
   reference, suitable for `mlvamaps call --database`;
 - `reference_build/database/reference_sequence_index.tsv`: canonical sequence
   hashes for the default exact-reference fast path;
+- `reference_build/database/reference_assemblies.tsv`: stable reference-ID to
+  whole-genome assembly mapping;
+- `reference_build/skani/`: precomputed whole-genome sketches used to resolve
+  exact-marker ties for assembly queries;
 - `reference_build/phylogeny/LOCUS.tree`: a portable Newick tree for each locus;
 - `reference_build/reference_build_manifest.tsv`: extraction and ambiguity QC;
 - `reference_build/database/reference_metadata.tsv`: normalized placement metadata;
@@ -313,7 +318,7 @@ mlvamaps extract-amplicons \
 mlvamaps uses 32 threads by default. Pass `-t N` or `--threads N`;
 `--threads 0` uses all available CPUs. Use `--quiet` to suppress progress.
 External executables can be overridden with `--vsearch-bin`, `--minimap2-bin`,
-`--mafft-bin`, `--raxml-ng-bin`, and `--epa-ng-bin`.
+`--mafft-bin`, `--raxml-ng-bin`, `--epa-ng-bin`, and `--skani-bin`.
 RAxML-NG uses its `DNA` model-selection set by default to choose a nucleotide
 model independently for each locus; override it with `--raxml-model`.
 

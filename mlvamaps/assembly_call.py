@@ -952,6 +952,7 @@ def run_assembly_call(
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
     epa_ng_bin: str = "epa-ng",
+    skani_bin: str = "skani",
     raxml_model: str = "DNA",
     phylogeny_snp_weight: float = 1.0,
     phylogeny_repeat_weight: float = 1.0,
@@ -1104,6 +1105,8 @@ def run_assembly_call(
             repeat_weight=phylogeny_repeat_weight,
             reference_metadata_path=reference_metadata_path,
             progress=progress,
+            query_assembly_path=assembly_path,
+            skani_bin=skani_bin,
         )
         phylogenetic_rows = read_profiles(phylogeny_paths["combined_marker_matches"])
         closest_reference_bands = read_profiles(

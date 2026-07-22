@@ -8,7 +8,11 @@ from .assembly_call import pcr_rows_to_products
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .models import Locus
-from .phylogeny import build_reference_phylogenies
+from .phylogeny import (
+    REFERENCE_ASSEMBLY_FIELDS,
+    build_reference_phylogenies,
+    build_skani_reference_database,
+)
 from .primers import read_loci_or_primers
 from .progress import ProgressReporter
 
@@ -227,6 +231,7 @@ def build_reference_database(
     amplirust_bin: str = "amplirust",
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
+    skani_bin: str = "skani",
     raxml_model: str = "DNA",
     show_progress: bool = False,
 ) -> dict[str, Path]:
@@ -364,6 +369,15 @@ def build_reference_database(
     reference_metadata_path = database_dir / "reference_metadata.tsv"
     normalized_fields = ["reference_id", *[field for field in metadata_fields if field != id_field]]
     _write_tsv(normalized_metadata, reference_metadata_path, normalized_fields)
+    reference_assemblies_path = database_dir / "reference_assemblies.tsv"
+    _write_tsv(
+        [
+            {"reference_id": reference_id, "assembly_file": str(assembly.resolve())}
+            for reference_id, assembly, _row in matched
+        ],
+        reference_assemblies_path,
+        REFERENCE_ASSEMBLY_FIELDS,
+    )
     _write_tsv(manifest_rows, output / "reference_build_manifest.tsv", REFERENCE_BUILD_FIELDS)
     with (output / "myoga_metadata.csv").open("w", newline="") as handle:
         myoga_fields = ["genome_id", *[field for field in metadata_fields if field != id_field]]
@@ -371,6 +385,13 @@ def build_reference_database(
         writer.writeheader()
         writer.writerows(myoga_metadata)
 
+    progress.step("Pre-sketching whole reference assemblies with skani")
+    skani_database_path = build_skani_reference_database(
+        [(reference_id, assembly) for reference_id, assembly, _row in matched],
+        output / "skani",
+        thread_count,
+        executable=skani_bin,
+    )
     progress.step("Building per-locus reference alignments and trees")
     tree_paths = build_reference_phylogenies(
         database_dir,
@@ -390,5 +411,7 @@ def build_reference_database(
         "metadata": reference_metadata_path,
         "myoga_metadata": output / "myoga_metadata.csv",
         "manifest": output / "reference_build_manifest.tsv",
+        "reference_assemblies": reference_assemblies_path,
+        "skani_database": skani_database_path,
         **tree_paths,
     }
