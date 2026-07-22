@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
 from .calling import estimate_repeat_count_from_product_length, normalize_allele, repeat_unit_length
 from .concurrency import resolve_threads
 from .models import Locus, RepeatFeature
@@ -827,70 +829,52 @@ def _placement_patristic_distances(
 
 def _reference_tree_scale(root: _Node) -> float:
     """Median non-zero patristic distance among reference tips."""
-    adjacency: dict[int, list[tuple[_Node, float]]] = {}
-    leaves: list[_Node] = []
+    _names, matrix = _tip_patristic_distance_matrix(root)
+    positive = matrix[np.triu_indices(len(matrix), k=1)]
+    positive = positive[positive > 0]
+    return float(np.median(positive)) if positive.size else 1.0
 
-    def connect(node: _Node) -> None:
-        adjacency.setdefault(id(node), [])
+
+def _tip_patristic_distance_matrix(root: _Node) -> tuple[list[str], np.ndarray]:
+    """Build a dense tip-distance matrix using NumPy's compiled matrix kernels."""
+    edge_lengths: list[float] = []
+    names: list[str] = []
+    tip_paths: list[list[int]] = []
+
+    def collect(node: _Node, path: list[int]) -> None:
         if not node.children and node.name is not None:
-            leaves.append(node)
+            names.append(str(node.name))
+            tip_paths.append(path)
         for child, length in node.children:
-            adjacency[id(node)].append((child, length))
-            adjacency.setdefault(id(child), []).append((node, length))
-            connect(child)
+            edge_index = len(edge_lengths)
+            edge_lengths.append(float(length))
+            collect(child, [*path, edge_index])
 
-    connect(root)
-
-    def distance_between(source: _Node, target: _Node) -> float:
-        stack = [(source, None, 0.0)]
-        while stack:
-            node, parent, distance = stack.pop()
-            if node is target:
-                return distance
-            for neighbor, length in adjacency[id(node)]:
-                if neighbor is not parent:
-                    stack.append((neighbor, node, distance + length))
-        raise ValueError("Reference tree is disconnected")
-
-    distances = [
-        distance_between(leaves[left], leaves[right])
-        for left in range(len(leaves))
-        for right in range(left + 1, len(leaves))
-    ]
-    positive = [distance for distance in distances if distance > 0]
-    return statistics.median(positive) if positive else 1.0
+    collect(root, [])
+    if len(names) != len(set(names)):
+        raise ValueError("Reference tree contains duplicate tip names")
+    incidence = np.zeros((len(names), len(edge_lengths)), dtype=np.float64)
+    for tip_index, path in enumerate(tip_paths):
+        incidence[tip_index, path] = 1.0
+    weighted_paths = incidence * np.asarray(edge_lengths, dtype=np.float64)
+    root_distances = weighted_paths.sum(axis=1)
+    shared_distances = weighted_paths @ incidence.T
+    matrix = (
+        root_distances[:, None]
+        + root_distances[None, :]
+        - 2.0 * shared_distances
+    )
+    np.maximum(matrix, 0.0, out=matrix)
+    return names, matrix
 
 
 def _tip_patristic_distances(root: _Node) -> dict[tuple[str, str], float]:
-    adjacency: dict[int, list[tuple[_Node, float]]] = {}
-    leaves: list[_Node] = []
-
-    def connect(node: _Node) -> None:
-        adjacency.setdefault(id(node), [])
-        if not node.children and node.name is not None:
-            leaves.append(node)
-        for child, length in node.children:
-            adjacency[id(node)].append((child, length))
-            adjacency.setdefault(id(child), []).append((node, length))
-            connect(child)
-
-    connect(root)
-
-    def walk(source: _Node, target: _Node) -> float:
-        stack = [(source, None, 0.0)]
-        while stack:
-            node, parent, distance = stack.pop()
-            if node is target:
-                return distance
-            for neighbor, length in adjacency[id(node)]:
-                if neighbor is not parent:
-                    stack.append((neighbor, node, distance + length))
-        raise ValueError("Reference tree is disconnected")
-
+    """Return the public pair-keyed view of the compiled dense calculation."""
+    names, matrix = _tip_patristic_distance_matrix(root)
     return {
-        tuple(sorted((str(left.name), str(right.name)))): walk(left, right)
-        for left_index, left in enumerate(leaves)
-        for right in leaves[left_index + 1 :]
+        tuple(sorted((left, right))): float(matrix[left_index, right_index])
+        for left_index, left in enumerate(names)
+        for right_index, right in enumerate(names[left_index + 1 :], left_index + 1)
     }
 
 
@@ -902,49 +886,56 @@ def neighbor_joining_tree(
     labels: list[str], distances: dict[tuple[str, str], float]
 ) -> str:
     """Build a deterministic Newick neighbor-joining tree from a distance matrix."""
+    matrix = np.zeros((len(labels), len(labels)), dtype=np.float64)
+
+    def key(left: str, right: str) -> tuple[str, str]:
+        return tuple(sorted((left, right)))
+
+    for left_index, left in enumerate(labels):
+        for right_index, right in enumerate(
+            labels[left_index + 1 :], start=left_index + 1
+        ):
+            pair = key(left, right)
+            if pair not in distances:
+                raise ValueError(f"Missing distance between {left!r} and {right!r}")
+            value = max(0.0, float(distances[pair]))
+            matrix[left_index, right_index] = value
+            matrix[right_index, left_index] = value
+    return _neighbor_joining_tree_from_matrix(labels, matrix)
+
+
+def _neighbor_joining_tree_from_matrix(
+    labels: list[str], distances: np.ndarray
+) -> str:
+    """Run neighbor joining on a dense matrix through compiled NumPy kernels."""
     if not labels:
         return ";\n"
     if len(labels) == 1:
         return f"({_newick_label(labels[0])}:0.00000000);\n"
     active = list(labels)
     clusters = {label: _newick_label(label) for label in labels}
-    matrix: dict[tuple[str, str], float] = {}
-
-    def key(left: str, right: str) -> tuple[str, str]:
-        return tuple(sorted((left, right)))
-
-    for left_index, left in enumerate(labels):
-        for right in labels[left_index + 1 :]:
-            pair = key(left, right)
-            if pair not in distances:
-                raise ValueError(f"Missing distance between {left!r} and {right!r}")
-            matrix[pair] = max(0.0, float(distances[pair]))
+    matrix = np.asarray(distances, dtype=np.float64).copy()
+    if matrix.shape != (len(labels), len(labels)):
+        raise ValueError("Neighbor-joining distance matrix shape does not match labels")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("Neighbor-joining distances must be finite")
+    np.maximum(matrix, 0.0, out=matrix)
+    np.fill_diagonal(matrix, 0.0)
 
     node_number = 0
     while len(active) > 2:
         size = len(active)
-        row_sums = {
-            label: sum(
-                matrix[key(label, other)] for other in active if other != label
-            )
-            for label in active
-        }
-        left, right = min(
-            (
-                (left, right)
-                for left_index, left in enumerate(active)
-                for right in active[left_index + 1 :]
-            ),
-            key=lambda pair: (
-                (size - 2) * matrix[key(*pair)]
-                - row_sums[pair[0]]
-                - row_sums[pair[1]],
-                pair,
-            ),
+        row_sums = matrix.sum(axis=1)
+        q_matrix = (size - 2) * matrix - row_sums[:, None] - row_sums[None, :]
+        q_matrix[np.tril_indices(size)] = np.inf
+        left_index, right_index = np.unravel_index(
+            int(np.argmin(q_matrix)), q_matrix.shape
         )
-        pair_distance = matrix[key(left, right)]
+        left = active[left_index]
+        right = active[right_index]
+        pair_distance = float(matrix[left_index, right_index])
         left_length = 0.5 * pair_distance + (
-            row_sums[left] - row_sums[right]
+            float(row_sums[left_index]) - float(row_sums[right_index])
         ) / (2 * (size - 2))
         right_length = pair_distance - left_length
         left_length = max(0.0, left_length)
@@ -955,23 +946,28 @@ def neighbor_joining_tree(
             f"({clusters[left]}:{left_length:.8f},"
             f"{clusters[right]}:{right_length:.8f})"
         )
-        for other in active:
-            if other in {left, right}:
-                continue
-            matrix[key(joined, other)] = max(
-                0.0,
-                (
-                    matrix[key(left, other)]
-                    + matrix[key(right, other)]
-                    - pair_distance
-                )
-                / 2,
+        retained = [
+            index for index in range(size) if index not in {left_index, right_index}
+        ]
+        joined_distances = np.maximum(
+            0.0,
+            (
+                matrix[left_index, retained]
+                + matrix[right_index, retained]
+                - pair_distance
             )
-        active = [label for label in active if label not in {left, right}]
+            / 2,
+        )
+        next_matrix = np.zeros((size - 1, size - 1), dtype=float)
+        next_matrix[:-1, :-1] = matrix[np.ix_(retained, retained)]
+        next_matrix[-1, :-1] = joined_distances
+        next_matrix[:-1, -1] = joined_distances
+        matrix = next_matrix
+        active = [active[index] for index in retained]
         active.append(joined)
 
     left, right = active
-    final_distance = matrix[key(left, right)] / 2
+    final_distance = float(matrix[0, 1]) / 2
     return (
         f"({clusters[left]}:{max(0.0, final_distance):.8f},"
         f"{clusters[right]}:{max(0.0, final_distance):.8f});\n"
@@ -1088,7 +1084,7 @@ def run_phylogenetic_placement(
     marker_rows: list[dict] = []
     query_components_by_locus: dict[str, MarkerComponents] = {}
     reference_components_by_locus: dict[str, dict[str, MarkerComponents]] = {}
-    reference_pairwise_by_locus: dict[str, dict[tuple[str, str], float]] = {}
+    reference_distance_matrices: dict[str, tuple[list[str], np.ndarray]] = {}
     placement_jobs: dict[str, _PlacementJob] = {}
 
     for locus_id in sorted(references):
@@ -1257,6 +1253,8 @@ def run_phylogenetic_placement(
                         )
 
     # Parse completed placements in locus order for deterministic tables.
+    if placement_results and progress is not None:
+        progress.step("Computing reference-tip distances and placement summaries")
     for locus_id in sorted(placement_results):
         jplace_path = placement_results[locus_id]
         (
@@ -1266,7 +1264,7 @@ def run_phylogenetic_placement(
         ) = read_epa_ng_placement_statistics(jplace_path)
         with Path(jplace_path).open() as jplace_handle:
             jplace_tree = _parse_newick(str(json.load(jplace_handle)["tree"]))
-        reference_pairwise_by_locus[locus_id] = _tip_patristic_distances(
+        reference_distance_matrices[locus_id] = _tip_patristic_distance_matrix(
             jplace_tree
         )
         expected_references = {reference_id for reference_id, _sequence in references[locus_id]}
@@ -1304,6 +1302,13 @@ def run_phylogenetic_placement(
                 "status": "PLACED",
             }
         )
+        if progress is not None:
+            progress.count(
+                "Processed placement summaries",
+                len(placed_loci),
+                len(placement_results),
+                force=True,
+            )
 
     detail_path = output / "locus_phylogenetic_distances.tsv"
     _write_tsv(detail_rows, detail_path, PLACEMENT_FIELDS)
@@ -1531,46 +1536,94 @@ def run_phylogenetic_placement(
         for row in detail_rows
     }
 
-    def components_for(label: str, locus_id: str) -> MarkerComponents | None:
-        if label == query_tree_label:
-            return query_components_by_locus.get(locus_id)
-        return reference_components_by_locus.get(locus_id, {}).get(label)
-
-    combined_pairwise: dict[tuple[str, str], float] = {}
-    for left_index, left in enumerate(tree_labels):
-        for right in tree_labels[left_index + 1 :]:
-            snp_total = 0.0
-            repeat_total = 0.0
-            for locus_id in placed_loci:
-                if query_tree_label in {left, right}:
-                    reference_id = right if left == query_tree_label else left
-                    marker_row = query_locus_rows[(locus_id, reference_id)]
-                    snp_total += float(marker_row["normalized_snp_distance"])
-                else:
-                    pair = tuple(sorted((left, right)))
-                    snp_total += (
-                        reference_pairwise_by_locus[locus_id][pair]
-                        / tree_scale_by_locus[locus_id]
-                    )
-                left_components = components_for(left, locus_id)
-                right_components = components_for(right, locus_id)
-                if (
-                    left_components is not None
-                    and right_components is not None
-                    and left_components.repeat_count_raw is not None
-                    and right_components.repeat_count_raw is not None
-                ):
-                    repeat_total += abs(
-                        left_components.repeat_count_raw
-                        - right_components.repeat_count_raw
-                    ) / repeat_scale_by_locus[locus_id]
-            combined_pairwise[tuple(sorted((left, right)))] = (
-                snp_weight * snp_total + repeat_weight * repeat_total
-            )
-    combined_tree_path = output / "combined_markers.tree"
-    combined_tree_path.write_text(
-        neighbor_joining_tree(tree_labels, combined_pairwise)
+    combined_matrix = np.zeros(
+        (len(tree_labels), len(tree_labels)), dtype=np.float64
     )
+    reference_labels = tree_labels[:-1]
+    if progress is not None:
+        progress.step(
+            f"Combining marker distances for {len(tree_labels):,} tree labels"
+        )
+    for locus_number, locus_id in enumerate(placed_loci, start=1):
+        locus_names, locus_distances = reference_distance_matrices[locus_id]
+        locus_indexes = {name: index for index, name in enumerate(locus_names)}
+        try:
+            reference_indexes = np.asarray(
+                [locus_indexes[label] for label in reference_labels], dtype=np.intp
+            )
+        except KeyError as exc:
+            raise RuntimeError(
+                f"Combined-tree reference {exc.args[0]!r} is absent from locus "
+                f"{locus_id!r}"
+            ) from exc
+        if reference_labels:
+            reference_snp = locus_distances[
+                np.ix_(reference_indexes, reference_indexes)
+            ] / tree_scale_by_locus[locus_id]
+            combined_matrix[:-1, :-1] += snp_weight * reference_snp
+            query_snp = np.asarray(
+                [
+                    float(
+                        query_locus_rows[(locus_id, reference_id)][
+                            "normalized_snp_distance"
+                        ]
+                    )
+                    for reference_id in reference_labels
+                ],
+                dtype=np.float64,
+            )
+            combined_matrix[-1, :-1] += snp_weight * query_snp
+            combined_matrix[:-1, -1] += snp_weight * query_snp
+
+        if locus_id in repeat_scale_by_locus:
+            reference_components = reference_components_by_locus.get(locus_id, {})
+            query_components = query_components_by_locus.get(locus_id)
+            repeat_counts = np.asarray(
+                [
+                    (
+                        reference_components[reference_id].repeat_count_raw
+                        if reference_id in reference_components
+                        else None
+                    )
+                    for reference_id in reference_labels
+                ]
+                + [
+                    query_components.repeat_count_raw
+                    if query_components is not None
+                    else None
+                ],
+                dtype=np.float64,
+            )
+            valid_repeats = np.isfinite(repeat_counts)
+            repeat_distances = np.abs(
+                repeat_counts[:, None] - repeat_counts[None, :]
+            )
+            repeat_distances[
+                ~(valid_repeats[:, None] & valid_repeats[None, :])
+            ] = 0.0
+            combined_matrix += (
+                repeat_weight
+                * repeat_distances
+                / repeat_scale_by_locus[locus_id]
+            )
+        if progress is not None:
+            progress.count(
+                "Combined marker loci",
+                locus_number,
+                len(placed_loci),
+                force=locus_number == len(placed_loci),
+            )
+    np.fill_diagonal(combined_matrix, 0.0)
+    combined_tree_path = output / "combined_markers.tree"
+    if progress is not None:
+        progress.step(
+            f"Building combined neighbor-joining tree for {len(tree_labels):,} labels"
+        )
+    combined_tree_path.write_text(
+        _neighbor_joining_tree_from_matrix(tree_labels, combined_matrix)
+    )
+    if progress is not None:
+        progress.step("Finished phylogenetic placement summaries")
     status_path = output / "locus_status.tsv"
     _write_tsv(status_rows, status_path, STATUS_FIELDS)
     return {

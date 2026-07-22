@@ -13,6 +13,7 @@ from mlvamaps.phylogeny import (
     _parse_newick,
     _placement_patristic_distances,
     _run_raxml_ng,
+    _tip_patristic_distances,
     build_mafft_add_command,
     build_mafft_reference_command,
     build_epa_ng_command,
@@ -20,6 +21,7 @@ from mlvamaps.phylogeny import (
     read_sequence_database,
     read_epa_ng_placement,
     read_epa_ng_placement_statistics,
+    neighbor_joining_tree,
     run_phylogenetic_placement,
     decompose_marker_sequence,
 )
@@ -271,6 +273,9 @@ def test_phylogenetic_placement_parallelizes_across_loci(tmp_path, monkeypatch):
     assert _read_tsv(result["phylogenetic_status"])[0]["status"] == "PLACED"
     assert "with 2 worker(s)" in stream.getvalue()
     assert "Completed EPA-ng loci: 2/2 (100.0%)" in stream.getvalue()
+    assert "Computing reference-tip distances" in stream.getvalue()
+    assert "Building combined neighbor-joining tree" in stream.getvalue()
+    assert "Finished phylogenetic placement summaries" in stream.getvalue()
 
 
 def test_missing_query_still_builds_reference_tree(tmp_path):
@@ -294,6 +299,30 @@ def test_jplace_edge_lengths_drive_patristic_distances():
     assert distances["R1"] == pytest.approx(0.25)
     assert distances["R2"] == pytest.approx(0.35)
     assert distances["R 3"] == pytest.approx(0.65)
+
+
+def test_all_tip_distances_use_tree_branch_lengths():
+    root = _parse_newick("((A:1,B:2):3,C:4);")
+    assert _tip_patristic_distances(root) == {
+        ("A", "B"): pytest.approx(3.0),
+        ("A", "C"): pytest.approx(8.0),
+        ("B", "C"): pytest.approx(9.0),
+    }
+
+
+def test_vectorized_neighbor_joining_is_deterministic():
+    labels = ["A", "B", "C", "D"]
+    distances = {
+        ("A", "B"): 5.0,
+        ("A", "C"): 9.0,
+        ("A", "D"): 9.0,
+        ("B", "C"): 10.0,
+        ("B", "D"): 10.0,
+        ("C", "D"): 8.0,
+    }
+    first = neighbor_joining_tree(labels, distances)
+    assert neighbor_joining_tree(labels, distances) == first
+    assert set(_tip_patristic_distances(_parse_newick(first))) == set(distances)
 
 
 def test_epa_parser_uses_highest_likelihood_weight_placement(tmp_path):

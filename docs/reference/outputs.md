@@ -40,7 +40,10 @@ model independently for each locus from its `DNA` set; this can be changed with
 `--raxml-model`. EPA-ng consumes the optimized
 RAxML-NG `.bestModel` file and places the query without changing the reference
 topology. Callable loci are placed concurrently within the `--threads` CPU
-budget. Summed matching distances combine the placement pendant/distal lengths
+budget. Post-placement patristic matrices, cross-locus SNP/repeat aggregation,
+and neighbor joining use NumPy's compiled C/BLAS kernels rather than Python
+reference-pair loops. Summed matching distances combine the placement
+pendant/distal lengths
 with the RAxML-NG reference-tree branch lengths. The output retains both the
 highest-likelihood-weight placement distance and the expected distance across
 all candidate placements, weighted by normalized likelihood weight ratios.
