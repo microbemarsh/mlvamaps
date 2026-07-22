@@ -65,17 +65,23 @@ def _metadata_from_manifest(manifest_path: Path) -> Path:
 
 
 def resolve_input(input_path: Path) -> Path:
-    """Resolve a reference directory, manifest, or table to its metadata table."""
+    """Resolve a Geonome directory, manifest, or metadata table."""
     if input_path.is_dir():
         manifest_path = input_path / "reference_manifest.json"
         if manifest_path.is_file():
             return _metadata_from_manifest(manifest_path)
-        metadata_path = input_path / "normalized_metadata.tsv"
-        if metadata_path.is_file():
-            return metadata_path
+        candidates = (
+            input_path / "normalized_metadata.tsv",
+            input_path / "metadata.tsv",
+            input_path / "surveillance" / "inputs" / "metadata.csv",
+            input_path / "inputs" / "metadata.csv",
+        )
+        for metadata_path in candidates:
+            if metadata_path.is_file():
+                return metadata_path
         raise ValueError(
-            f"directory is not a Geonome reference build (no reference_manifest.json "
-            f"or normalized_metadata.tsv): {input_path}"
+            f"could not find Geonome metadata in directory: {input_path}; pass its "
+            f"metadata.tsv or surveillance/inputs/metadata.csv directly"
         )
     if input_path.name == "reference_manifest.json" or input_path.suffix.lower() == ".json":
         return _metadata_from_manifest(input_path)
@@ -100,11 +106,17 @@ def _location(row: dict[str, str]) -> str:
 
 def convert_rows(fields: list[str], rows: list[dict[str, str]]) -> list[dict[str, str]]:
     id_field = next(
-        (field for field in ("genome_id", "reference_id", "accession") if field in fields),
+        (
+            field
+            for field in ("genome_id", "reference_id", "sample", "accession")
+            if field in fields
+        ),
         None,
     )
     if id_field is None:
-        raise ValueError("Geonome metadata needs a genome_id or accession column")
+        raise ValueError(
+            "Geonome metadata needs a genome_id, sample, or accession column"
+        )
 
     converted: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -136,7 +148,13 @@ def convert_rows(fields: list[str], rows: list[dict[str, str]]) -> list[dict[str
                 "location": _location(row),
                 "source": _first(
                     row,
-                    ("isolation_source", "sample_type_normalized", "sample_type_raw", "source"),
+                    (
+                        "isolation_source",
+                        "sample_type_normalized",
+                        "sample_type_raw",
+                        "sample_type",
+                        "source",
+                    ),
                 ),
             }
         )
@@ -170,8 +188,8 @@ def build_parser() -> argparse.ArgumentParser:
         "input",
         type=Path,
         help=(
-            "Geonome reference directory, reference_manifest.json, or "
-            "normalized_metadata.tsv"
+            "Geonome metadata.tsv/metadata.csv, reference directory, or "
+            "reference_manifest.json"
         ),
     )
     parser.add_argument(

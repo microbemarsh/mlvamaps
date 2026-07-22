@@ -60,3 +60,39 @@ def test_convert_rejects_duplicate_identifiers(tmp_path):
         assert "duplicate reference identifier" in str(exc)
     else:
         raise AssertionError("duplicate identifiers should fail conversion")
+
+
+def test_convert_geonome_flow_input_metadata(tmp_path):
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "accession\tcollection_date\tlatitude\tlongitude\tlocation\tsample_type\n"
+        "GCF_000000003.1\t2024-03\t10\t20\tCanada: Ontario\twater\n"
+    )
+    output = tmp_path / "reference_metadata.tsv"
+
+    assert MODULE.convert_metadata(metadata, output) == 1
+
+    assert _read_tsv(output)[0] == {
+        "reference_id": "GCF_000000003.1",
+        "collection_date": "2024-03",
+        "latitude": "10",
+        "longitude": "20",
+        "location": "Canada: Ontario",
+        "source": "water",
+    }
+
+
+def test_convert_surveillance_metadata(tmp_path):
+    inputs = tmp_path / "surveillance" / "inputs"
+    inputs.mkdir(parents=True)
+    (inputs / "metadata.csv").write_text(
+        "sample,accession,country,location,date,sample_type,latitude,longitude\n"
+        "GCF_000000004.1,GCF_000000004.1,USA,Boston,2023,clinical,42.36,-71.06\n"
+    )
+    output = tmp_path / "reference_metadata.tsv"
+
+    assert MODULE.convert_metadata(tmp_path, output) == 1
+    row = _read_tsv(output)[0]
+    assert row["reference_id"] == "GCF_000000004.1"
+    assert row["collection_date"] == "2023"
+    assert row["source"] == "clinical"
