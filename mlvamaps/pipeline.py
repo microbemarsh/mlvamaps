@@ -15,7 +15,6 @@ from .mapping import (
 )
 from .mixture import MIXTURE_FIELDS, estimate_variant_mixtures
 from .ml_classifier import predict_read_alleles
-from .novelty import score_novelty
 from .profile_matching import build_fingerprint, match_profiles
 from .phylogeny import dominant_read_query_sequences, run_phylogenetic_placement
 from .progress import ProgressReporter
@@ -135,7 +134,6 @@ MATCH_FIELDS = [
     "confidence",
 ]
 
-NOVELTY_FIELDS = ["sample_id", "nearest_profile", "novelty_score", "interpretation"]
 
 SIMPLE_CALL_FIELDS = [
     "sample_id",
@@ -430,8 +428,6 @@ def run_call(
 
     match_rows = match_profiles(sample_id, fingerprint_rows[0], profiles)
     write_tsv(match_rows, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
-    novelty_rows = score_novelty(sample_id, allele_rows, match_rows)
-    write_tsv(novelty_rows, outdir_path / "novelty_scores.tsv", NOVELTY_FIELDS)
     phylogeny_paths: dict[str, Path] = {}
     phylogenetic_rows: list[dict] = []
     closest_reference_bands: list[dict] = []
@@ -464,7 +460,6 @@ def run_call(
         outdir_path,
         sample_id,
         allele_rows,
-        novelty_rows,
         loci,
         match_rows,
         profiles,

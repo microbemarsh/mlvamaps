@@ -14,7 +14,7 @@ path, intermediate stage, output, and interpretation boundary.
 - [Variant mixture abundance](concepts/variant-mixtures.md)
 - [Repeat-aware SNP placement and phylogeography](concepts/repeat-snp-phylogeography.md)
 - [Representative mapping and SNP evidence](concepts/representative-mapping.md)
-- [Allele calling, profiles, and novelty](concepts/calling-and-profiles.md)
+- [Allele calling and profiles](concepts/calling-and-profiles.md)
 
 ## Reference
 

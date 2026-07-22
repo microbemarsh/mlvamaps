@@ -28,7 +28,7 @@ the sequence evidence behind them:
   from the generated gel and SNP evidence.
 - Optional per-locus phylogenetic placement against a sequence database using
   MAFFT, RAxML-NG, and EPA-ng.
-- Probabilistic locus calls, profile matching, novelty summaries, and a
+- Probabilistic locus calls, profile matching, and a
   self-contained HTML report.
 
 ## Install
@@ -150,7 +150,7 @@ invoked.
 | Assembly FASTA | In-silico primer products, product coordinates, sizes, and repeat counts. |
 | Assembly plus accurate FASTQ | Assembly calls plus minimap2 read count and mean coverage for extracted products. |
 | Assembly plus SAM/BAM | Assembly calls plus overlap-based read support from existing alignments. |
-| Known profile TSV | Closest MLVA profiles, mismatched loci, distance, confidence, and novelty context. |
+| Known profile TSV | Closest MLVA profiles, mismatched loci, distance, and comparison confidence. |
 | Per-locus sequence database | Fixed-tree phylogenetic placement and a closest-reference ranking across callable loci. |
 
 FASTQ assignment requires both primers to occur in a valid product. Ordinary
@@ -204,7 +204,7 @@ For FASTQ data, mlvamaps:
 7. Maps locus reads to the dominant observed amplicon with minimap2.
 8. Reports quality-filtered, representative-relative SNP evidence.
 9. Combines read probabilities into per-locus repeat-count calls.
-10. Builds the fingerprint, compares profiles, scores novelty, and writes a
+10. Builds the fingerprint, compares profiles, and writes a
     plot-first HTML report.
 11. When `--database` is supplied, separates the tandem-repeat tract from the
     SNP-bearing sequence, aligns repeat-masked references with MAFFT, infers a
@@ -257,7 +257,7 @@ recommended metadata, validation, and profile-table setup.
 - [Representative mapping and SNP evidence](docs/concepts/representative-mapping.md)
 - [Variant mixture abundance](docs/concepts/variant-mixtures.md)
 - [Repeat-aware SNP placement and phylogeography](docs/concepts/repeat-snp-phylogeography.md)
-- [Allele calling, profiles, and novelty](docs/concepts/calling-and-profiles.md)
+- [Allele calling and profiles](docs/concepts/calling-and-profiles.md)
 - [Adding a new organism or MLVA scheme](docs/guides/new-organism-panel.md)
 
 ## Additional commands

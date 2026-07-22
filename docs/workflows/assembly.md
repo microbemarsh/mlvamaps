@@ -100,17 +100,18 @@ assembly-product sequence or alter its size-derived repeat count.
 
 ## 5. Fingerprint and report
 
-Assembly calls use the same fingerprint, profile matching, and novelty formats
-as FASTQ calls.
+Assembly calls use the same fingerprint and profile-matching formats as FASTQ
+calls.
 
 This stage returns:
 
 - `mlva_fingerprint.tsv`
 - `mlva_fingerprint_probabilistic.tsv`
 - `profile_matches.tsv`
-- `novelty_scores.tsv`
 - `report.html`
 
-The report displays product calls, coordinates, profile matches, and a generated
-gel. Band position follows product size. Band intensity follows read support
-when available and otherwise uses a uniform default intensity.
+The report leads with panel recovery, locus-specific review findings, closest
+profile/reference interpretation, and the generated gel. Product coordinates,
+primer mismatches, and alternative-call probabilities remain in expandable
+detail tables. Band position follows product size; band intensity follows read
+support when available and otherwise uses a uniform default intensity.

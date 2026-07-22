@@ -11,6 +11,54 @@ def _safe(value) -> str:
     return html.escape(str(value))
 
 
+def _metric_card(label: str, value, detail: str = "", tone: str = "") -> str:
+    detail_html = f'<small>{_safe(detail)}</small>' if detail else ""
+    tone_class = f" {tone}" if tone else ""
+    return (
+        f'<div class="metric{tone_class}"><strong>{_safe(label)}</strong>'
+        f'<span>{_safe(value)}</span>{detail_html}</div>'
+    )
+
+
+def _finding(kind: str, title: str, detail: str) -> str:
+    return (
+        f'<div class="finding {kind}"><strong>{_safe(title)}</strong>'
+        f'<span>{_safe(detail)}</span></div>'
+    )
+
+
+def _closest_reference_detail(row: dict) -> str:
+    if row.get("whole_genome_exact_match") == "yes":
+        return "Exact whole-genome match"
+    if row.get("whole_genome_snps") not in ("", None):
+        return (
+            f"{row.get('whole_genome_snps')} whole-genome SNPs; "
+            f"{row.get('whole_genome_align_fraction_query', '')}% query aligned"
+        )
+    if row.get("combined_marker_distance") not in ("", None):
+        return f"Marker distance {row.get('combined_marker_distance')}"
+    return "Closest ranked reference"
+
+
+def _reference_summary_rows(rows: list[dict]) -> str:
+    return "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('rank', ''))}</td>"
+        f"<td>{_safe(row.get('reference_id', ''))}</td>"
+        f"<td>{_safe(row.get('match_status', ''))}</td>"
+        f"<td>{_safe(row.get('combined_marker_distance', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_exact_match', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_snps', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_indel_bases', ''))}</td>"
+        f"<td>{_safe(row.get('whole_genome_align_fraction_ref', ''))} / "
+        f"{_safe(row.get('whole_genome_align_fraction_query', ''))}</td>"
+        f"<td>{_safe(row.get('collection_date', ''))}</td>"
+        f"<td>{_safe(row.get('location', ''))}</td>"
+        "</tr>"
+        for row in rows[:10]
+    )
+
+
 def _phylogenetic_warning_html(rows: list[dict]) -> str:
     warned = [
         str(row.get("reference_id", ""))
@@ -626,7 +674,6 @@ def write_report(
     outdir: str | Path,
     sample_id: str,
     allele_rows: list[dict],
-    novelty_rows: list[dict],
     loci: list[Locus] | None = None,
     match_rows: list[dict] | None = None,
     profiles: list[dict] | None = None,
@@ -638,6 +685,7 @@ def write_report(
     closest_reference_bands: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
     loci = loci or []
     match_rows = match_rows or []
     profiles = profiles or []
@@ -653,10 +701,74 @@ def write_report(
     multiple = sum(
         1 for row in allele_rows if row.get("call_status") == "MULTIPLE_VARIANTS"
     )
-    novelty = novelty_rows[0] if novelty_rows else {}
     best_match = match_rows[0] if match_rows else {}
     best_profile = _best_profile(match_rows, profiles)
     phylogenetic_best = phylogenetic_rows[0] if phylogenetic_rows else {}
+    total_loci = len(allele_rows)
+    flagged = low_depth + dropout + multiple + sum(
+        row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE"}
+        for row in allele_rows
+    )
+    summary_cards = [
+        _metric_card("Confident calls", f"{passed}/{total_loci}", "PASS loci"),
+        _metric_card(
+            "Loci needing review",
+            flagged,
+            "Low depth, mixed, ambiguous, out-of-range, or missing",
+            "warn" if flagged else "good",
+        ),
+    ]
+    if mapping_rows:
+        summary_cards.extend(
+            [
+                _metric_card(
+                    "Assigned locus reads",
+                    f"{sum(int(row.get('mapped_reads') or 0) for row in mapping_rows)}/"
+                    f"{sum(int(row.get('total_reads') or 0) for row in mapping_rows)}",
+                ),
+                _metric_card("Amplicon SNP observations", len(snp_rows)),
+            ]
+        )
+    if best_match.get("best_profile_id"):
+        summary_cards.append(
+            _metric_card(
+                "Closest MLVA profile",
+                best_match["best_profile_id"],
+                f"Distance {best_match.get('distance', '')}; confidence {best_match.get('confidence', '')}",
+            )
+        )
+    if phylogenetic_best.get("reference_id"):
+        summary_cards.append(
+            _metric_card(
+                "Closest reference genome",
+                phylogenetic_best["reference_id"],
+                _closest_reference_detail(phylogenetic_best),
+                "good" if phylogenetic_best.get("whole_genome_exact_match") == "yes" else "",
+            )
+        )
+    findings = []
+    for status, title in (
+        ("LOCUS_DROPOUT", "Missing loci"),
+        ("LOW_DEPTH", "Low-depth loci"),
+        ("MULTIPLE_VARIANTS", "Mixed loci"),
+        ("AMBIGUOUS", "Ambiguous loci"),
+        ("OUT_OF_RANGE", "Out-of-range loci"),
+    ):
+        affected = [str(row.get("locus_id", "")) for row in allele_rows if row.get("call_status") == status]
+        if affected:
+            findings.append(_finding("warn", title, ", ".join(affected)))
+    if not findings:
+        findings.append(_finding("good", "Panel quality", "No locus-level review flags were detected."))
+    if phylogenetic_best.get("reference_id"):
+        findings.append(
+            _finding(
+                "info",
+                "Reference interpretation",
+                f"{phylogenetic_best['reference_id']}: {_closest_reference_detail(phylogenetic_best)}",
+            )
+        )
+    summary_html = "".join(summary_cards)
+    findings_html = "".join(findings)
     gel = _gel_svg(
         sample_id,
         loci,
@@ -695,8 +807,6 @@ def write_report(
         mixture_table_rows = (
             '<tr><td colspan="9">No retained variants were available for mixture estimation.</td></tr>'
         )
-    mapped_reads = sum(int(row.get("mapped_reads") or 0) for row in mapping_rows)
-    total_mapping_reads = sum(int(row.get("total_reads") or 0) for row in mapping_rows)
     mapping_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
@@ -731,6 +841,32 @@ def write_report(
             '<tr><td colspan="7">No SNPs passed the configured depth, base-quality, '
             "support, and allele-frequency thresholds.</td></tr>"
         )
+    profile_table_rows = "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('best_profile_id', ''))}</td>"
+        f"<td>{_safe(row.get('strain_id', ''))}</td>"
+        f"<td>{_safe(row.get('distance', ''))}</td>"
+        f"<td>{_safe(row.get('matched_loci', ''))}</td>"
+        f"<td>{_safe(row.get('mismatched_loci', ''))}</td>"
+        f"<td>{_safe(row.get('confidence', ''))}</td>"
+        "</tr>"
+        for row in match_rows[:10]
+    )
+    profile_section = ""
+    if profiles:
+        if not profile_table_rows:
+            profile_table_rows = '<tr><td colspan="6">No comparable profile rows were available.</td></tr>'
+        profile_section = f"""
+      <section class="report-section">
+        <h2>Closest MLVA Profiles</h2>
+        <p class="section-intro">Direct repeat-count comparison against the supplied profile collection.</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Profile</th><th>Strain</th><th>Distance</th><th>Matched loci</th><th>Mismatched loci</th><th>Confidence</th></tr></thead>
+          <tbody>{profile_table_rows}</tbody>
+        </table></div>
+      </section>
+"""
+    reference_summary_rows = _reference_summary_rows(phylogenetic_rows)
     phylogenetic_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('rank', ''))}</td>"
@@ -759,13 +895,64 @@ def write_report(
     if phylogenetic_rows:
         phylogenetic_warning = _phylogenetic_warning_html(phylogenetic_rows)
         phylogenetic_section = f"""
-      <h2>Phylogenetic Placement</h2>
-      {phylogenetic_warning}
-      <p class="terminal-note">Ranked by identity-aware hybrid SNP distance plus tandem-repeat distance across every placed locus. For assembly inputs, exact marker ties are broken by canonical whole-genome identity, then MUMmer4 dnadiff SNPs, indel bases, and one-to-one aligned fraction; the marker distance remains zero. Exact masked SNP matches contribute zero; non-exact comparisons average normalized EPA/tree distance with normalized direct aligned-sequence divergence. Component values remain separate for interpretation. Per-locus files and whole-genome tie-break results are under <code>phylogeny/</code>.</p>
-      <div class="table-scroll"><table>
-        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
-        <tbody>{phylogenetic_table_rows}</tbody>
-      </table></div>
+      <section class="report-section">
+        <h2>Closest Reference Genomes</h2>
+        {phylogenetic_warning}
+        <p class="section-intro">Marker similarity identifies the candidate group. Exact assembly ties are resolved by canonical genome identity and MUMmer whole-genome SNP comparison.</p>
+        <div class="table-scroll"><table class="primary-table">
+          <thead><tr><th>Rank</th><th>Reference</th><th>Marker status</th><th>Marker distance</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Aligned % ref/query</th><th>Date</th><th>Location</th></tr></thead>
+          <tbody>{reference_summary_rows}</tbody>
+        </table></div>
+        <details>
+          <summary>Technical marker-distance components</summary>
+          <p class="terminal-note">EPA/tree, direct aligned-sequence, repeat, and tie-break components used to construct the ranking.</p>
+          <div class="table-scroll"><table>
+            <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
+            <tbody>{phylogenetic_table_rows}</tbody>
+          </table></div>
+        </details>
+      </section>
+"""
+    mixture_overview_section = ""
+    mixture_detail_section = ""
+    if mixture_rows:
+        mixture_overview_section = f"""
+      <h2>Variant Mixture Abundance</h2>
+      <p class="section-intro">Estimated within-locus variant fractions distinguish dominant alleles from meaningful mixtures and trace evidence.</p>
+      <div class="chart-scroll">{mixture_plot}</div>
+"""
+        mixture_detail_section = f"""
+      <details>
+        <summary>Variant mixture details</summary>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Variant</th><th>Repeat</th><th>Observed reads</th><th>Observed %</th><th>EM reads</th><th>EM %</th><th>Class</th><th>Meaningful</th></tr></thead>
+          <tbody>{mixture_table_rows}</tbody>
+        </table></div>
+      </details>
+"""
+    mapping_overview_section = ""
+    mapping_detail_section = ""
+    if mapping_rows:
+        mapping_overview_section = f"""
+      <h2>Representative Mapping Coverage</h2>
+      <p class="section-intro">Coverage and SNP observations are relative to each sample-derived dominant amplicon, not chromosomal coordinates.</p>
+      <div class="chart-scroll">{mapping_plot}</div>
+"""
+        mapping_detail_section = f"""
+      <details>
+        <summary>Representative mapping details</summary>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Reference ASV</th><th>Mapped</th><th>Rate</th><th>Mean depth</th><th>Covered %</th><th>SNPs</th></tr></thead>
+          <tbody>{mapping_table_rows}</tbody>
+        </table></div>
+      </details>
+      <details>
+        <summary>SNP evidence details ({len(snp_rows)} rows)</summary>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Reference ASV</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
+          <tbody>{snp_table_rows}</tbody>
+        </table></div>
+      </details>
 """
     html = f"""<!doctype html>
 <html lang="en">
@@ -791,19 +978,11 @@ def write_report(
         radial-gradient(circle at 50% -15%, rgba(98, 255, 155, 0.14), transparent 34rem),
         linear-gradient(180deg, #030705 0%, #07150f 55%, #030705 100%);
       color: var(--phosphor);
-      font-family: "Courier New", Courier, monospace;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       letter-spacing: 0;
     }}
-    body::before {{
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background: repeating-linear-gradient(180deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 4px);
-      mix-blend-mode: screen;
-    }}
-    main {{ max-width: 1180px; margin: 0 auto; padding: 2rem; }}
-    h1, h2 {{ color: var(--amber); text-transform: uppercase; text-shadow: 0 0 10px rgba(255, 200, 87, 0.65); }}
+    main {{ max-width: 1320px; margin: 0 auto; padding: 2rem; }}
+    h1, h2 {{ color: var(--amber); }}
     h1 {{ font-size: clamp(1.7rem, 4vw, 3rem); margin: 0 0 0.35rem; }}
     h2 {{ font-size: 1.1rem; margin-top: 2rem; }}
     .subhead {{ color: var(--muted); margin: 0 0 1.5rem; }}
@@ -824,12 +1003,26 @@ def write_report(
     }}
     .metric strong {{ display: block; color: var(--cyan); font-size: 0.8rem; margin-bottom: 0.35rem; }}
     .metric span {{ color: var(--amber); font-size: 1.35rem; }}
+    .metric small {{ display: block; color: var(--muted); line-height: 1.35; margin-top: 0.35rem; }}
+    .metric.good {{ border-color: rgba(98,255,155,0.65); }}
+    .metric.warn {{ border-color: rgba(255,200,87,0.75); }}
+    .findings {{ display: grid; gap: 0.55rem; margin: 0 0 1.5rem; }}
+    .finding {{ display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0.8rem; padding: 0.75rem 0.9rem; border-left: 4px solid var(--cyan); background: rgba(95,232,255,0.06); border-radius: 4px; }}
+    .finding strong {{ color: var(--cyan); }}
+    .finding span {{ color: #d8fbe2; }}
+    .finding.warn {{ border-left-color: var(--amber); background: rgba(255,200,87,0.07); }}
+    .finding.warn strong {{ color: var(--amber); }}
+    .finding.good {{ border-left-color: var(--phosphor); }}
+    .finding.good strong {{ color: var(--phosphor); }}
+    .report-section {{ margin-top: 2.2rem; padding-top: 0.2rem; }}
+    .section-intro {{ color: var(--muted); max-width: 72rem; line-height: 1.5; }}
     .terminal-note {{ color: var(--muted); }}
     .warning-banner {{ margin: 0.75rem 0; padding: 0.8rem 1rem; color: #1b1200; background: var(--amber); border: 2px solid #ff8c42; border-radius: 5px; }}
     table {{ border-collapse: collapse; width: 100%; margin-top: 0.75rem; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 0.55rem; text-align: left; }}
-    th {{ color: var(--cyan); font-size: 0.82rem; text-transform: uppercase; }}
-    td {{ color: #c9ffd8; }}
+    th {{ color: var(--cyan); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }}
+    td {{ color: #d8fbe2; }}
+    .primary-table tbody tr:first-child {{ background: rgba(98,255,155,0.08); }}
     .gel-panel {{ margin: 1rem 0 1.5rem; }}
     .gel-panel svg {{ width: 100%; max-height: 620px; display: block; }}
     .gel-panel figcaption {{ color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }}
@@ -861,35 +1054,31 @@ def write_report(
     details {{ border: 1px solid var(--line); border-radius: 6px; margin: 0.7rem 0; padding: 0.65rem 0.8rem; background: rgba(98, 255, 155, 0.035); }}
     summary {{ color: var(--cyan); cursor: pointer; font-weight: 700; }}
     .table-scroll {{ overflow-x: auto; }}
+    @media (max-width: 700px) {{
+      main {{ padding: 1rem; }}
+      .finding {{ grid-template-columns: 1fr; gap: 0.2rem; }}
+    }}
   </style>
 </head>
 <body>
   <main>
     <h1>MLVAMaps Report: {_safe(sample_id)}</h1>
-    <p class="subhead">VNTR allele terminal // agarose gel comparison // probabilistic fingerprint</p>
+    <p class="subhead">VNTR calls, sample quality, mixture evidence, and closest-reference interpretation.</p>
     <section class="terminal">
+      <h2>Sample Overview</h2>
       <div class="summary">
-        <div class="metric"><strong>PASS loci</strong><span>{passed}</span></div>
-        <div class="metric"><strong>LOW_DEPTH loci</strong><span>{low_depth}</span></div>
-        <div class="metric"><strong>MIXED loci</strong><span>{multiple}</span></div>
-        <div class="metric"><strong>DROPOUT loci</strong><span>{dropout}</span></div>
-        <div class="metric"><strong>Mapped locus reads</strong><span>{mapped_reads}/{total_mapping_reads}</span></div>
-        <div class="metric"><strong>Representative SNPs</strong><span>{len(snp_rows)}</span></div>
-        <div class="metric"><strong>Best reference</strong><span>{_safe(best_match.get('best_profile_id', 'NA') or 'NA')}</span></div>
-        <div class="metric"><strong>Phylogenetic reference</strong><span>{_safe(phylogenetic_best.get('reference_id', 'NA') or 'NA')}</span></div>
-        <div class="metric"><strong>Novelty</strong><span>{_safe(novelty.get('novelty_score', ''))}</span><br>{_safe(novelty.get('interpretation', ''))}</div>
+        {summary_html}
       </div>
+      <div class="findings">{findings_html}</div>
       <h2>Individual Locus Repeat Counts</h2>
       <div class="chart-scroll">{repeat_count_plot}</div>
       <h2>Locus Confidence</h2>
       <div class="chart-scroll">{confidence_plot}</div>
-      <h2>Variant Mixture Abundance</h2>
-      <p class="terminal-note">Fractions are estimated from retained VSEARCH counts with an Emu-inspired expectation-maximization model. Sequence similarity supplies assignment likelihoods; the current abundance estimate supplies the prior for the next iteration.</p>
-      <div class="chart-scroll">{mixture_plot}</div>
-      <h2>Representative Mapping Coverage</h2>
-      <div class="chart-scroll">{mapping_plot}</div>
+      {mixture_overview_section}
+      {mapping_overview_section}
       <h2>Generated Gel</h2>
       {gel}
+      {profile_section}
       {phylogenetic_section}
       <h2>Detailed Evidence</h2>
       <p class="terminal-note">The plots above are the primary interpretation view. Expand a section below when exact values are needed.</p>
@@ -900,28 +1089,8 @@ def write_report(
           <tbody>{rows}</tbody>
         </table></div>
       </details>
-      <details>
-        <summary>Variant mixture details</summary>
-        <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Variant</th><th>Repeat</th><th>Observed reads</th><th>Observed %</th><th>EM reads</th><th>EM %</th><th>Class</th><th>Meaningful</th></tr></thead>
-          <tbody>{mixture_table_rows}</tbody>
-        </table></div>
-      </details>
-      <details>
-        <summary>Representative mapping details</summary>
-        <p class="terminal-note">Primer-oriented reads are mapped with minimap2 to the dominant observed VSEARCH representative amplicon. Coordinates are representative-relative, not chromosomal.</p>
-        <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Reference ASV</th><th>Mapped</th><th>Rate</th><th>Mean depth</th><th>Covered %</th><th>SNPs</th></tr></thead>
-          <tbody>{mapping_table_rows}</tbody>
-        </table></div>
-      </details>
-      <details>
-        <summary>SNP evidence details ({len(snp_rows)} rows)</summary>
-        <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Reference ASV</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
-          <tbody>{snp_table_rows}</tbody>
-        </table></div>
-      </details>
+      {mixture_detail_section}
+      {mapping_detail_section}
     </section>
   </main>
 </body>
@@ -937,15 +1106,14 @@ def write_assembly_report(
     product_rows: list[dict],
     match_rows: list[dict] | None = None,
     profiles: list[dict] | None = None,
-    novelty_rows: list[dict] | None = None,
     loci: list[Locus] | None = None,
     phylogenetic_rows: list[dict] | None = None,
     closest_reference_bands: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
     match_rows = match_rows or []
     profiles = profiles or []
-    novelty_rows = novelty_rows or []
     phylogenetic_rows = phylogenetic_rows or []
     closest_reference_bands = closest_reference_bands or []
     present = sum(1 for row in call_rows if row.get("present") == "yes")
@@ -962,7 +1130,72 @@ def write_assembly_report(
         closest_reference_bands,
     )
     repeat_count_plot = _repeat_count_svg(call_rows, assembly=True)
-    novelty = novelty_rows[0] if novelty_rows else {}
+    summary_cards = [
+        _metric_card(
+            "Panel recovered",
+            f"{present}/{len(call_rows)}",
+            "Loci with a selected primer product",
+            "good" if not not_found else "warn",
+        ),
+        _metric_card("Primer products", len(product_rows)),
+    ]
+    if any(row.get("read_depth") not in ("", None) for row in call_rows):
+        summary_cards.append(
+            _metric_card("Read-supported loci", f"{with_depth}/{present}")
+        )
+    if best_match.get("best_profile_id"):
+        summary_cards.append(
+            _metric_card(
+                "Closest MLVA profile",
+                best_match["best_profile_id"],
+                f"Distance {best_match.get('distance', '')}; confidence {best_match.get('confidence', '')}",
+            )
+        )
+    if phylogenetic_best.get("reference_id"):
+        summary_cards.append(
+            _metric_card(
+                "Closest reference genome",
+                phylogenetic_best["reference_id"],
+                _closest_reference_detail(phylogenetic_best),
+                "good" if phylogenetic_best.get("whole_genome_exact_match") == "yes" else "",
+            )
+        )
+    findings = []
+    missing_loci = [
+        str(row.get("locus_id", ""))
+        for row in call_rows
+        if row.get("present") != "yes"
+    ]
+    if missing_loci:
+        findings.append(_finding("warn", "Loci not recovered", ", ".join(missing_loci)))
+    review_rows = [
+        row
+        for row in call_rows
+        if row.get("present") == "yes"
+        and row.get("status") not in {"PASS", "PRESENT", "INCLUDED", ""}
+    ]
+    if review_rows:
+        findings.append(
+            _finding(
+                "warn",
+                "Calls needing review",
+                ", ".join(
+                    f"{row.get('locus_id')} ({row.get('status')})" for row in review_rows
+                ),
+            )
+        )
+    if not findings:
+        findings.append(_finding("good", "Panel quality", "All configured loci were recovered without call flags."))
+    if phylogenetic_best.get("reference_id"):
+        findings.append(
+            _finding(
+                "info",
+                "Reference interpretation",
+                f"{phylogenetic_best['reference_id']}: {_closest_reference_detail(phylogenetic_best)}",
+            )
+        )
+    summary_html = "".join(summary_cards)
+    findings_html = "".join(findings)
     table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
@@ -1017,6 +1250,7 @@ def write_assembly_report(
         <tbody>{match_table_rows}</tbody>
       </table>
 """
+    reference_summary_rows = _reference_summary_rows(phylogenetic_rows)
     phylogenetic_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('rank', ''))}</td>"
@@ -1045,13 +1279,23 @@ def write_assembly_report(
     if phylogenetic_rows:
         phylogenetic_warning = _phylogenetic_warning_html(phylogenetic_rows)
         phylogenetic_section = f"""
-      <h2>Phylogenetic Placement</h2>
-      {phylogenetic_warning}
-      <p class="terminal-note">Ranked by identity-aware hybrid SNP distance plus tandem-repeat distance across every placed locus. For assembly inputs, exact marker ties are broken by canonical whole-genome identity, then MUMmer4 dnadiff SNPs, indel bases, and one-to-one aligned fraction; the marker distance remains zero. Exact masked SNP matches contribute zero; non-exact comparisons average normalized EPA/tree distance with normalized direct aligned-sequence divergence. Component values remain separate for interpretation. Per-locus files and whole-genome tie-break results are under <code>phylogeny/</code>.</p>
-      <table>
-        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
-        <tbody>{phylogenetic_table_rows}</tbody>
-      </table>
+      <section class="report-section">
+        <h2>Closest Reference Genomes</h2>
+        {phylogenetic_warning}
+        <p class="section-intro">Marker similarity identifies the candidate group. Exact assembly ties are resolved by canonical genome identity and MUMmer whole-genome SNP comparison.</p>
+        <div class="table-scroll"><table class="primary-table">
+          <thead><tr><th>Rank</th><th>Reference</th><th>Marker status</th><th>Marker distance</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Aligned % ref/query</th><th>Date</th><th>Location</th></tr></thead>
+          <tbody>{reference_summary_rows}</tbody>
+        </table></div>
+        <details>
+          <summary>Technical marker-distance components</summary>
+          <p class="terminal-note">EPA/tree, direct aligned-sequence, repeat, and tie-break components used to construct the ranking.</p>
+          <div class="table-scroll"><table>
+            <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
+            <tbody>{phylogenetic_table_rows}</tbody>
+          </table></div>
+        </details>
+      </section>
 """
 
     html = f"""<!doctype html>
@@ -1078,19 +1322,11 @@ def write_assembly_report(
         radial-gradient(circle at 50% -15%, rgba(98, 255, 155, 0.14), transparent 34rem),
         linear-gradient(180deg, #030705 0%, #07150f 55%, #030705 100%);
       color: var(--phosphor);
-      font-family: "Courier New", Courier, monospace;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       letter-spacing: 0;
     }}
-    body::before {{
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background: repeating-linear-gradient(180deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 4px);
-      mix-blend-mode: screen;
-    }}
-    main {{ max-width: 1180px; margin: 0 auto; padding: 2rem; }}
-    h1, h2 {{ color: var(--amber); text-transform: uppercase; text-shadow: 0 0 10px rgba(255, 200, 87, 0.65); }}
+    main {{ max-width: 1320px; margin: 0 auto; padding: 2rem; }}
+    h1, h2 {{ color: var(--amber); }}
     h1 {{ font-size: clamp(1.7rem, 4vw, 3rem); margin: 0 0 0.35rem; }}
     h2 {{ font-size: 1.1rem; margin-top: 2rem; }}
     .subhead, .terminal-note {{ color: var(--muted); }}
@@ -1113,10 +1349,24 @@ def write_assembly_report(
     }}
     .metric strong {{ display: block; color: var(--cyan); font-size: 0.8rem; margin-bottom: 0.35rem; }}
     .metric span {{ color: var(--amber); font-size: 1.35rem; }}
+    .metric small {{ display: block; color: var(--muted); line-height: 1.35; margin-top: 0.35rem; }}
+    .metric.good {{ border-color: rgba(98,255,155,0.65); }}
+    .metric.warn {{ border-color: rgba(255,200,87,0.75); }}
+    .findings {{ display: grid; gap: 0.55rem; margin: 0 0 1.5rem; }}
+    .finding {{ display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0.8rem; padding: 0.75rem 0.9rem; border-left: 4px solid var(--cyan); background: rgba(95,232,255,0.06); border-radius: 4px; }}
+    .finding strong {{ color: var(--cyan); }}
+    .finding span {{ color: #d8fbe2; }}
+    .finding.warn {{ border-left-color: var(--amber); background: rgba(255,200,87,0.07); }}
+    .finding.warn strong {{ color: var(--amber); }}
+    .finding.good {{ border-left-color: var(--phosphor); }}
+    .finding.good strong {{ color: var(--phosphor); }}
+    .report-section {{ margin-top: 2.2rem; padding-top: 0.2rem; }}
+    .section-intro {{ color: var(--muted); max-width: 72rem; line-height: 1.5; }}
     table {{ border-collapse: collapse; width: 100%; margin-top: 0.75rem; min-width: 900px; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 0.55rem; text-align: left; vertical-align: top; }}
-    th {{ color: var(--cyan); font-size: 0.82rem; text-transform: uppercase; }}
-    td {{ color: #c9ffd8; }}
+    th {{ color: var(--cyan); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }}
+    td {{ color: #d8fbe2; }}
+    .primary-table tbody tr:first-child {{ background: rgba(98,255,155,0.08); }}
     .gel-panel {{ margin: 1rem 0 1.5rem; }}
     .gel-panel svg {{ width: 100%; max-height: 620px; display: block; }}
     .gel-panel figcaption {{ color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }}
@@ -1140,39 +1390,49 @@ def write_assembly_report(
     .chart-label {{ fill: #d6ffe2; font: 12px "Courier New", monospace; }}
     .chart-value {{ fill: var(--muted); font: 11px "Courier New", monospace; }}
     .mapping-track {{ fill: rgba(141, 215, 170, 0.1); stroke: var(--line); stroke-width: 1; }}
+    details {{ border: 1px solid var(--line); border-radius: 6px; margin: 0.7rem 0; padding: 0.65rem 0.8rem; background: rgba(98,255,155,0.035); }}
+    summary {{ color: var(--cyan); cursor: pointer; font-weight: 700; }}
+    .table-scroll {{ overflow-x: auto; }}
+    @media (max-width: 700px) {{
+      main {{ padding: 1rem; }}
+      .finding {{ grid-template-columns: 1fr; gap: 0.2rem; }}
+    }}
   </style>
 </head>
 <body>
   <main>
     <h1>MLVAMaps Assembly Report: {_safe(sample_id)}</h1>
-    <p class="subhead">VNTR primer-product calls from assembly evidence.</p>
+    <p class="subhead">Assembly-derived VNTR calls, panel quality, and closest-reference interpretation.</p>
     <section class="terminal">
+      <h2>Sample Overview</h2>
       <div class="summary">
-        <div class="metric"><strong>Present loci</strong><span>{present}</span></div>
-        <div class="metric"><strong>Not found</strong><span>{not_found}</span></div>
-        <div class="metric"><strong>Products</strong><span>{len(product_rows)}</span></div>
-        <div class="metric"><strong>With read support</strong><span>{with_depth}</span></div>
-        <div class="metric"><strong>Best profile</strong><span>{_safe(best_match.get('best_profile_id', 'NA') or 'NA')}</span></div>
-        <div class="metric"><strong>Phylogenetic reference</strong><span>{_safe(phylogenetic_best.get('reference_id', 'NA') or 'NA')}</span></div>
-        <div class="metric"><strong>Distance</strong><span>{_safe(best_match.get('distance', ''))}</span></div>
-        <div class="metric"><strong>Novelty</strong><span>{_safe(novelty.get('novelty_score', ''))}</span><br>{_safe(novelty.get('interpretation', ''))}</div>
+        {summary_html}
       </div>
+      <div class="findings">{findings_html}</div>
       <h2>Individual Locus Repeat Counts</h2>
       <div class="chart-scroll">{repeat_count_plot}</div>
       <h2>Generated Gel</h2>
       {gel}
-      <h2>Calls</h2>
-      <table>
-        <thead><tr><th>Locus</th><th>Present</th><th>Repeat count</th><th>Raw count</th><th>Product bp</th><th>Reads</th><th>Coverage</th><th>Confidence</th><th>Second allele</th><th>Second probability</th><th>Inference</th><th>Status</th><th>Evidence</th></tr></thead>
-        <tbody>{table_rows}</tbody>
-      </table>
-      <h2>Assembly Amplicons</h2>
-      <table>
-        <thead><tr><th>Locus</th><th>Contig</th><th>Coordinates</th><th>Orientation</th><th>Product bp</th><th>Forward mismatches</th><th>Reverse mismatches</th></tr></thead>
-        <tbody>{product_table_rows}</tbody>
-      </table>
       {profile_section}
       {phylogenetic_section}
+      <section class="report-section">
+        <h2>Detailed Evidence</h2>
+        <p class="section-intro">Expand these tables when exact product coordinates or alternative-call probabilities are needed.</p>
+        <details>
+          <summary>Locus call details</summary>
+          <div class="table-scroll"><table>
+            <thead><tr><th>Locus</th><th>Present</th><th>Repeat count</th><th>Raw count</th><th>Product bp</th><th>Reads</th><th>Coverage</th><th>Confidence</th><th>Second allele</th><th>Second probability</th><th>Inference</th><th>Status</th><th>Evidence</th></tr></thead>
+            <tbody>{table_rows}</tbody>
+          </table></div>
+        </details>
+        <details>
+          <summary>Assembly amplicon coordinates and primer mismatches</summary>
+          <div class="table-scroll"><table>
+            <thead><tr><th>Locus</th><th>Contig</th><th>Coordinates</th><th>Orientation</th><th>Product bp</th><th>Forward mismatches</th><th>Reverse mismatches</th></tr></thead>
+            <tbody>{product_table_rows}</tbody>
+          </table></div>
+        </details>
+      </section>
     </section>
   </main>
 </body>

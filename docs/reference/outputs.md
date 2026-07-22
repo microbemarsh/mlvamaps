@@ -8,8 +8,7 @@
 | `mlva_fingerprint.tsv` | Wide sample-by-locus repeat-count fingerprint. |
 | `mlva_fingerprint_probabilistic.tsv` | Long-form calls with confidence values. |
 | `profile_matches.tsv` | Closest profile rows; header-only without a profile database. |
-| `novelty_scores.tsv` | Nearest profile, score, and interpretation. |
-| `report.html` | Self-contained human-readable report. |
+| `report.html` | Self-contained interpretation report with conditional sample findings, locus-quality flags, gel evidence, profile matches, closest reference genomes, and expandable technical tables. |
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
 

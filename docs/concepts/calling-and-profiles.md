@@ -1,4 +1,4 @@
-# Allele calling, profiles, and novelty
+# Allele calling and profiles
 
 ## Read-level predictions
 
@@ -73,21 +73,3 @@ match exactly.
 
 Profiles from different panels or repeat-number conventions should not be
 compared without a documented conversion.
-
-## Novelty summary
-
-The novelty score combines:
-
-- Distance from the nearest supplied profile.
-- Low posterior calls.
-- Non-`PASS`/`LOW_DEPTH` statuses.
-
-The interpretation is:
-
-- Below 0.25: `known-like`
-- 0.25 to below 0.6: `uncertain`
-- 0.6 or above: `potentially novel profile`
-
-Without a supplied profile database, the score uses a neutral distance
-component. Novelty is a prioritization summary, not proof that a strain,
-lineage, or allele is biologically novel.

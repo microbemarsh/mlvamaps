@@ -24,7 +24,6 @@ from .mapping import (
 from .pipeline import (
     ALLELE_DISTRIBUTION_FIELDS,
     MATCH_FIELDS,
-    NOVELTY_FIELDS,
     REPEAT_COUNT_FIELDS,
     SIMPLE_CALL_FIELDS,
     allele_distribution_rows,
@@ -33,7 +32,6 @@ from .progress import ProgressReporter
 from .profile_matching import build_fingerprint, match_profiles
 from .phylogeny import run_phylogenetic_placement
 from .primers import LEGACY_NAME_RE, read_loci_or_primers
-from .novelty import score_novelty
 from .report import write_assembly_report
 
 
@@ -1059,8 +1057,6 @@ def run_assembly_call(
     )
     match_rows = match_profiles(sample_id, fingerprint_rows[0], profiles)
     write_tsv(match_rows, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
-    novelty_rows = score_novelty(sample_id, allele_rows, match_rows)
-    write_tsv(novelty_rows, outdir_path / "novelty_scores.tsv", NOVELTY_FIELDS)
     # Re-run product selection without depth so the comparison files retain
     # historical mismatch-round behavior even when modern calls use support.
     legacy_call_rows = legacy_assembly_call_rows(
@@ -1120,7 +1116,6 @@ def run_assembly_call(
         products,
         match_rows,
         profiles,
-        novelty_rows,
         loci,
         phylogenetic_rows,
         closest_reference_bands,

@@ -3,6 +3,8 @@ from mlvamaps.report import (
     _assembly_gel_svg,
     _gel_svg,
     _phylogenetic_warning_html,
+    write_assembly_report,
+    write_report,
 )
 
 
@@ -77,3 +79,63 @@ def test_phylogenetic_warning_explains_exact_match_override():
     assert "Exact-match placement warning" in warning
     assert "R1" in warning
     assert "likelihood-weighted placement distance" in warning
+
+
+def test_reports_prioritize_sample_findings_and_remove_novelty(tmp_path):
+    locus = Locus(locus_id="L1", repeat_motif="AT")
+    phylogenetic_rows = [
+        {
+            "rank": "1",
+            "reference_id": "R1",
+            "match_status": "EXACT_AMPLICON_MATCH",
+            "combined_marker_distance": "0.00000000",
+            "whole_genome_exact_match": "yes",
+            "whole_genome_snps": "0",
+            "whole_genome_indel_bases": "0",
+            "whole_genome_align_fraction_ref": "100.00000000",
+            "whole_genome_align_fraction_query": "100.00000000",
+            "tie_break_status": "APPLIED",
+        }
+    ]
+    write_report(
+        tmp_path / "reads",
+        "sample",
+        [
+            {
+                "locus_id": "L1",
+                "called_repeat_count": "5",
+                "posterior_probability": "0.99",
+                "read_depth": "20",
+                "call_status": "PASS",
+            }
+        ],
+        [locus],
+        phylogenetic_rows=phylogenetic_rows,
+    )
+    write_assembly_report(
+        tmp_path / "assembly",
+        "sample",
+        [
+            {
+                "locus_id": "L1",
+                "present": "yes",
+                "repeat_count": "5",
+                "product_size_bp": "100",
+                "status": "PASS",
+            }
+        ],
+        [{"locus_id": "L1", "product_size_bp": "100"}],
+        loci=[locus],
+        phylogenetic_rows=phylogenetic_rows,
+    )
+
+    for report_path in (
+        tmp_path / "reads" / "report.html",
+        tmp_path / "assembly" / "report.html",
+    ):
+        report = report_path.read_text()
+        assert "Sample Overview" in report
+        assert "Closest Reference Genomes" in report
+        assert "Exact whole-genome match" in report
+        assert "Technical marker-distance components" in report
+        assert "Novelty" not in report

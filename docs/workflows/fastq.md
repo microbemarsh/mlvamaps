@@ -150,18 +150,16 @@ Statuses include `PASS`, `LOW_DEPTH`, `AMBIGUOUS`, `OUT_OF_RANGE`,
 
 MLVAMaps converts the locus calls to wide and probabilistic fingerprints. If a
 profile database is present, it ranks known rows by repeat-count distance and
-reports mismatched loci and comparison confidence. It also summarizes novelty
-from distance and call uncertainty.
+reports mismatched loci and comparison confidence.
 
 This stage returns:
 
 - `mlva_fingerprint.tsv`
 - `mlva_fingerprint_probabilistic.tsv`
 - `profile_matches.tsv`
-- `novelty_scores.tsv`
 - `report.html`
 
-The report leads with plots for locus confidence, EM-estimated variant
-fractions, representative mapping coverage, and the generated gel. Exact
-allele, mixture, mapping, and SNP tables remain available in collapsed detail
-sections.
+The report leads with panel completeness, locus-specific review findings, and
+the closest profile/reference interpretation. It only shows mixture and mapping
+sections when those data exist. Exact allele, mixture, mapping, SNP, and
+distance-component tables remain available in collapsed detail sections.
