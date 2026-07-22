@@ -1078,6 +1078,7 @@ def run_assembly_call(
     )
     phylogeny_paths: dict[str, Path] = {}
     phylogenetic_rows: list[dict] = []
+    closest_reference_bands: list[dict] = []
     if database_path:
         product_by_id = {product["product_id"]: product for product in products}
         query_sequences = {
@@ -1105,6 +1106,9 @@ def run_assembly_call(
             progress=progress,
         )
         phylogenetic_rows = read_profiles(phylogeny_paths["combined_marker_matches"])
+        closest_reference_bands = read_profiles(
+            phylogeny_paths["closest_reference_bands"]
+        )
     progress.step("Writing HTML report")
     write_assembly_report(
         outdir_path,
@@ -1116,6 +1120,7 @@ def run_assembly_call(
         novelty_rows,
         loci,
         phylogenetic_rows,
+        closest_reference_bands,
     )
     progress.step(f"Done. Main calls: {calls_path}")
     return {

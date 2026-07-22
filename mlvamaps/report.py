@@ -54,7 +54,9 @@ def _gel_svg(
     allele_rows: list[dict],
     best_profile: dict | None,
     asv_rows: list[dict],
+    closest_reference_bands: list[dict] | None = None,
 ) -> str:
+    closest_reference_bands = closest_reference_bands or []
     allele_by_locus = {row["locus_id"]: row for row in allele_rows}
     asv_by_locus: dict[str, list[dict]] = {}
     for row in asv_rows:
@@ -77,10 +79,23 @@ def _gel_svg(
             if query_size:
                 support = _called_count(allele.get("read_depth")) or 0
                 query_bands.append((locus.locus_id, query_size, support, 1.0 if support else 0.0))
-        if best_profile:
+        if best_profile and not closest_reference_bands:
             reference_size = _amplicon_size(locus, _called_count(best_profile.get(locus.locus_id)))
             if reference_size:
                 reference_bands.append((locus.locus_id, reference_size, 0, 1.0))
+
+    if closest_reference_bands:
+        reference_bands = [
+            (
+                row.get("locus_id", ""),
+                size,
+                0,
+                1.0,
+            )
+            for row in closest_reference_bands
+            if (size := _called_count(row.get("product_size_bp"))) is not None
+            and size > 0
+        ]
 
     all_sizes = [size for _name, size, _support, _frequency in query_bands + reference_bands]
     if not all_sizes:
@@ -141,12 +156,18 @@ def _gel_svg(
         for size in marker_sizes
         if min_size <= size <= max_size
     )
-    reference_name = best_profile.get("profile_id", "best reference") if best_profile else "no reference"
+    reference_name = (
+        closest_reference_bands[0].get("reference_id", "closest reference")
+        if closest_reference_bands
+        else best_profile.get("profile_id", "best reference")
+        if best_profile
+        else "no reference"
+    )
     return f"""
 <figure class="gel-panel" aria-label="Generated agarose gel comparison">
   <svg viewBox="0 0 720 500" role="img" aria-labelledby="gel-title gel-desc">
     <title id="gel-title">Generated MLVA agarose gel comparison</title>
-    <desc id="gel-desc">Marker, query sample, and best matching reference profile bands estimated from VNTR amplicon sizes.</desc>
+    <desc id="gel-desc">Marker, query sample, and closest reference bands estimated from VNTR amplicon sizes.</desc>
     <defs>
       <filter id="glow"><feGaussianBlur stdDeviation="2.4" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
       <linearGradient id="gel-bg" x1="0" x2="1" y1="0" y2="1">
@@ -183,7 +204,9 @@ def _assembly_gel_svg(
     call_rows: list[dict],
     best_profile: dict | None = None,
     loci: list[Locus] | None = None,
+    closest_reference_bands: list[dict] | None = None,
 ) -> str:
+    closest_reference_bands = closest_reference_bands or []
     bands = []
     call_by_locus = {row.get("locus_id", ""): row for row in call_rows}
     for row in call_rows:
@@ -197,7 +220,19 @@ def _assembly_gel_svg(
         bands.append((row.get("locus_id", ""), size, support, repeat_count))
 
     reference_bands = []
-    if best_profile and loci:
+    if closest_reference_bands:
+        for row in closest_reference_bands:
+            size = _called_count(row.get("product_size_bp"))
+            if size is None or size <= 0:
+                continue
+            reference_bands.append(
+                (
+                    row.get("locus_id", ""),
+                    int(round(size)),
+                    row.get("repeat_count", ""),
+                )
+            )
+    elif best_profile and loci:
         for locus in loci:
             reference_repeat = _called_count(best_profile.get(locus.locus_id))
             repeat_unit_bp = _locus_repeat_unit_bp(locus)
@@ -269,14 +304,20 @@ def _assembly_gel_svg(
     reference_svg = []
     for locus_id, size, repeat_count in reference_bands:
         y = y_for_size(size)
-        label = f"{locus_id} ({repeat_count}U)"
+        label = f"{locus_id} ({repeat_count}U)" if repeat_count != "" else locus_id
         reference_svg.append(
             f'<g class="band-hit" tabindex="0"><title>{_safe(label)} reference: {size} bp</title>'
             f'<rect class="reference-band" x="468" y="{y - 3.5:.1f}" width="92" height="7" rx="2" />'
             f'<text class="band-label reference-label" x="574" y="{y + 3:.1f}">{_safe(label)}</text></g>'
         )
 
-    reference_name = best_profile.get("profile_id", "closest reference") if best_profile else "no reference"
+    reference_name = (
+        closest_reference_bands[0].get("reference_id", "closest reference")
+        if closest_reference_bands
+        else best_profile.get("profile_id", "closest reference")
+        if best_profile
+        else "no reference"
+    )
     depth_note = (
         "Band brightness and thickness scale with read depth from FASTQ/BAM support."
         if depth_available
@@ -313,7 +354,7 @@ def _assembly_gel_svg(
     {"".join(band_svg)}
     {"".join(reference_svg)}
   </svg>
-  <figcaption>{depth_note} Closest-reference bands are drawn in magenta when a profile match is available. Hover or focus a band for locus details.</figcaption>
+  <figcaption>{depth_note} Closest-reference bands are drawn in magenta when a database placement or profile match is available. Hover or focus a band for locus details.</figcaption>
 </figure>
 """
 
@@ -557,6 +598,7 @@ def write_report(
     snp_rows: list[dict] | None = None,
     mixture_rows: list[dict] | None = None,
     phylogenetic_rows: list[dict] | None = None,
+    closest_reference_bands: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     loci = loci or []
@@ -567,6 +609,7 @@ def write_report(
     snp_rows = snp_rows or []
     mixture_rows = mixture_rows or []
     phylogenetic_rows = phylogenetic_rows or []
+    closest_reference_bands = closest_reference_bands or []
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
     dropout = sum(1 for row in allele_rows if row.get("call_status") == "LOCUS_DROPOUT")
@@ -577,7 +620,14 @@ def write_report(
     best_match = match_rows[0] if match_rows else {}
     best_profile = _best_profile(match_rows, profiles)
     phylogenetic_best = phylogenetic_rows[0] if phylogenetic_rows else {}
-    gel = _gel_svg(sample_id, loci, allele_rows, best_profile, asv_rows)
+    gel = _gel_svg(
+        sample_id,
+        loci,
+        allele_rows,
+        best_profile,
+        asv_rows,
+        closest_reference_bands,
+    )
     repeat_count_plot = _repeat_count_svg(allele_rows)
     confidence_plot = _locus_confidence_svg(allele_rows)
     mixture_plot = _variant_mixture_svg(mixture_rows, allele_rows)
@@ -840,19 +890,27 @@ def write_assembly_report(
     novelty_rows: list[dict] | None = None,
     loci: list[Locus] | None = None,
     phylogenetic_rows: list[dict] | None = None,
+    closest_reference_bands: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     match_rows = match_rows or []
     profiles = profiles or []
     novelty_rows = novelty_rows or []
     phylogenetic_rows = phylogenetic_rows or []
+    closest_reference_bands = closest_reference_bands or []
     present = sum(1 for row in call_rows if row.get("present") == "yes")
     not_found = sum(1 for row in call_rows if row.get("present") != "yes")
     with_depth = sum(1 for row in call_rows if _called_count(row.get("read_depth")))
     best_match = match_rows[0] if match_rows else {}
     best_profile = _best_profile(match_rows, profiles)
     phylogenetic_best = phylogenetic_rows[0] if phylogenetic_rows else {}
-    gel = _assembly_gel_svg(sample_id, call_rows, best_profile, loci)
+    gel = _assembly_gel_svg(
+        sample_id,
+        call_rows,
+        best_profile,
+        loci,
+        closest_reference_bands,
+    )
     repeat_count_plot = _repeat_count_svg(call_rows, assembly=True)
     novelty = novelty_rows[0] if novelty_rows else {}
     table_rows = "\n".join(

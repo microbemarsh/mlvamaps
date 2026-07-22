@@ -101,6 +101,13 @@ COMBINED_MARKER_FIELDS = [
     "rank",
 ]
 
+CLOSEST_REFERENCE_BAND_FIELDS = [
+    "reference_id",
+    "locus_id",
+    "product_size_bp",
+    "repeat_count",
+]
+
 _FASTA_SUFFIXES = {".fa", ".fas", ".fasta", ".fna", ".ffn"}
 _SAFE_FILE = re.compile(r"[^A-Za-z0-9_.-]+")
 _IUPAC = {
@@ -1525,6 +1532,43 @@ def run_phylogenetic_placement(
         )
     combined_path = output / "combined_marker_matches.tsv"
     _write_tsv(combined_rows, combined_path, COMBINED_MARKER_FIELDS)
+    closest_reference_bands_path = output / "closest_reference_bands.tsv"
+    closest_reference_id = ""
+    if combined_rows:
+        closest_reference_id = str(combined_rows[0]["reference_id"])
+    elif summary_rows:
+        closest_reference_id = str(summary_rows[0]["reference_id"])
+    closest_reference_band_rows = []
+    if closest_reference_id:
+        for locus_id in sorted(references):
+            reference_sequence = next(
+                (
+                    sequence
+                    for reference_id, sequence in references[locus_id]
+                    if reference_id == closest_reference_id
+                ),
+                "",
+            )
+            if not reference_sequence:
+                continue
+            components = reference_components_by_locus.get(locus_id, {}).get(
+                closest_reference_id
+            )
+            closest_reference_band_rows.append(
+                {
+                    "reference_id": closest_reference_id,
+                    "locus_id": locus_id,
+                    "product_size_bp": len(reference_sequence),
+                    "repeat_count": ""
+                    if components is None or components.repeat_count is None
+                    else components.repeat_count,
+                }
+            )
+    _write_tsv(
+        closest_reference_band_rows,
+        closest_reference_bands_path,
+        CLOSEST_REFERENCE_BAND_FIELDS,
+    )
     query_tree_label = sample_id if sample_id not in eligible_combined_references else query_name
     tree_labels = [*sorted(eligible_combined_references), query_tree_label]
     query_locus_rows = {
@@ -1635,6 +1679,7 @@ def run_phylogenetic_placement(
         "locus_marker_distances": locus_marker_path,
         "combined_marker_matches": combined_path,
         "combined_marker_tree": combined_tree_path,
+        "closest_reference_bands": closest_reference_bands_path,
     }
 
 

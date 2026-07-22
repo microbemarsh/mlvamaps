@@ -58,6 +58,7 @@ reference.
 | `phylogeny/marker_components.tsv` | Query and reference repeat counts, repeat-unit haplotypes, masking coordinates, and SNP-sequence lengths. |
 | `phylogeny/locus_marker_distances.tsv` | Per-locus normalized SNP-tree distance and explicit repeat-count distance for every reference. |
 | `phylogeny/combined_marker_matches.tsv` | References ranked by the configurable weighted sum of normalized SNP and repeat distances, with optional date/location metadata. |
+| `phylogeny/closest_reference_bands.tsv` | Exact per-locus amplicon sizes and repeat calls for the top combined-marker reference (or top SNP-tree match when repeat-aware ranking is unavailable), used for the reference lane in the generated gel. |
 | `phylogeny/combined_markers.tree` | MYOGA-compatible Newick neighbor-joining tree inferred from the combined normalized SNP-plus-repeat distance matrix. Tip labels are reference IDs plus the query sample ID. |
 
 ## Compact call columns

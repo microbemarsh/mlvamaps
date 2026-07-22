@@ -409,6 +409,15 @@ def test_repeat_masking_and_combined_marker_ranking(tmp_path):
     assert combined[0]["repeat_compared_loci"] == "1"
     assert combined[0]["collection_date"] == "2024-01-02"
     assert combined[0]["location"] == "Site A"
+    closest_bands = _read_tsv(result["closest_reference_bands"])
+    assert closest_bands == [
+        {
+            "reference_id": "R1",
+            "locus_id": "L1",
+            "product_size_bp": str(len(query)),
+            "repeat_count": "2",
+        }
+    ]
     combined_tree = result["combined_marker_tree"]
     assert combined_tree.name == "combined_markers.tree"
     root = _parse_newick(combined_tree.read_text())

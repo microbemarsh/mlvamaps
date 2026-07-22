@@ -434,6 +434,7 @@ def run_call(
     write_tsv(novelty_rows, outdir_path / "novelty_scores.tsv", NOVELTY_FIELDS)
     phylogeny_paths: dict[str, Path] = {}
     phylogenetic_rows: list[dict] = []
+    closest_reference_bands: list[dict] = []
     if database_path:
         progress.step(
             "Placing MAFFT-aligned queries with EPA-ng using reusable reference trees when available"
@@ -455,6 +456,9 @@ def run_call(
             progress=progress,
         )
         phylogenetic_rows = read_profiles(phylogeny_paths["combined_marker_matches"])
+        closest_reference_bands = read_profiles(
+            phylogeny_paths["closest_reference_bands"]
+        )
     progress.step("Writing HTML report")
     write_report(
         outdir_path,
@@ -469,6 +473,7 @@ def run_call(
         snp_rows,
         mixture_rows,
         phylogenetic_rows,
+        closest_reference_bands,
     )
     progress.step(f"Done. Main calls: {outdir_path / 'calls.tsv'}")
 
