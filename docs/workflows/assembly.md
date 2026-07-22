@@ -9,9 +9,11 @@ mlvamaps call primers.tsv assembly.fasta -o results
 ## 1. Find paired-primer products
 
 Amplirust searches both assembly orientations with degenerate-primer and
-primer-error support. MLVAMaps filters circular-wrap records and uses the
-historical raw-allele limit for discovery. Novel calling still enforces each
-locus's configured amplicon range before selecting a product.
+primer-error support. For compatibility, assembly gaps represented by `N`
+bases are permitted inside products; MLVA_finder did not reject them. MLVAMaps
+filters circular-wrap records and uses the historical raw-allele limit for
+discovery. Novel calling still enforces each locus's configured amplicon range
+before selecting a product.
 
 This stage returns:
 
@@ -21,10 +23,12 @@ This stage returns:
 - Native evidence under `amplirust/`.
 
 The default `--algorithm legacy` path reproduces MLVA_finder's decision rule:
-it uses the lowest successful primer-error round and retains the smallest raw
-allele in that round. Equal values preserve discovery order, as in the original
-script. `--algorithm novel` selects the probabilistic caller described below.
-All accepted products remain available in the amplicon table.
+it uses the lowest successful primer-error round, applies the original
+forward-strand and equal-length-match precedence, and retains the smallest raw
+allele on the last FASTA record with a valid product in that round. Product
+sizes also follow the original configured-primer-length formula when a primer
+match contains an indel. `--algorithm novel` selects the probabilistic caller
+described below. All accepted products remain available in the amplicon table.
 
 ## 2. Estimate repeat count
 

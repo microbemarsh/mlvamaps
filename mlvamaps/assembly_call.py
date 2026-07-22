@@ -14,7 +14,7 @@ from .calling import (
 )
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_amplirust_results, run_amplirust_loci
-from .io import read_profiles, write_fasta, write_tsv
+from .io import read_fasta, read_profiles, write_fasta, write_tsv
 from .models import Locus
 from .mapping import (
     build_minimap2_map_command,
@@ -199,16 +199,43 @@ def amplirust_rows_to_products(
     loci: list[Locus],
     sample_id: str,
     enforce_locus_bounds: bool = True,
+    reference_order: dict[str, int] | None = None,
 ) -> list[dict]:
-    """Convert Amplirust output into MLVAMaps assembly-product records."""
+    """Convert Amplirust output into MLVAMaps assembly-product records.
+
+    ``MLVA_finder`` reports product size using the configured primer lengths,
+    even when a fuzzy primer match contains an insertion or deletion.  That is
+    subtly different from Amplirust's ``full_len`` (the observed sequence
+    span), so retain the latter internally and expose the legacy-compatible
+    size to the assembly callers.
+    """
     locus_by_id = {locus.locus_id: locus for locus in loci}
+    reference_order = reference_order or {}
     products = []
     for row in rows:
         locus_id = str(row.get("primer_name", ""))
         locus = locus_by_id.get(locus_id)
         if locus is None or str(row.get("is_circular_wrap", "false")).lower() == "true":
             continue
-        product_size = int(row["full_len"])
+        amplicon_span_size = int(row["full_len"])
+        fwd_start = int(row["fwd_start"])
+        fwd_end = int(row["fwd_end"])
+        rev_start = int(row["rev_start"])
+        rev_end = int(row["rev_end"])
+        forward_match_length = max(0, fwd_end - fwd_start)
+        reverse_match_length = max(0, rev_end - rev_start)
+        # This is algebraically equivalent to both orientation-specific size
+        # formulas in MLVA_finder.py.  In particular, the configured reverse
+        # primer length is used rather than the observed reverse-match length.
+        product_size = (
+            rev_start
+            + len(locus.reverse_primer)
+            - fwd_start
+            - forward_match_length
+            + len(locus.forward_primer)
+        )
+        if product_size <= 0:
+            continue
         min_len = locus.expected_amplicon_min_bp or len(locus.forward_primer) + len(locus.reverse_primer)
         max_len = locus.expected_amplicon_max_bp or 100000
         if enforce_locus_bounds and not min_len <= product_size <= max_len:
@@ -221,12 +248,6 @@ def amplirust_rows_to_products(
         orientation = "reverse" if row.get("strand") == "-" else "forward"
         product_id = f"{locus_id}|{contig}|{orientation}|{contig_start}-{contig_end}"
         sequence = str(row["product_seq"]).upper()
-        fwd_start = int(row["fwd_start"])
-        fwd_end = int(row["fwd_end"])
-        rev_start = int(row["rev_start"])
-        rev_end = int(row["rev_end"])
-        forward_match_length = max(0, fwd_end - fwd_start)
-        reverse_match_length = max(0, rev_end - rev_start)
         original_start = int(row["original_start"])
         original_end = int(row["original_end"])
         if orientation == "forward":
@@ -246,6 +267,7 @@ def amplirust_rows_to_products(
                 "contig_end": contig_end,
                 "orientation": orientation,
                 "product_size_bp": product_size,
+                "amplicon_span_size_bp": amplicon_span_size,
                 "forward_mismatches": int(row["fwd_mismatches"]),
                 "reverse_mismatches": int(row["rev_mismatches"]),
                 "primer_error_round": max(int(row["fwd_mismatches"]), int(row["rev_mismatches"])),
@@ -256,6 +278,9 @@ def amplirust_rows_to_products(
                 else "",
                 "forward_start_0based": forward_start_0based,
                 "reverse_start_0based": reverse_start_0based,
+                "forward_match_length": forward_match_length,
+                "reverse_match_length": reverse_match_length,
+                "contig_index": reference_order.get(contig, 0),
                 "sequence": sequence,
             }
         )
@@ -486,9 +511,12 @@ def legacy_assembly_call_rows(
     """Call assembly alleles with MLVA_finder's historical decision rules.
 
     The original script searched successively larger per-primer mismatch
-    rounds.  Within the first successful round it retained the product with
-    the smallest unrounded allele value (preserving discovery order for an
-    exact tie), rejected values of 100 or greater, and only then rounded.
+    rounds. Within the first successful round, each FASTA record replaced the
+    preceding record's result, and the smallest unrounded allele on that final
+    matching record was retained. It also preferred a forward-orientation
+    first-primer match over reverse orientation and equal-length fuzzy primer
+    matches over indel matches. Values of 100 or greater were rejected before
+    rounding.
     """
     read_support = read_support or {}
     products_by_locus: dict[str, list[dict]] = {}
@@ -497,8 +525,9 @@ def legacy_assembly_call_rows(
 
     rows = []
     for locus in loci:
+        locus_products = products_by_locus.get(locus.locus_id, [])
         eligible = []
-        for product in products_by_locus.get(locus.locus_id, []):
+        for product in locus_products:
             raw_count = estimate_repeat_count_from_product_length(
                 locus, int(product["product_size_bp"])
             )
@@ -508,14 +537,60 @@ def legacy_assembly_call_rows(
             rows.append(_not_found_row(sample_id, locus.locus_id))
             continue
 
-        first_error_round = min(
-            int(product["primer_error_round"]) for product, _ in eligible
+        def compatible_with_legacy_search(product: dict, error_round: int) -> bool:
+            same_search = [
+                other
+                for other in locus_products
+                if other.get("contig") == product.get("contig")
+                and other.get("orientation") == product.get("orientation")
+            ]
+            # MLVA_finder searches the forward primer on the input strand
+            # first. Any such match prevents its reverse-complement fallback.
+            if product.get("orientation") == "reverse" and any(
+                other.get("orientation") == "forward"
+                and other.get("contig") == product.get("contig")
+                and int(other.get("forward_mismatches", 0)) <= error_round
+                for other in locus_products
+            ):
+                return False
+            # Its fuzzy matcher discards indel-length matches whenever an
+            # equal-length match exists at the same mismatch threshold.
+            for length_key, error_key, configured_length in (
+                ("forward_match_length", "forward_mismatches", len(locus.forward_primer)),
+                ("reverse_match_length", "reverse_mismatches", len(locus.reverse_primer)),
+            ):
+                if int(product.get(length_key, configured_length)) == configured_length:
+                    continue
+                if any(
+                    int(other.get(error_key, 0)) <= error_round
+                    and int(other.get(length_key, configured_length)) == configured_length
+                    for other in same_search
+                ):
+                    return False
+            return True
+
+        round_products = []
+        max_error_round = max(int(product["primer_error_round"]) for product, _ in eligible)
+        for first_error_round in range(max_error_round + 1):
+            round_products = [
+                item
+                for item in eligible
+                if int(item[0]["primer_error_round"]) <= first_error_round
+                and compatible_with_legacy_search(item[0], first_error_round)
+            ]
+            if round_products:
+                break
+        if not round_products:
+            rows.append(_not_found_row(sample_id, locus.locus_id))
+            continue
+        final_contig_index = max(
+            int(product.get("contig_index", 0)) for product, _ in round_products
         )
         product, raw_count = min(
             (
                 (product, raw_count)
-                for product, raw_count in eligible
-                if int(product["primer_error_round"]) == first_error_round
+                for product, raw_count in round_products
+                if int(product.get("contig_index", 0)) == final_contig_index
             ),
             key=lambda item: item[1],
         )
@@ -896,14 +971,22 @@ def run_assembly_call(
         outdir_path / "amplirust",
         max_errors=max_primer_mismatches,
         threads=threads,
+        # MLVA_finder does not reject an otherwise valid product because its
+        # interior crosses an assembly gap represented by N bases.
+        max_n_fraction=1.0,
         executable=amplirust_bin,
         amplicon_bounds=legacy_amplicon_bounds(loci),
     )
+    reference_order = {
+        reference_id: index
+        for index, (reference_id, _sequence) in enumerate(read_fasta(assembly_path))
+    }
     products = amplirust_rows_to_products(
         read_amplirust_results(amplirust_paths["stats"], amplirust_paths["products"]),
         loci,
         sample_id,
         enforce_locus_bounds=False,
+        reference_order=reference_order,
     )
     progress.step(f"Found {len(products):,} primer product(s)")
     write_tsv(products, outdir_path / "assembly_amplicons.tsv", AMPLICON_FIELDS)

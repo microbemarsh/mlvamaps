@@ -10,6 +10,7 @@ from mlvamaps import sequence
 from mlvamaps.bayesian_caller import call_loci
 from mlvamaps.assembly_call import (
     _primer_match_display,
+    amplirust_rows_to_products,
     assembly_call_rows,
     build_minimap2_command,
     legacy_amplicon_bounds,
@@ -181,6 +182,7 @@ for reference, original in records:
             suffix = '_rc' if strand == '-' else ''
             amplicon_id = f"{reference}:{primer['name']}{suffix}:{case}"
             product = sequence[fwd:end]
+            if product.count('N') / len(product) > float(value('--max-n-fraction')): continue
             products.append((amplicon_id, reference, primer['name'], product, full_len, fwd, rev, strand, start0, end0, len(primer['forward']), len(rev_seq)))
             break
 with pathlib.Path(value('--output')).open('w') as fasta:
@@ -619,6 +621,98 @@ def test_legacy_rounding_and_mismatch_round_product_selection():
     assert row["repeat_count_raw"] == "6.25"
     assert row["repeat_count"] == 6
     assert row["status"] == "AMBIGUOUS"
+
+
+def test_amplirust_products_use_mlva_finder_size_formula_for_primer_indels():
+    locus = Locus(
+        locus_id="VNTR",
+        forward_primer="AAAA",
+        reverse_primer="CCCC",
+        repeat_unit_length_bp=2,
+        expected_product_size_bp=20,
+        nominal_repeat_units=5,
+    )
+    row = {
+        "primer_name": "VNTR",
+        "reference_id": "contig1 description",
+        "is_circular_wrap": "false",
+        "full_len": "20",
+        "fwd_start": "10",
+        "fwd_end": "15",
+        "rev_start": "26",
+        "rev_end": "29",
+        "fwd_mismatches": "1",
+        "rev_mismatches": "1",
+        "strand": "+",
+        "original_start": 10,
+        "original_end": 30,
+        "product_seq": "A" * 20,
+    }
+
+    product = amplirust_rows_to_products(
+        [row], [locus], "sample", enforce_locus_bounds=False
+    )[0]
+
+    assert product["amplicon_span_size_bp"] == 20
+    assert product["product_size_bp"] == 19
+    assert product["forward_match_length"] == 5
+    assert product["reverse_match_length"] == 3
+
+
+def test_legacy_selection_uses_last_matching_contig_and_forward_precedence():
+    locus = Locus(
+        locus_id="VNTR",
+        forward_primer="AAAA",
+        reverse_primer="TTTT",
+        repeat_unit_length_bp=4,
+        expected_product_size_bp=40,
+        nominal_repeat_units=5,
+    )
+    common = {
+        "locus_id": "VNTR",
+        "primer_error_round": 0,
+        "forward_mismatches": 0,
+        "reverse_mismatches": 0,
+        "forward_match_length": 4,
+        "reverse_match_length": 4,
+    }
+    products = [
+        dict(common, product_id="first-small", contig="first", contig_index=0,
+             orientation="forward", product_size_bp=32),
+        dict(common, product_id="last-large", contig="last", contig_index=1,
+             orientation="forward", product_size_bp=44),
+        dict(common, product_id="last-reverse-smaller", contig="last", contig_index=1,
+             orientation="reverse", product_size_bp=28),
+    ]
+
+    row = assembly_call_rows([locus], products, "S1")[0]
+
+    assert row["evidence"] == "last-large"
+    assert row["repeat_count"] == 6
+
+
+def test_assembly_call_allows_n_bases_inside_legacy_product(tmp_path):
+    amplirust = write_fake_amplirust(tmp_path)
+    primers = tmp_path / "primers.tsv"
+    primers.write_text(
+        "locus_id\tforward_primer\treverse_primer\trepeat_unit_length_bp\t"
+        "expected_product_size_bp\tnominal_repeat_units\n"
+        "VNTR\tAAAACCCC\tGGGGTTTT\t2\t24\t4\n"
+    )
+    assembly = tmp_path / "assembly.fasta"
+    assembly.write_text(">contig1\nAAAACCCCNNNNNNNNAAAACCCCAAAAGGGGTTTT\n")
+
+    result = run_assembly_call(
+        assembly_path=str(assembly),
+        loci_path=None,
+        primers_path=str(primers),
+        outdir=str(tmp_path / "results"),
+        sample_id="sample",
+        amplirust_bin=str(amplirust),
+    )
+
+    call = read_tsv(result["calls"])[0]
+    assert call["present"] == "yes"
 
 
 def test_depth_distribution_selects_supported_assembly_allele():
