@@ -94,6 +94,11 @@ reuses the saved reference alignment, RAxML-NG tree, and selected model for
 each locus. It runs MAFFT only to add the query without changing reference
 coordinates, followed by EPA-ng placement.
 
+Because each locus contains only one short query, MLVAMaps parallelizes EPA-ng
+across callable loci. The `--threads` CPU budget is divided among the concurrent
+placement processes; with at least as many loci as CPUs, each process gets one
+native thread.
+
 Sequence-only databases remain supported and build missing reference trees on
 demand. Their recommended layout is one FASTA per locus in a directory;
 each filename stem must exactly match the panel locus and each FASTA header is

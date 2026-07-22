@@ -97,7 +97,10 @@ mlvamaps call primers.tsv sample.fastq.gz \
 
 The recommended database is the top-level output from `mlvamaps
 build-reference`. MLVAMaps reuses its fixed reference alignments, trees, and
-selected models, then runs only MAFFT query addition and EPA-ng placement. The
+selected models, then runs only MAFFT query addition and EPA-ng placement.
+Independent locus placements run concurrently, and the available CPU budget is
+shared between them. This is more efficient than assigning all OpenMP threads
+to each short single-query placement. The
 `reference_build/database` subdirectory is also accepted.
 
 For a sequence-only database, use a directory containing one FASTA per locus.

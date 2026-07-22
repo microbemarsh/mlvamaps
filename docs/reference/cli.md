@@ -8,7 +8,7 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | --- | --- | --- |
 | `-o`, `--output`, `--outdir` | `results` | Output directory. |
 | `--sample-id` | Input filename | Sample identifier. |
-| `-t`, `--threads` | `32` | Worker/native threads; `0` uses all CPUs. |
+| `-t`, `--threads` | `32` | CPU budget shared across concurrent EPA-ng locus workers; `0` uses all CPUs. |
 | `--quiet` | Off | Suppress live progress. |
 | `--max-primer-mismatches` | `2` | Allowed primer errors for paired-primer detection, matching MLVA_finder's default. |
 | `--profiles` | None | Known MLVA profile TSV. |

@@ -39,7 +39,8 @@ that lack reusable trees, RAxML-NG selects a
 model independently for each locus from its `DNA` set; this can be changed with
 `--raxml-model`. EPA-ng consumes the optimized
 RAxML-NG `.bestModel` file and places the query without changing the reference
-topology. Summed matching distances combine the placement pendant/distal lengths
+topology. Callable loci are placed concurrently within the `--threads` CPU
+budget. Summed matching distances combine the placement pendant/distal lengths
 with the RAxML-NG reference-tree branch lengths. The output retains both the
 highest-likelihood-weight placement distance and the expected distance across
 all candidate placements, weighted by normalized likelihood weight ratios.

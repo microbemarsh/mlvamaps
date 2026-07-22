@@ -4,9 +4,11 @@ import csv
 import io
 import json
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
+from mlvamaps import phylogeny as phylogeny_module
 from mlvamaps.phylogeny import (
     _parse_newick,
     _placement_patristic_distances,
@@ -234,6 +236,41 @@ def test_phylogenetic_placement_reuses_reference_build_trees(
     assert (locus_output / "reference_tree.nwk").read_text() == saved_tree
     assert not (locus_output / "reference.raxml.bestTree").exists()
     assert _read_tsv(result["phylogenetic_status"])[0]["status"] == "PLACED"
+
+
+def test_phylogenetic_placement_parallelizes_across_loci(tmp_path, monkeypatch):
+    database = tmp_path / "database"
+    database.mkdir()
+    (database / "L1.fasta").write_text(">R1\nAAAA\n>R2\nTTTT\n")
+    (database / "L2.fasta").write_text(">R1\nCCCC\n>R2\nGGGG\n")
+    barrier = Barrier(2)
+    observed: list[tuple[str, int]] = []
+    original = phylogeny_module._run_placement_job
+
+    def synchronized_job(job, mafft, epa_ng, native_threads=1):
+        observed.append((job.locus_id, native_threads))
+        barrier.wait(timeout=2)
+        return original(job, mafft, epa_ng, native_threads)
+
+    monkeypatch.setattr(phylogeny_module, "_run_placement_job", synchronized_job)
+    stream = io.StringIO()
+    result = run_phylogenetic_placement(
+        {"L1": "AAAA", "L2": "CCCC"},
+        database,
+        tmp_path / "out",
+        "sample",
+        {"L1", "L2"},
+        2,
+        str(_fake_mafft(tmp_path)),
+        str(_fake_raxml_ng(tmp_path)),
+        str(_fake_epa_ng(tmp_path)),
+        progress=ProgressReporter(stream=stream),
+    )
+
+    assert sorted(observed) == [("L1", 1), ("L2", 1)]
+    assert _read_tsv(result["phylogenetic_status"])[0]["status"] == "PLACED"
+    assert "with 2 worker(s)" in stream.getvalue()
+    assert "Completed EPA-ng loci: 2/2 (100.0%)" in stream.getvalue()
 
 
 def test_missing_query_still_builds_reference_tree(tmp_path):

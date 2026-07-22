@@ -8,10 +8,12 @@ import re
 import shutil
 import statistics
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
 from .calling import estimate_repeat_count_from_product_length, normalize_allele, repeat_unit_length
+from .concurrency import resolve_threads
 from .models import Locus, RepeatFeature
 from .progress import ProgressReporter
 
@@ -516,6 +518,59 @@ def _run_epa_ng(command: list[str], outdir: Path, stage: str) -> Path:
     return jplace
 
 
+@dataclass(frozen=True)
+class _PlacementJob:
+    locus_id: str
+    query_name: str
+    query_fasta: Path
+    reference_alignment: Path
+    reference_tree: Path
+    reference_model: Path
+    placed_alignment: Path
+    query_alignment: Path
+    epa_outdir: Path
+
+
+def _run_placement_job(
+    job: _PlacementJob,
+    mafft: str,
+    epa_ng: str,
+    native_threads: int = 1,
+) -> Path:
+    """Add and place one query; jobs are parallelized across independent loci."""
+    _run_mafft(
+        build_mafft_add_command(
+            job.query_fasta, job.reference_alignment, native_threads, mafft
+        ),
+        job.placed_alignment,
+        f"--add placement for {job.locus_id}",
+    )
+    aligned_query_records = [
+        (name, sequence)
+        for name, sequence in _read_fasta(job.placed_alignment)
+        if name == job.query_name
+    ]
+    if len(aligned_query_records) != 1:
+        raise RuntimeError(
+            f"MAFFT placement alignment for {job.locus_id} did not contain exactly "
+            f"one {job.query_name!r}"
+        )
+    _write_fasta(aligned_query_records, job.query_alignment)
+    return _run_epa_ng(
+        build_epa_ng_command(
+            job.reference_alignment,
+            job.reference_tree,
+            job.query_alignment,
+            job.reference_model,
+            job.epa_outdir,
+            native_threads,
+            epa_ng,
+        ),
+        job.epa_outdir,
+        f"placement for {job.locus_id}",
+    )
+
+
 def _read_database_fasta(path: Path, locus_ids: set[str]) -> dict[str, list[tuple[str, str]]]:
     records = _read_fasta(path)
     if path.parent != path and path.stem in locus_ids:
@@ -1001,6 +1056,7 @@ def run_phylogenetic_placement(
     snp_weight: float = 1.0,
     repeat_weight: float = 1.0,
     reference_metadata_path: str | Path | None = None,
+    progress: ProgressReporter | None = None,
 ) -> dict[str, Path]:
     if snp_weight < 0 or repeat_weight < 0 or snp_weight + repeat_weight <= 0:
         raise ValueError("SNP and repeat weights must be non-negative with a positive total")
@@ -1033,6 +1089,7 @@ def run_phylogenetic_placement(
     query_components_by_locus: dict[str, MarkerComponents] = {}
     reference_components_by_locus: dict[str, dict[str, MarkerComponents]] = {}
     reference_pairwise_by_locus: dict[str, dict[tuple[str, str], float]] = {}
+    placement_jobs: dict[str, _PlacementJob] = {}
 
     for locus_id in sorted(references):
         query_sequence = query_sequences.get(locus_id, "")
@@ -1138,34 +1195,70 @@ def run_phylogenetic_placement(
             )
             continue
         _write_fasta([(query_name, query_sequence)], query_fasta)
-        _run_mafft(
-            build_mafft_add_command(query_fasta, reference_alignment, threads, mafft),
-            placed_alignment,
-            f"--add placement for {locus_id}",
+        placement_jobs[locus_id] = _PlacementJob(
+            locus_id=locus_id,
+            query_name=query_name,
+            query_fasta=query_fasta,
+            reference_alignment=reference_alignment,
+            reference_tree=reference_tree,
+            reference_model=reference_model,
+            placed_alignment=placed_alignment,
+            query_alignment=query_alignment,
+            epa_outdir=epa_outdir,
         )
-        aligned_query_records = [
-            (name, sequence)
-            for name, sequence in _read_fasta(placed_alignment)
-            if name == query_name
-        ]
-        if len(aligned_query_records) != 1:
-            raise RuntimeError(
-                f"MAFFT placement alignment for {locus_id} did not contain exactly one {query_name!r}"
+
+    placement_results: dict[str, Path] = {}
+    if placement_jobs:
+        cpu_budget = resolve_threads(threads)
+        worker_count = min(cpu_budget, len(placement_jobs))
+        native_threads = max(1, cpu_budget // worker_count)
+        if progress is not None:
+            progress.step(
+                f"Running {len(placement_jobs):,} independent EPA-ng locus "
+                f"placements with {worker_count} worker(s) and "
+                f"{native_threads} native thread(s) per worker"
             )
-        _write_fasta(aligned_query_records, query_alignment)
-        jplace_path = _run_epa_ng(
-            build_epa_ng_command(
-                reference_alignment,
-                reference_tree,
-                query_alignment,
-                reference_model,
-                epa_outdir,
-                threads,
-                epa_ng,
-            ),
-            epa_outdir,
-            f"placement for {locus_id}",
-        )
+        if worker_count == 1:
+            for completed, (locus_id, job) in enumerate(
+                placement_jobs.items(), start=1
+            ):
+                placement_results[locus_id] = _run_placement_job(
+                    job, mafft, epa_ng, native_threads
+                )
+                if progress is not None:
+                    progress.count(
+                        "Completed EPA-ng loci",
+                        completed,
+                        len(placement_jobs),
+                        force=True,
+                    )
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(
+                        _run_placement_job, job, mafft, epa_ng, native_threads
+                    ): locus_id
+                    for locus_id, job in placement_jobs.items()
+                }
+                for completed, future in enumerate(as_completed(futures), start=1):
+                    locus_id = futures[future]
+                    try:
+                        placement_results[locus_id] = future.result()
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Phylogenetic placement failed for locus {locus_id!r}"
+                        ) from exc
+                    if progress is not None:
+                        progress.count(
+                            "Completed EPA-ng loci",
+                            completed,
+                            len(placement_jobs),
+                            force=True,
+                        )
+
+    # Parse completed placements in locus order for deterministic tables.
+    for locus_id in sorted(placement_results):
+        jplace_path = placement_results[locus_id]
         (
             placement_distances,
             expected_placement_distances,

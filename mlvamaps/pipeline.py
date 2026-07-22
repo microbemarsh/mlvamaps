@@ -452,6 +452,7 @@ def run_call(
             snp_weight=phylogeny_snp_weight,
             repeat_weight=phylogeny_repeat_weight,
             reference_metadata_path=reference_metadata_path,
+            progress=progress,
         )
         phylogenetic_rows = read_profiles(phylogeny_paths["combined_marker_matches"])
     progress.step("Writing HTML report")
