@@ -5,9 +5,9 @@ from pathlib import Path
 from .bayesian_caller import call_loci
 from .clustering import cluster_vntr_asvs
 from .concurrency import DEFAULT_THREADS, resolve_threads
-from .in_silico_pcr import read_amplirust_results, run_amplirust_loci
+from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
-from .locus_assignment import assignments_from_amplirust
+from .locus_assignment import assignments_from_pcr
 from .mapping import (
     MAPPING_SUMMARY_FIELDS,
     SNP_FIELDS,
@@ -300,21 +300,20 @@ def run_call(
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
 
     if filtered_reads:
-        progress.step("Assigning reads by degenerate primer pairs with Amplirust")
+        progress.step("Assigning reads with MLVA_finder-compatible Sassy primer matching")
         assignment_fasta = outdir_path / "filtered_reads.fasta"
         write_fasta(((read.read_id, read.sequence) for read in filtered_reads), assignment_fasta)
-        amplirust_paths = run_amplirust_loci(
+        pcr_paths = run_in_silico_pcr_loci(
             assignment_fasta,
             loci,
-            outdir_path / "amplirust",
+            outdir_path / "in_silico_pcr",
             max_errors=max_primer_mismatches,
             threads=threads,
-            executable=amplirust_bin,
         )
-        assignments = assignments_from_amplirust(
+        assignments = assignments_from_pcr(
             filtered_reads,
             loci,
-            read_amplirust_results(amplirust_paths["stats"], amplirust_paths["products"]),
+            read_pcr_results(pcr_paths["stats"], pcr_paths["products"]),
             sample_id,
             progress=progress,
         )
@@ -488,7 +487,7 @@ def run_call(
         "mapping_alignments": outdir_path / "locus_read_alignments.sam",
         "minimap2": outdir_path / "minimap2",
         "vsearch": vsearch_dir,
-        "amplirust": outdir_path / "amplirust",
+        "in_silico_pcr": outdir_path / "in_silico_pcr",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "report": outdir_path / "report.html",
         **phylogeny_paths,

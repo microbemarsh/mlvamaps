@@ -5,13 +5,10 @@ possible, and avoid generic fuzzy-string packages for core matching.
 
 Current backend policy:
 
-- `amplirust` is the required in-silico PCR backend for assembly, contig, and
-  reference product extraction and for paired-primer assignment of FASTQ reads
-  after a lossless FASTA projection. It owns IUPAC primer interpretation,
-  product-length constraints, strand handling, and primer alignment CIGARs.
-- `sassy` is the preferred Rust/SIMD approximate DNA matcher for primer-style
-  searches within already assigned amplicons, such as optional locus-flank
-  localization. Degenerate primer pairing is delegated to `amplirust`.
+- `sassy-rs>=0.2.6` is the Rust/SIMD engine for in-silico PCR, paired-primer
+  FASTQ assignment, and bounded flank localization. MLVAMaps owns deterministic
+  IUPAC expansion, MLVA_finder-compatible strand fallback and product pairing,
+  product-length constraints, and result selection.
 - `vsearch>=2.30` performs exact dereplication and abundance-sorted global
   clustering independently for each locus. Its SIMD alignment and identity
   calculation include gaps. MLVAMaps consumes UC memberships and uses the
@@ -32,8 +29,7 @@ Default threading policy:
 
 - CLI options use 32 threads by default. Users can explicitly pass `--threads 0`
   to use all available CPUs.
-- `0` means auto-detect available CPUs for MLVAMaps workers or delegate
-  auto-detection to the external backend, such as `amplirust`.
+- `0` means auto-detect available CPUs for MLVAMaps workers.
 - Native backends receive the resolved thread count directly. MLVAMaps does
   not place a Python thread pool around Sassy's internally threaded batch
   search, which avoids nested parallelism and CPU oversubscription.

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .assembly_call import ASSEMBLY_ALGORITHMS, run_assembly_call
 from .concurrency import DEFAULT_THREADS
-from .in_silico_pcr import run_amplirust
+from .in_silico_pcr import run_in_silico_pcr
 from .io import open_text
 from .pipeline import run_call
 from .reference_builder import build_reference_database
@@ -212,7 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--amplirust-bin",
         default="amplirust",
         metavar="PATH",
-        help="Amplirust executable used for degenerate primer pairing (default: %(default)s)",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--minimap2-bin",
@@ -318,9 +318,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     extract = subparsers.add_parser(
         "extract-amplicons",
-        help="Extract expected MLVA amplicons from FASTA/GenBank with amplirust",
+        help="Extract MLVA_finder-compatible amplicons from FASTA with Sassy",
     )
-    extract.add_argument("--input", required=True, help="FASTA/GenBank input or amplirust-supported glob")
+    extract.add_argument("--input", required=True, help="Input FASTA, optionally gzip-compressed")
     extract.add_argument("--loci")
     extract.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
     extract.add_argument(
@@ -338,12 +338,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--threads",
         type=int,
         default=DEFAULT_THREADS,
-        help="amplirust threads (default: %(default)s; 0 lets amplirust auto-detect CPUs)",
+        help="PCR search threads (default: %(default)s; 0 auto-detects CPUs)",
     )
     extract.add_argument("--circular", action="store_true")
     extract.add_argument("--no-search-rc", action="store_true")
     extract.add_argument("--trim-primers", action="store_true")
-    extract.add_argument("--amplirust-bin", default="amplirust")
+    extract.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
 
     reference = subparsers.add_parser(
         "build-reference",
@@ -369,7 +369,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum extracted references required to infer a locus tree (default: %(default)s)",
     )
     reference.add_argument("-t", "--threads", type=int, default=DEFAULT_THREADS)
-    reference.add_argument("--amplirust-bin", default="amplirust")
+    reference.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
     reference.add_argument("--mafft-bin", default="mafft")
     reference.add_argument("--raxml-ng-bin", default="raxml-ng")
     reference.add_argument("--raxml-model", default="GTR+G")
@@ -493,7 +493,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "extract-amplicons":
         if not args.loci and not args.primers:
             parser.error("extract-amplicons requires either --loci or --primers")
-        result = run_amplirust(
+        result = run_in_silico_pcr(
             input_path=args.input,
             loci_path=args.loci,
             primers_path=args.primers,
@@ -503,11 +503,10 @@ def main(argv: list[str] | None = None) -> int:
             circular=args.circular,
             search_rc=not args.no_search_rc,
             trim_primers=args.trim_primers,
-            executable=args.amplirust_bin,
         )
-        print(f"Wrote amplirust primer CSV to {result['primers']}")
+        print(f"Wrote normalized primer CSV to {result['primers']}")
         print(f"Wrote extracted amplicons to {result['products']}")
-        print(f"Wrote amplirust stats to {result['stats']}")
+        print(f"Wrote primer-match stats to {result['stats']}")
         return 0
     if args.command == "build-reference":
         result = build_reference_database(

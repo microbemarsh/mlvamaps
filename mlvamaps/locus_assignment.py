@@ -5,7 +5,7 @@ from .progress import ProgressReporter
 from .sequence import revcomp
 
 
-def assignments_from_amplirust(
+def assignments_from_pcr(
     reads: list[ReadRecord],
     loci: list[Locus],
     rows: list[dict[str, str | int]],
@@ -13,7 +13,7 @@ def assignments_from_amplirust(
     min_assignment_score: float = 0.55,
     progress: ProgressReporter | None = None,
 ) -> list[Assignment]:
-    """Build read assignments from Amplirust's paired-primer products."""
+    """Build read assignments from native paired-primer products."""
     progress = progress or ProgressReporter(enabled=False)
     locus_by_id = {locus.locus_id: locus for locus in loci}
     read_by_id = {read.read_id: read for read in reads}
@@ -68,6 +68,10 @@ def assignments_from_amplirust(
         progress.count("Assigned reads", idx, total)
     progress.count("Assigned reads", total, total, force=True)
     return results
+
+
+# Source compatibility for the MLVAMaps 0.1 API.
+assignments_from_amplirust = assignments_from_pcr
 
 
 def _assignment_from_candidates(

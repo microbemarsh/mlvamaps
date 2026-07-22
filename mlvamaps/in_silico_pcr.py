@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import csv
+import gzip
+import itertools
 import re
-import shutil
-import subprocess
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
-from .concurrency import DEFAULT_THREADS
+import sassy
+import regex
+
+from .concurrency import DEFAULT_THREADS, resolve_threads
 from .models import Locus
 from .primers import read_loci_or_primers
 
 
-AMPLIRUST_TSV_FIELDS = [
+PCR_TSV_FIELDS = [
     "amplicon_id",
     "reference_id",
     "source_file",
@@ -33,9 +38,177 @@ AMPLIRUST_TSV_FIELDS = [
     "product_seq",
 ]
 
+_IUPAC = {
+    "A": "A",
+    "C": "C",
+    "G": "G",
+    "T": "T",
+    "R": "AG",
+    "Y": "CT",
+    "S": "CG",
+    "W": "AT",
+    "K": "GT",
+    "M": "AC",
+    "B": "CGT",
+    "D": "AGT",
+    "H": "ACT",
+    "V": "ACG",
+    "N": "ACGT",
+}
+_COMPLEMENT = str.maketrans("ACGTRYSWKMBDHVN", "TGCAYRSWMKVHDBN")
+_POSITION_RE = re.compile(r"\bpos=(\d+)-(\d+)\b")
 
-def write_amplirust_primers(loci: list[Locus], path: str | Path) -> Path:
-    """Write amplirust primer-pair CSV from the MLVA loci table."""
+
+@dataclass(frozen=True)
+class _PrimerMatch:
+    start: int
+    end: int
+    cost: int
+    cigar: str
+
+    @property
+    def length(self) -> int:
+        return self.end - self.start
+
+
+def _reverse_complement(sequence: str) -> str:
+    return sequence.upper().translate(_COMPLEMENT)[::-1]
+
+
+def _read_fasta(path: str | Path):
+    """Stream FASTA without routing sequence data back through Python objects twice."""
+    path = Path(path)
+    opener = gzip.open if path.suffix == ".gz" else open
+    name: str | None = None
+    parts: list[str] = []
+    with opener(path, "rt") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(">"):
+                if name is not None:
+                    yield name, "".join(parts).upper()
+                name = line[1:].split()[0]
+                if not name:
+                    raise ValueError(f"Empty FASTA identifier at {path}:{line_number}")
+                parts = []
+            elif name is None:
+                raise ValueError(f"Expected a FASTA header at {path}:{line_number}")
+            else:
+                parts.append(line)
+    if name is not None:
+        yield name, "".join(parts).upper()
+
+
+def _expand_degenerate(primer: str) -> tuple[str, ...]:
+    """Expand an IUPAC primer exactly as MLVA_finder does, deterministically."""
+    try:
+        choices = [_IUPAC[base] for base in primer.upper()]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported primer base {exc.args[0]!r} in {primer!r}") from exc
+    return tuple("".join(parts) for parts in itertools.product(*choices))
+
+
+def _new_searcher():
+    # ASCII is intentional. MLVA_finder expands ambiguity in the primer, while
+    # an N in an assembly is an error rather than an IUPAC wildcard.
+    try:
+        return sassy.Searcher("ascii", rc=False)
+    except TypeError:  # pragma: no cover - compatibility with early bindings
+        return sassy.Searcher("ascii")
+
+
+def _match_key(match: _PrimerMatch) -> tuple[int, int, int, str]:
+    return (match.start, match.end, match.cost, match.cigar)
+
+
+def _sassy_matches(searcher, pattern: str, sequence: str, max_errors: int) -> list[_PrimerMatch]:
+    """Discover with Sassy, then resolve legacy ``regex`` traceback ties."""
+    pattern_bytes = pattern.encode("ascii")
+    sequence_bytes = sequence.encode("ascii")
+    if hasattr(searcher, "search_all_alignments"):
+        raw = itertools.chain.from_iterable(
+            searcher.search_all_alignments(pattern_bytes, sequence_bytes, k=max_errors)
+        )
+    elif hasattr(searcher, "search_all"):  # pragma: no cover - sassy-rs < 0.2.6
+        raw = searcher.search_all(pattern_bytes, sequence_bytes, k=max_errors)
+    else:  # pragma: no cover - retained for a useful dependency error
+        raw = searcher.search(pattern_bytes, sequence_bytes, k=max_errors)
+
+    sassy_matches: dict[tuple[int, int], _PrimerMatch] = {}
+    candidate_starts: set[int] = set()
+    for item in raw:
+        start = int(item.text_start)
+        end = int(item.text_end)
+        pattern_start = int(getattr(item, "pattern_start", 0))
+        pattern_end = int(getattr(item, "pattern_end", len(pattern)))
+        if start < 0 or end <= start or pattern_start != 0 or pattern_end != len(pattern):
+            continue
+        candidate = _PrimerMatch(start, end, int(item.cost), str(item.cigar))
+        candidate_starts.add(start)
+        key = (start, end)
+        previous = sassy_matches.get(key)
+        if previous is None or (candidate.cost, candidate.cigar) < (previous.cost, previous.cigar):
+            sassy_matches[key] = candidate
+
+    # MLVA_finder used the third-party ``regex`` module. Its choice between
+    # equal-cost insertion/deletion tracebacks differs from Sassy's. Running
+    # anchored matches only at SIMD-discovered starts preserves that observable
+    # behavior without making regex scan the genome.
+    expression = regex.compile(f"({pattern}){{e<={max_errors}}}")
+    resolved: list[_PrimerMatch] = []
+    legacy_starts = sorted({
+        nearby
+        for start in candidate_starts
+        for nearby in range(max(0, start - max_errors), min(len(sequence), start + max_errors + 1))
+    })
+    intervals: list[tuple[int, int]] = []
+    for start in legacy_starts:
+        if intervals and start <= intervals[-1][1] + 1:
+            intervals[-1] = (intervals[-1][0], start)
+        else:
+            intervals.append((start, start))
+    seen_legacy_spans: set[tuple[int, int]] = set()
+    for interval_start, interval_end in intervals:
+        window_end = min(len(sequence), interval_end + len(pattern) + max_errors)
+        window = sequence[interval_start:window_end]
+        for legacy in expression.finditer(window, overlapped=True):
+            actual_start = interval_start + legacy.start()
+            actual_end = interval_start + legacy.end()
+            if actual_start > interval_end or (actual_start, actual_end) in seen_legacy_spans:
+                continue
+            seen_legacy_spans.add((actual_start, actual_end))
+            observed = legacy.group(1)
+            # Preserve MLVA_finder.positionsOfMatches: repeated identical fuzzy
+            # strings are assigned the position of their first occurrence.
+            start = actual_start if max_errors == 0 else sequence.find(observed)
+            end = start + len(observed)
+            substitutions, insertions, deletions = legacy.fuzzy_counts
+            cost = substitutions + insertions + deletions
+            traced = sassy_matches.get((actual_start, actual_end))
+            cigar = traced.cigar if traced is not None else f"{len(observed)}M"
+            resolved.append(_PrimerMatch(start, end, cost, cigar))
+    return sorted(resolved, key=_match_key)
+
+
+def _legacy_primer_matches(
+    searcher, primer: str, sequence: str, max_errors: int
+) -> list[_PrimerMatch]:
+    """Match an IUPAC primer with MLVA_finder's equal-length preference."""
+    matches: dict[tuple[int, int], _PrimerMatch] = {}
+    for concrete in _expand_degenerate(primer):
+        for match in _sassy_matches(searcher, concrete, sequence, max_errors):
+            key = (match.start, match.end)
+            previous = matches.get(key)
+            if previous is None or (match.cost, match.cigar) < (previous.cost, previous.cigar):
+                matches[key] = match
+    ordered = sorted(matches.values(), key=_match_key)
+    equal_length = [match for match in ordered if match.length == len(primer)]
+    return equal_length or ordered
+
+
+def write_primer_pairs(loci: list[Locus], path: str | Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
@@ -43,11 +216,7 @@ def write_amplirust_primers(loci: list[Locus], path: str | Path) -> Path:
         writer.writeheader()
         for locus in loci:
             writer.writerow(
-                {
-                    "name": locus.locus_id,
-                    "forward": locus.forward_primer,
-                    "reverse": locus.reverse_primer,
-                }
+                {"name": locus.locus_id, "forward": locus.forward_primer, "reverse": locus.reverse_primer}
             )
     return path
 
@@ -58,81 +227,164 @@ def expected_amplicon_bounds(loci: list[Locus]) -> tuple[int, int]:
     return (min(mins) if mins else 50, max(maxes) if maxes else 5000)
 
 
-def build_amplirust_command(
+def _product_rows(
     input_path: str | Path,
-    primers_path: str | Path,
-    output_fasta: str | Path,
-    stats_tsv: str | Path,
+    loci: list[Locus],
+    max_errors: int,
     min_len: int,
     max_len: int,
-    max_errors: int = 2,
-    threads: int = DEFAULT_THREADS,
-    circular: bool = False,
-    search_rc: bool = True,
-    trim_primers: bool = False,
-    max_n_fraction: float = 0.0,
-    executable: str = "amplirust",
-) -> list[str]:
-    command = [
-        executable,
-        "--input",
-        str(input_path),
-        "--primers",
-        str(primers_path),
-        "--output",
-        str(output_fasta),
-        "--tsv",
-        str(stats_tsv),
-        "--max-errors",
-        str(max_errors),
-        "--min-len",
-        str(min_len),
-        "--max-len",
-        str(max_len),
-        "--threads",
-        str(threads),
-        "--max-n-fraction",
-        str(max_n_fraction),
-        "--quiet",
-    ]
-    if circular:
-        command.append("--circular")
-    if search_rc:
-        command.append("--search-rc")
-    if trim_primers:
-        command.append("--trim-primers")
-    return command
+    search_rc: bool,
+    trim_primers: bool,
+    max_n_fraction: float,
+) -> list[dict[str, str | int]]:
+    searcher = _new_searcher()
+    rows: list[dict[str, str | int]] = []
+    seen_products: set[tuple[str, str, str, int, int, int, int]] = set()
+    source = str(input_path)
+    for reference_id, original in _read_fasta(input_path):
+        original = original.upper()
+        reverse = _reverse_complement(original)
+        for locus in loci:
+            # The legacy program reruns unresolved loci at thresholds 0..k.
+            # Strand fallback and equal-length/indel preference are evaluated
+            # independently at each threshold, so retain their union here and
+            # let the caller choose the first successful round.
+            for error_round in range(max_errors + 1):
+                forward_matches = _legacy_primer_matches(
+                    searcher, locus.forward_primer, original, error_round
+                )
+                orientations = [("+", original, forward_matches)]
+                if not forward_matches and search_rc:
+                    orientations = [
+                        (
+                            "-",
+                            reverse,
+                            _legacy_primer_matches(
+                                searcher, locus.forward_primer, reverse, error_round
+                            ),
+                        )
+                    ]
+                for strand, sequence, first_matches in orientations:
+                    second_matches = _legacy_primer_matches(
+                        searcher,
+                        _reverse_complement(locus.reverse_primer),
+                        sequence,
+                        error_round,
+                    )
+                    for first in first_matches:
+                        for second in second_matches:
+                            product_key = (
+                                reference_id,
+                                locus.locus_id,
+                                strand,
+                                first.start,
+                                first.end,
+                                second.start,
+                                second.end,
+                            )
+                            if product_key in seen_products:
+                                continue
+                            seen_products.add(product_key)
+                            row = _paired_product_row(
+                                source,
+                                reference_id,
+                                original,
+                                locus,
+                                strand,
+                                sequence,
+                                first,
+                                second,
+                                min_len,
+                                max_len,
+                                trim_primers,
+                                max_n_fraction,
+                                len(rows) + 1,
+                            )
+                            if row is not None:
+                                rows.append(row)
+    return rows
 
 
-def run_amplirust(
-    input_path: str,
-    loci_path: str | None,
-    outdir: str,
-    primers_path: str | None = None,
-    max_errors: int = 2,
-    threads: int = DEFAULT_THREADS,
-    circular: bool = False,
-    search_rc: bool = True,
-    trim_primers: bool = False,
-    max_n_fraction: float = 0.0,
-    executable: str = "amplirust",
+def _paired_product_row(
+    source: str,
+    reference_id: str,
+    original: str,
+    locus: Locus,
+    strand: str,
+    sequence: str,
+    first: _PrimerMatch,
+    second: _PrimerMatch,
+    min_len: int,
+    max_len: int,
+    trim_primers: bool,
+    max_n_fraction: float,
+    ordinal: int,
+) -> dict[str, str | int] | None:
+    """Build one Amplirust-shaped row for existing downstream table readers."""
+    legacy_len = (
+        second.start
+        + len(locus.reverse_primer)
+        - first.start
+        - first.length
+        + len(locus.forward_primer)
+    )
+    if legacy_len <= 0:
+        return None
+    observed_start = first.start
+    observed_end = second.end
+    if observed_end <= observed_start:
+        return None
+    full_product = sequence[observed_start:observed_end]
+    if not min_len <= legacy_len <= max_len:
+        return None
+    if full_product and full_product.count("N") / len(full_product) > max_n_fraction:
+        return None
+    if strand == "+":
+        original_start, original_end = observed_start, observed_end
+    else:
+        original_start = len(original) - observed_end
+        original_end = len(original) - observed_start
+    product = sequence[first.end:second.start] if trim_primers else full_product
+    amplicon_id = (
+        f"{reference_id}:{locus.locus_id}:{ordinal}" + ("_rc" if strand == "-" else "")
+    )
+    return {
+        "amplicon_id": amplicon_id,
+        "reference_id": reference_id,
+        "source_file": source,
+        "primer_name": locus.locus_id,
+        "product_len": len(product),
+        "full_len": observed_end - observed_start,
+        "fwd_start": first.start,
+        "fwd_end": first.end,
+        "fwd_mismatches": first.cost,
+        "fwd_identity": f"{1 - first.cost / max(len(locus.forward_primer), 1):.6f}",
+        "fwd_cigar": first.cigar,
+        "rev_start": second.start,
+        "rev_end": second.end,
+        "rev_mismatches": second.cost,
+        "rev_identity": f"{1 - second.cost / max(len(locus.reverse_primer), 1):.6f}",
+        "rev_cigar": second.cigar,
+        "strand": strand,
+        "is_circular_wrap": "false",
+        "product_seq": product,
+        "original_start": original_start,
+        "original_end": original_end,
+    }
+
+
+def run_in_silico_pcr(
+    input_path: str | Path,
+    loci_path: str | Path | None,
+    outdir: str | Path,
+    primers_path: str | Path | None = None,
+    **kwargs,
 ) -> dict[str, Path]:
     loci = read_loci_or_primers(loci_path, primers_path)
-    return run_amplirust_loci(
-        input_path,
-        loci,
-        outdir,
-        max_errors=max_errors,
-        threads=threads,
-        circular=circular,
-        search_rc=search_rc,
-        trim_primers=trim_primers,
-        max_n_fraction=max_n_fraction,
-        executable=executable,
-    )
+    return run_in_silico_pcr_loci(input_path, loci, outdir, **kwargs)
 
 
-def run_amplirust_loci(
+def run_in_silico_pcr_loci(
     input_path: str | Path,
     loci: list[Locus],
     outdir: str | Path,
@@ -142,76 +394,78 @@ def run_amplirust_loci(
     search_rc: bool = True,
     trim_primers: bool = False,
     max_n_fraction: float = 0.0,
-    executable: str = "amplirust",
     amplicon_bounds: tuple[int, int] | None = None,
+    **_compatibility_options,
 ) -> dict[str, Path]:
-    """Run Amplirust for an already-loaded MLVA panel."""
-    if shutil.which(executable) is None:
-        raise RuntimeError(
-            f"Could not find {executable!r} on PATH. Install amplirust first, for example with "
-            "`conda install bioconda::amplirust`, then rerun this command."
+    """Run MLVAMaps' Sassy-backed, MLVA_finder-compatible in-silico PCR."""
+    if not 0 <= max_n_fraction <= 1:
+        raise ValueError("max_n_fraction must be between 0 and 1")
+    if max_errors < 0:
+        raise ValueError("max_errors must be non-negative")
+    resolve_threads(threads)  # validate the shared CLI option; Sassy owns SIMD work.
+    if circular:
+        warnings.warn(
+            "Circular-wrap products are not yet emitted by the MLVA_finder compatibility engine",
+            RuntimeWarning,
+            stacklevel=2,
         )
 
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
-    primers_path = write_amplirust_primers(loci, outdir_path / "amplirust_primers.csv")
-    output_fasta = outdir_path / "amplirust_products.fasta"
-    stats_tsv = outdir_path / "amplirust_stats.tsv"
-    # Amplirust creates output files lazily only after finding its first product.
-    # Seed empty outputs so zero-hit runs and reruns cannot expose stale results.
-    output_fasta.write_text("")
-    stats_tsv.write_text("\t".join(AMPLIRUST_TSV_FIELDS) + "\n")
+    primers_output = write_primer_pairs(loci, outdir_path / "primers.csv")
+    products_path = outdir_path / "products.fasta"
+    stats_path = outdir_path / "matches.tsv"
     min_len, max_len = amplicon_bounds or expected_amplicon_bounds(loci)
-    command = build_amplirust_command(
-        input_path=input_path,
-        primers_path=primers_path,
-        output_fasta=output_fasta,
-        stats_tsv=stats_tsv,
-        min_len=min_len,
-        max_len=max_len,
-        max_errors=max_errors,
-        threads=threads,
-        circular=circular,
-        search_rc=search_rc,
-        trim_primers=trim_primers,
-        max_n_fraction=max_n_fraction,
-        executable=executable,
+    rows = _product_rows(
+        input_path,
+        loci,
+        max_errors,
+        min_len,
+        max_len,
+        search_rc,
+        trim_primers,
+        max_n_fraction,
     )
-    subprocess.run(command, check=True)
-    return {"primers": primers_path, "products": output_fasta, "stats": stats_tsv}
+    with products_path.open("w") as handle:
+        for row in rows:
+            handle.write(
+                f">{row['amplicon_id']}\tpos={row['original_start']}-{row['original_end']}"
+                f"\tstrand={row['strand']}\tlen={row['full_len']}\n{row['product_seq']}\n"
+            )
+    with stats_path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=PCR_TSV_FIELDS, delimiter="\t", extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    return {"primers": primers_output, "products": products_path, "stats": stats_path}
 
 
-_AMPLIRUST_POSITION_RE = re.compile(r"\bpos=(\d+)-(\d+)\b")
-
-
-def read_amplirust_results(
-    stats_path: str | Path, products_path: str | Path
-) -> list[dict[str, str | int]]:
-    """Read Amplirust TSV rows and attach original-reference product coordinates."""
+def read_pcr_results(stats_path: str | Path, products_path: str | Path) -> list[dict[str, str | int]]:
     coordinates: dict[str, tuple[int, int]] = {}
     with Path(products_path).open() as handle:
         for line in handle:
-            if not line.startswith(">"):
-                continue
-            fields = line[1:].rstrip().split("\t")
-            match = _AMPLIRUST_POSITION_RE.search(line)
-            if match:
-                coordinates[fields[0]] = (int(match.group(1)), int(match.group(2)))
-
+            if line.startswith(">"):
+                match = _POSITION_RE.search(line)
+                if match:
+                    coordinates[line[1:].split("\t", 1)[0]] = (int(match.group(1)), int(match.group(2)))
     rows: list[dict[str, str | int]] = []
     with Path(stats_path).open(newline="") as handle:
         for row in csv.DictReader(handle, delimiter="\t"):
             amplicon_id = row.get("amplicon_id", "")
             if amplicon_id not in coordinates:
-                raise RuntimeError(
-                    f"Amplirust TSV product {amplicon_id!r} has no matching FASTA record"
-                )
-            original_start, original_end = coordinates[amplicon_id]
-            rows.append(
-                {
-                    **row,
-                    "original_start": original_start,
-                    "original_end": original_end,
-                }
-            )
+                raise RuntimeError(f"PCR match {amplicon_id!r} has no matching FASTA record")
+            start, end = coordinates[amplicon_id]
+            rows.append({**row, "original_start": start, "original_end": end})
     return rows
+
+
+# Temporary source-compatible aliases for callers built against MLVAMaps 0.1.
+# They no longer invoke or require the Amplirust executable.
+AMPLIRUST_TSV_FIELDS = PCR_TSV_FIELDS
+write_amplirust_primers = write_primer_pairs
+run_amplirust = run_in_silico_pcr
+run_amplirust_loci = run_in_silico_pcr_loci
+read_amplirust_results = read_pcr_results
+
+
+def build_amplirust_command(*_args, **_kwargs):
+    raise RuntimeError("Amplirust was replaced by MLVAMaps' built-in Sassy-backed PCR engine")

@@ -3,9 +3,9 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from .assembly_call import amplirust_rows_to_products
+from .assembly_call import pcr_rows_to_products
 from .concurrency import DEFAULT_THREADS, resolve_threads
-from .in_silico_pcr import read_amplirust_results, run_amplirust_loci
+from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .models import Locus
 from .phylogeny import build_reference_phylogenies
 from .primers import read_loci_or_primers
@@ -230,16 +230,15 @@ def build_reference_database(
     manifest_rows: list[dict] = []
 
     for reference_id, assembly, _metadata in matched:
-        paths = run_amplirust_loci(
+        paths = run_in_silico_pcr_loci(
             assembly,
             loci,
             extraction_dir / reference_id,
             max_errors=max_primer_mismatches,
             threads=threads,
-            executable=amplirust_bin,
         )
-        products = amplirust_rows_to_products(
-            read_amplirust_results(paths["stats"], paths["products"]), loci, reference_id
+        products = pcr_rows_to_products(
+            read_pcr_results(paths["stats"], paths["products"]), loci, reference_id
         )
         products_by_locus: dict[str, list[dict]] = {}
         for product in products:

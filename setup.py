@@ -39,7 +39,8 @@ setup(
         "numpy>=1.24",
         "parasail>=1.3.4",
         "pysam>=0.22",
-        "sassy-rs>=0.2.4",
+        "regex>=2024.5.15",
+        "sassy-rs>=0.2.6",
     ],
     extras_require={
         "dev": ["pytest"],

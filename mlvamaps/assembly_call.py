@@ -13,7 +13,7 @@ from .calling import (
     repeat_unit_length,
 )
 from .concurrency import DEFAULT_THREADS, resolve_threads
-from .in_silico_pcr import read_amplirust_results, run_amplirust_loci
+from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import read_fasta, read_profiles, write_fasta, write_tsv
 from .models import Locus
 from .mapping import (
@@ -194,18 +194,18 @@ def _product_in_locus_bounds(product: dict, locus: Locus) -> bool:
     return minimum <= product_size <= maximum
 
 
-def amplirust_rows_to_products(
+def pcr_rows_to_products(
     rows: list[dict[str, str | int]],
     loci: list[Locus],
     sample_id: str,
     enforce_locus_bounds: bool = True,
     reference_order: dict[str, int] | None = None,
 ) -> list[dict]:
-    """Convert Amplirust output into MLVAMaps assembly-product records.
+    """Convert native PCR output into MLVAMaps assembly-product records.
 
     ``MLVA_finder`` reports product size using the configured primer lengths,
     even when a fuzzy primer match contains an insertion or deletion.  That is
-    subtly different from Amplirust's ``full_len`` (the observed sequence
+    subtly different from ``full_len`` (the observed sequence
     span), so retain the latter internally and expose the legacy-compatible
     size to the assembly callers.
     """
@@ -285,6 +285,10 @@ def amplirust_rows_to_products(
             }
         )
     return products
+
+
+# Source compatibility for the MLVAMaps 0.1 API.
+amplirust_rows_to_products = pcr_rows_to_products
 
 
 def build_minimap2_command(
@@ -964,25 +968,24 @@ def run_assembly_call(
     loci = read_loci_or_primers(loci_path, primers_path)
     profiles = read_profiles(profiles_path)
     progress.step(f"Loaded {len(loci):,} loci" + (f" and {len(profiles):,} reference profiles" if profiles else ""))
-    progress.step("Finding degenerate-primer products with Amplirust")
-    amplirust_paths = run_amplirust_loci(
+    progress.step("Finding MLVA_finder-compatible primer products with Sassy")
+    pcr_paths = run_in_silico_pcr_loci(
         assembly_path,
         loci,
-        outdir_path / "amplirust",
+        outdir_path / "in_silico_pcr",
         max_errors=max_primer_mismatches,
         threads=threads,
         # MLVA_finder does not reject an otherwise valid product because its
         # interior crosses an assembly gap represented by N bases.
         max_n_fraction=1.0,
-        executable=amplirust_bin,
         amplicon_bounds=legacy_amplicon_bounds(loci),
     )
     reference_order = {
         reference_id: index
         for index, (reference_id, _sequence) in enumerate(read_fasta(assembly_path))
     }
-    products = amplirust_rows_to_products(
-        read_amplirust_results(amplirust_paths["stats"], amplirust_paths["products"]),
+    products = pcr_rows_to_products(
+        read_pcr_results(pcr_paths["stats"], pcr_paths["products"]),
         loci,
         sample_id,
         enforce_locus_bounds=False,
@@ -1121,7 +1124,7 @@ def run_assembly_call(
         "allele_distribution": allele_distribution_path,
         "amplicons": outdir_path / "assembly_amplicons.tsv",
         "amplicon_fasta": product_fasta,
-        "amplirust": outdir_path / "amplirust",
+        "in_silico_pcr": outdir_path / "in_silico_pcr",
         "read_support": support_path,
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "profile_matches": outdir_path / "profile_matches.tsv",
