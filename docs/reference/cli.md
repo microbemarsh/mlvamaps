@@ -98,4 +98,6 @@ instead of `--primers` when motif or flank definitions are available.
 | `--multiple-products` | `exclude` | Exclude, choose the best, or fail on equally good multiple products. |
 | `--max-primer-mismatches` | `2` | Maximum Amplirust primer errors. |
 | `--min-references-per-tree` | `3` | Minimum references required to infer a locus tree. |
+| `-t`, `--threads` | `32` | Parallel assembly-extraction workers and MAFFT/RAxML-NG threads; `0` uses all CPUs. |
+| `--quiet` | off | Suppress per-assembly and per-locus progress updates. |
 | `--raxml-model` | `GTR+G` | Nucleotide model for reference-tree inference. |

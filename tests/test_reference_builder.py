@@ -27,13 +27,13 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
     )
 
     monkeypatch.setattr(
-        "mlvamaps.reference_builder.run_amplirust_loci",
+        "mlvamaps.reference_builder.run_in_silico_pcr_loci",
         lambda assembly, loci, outdir, **kwargs: {
             "stats": Path(outdir) / "stats.tsv",
             "products": Path(outdir) / "products.fasta",
         },
     )
-    monkeypatch.setattr("mlvamaps.reference_builder.read_amplirust_results", lambda *args: [])
+    monkeypatch.setattr("mlvamaps.reference_builder.read_pcr_results", lambda *args: [])
 
     def fake_products(rows, loci, sample_id):
         products = []
@@ -54,12 +54,13 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
                 )
         return products
 
-    monkeypatch.setattr("mlvamaps.reference_builder.amplirust_rows_to_products", fake_products)
+    monkeypatch.setattr("mlvamaps.reference_builder.pcr_rows_to_products", fake_products)
     result = build_reference_database(
         assemblies,
         primers,
         metadata,
         tmp_path / "reference",
+        threads=1,
         min_references_per_tree=2,
         mafft_bin=str(_fake_mafft(tmp_path)),
         raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
@@ -94,3 +95,38 @@ def test_cli_exposes_reference_builder():
     )
     assert args.multiple_products == "exclude"
     assert args.min_references_per_tree == 3
+    assert args.quiet is False
+
+
+def test_reference_extraction_uses_multiple_processes_and_reports_progress(
+    tmp_path, capsys
+):
+    assemblies = tmp_path / "assemblies"
+    assemblies.mkdir()
+    product = "ACGTACGTACGT" + "T" * 50 + "TAGCTAGCTAGC"
+    for sample in ("R1", "R2"):
+        (assemblies / f"{sample}.fasta").write_text(f">{sample}\n{product}\n")
+    primers = tmp_path / "primers.csv"
+    primers.write_text(
+        "name,forward,reverse\nL1,ACGTACGTACGT,GCTAGCTAGCTA\n"
+    )
+    metadata = tmp_path / "metadata.csv"
+    metadata.write_text("reference_id\nR1\nR2\n")
+
+    result = build_reference_database(
+        assemblies,
+        primers,
+        metadata,
+        tmp_path / "reference",
+        threads=2,
+        min_references_per_tree=2,
+        mafft_bin=str(_fake_mafft(tmp_path)),
+        raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
+        show_progress=True,
+    )
+
+    assert (result["database"] / "L1.fasta").read_text().count(">") == 2
+    progress = capsys.readouterr().err
+    assert "with 2 worker(s)" in progress
+    assert "Extracted assemblies: 2/2 (100.0%)" in progress
+    assert "Processed tree loci: 1/1 (100.0%)" in progress

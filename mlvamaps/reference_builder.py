@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 from .assembly_call import pcr_rows_to_products
@@ -9,6 +10,7 @@ from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .models import Locus
 from .phylogeny import build_reference_phylogenies
 from .primers import read_loci_or_primers
+from .progress import ProgressReporter
 
 
 _ASSEMBLY_SUFFIXES = (
@@ -190,6 +192,27 @@ def _primer_quality(product: dict) -> tuple[int, int]:
     )
 
 
+def _extract_reference_products(
+    reference_id: str,
+    assembly: Path,
+    loci: list[Locus],
+    extraction_dir: Path,
+    max_primer_mismatches: int,
+) -> tuple[str, list[dict]]:
+    """Extract one assembly in a worker process and return normalized products."""
+    paths = run_in_silico_pcr_loci(
+        assembly,
+        loci,
+        extraction_dir / reference_id,
+        max_errors=max_primer_mismatches,
+        threads=1,
+    )
+    products = pcr_rows_to_products(
+        read_pcr_results(paths["stats"], paths["products"]), loci, reference_id
+    )
+    return reference_id, products
+
+
 def build_reference_database(
     assemblies_dir: str | Path,
     primers_path: str | Path,
@@ -205,6 +228,7 @@ def build_reference_database(
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
     raxml_model: str = "GTR+G",
+    show_progress: bool = False,
 ) -> dict[str, Path]:
     """Extract reference amplicons and infer a SNP tree for every usable locus."""
     if multiple_products not in {"exclude", "best", "error"}:
@@ -220,6 +244,12 @@ def build_reference_database(
 
     metadata_fields, metadata_rows, id_field, assembly_field = _read_metadata(metadata_path)
     matched = _match_assemblies(assemblies_dir, metadata_rows, id_field, assembly_field)
+    thread_count = resolve_threads(threads)
+    progress = ProgressReporter(enabled=show_progress)
+    progress.step(
+        f"Starting reference build for {len(matched):,} assemblies and "
+        f"{len(loci):,} loci with {thread_count} worker(s)"
+    )
     output = Path(outdir)
     database_dir = output / "database"
     extraction_dir = output / "extraction"
@@ -229,17 +259,47 @@ def build_reference_database(
     }
     manifest_rows: list[dict] = []
 
+    progress.step("Extracting primer products from reference assemblies")
+    products_by_reference: dict[str, list[dict]] = {}
+    if thread_count == 1 or len(matched) == 1:
+        for completed, (reference_id, assembly, _metadata) in enumerate(matched, start=1):
+            _, products = _extract_reference_products(
+                reference_id,
+                assembly,
+                loci,
+                extraction_dir,
+                max_primer_mismatches,
+            )
+            products_by_reference[reference_id] = products
+            progress.count("Extracted assemblies", completed, len(matched), force=True)
+    else:
+        worker_count = min(thread_count, len(matched))
+        with ProcessPoolExecutor(max_workers=worker_count) as executor:
+            futures = {
+                executor.submit(
+                    _extract_reference_products,
+                    reference_id,
+                    assembly,
+                    loci,
+                    extraction_dir,
+                    max_primer_mismatches,
+                ): reference_id
+                for reference_id, assembly, _metadata in matched
+            }
+            for completed, future in enumerate(as_completed(futures), start=1):
+                reference_id = futures[future]
+                try:
+                    _, products = future.result()
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Reference extraction failed for {reference_id!r}"
+                    ) from exc
+                products_by_reference[reference_id] = products
+                progress.count("Extracted assemblies", completed, len(matched), force=True)
+
+    # Consume results in metadata order so FASTA and manifest output stay deterministic.
     for reference_id, assembly, _metadata in matched:
-        paths = run_in_silico_pcr_loci(
-            assembly,
-            loci,
-            extraction_dir / reference_id,
-            max_errors=max_primer_mismatches,
-            threads=threads,
-        )
-        products = pcr_rows_to_products(
-            read_pcr_results(paths["stats"], paths["products"]), loci, reference_id
-        )
+        products = products_by_reference[reference_id]
         products_by_locus: dict[str, list[dict]] = {}
         for product in products:
             products_by_locus.setdefault(str(product["locus_id"]), []).append(product)
@@ -311,16 +371,19 @@ def build_reference_database(
         writer.writeheader()
         writer.writerows(myoga_metadata)
 
+    progress.step("Building per-locus reference alignments and trees")
     tree_paths = build_reference_phylogenies(
         database_dir,
         output / "phylogeny",
         loci,
-        resolve_threads(threads),
+        thread_count,
         min_references=min_references_per_tree,
         mafft_bin=mafft_bin,
         raxml_ng_bin=raxml_ng_bin,
         raxml_model=raxml_model,
+        progress=progress,
     )
+    progress.step(f"Done. Reference database: {database_dir}")
     return {
         "outdir": output,
         "database": database_dir,

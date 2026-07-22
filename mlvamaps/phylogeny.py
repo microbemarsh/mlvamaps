@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .calling import estimate_repeat_count_from_product_length, normalize_allele, repeat_unit_length
 from .models import Locus, RepeatFeature
+from .progress import ProgressReporter
 
 
 PLACEMENT_FIELDS = [
@@ -1416,6 +1417,7 @@ def build_reference_phylogenies(
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
     raxml_model: str = "GTR+G",
+    progress: ProgressReporter | None = None,
 ) -> dict[str, Path]:
     """Build reusable, repeat-masked reference alignments and locus trees.
 
@@ -1434,7 +1436,8 @@ def build_reference_phylogenies(
     status_rows: list[dict] = []
     component_rows: list[dict] = []
 
-    for locus_id in sorted(locus_by_id):
+    sorted_locus_ids = sorted(locus_by_id)
+    for locus_number, locus_id in enumerate(sorted_locus_ids, start=1):
         records = references.get(locus_id, [])
         safe_locus = _SAFE_FILE.sub("_", locus_id).strip("_") or "locus"
         locus_dir = output / safe_locus
@@ -1449,7 +1452,16 @@ def build_reference_phylogenies(
                     "tree": "",
                 }
             )
+            if progress is not None:
+                progress.count(
+                    "Processed tree loci", locus_number, len(sorted_locus_ids), force=True
+                )
             continue
+        if progress is not None:
+            progress.step(
+                f"Building tree for {locus_id} ({locus_number}/{len(sorted_locus_ids)}; "
+                f"{len(records):,} references)"
+            )
         locus_dir.mkdir(parents=True, exist_ok=True)
         masked_records: list[tuple[str, str]] = []
         for reference_id, sequence in records:
@@ -1489,6 +1501,10 @@ def build_reference_phylogenies(
                 "tree": str(portable_tree),
             }
         )
+        if progress is not None:
+            progress.count(
+                "Processed tree loci", locus_number, len(sorted_locus_ids), force=True
+            )
 
     status_path = output / "reference_tree_status.tsv"
     components_path = output / "reference_marker_components.tsv"

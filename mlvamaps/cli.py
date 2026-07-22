@@ -368,7 +368,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=3,
         help="Minimum extracted references required to infer a locus tree (default: %(default)s)",
     )
-    reference.add_argument("-t", "--threads", type=int, default=DEFAULT_THREADS)
+    reference.add_argument(
+        "-t",
+        "--threads",
+        type=int,
+        default=DEFAULT_THREADS,
+        help="Parallel extraction workers and tree-tool threads (default: %(default)s; 0 auto-detects CPUs)",
+    )
+    reference.add_argument("--quiet", action="store_true", help="Suppress live progress updates")
     reference.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
     reference.add_argument("--mafft-bin", default="mafft")
     reference.add_argument("--raxml-ng-bin", default="raxml-ng")
@@ -523,6 +530,7 @@ def main(argv: list[str] | None = None) -> int:
             mafft_bin=args.mafft_bin,
             raxml_ng_bin=args.raxml_ng_bin,
             raxml_model=args.raxml_model,
+            show_progress=not args.quiet,
         )
         print(f"Wrote per-locus reference database to {result['database']}")
         print(f"Wrote reference build QC to {result['manifest']}")
