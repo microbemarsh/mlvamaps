@@ -14,7 +14,7 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | `--profiles` | None | Known MLVA profile TSV. |
 | `--database` | None | Per-locus reference sequences for MAFFT alignment, RAxML-NG trees, and EPA-ng placement. |
 | `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
-| `--raxml-model` | `GTR+G` | RAxML-NG nucleotide model used for every locus tree. |
+| `--raxml-model` | `DNA` | RAxML-NG model-selection set used independently for every locus tree. |
 | `--phylogeny-snp-weight` | `1.0` | Weight of normalized SNP-tree distance in combined marker ranking. |
 | `--phylogeny-repeat-weight` | `1.0` | Weight of normalized tandem-repeat distance in combined marker ranking. |
 
@@ -98,6 +98,12 @@ instead of `--primers` when motif or flank definitions are available.
 | `--multiple-products` | `exclude` | Exclude, choose the best, or fail on equally good multiple products. |
 | `--max-primer-mismatches` | `2` | Maximum Amplirust primer errors. |
 | `--min-references-per-tree` | `3` | Minimum references required to infer a locus tree. |
-| `-t`, `--threads` | `32` | Parallel assembly-extraction workers and MAFFT/RAxML-NG threads; `0` uses all CPUs. |
+| `-t`, `--threads` | `32` | Parallel assembly-extraction workers and maximum MAFFT/RAxML-NG threads; `0` uses all CPUs. RAxML-NG retries low-pattern loci with fewer threads automatically. |
 | `--quiet` | off | Suppress per-assembly and per-locus progress updates. |
-| `--raxml-model` | `GTR+G` | Nucleotide model for reference-tree inference. |
+| `--raxml-model` | `DNA` | Model-selection set used independently for each reference tree. |
+
+RAxML-NG 2.x selects a nucleotide model independently for each locus from the
+default `DNA` model set. Pass an explicit model such as `--raxml-model GTR+G`
+for reproducibility or compatibility with older RAxML-NG releases. Model
+choice cannot resolve references whose retained SNP sequences are exactly
+identical.

@@ -95,6 +95,7 @@ def test_cli_exposes_reference_builder():
     )
     assert args.multiple_products == "exclude"
     assert args.min_references_per_tree == 3
+    assert args.raxml_model == "DNA"
     assert args.quiet is False
 
 

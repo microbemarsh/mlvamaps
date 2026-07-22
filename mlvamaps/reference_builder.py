@@ -227,7 +227,7 @@ def build_reference_database(
     amplirust_bin: str = "amplirust",
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
-    raxml_model: str = "GTR+G",
+    raxml_model: str = "DNA",
     show_progress: bool = False,
 ) -> dict[str, Path]:
     """Extract reference amplicons and infer a SNP tree for every usable locus."""

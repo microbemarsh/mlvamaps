@@ -262,7 +262,7 @@ def run_call(
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
     epa_ng_bin: str = "epa-ng",
-    raxml_model: str = "GTR+G",
+    raxml_model: str = "DNA",
     phylogeny_snp_weight: float = 1.0,
     phylogeny_repeat_weight: float = 1.0,
     reference_metadata_path: str | None = None,

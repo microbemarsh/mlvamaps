@@ -6,6 +6,8 @@ from pathlib import Path
 from threading import Barrier
 from types import SimpleNamespace
 
+import pytest
+
 from mlvamaps import sequence
 from mlvamaps.bayesian_caller import call_loci
 from mlvamaps.assembly_call import (
@@ -478,7 +480,7 @@ def test_dropout_is_reported(tmp_path):
     assert easy_calls["VNTR_01"]["present"] == "no"
 
 
-def test_amplirust_primer_export_and_command(tmp_path):
+def test_legacy_amplirust_primer_export_and_removed_command(tmp_path):
     loci_path, _profiles = write_panel(tmp_path)
     loci = read_loci(loci_path)
     primers = write_amplirust_primers(loci, tmp_path / "amplirust_primers.csv")
@@ -486,29 +488,17 @@ def test_amplirust_primer_export_and_command(tmp_path):
     assert primer_rows[0] == {"name": "VNTR_01", "forward": "ACGTTGCAAC", "reverse": "TGCATGCAAA"}
     assert expected_amplicon_bounds(loci) == (30, 90)
 
-    command = build_amplirust_command(
-        input_path="assembly.fasta",
-        primers_path=primers,
-        output_fasta=tmp_path / "products.fasta",
-        stats_tsv=tmp_path / "stats.tsv",
-        min_len=30,
-        max_len=90,
-        max_errors=3,
-        circular=True,
-    )
-    assert command[:7] == [
-        "amplirust",
-        "--input",
-        "assembly.fasta",
-        "--primers",
-        str(primers),
-        "--output",
-        str(tmp_path / "products.fasta"),
-    ]
-    assert "--search-rc" in command
-    assert "--circular" in command
-    assert command[command.index("--max-errors") + 1] == "3"
-    assert command[command.index("--max-n-fraction") + 1] == "0.0"
+    with pytest.raises(RuntimeError, match="replaced by MLVAMaps"):
+        build_amplirust_command(
+            input_path="assembly.fasta",
+            primers_path=primers,
+            output_fasta=tmp_path / "products.fasta",
+            stats_tsv=tmp_path / "stats.tsv",
+            min_len=30,
+            max_len=90,
+            max_errors=3,
+            circular=True,
+        )
 
 
 def test_assembly_call_from_primer_products(tmp_path):
@@ -958,6 +948,7 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.min_snp_frequency == 0.2
     assert default_call_args.algorithm == "legacy"
     assert default_call_args.max_primer_mismatches == 2
+    assert default_call_args.raxml_model == "DNA"
 
     novel_call_args = parser.parse_args(
         ["call", "primers.tsv", "assembly.fasta", "--algorithm", "novel"]

@@ -22,6 +22,7 @@
 | `reference_build_manifest.tsv` | Per-reference/locus product counts, selected product, primer errors, and exclusion status. |
 | `phylogeny/LOCUS.tree` | Portable Newick SNP tree for the locus. |
 | `phylogeny/LOCUS/references.aligned.fasta` | Repeat-masked MAFFT alignment used for tree inference. |
+| `phylogeny/LOCUS/reference.mlvamaps.raxml.log` | Full RAxML-NG output for every attempted thread count. |
 | `phylogeny/reference_tree_status.tsv` | Tree completion or insufficient-reference status for every panel locus. |
 | `phylogeny/reference_marker_components.tsv` | Retained repeat measurements and the masking method for each reference marker. |
 | `myoga_metadata.csv` | Metadata with a `genome_id` column matching Newick tip labels. |
@@ -32,8 +33,9 @@ When `--database` is supplied, `phylogeny/` contains one directory per reference
 locus. Each directory has the raw references, MAFFT reference alignment,
 RAxML-NG reference search files and best-tree Newick, and—when a query locus
 was callable—the query FASTA, MAFFT `--add --keeplength` alignment, query-only
-aligned FASTA, and EPA-ng `epa_result.jplace`. The default RAxML-NG model is
-`GTR+G` and can be changed with `--raxml-model`. EPA-ng consumes the optimized
+aligned FASTA, and EPA-ng `epa_result.jplace`. By default, RAxML-NG selects a
+model independently for each locus from its `DNA` set; this can be changed with
+`--raxml-model`. EPA-ng consumes the optimized
 RAxML-NG `.bestModel` file and places the query without changing the reference
 topology. Summed matching distances combine the placement pendant/distal lengths
 with the RAxML-NG reference-tree branch lengths. The output retains both the

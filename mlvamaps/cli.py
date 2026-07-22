@@ -240,7 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--raxml-model",
-        default="GTR+G",
+        default="DNA",
         metavar="MODEL",
         help="RAxML-NG nucleotide model for locus trees (default: %(default)s)",
     )
@@ -379,7 +379,11 @@ def build_parser() -> argparse.ArgumentParser:
     reference.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
     reference.add_argument("--mafft-bin", default="mafft")
     reference.add_argument("--raxml-ng-bin", default="raxml-ng")
-    reference.add_argument("--raxml-model", default="GTR+G")
+    reference.add_argument(
+        "--raxml-model",
+        default="DNA",
+        help="RAxML-NG nucleotide model or model-selection set (default: %(default)s)",
+    )
     return parser
 
 

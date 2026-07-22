@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 from mlvamaps.phylogeny import (
     _parse_newick,
     _placement_patristic_distances,
+    _run_raxml_ng,
     build_mafft_add_command,
     build_mafft_reference_command,
     build_epa_ng_command,
@@ -20,6 +22,7 @@ from mlvamaps.phylogeny import (
     decompose_marker_sequence,
 )
 from mlvamaps.models import Locus
+from mlvamaps.progress import ProgressReporter
 
 
 def _read_tsv(path: Path) -> list[dict[str, str]]:
@@ -126,13 +129,52 @@ def test_mafft_commands_keep_reference_coordinates():
         "mafft-x", "--add", "query.fa", "--keeplength", "--thread", "4", "refs.aln.fa"
     ]
     assert build_raxml_ng_command("placed.fa", "run", 4, "raxml-ng-x") == [
-        "raxml-ng-x", "--search", "--msa", "placed.fa", "--model", "GTR+G",
+        "raxml-ng-x", "--search", "--msa", "placed.fa", "--model", "DNA",
         "--prefix", "run", "--seed", "12345", "--threads", "4", "--redo",
     ]
     assert build_epa_ng_command("refs.fa", "tree.nwk", "query.fa", "model", "epa", 4, "epa-x") == [
         "epa-x", "--ref-msa", "refs.fa", "--tree", "tree.nwk", "--query", "query.fa",
         "--model", "model", "--outdir", "epa", "--threads", "4",
     ]
+
+
+def test_raxml_retries_low_pattern_alignment_with_fewer_threads(tmp_path):
+    executable = tmp_path / "raxml-ng-retry"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import pathlib, sys
+args = sys.argv[1:]
+def value(flag): return args[args.index(flag) + 1]
+prefix = value('--prefix')
+threads = int(value('--threads'))
+with open(prefix + '.attempts', 'a') as handle: handle.write(f'{threads}\\n')
+if threads > 2:
+    print('ERROR: Too few patterns per thread!', file=sys.stderr)
+    raise SystemExit(1)
+pathlib.Path(prefix + '.raxml.bestTree').write_text('(R1:0,R2:0);\\n')
+pathlib.Path(prefix + '.raxml.bestModel').write_text('GTR+G\\n')
+"""
+    )
+    executable.chmod(0o755)
+    prefix = tmp_path / "reference"
+    tree = tmp_path / "reference_tree.nwk"
+    stream = io.StringIO()
+    progress = ProgressReporter(stream=stream)
+
+    _run_raxml_ng(
+        build_raxml_ng_command("alignment.fa", prefix, 8, str(executable)),
+        prefix,
+        tree,
+        "test tree",
+        progress,
+    )
+
+    assert Path(f"{prefix}.attempts").read_text().splitlines() == ["8", "4", "2"]
+    assert tree.read_text() == "(R1:0,R2:0);\n"
+    assert "retrying test tree with 4" in stream.getvalue()
+    assert "Too few patterns per thread" in Path(
+        f"{prefix}.mlvamaps.raxml.log"
+    ).read_text()
 
 
 def test_phylogenetic_placement_ranks_all_locus_distance_sum(tmp_path):

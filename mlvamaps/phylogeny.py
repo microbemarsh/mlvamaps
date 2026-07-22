@@ -391,7 +391,7 @@ def build_raxml_ng_command(
     prefix: str | Path,
     threads: int,
     executable: str = "raxml-ng",
-    model: str = "GTR+G",
+    model: str = "DNA",
 ) -> list[str]:
     return [
         executable,
@@ -410,13 +410,48 @@ def build_raxml_ng_command(
     ]
 
 
-def _run_raxml_ng(command: list[str], prefix: Path, output_tree: Path, stage: str) -> None:
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-    if result.returncode:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise RuntimeError(
-            f"RAxML-NG {stage} failed (exit {result.returncode}): {detail}"
+def _run_raxml_ng(
+    command: list[str],
+    prefix: Path,
+    output_tree: Path,
+    stage: str,
+    progress: ProgressReporter | None = None,
+) -> None:
+    """Run RAxML-NG, reducing only its threads for low-pattern alignments."""
+    attempted_command = list(command)
+    thread_index = attempted_command.index("--threads") + 1
+    raxml_threads = int(attempted_command[thread_index])
+    log_path = Path(f"{prefix}.mlvamaps.raxml.log")
+    attempts: list[str] = []
+
+    while True:
+        attempted_command[thread_index] = str(raxml_threads)
+        result = subprocess.run(
+            attempted_command, capture_output=True, text=True, check=False
         )
+        detail = "\n".join(
+            part.strip() for part in (result.stdout, result.stderr) if part.strip()
+        )
+        attempts.append(
+            f"$ {' '.join(attempted_command)}\n{detail}".rstrip()
+        )
+        log_path.write_text("\n\n".join(attempts) + "\n")
+        if not result.returncode:
+            break
+        if "Too few patterns per thread" not in detail or raxml_threads == 1:
+            detail_tail = "\n".join(detail.splitlines()[-40:])
+            raise RuntimeError(
+                f"RAxML-NG {stage} failed (exit {result.returncode}). Full output: "
+                f"{log_path}\n{detail_tail}"
+            )
+        next_threads = max(1, raxml_threads // 2)
+        if progress is not None:
+            progress.step(
+                f"RAxML-NG found too few alignment patterns for {raxml_threads} "
+                f"threads; retrying {stage} with {next_threads}"
+            )
+        raxml_threads = next_threads
+
     best_tree = Path(f"{prefix}.raxml.bestTree")
     if not best_tree.exists():
         raise RuntimeError(
@@ -941,7 +976,7 @@ def run_phylogenetic_placement(
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
     epa_ng_bin: str = "epa-ng",
-    raxml_model: str = "GTR+G",
+    raxml_model: str = "DNA",
     snp_weight: float = 1.0,
     repeat_weight: float = 1.0,
     reference_metadata_path: str | Path | None = None,
@@ -1416,7 +1451,7 @@ def build_reference_phylogenies(
     min_references: int = 3,
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
-    raxml_model: str = "GTR+G",
+    raxml_model: str = "DNA",
     progress: ProgressReporter | None = None,
 ) -> dict[str, Path]:
     """Build reusable, repeat-masked reference alignments and locus trees.
@@ -1491,6 +1526,7 @@ def build_reference_phylogenies(
             prefix,
             tree,
             f"reference tree search for {locus_id}",
+            progress,
         )
         shutil.copyfile(tree, portable_tree)
         status_rows.append(

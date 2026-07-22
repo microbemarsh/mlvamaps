@@ -304,7 +304,8 @@ mlvamaps uses 32 threads by default. Pass `-t N` or `--threads N`;
 `--threads 0` uses all available CPUs. Use `--quiet` to suppress progress.
 External executables can be overridden with `--vsearch-bin`, `--minimap2-bin`,
 `--mafft-bin`, `--raxml-ng-bin`, and `--epa-ng-bin`.
-RAxML-NG uses `GTR+G` by default; change it with `--raxml-model`.
+RAxML-NG uses its `DNA` model-selection set by default to choose a nucleotide
+model independently for each locus; override it with `--raxml-model`.
 
 ## Motivation and recognition
 
