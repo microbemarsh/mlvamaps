@@ -15,11 +15,19 @@ placement. It retains the removed tract as explicit evidence:
 - masking coordinates and boundary method;
 - likelihood-weighted SNP-tree distance and placement entropy.
 
-Per-locus SNP distances are divided by the median pairwise distance of the
-reference tree. Repeat-count differences are divided by the reference repeat
-dispersion, with a minimum half-unit scale. This prevents one fast-evolving
-locus or intrinsically variable VNTR from dominating only because of its
-numeric scale.
+Each per-locus SNP comparison retains two complementary measurements. EPA-ng's
+likelihood-weighted tip distance is divided by the median pairwise distance of
+the reference tree. Direct query/reference divergence is measured in the
+shared MAFFT alignment and divided by the median positive direct divergence
+from the query at that locus. An exact repeat-masked SNP-sequence match is zero
+by definition; otherwise the two normalized SNP measurements are averaged.
+This prevents placement ambiguity from ranking a sequence below a reference
+with which it is exactly identical while retaining tree context for non-exact
+comparisons.
+
+Repeat-count differences are divided by the reference repeat dispersion, with
+a minimum half-unit scale. This prevents one fast-evolving locus or
+intrinsically variable VNTR from dominating only because of its numeric scale.
 
 The combined score is:
 
@@ -31,6 +39,12 @@ The combined score is:
 Both components remain in the output. Weights should be calibrated against
 known epidemiological links when those data are available; equal weights are a
 transparent starting point, not a universal biological constant.
+
+If the EPA/tree-only score would rank a complete exact marker match below
+another reference, `combined_marker_matches.tsv` records
+`EXACT_MATCH_OVERRIDES_PLACEMENT` and the HTML report displays a warning. Tied
+exact references retain the same rank because sequence evidence cannot
+distinguish them.
 
 Combined ranking requires every candidate reference to be present at all placed
 loci and to have repeat information wherever the query has a repeat call. This

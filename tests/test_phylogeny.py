@@ -115,6 +115,29 @@ pathlib.Path(value('--outdir'), 'epa_result.jplace').write_text(json.dumps(docum
     return executable
 
 
+def _fake_epa_ng_prefers_r2(tmp_path: Path) -> Path:
+    executable = tmp_path / "epa-ng-prefers-r2"
+    executable.write_text(
+        """#!/usr/bin/env python3
+import json, pathlib, sys
+if '--version' in sys.argv:
+    print('EPA-ng v0.3.8')
+    raise SystemExit(0)
+args = sys.argv[1:]
+def value(flag): return args[args.index(flag) + 1]
+document = {
+    'tree': '(R1:0.25{0},R2:1.0{1}){2};',
+    'placements': [{'p': [[1, -1.0, 1.0, 0.0, 0.0]], 'n': ['QUERY__sample']}],
+    'fields': ['edge_num', 'likelihood', 'like_weight_ratio', 'distal_length', 'pendant_length'],
+    'version': 3,
+}
+pathlib.Path(value('--outdir'), 'epa_result.jplace').write_text(json.dumps(document))
+"""
+    )
+    executable.chmod(0o755)
+    return executable
+
+
 def test_sequence_database_directory_uses_locus_filenames(tmp_path):
     database = tmp_path / "database"
     database.mkdir()
@@ -428,3 +451,52 @@ def test_repeat_masking_and_combined_marker_ranking(tmp_path):
         return set().union(*(tips(child) for child, _length in node.children))
 
     assert tips(root) == {"R1", "R2", "sample"}
+
+
+def test_exact_marker_match_overrides_conflicting_epa_ranking(tmp_path):
+    locus = Locus(
+        locus_id="L1",
+        forward_primer="ACG",
+        reverse_primer="TTA",
+        left_flank_sequence="TT",
+        right_flank_sequence="CC",
+        repeat_motif="GA",
+        repeat_unit_length_bp=2,
+        expected_min_repeats=1,
+        expected_max_repeats=6,
+    )
+    query = "ACGTTGAGACCTAA"
+    database = tmp_path / "database"
+    database.mkdir()
+    (database / "L1.fasta").write_text(
+        f">R1\n{query}\n>R2\nCCGTTGAGACCTAA\n"
+    )
+
+    result = run_phylogenetic_placement(
+        {"L1": query},
+        database,
+        tmp_path / "out",
+        "sample",
+        [locus],
+        1,
+        str(_fake_mafft(tmp_path)),
+        str(_fake_raxml_ng(tmp_path)),
+        str(_fake_epa_ng_prefers_r2(tmp_path)),
+    )
+
+    locus_rows = {
+        row["reference_id"]: row
+        for row in _read_tsv(result["locus_marker_distances"])
+    }
+    assert locus_rows["R1"]["exact_snp_match"] == "yes"
+    assert locus_rows["R1"]["direct_snp_distance"] == "0.00000000"
+    assert float(locus_rows["R1"]["placement_normalized_snp_distance"]) > 0
+    assert locus_rows["R1"]["normalized_snp_distance"] == "0.00000000"
+
+    combined = _read_tsv(result["combined_marker_matches"])
+    assert combined[0]["reference_id"] == "R1"
+    assert combined[0]["rank"] == "1"
+    assert combined[0]["combined_marker_distance"] == "0.00000000"
+    assert combined[0]["match_status"] == "EXACT_MARKER_MATCH"
+    assert combined[0]["ranking_warning"] == "EXACT_MATCH_OVERRIDES_PLACEMENT"
+    assert combined[1]["reference_id"] == "R2"

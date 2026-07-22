@@ -75,6 +75,11 @@ LOCUS_MARKER_DISTANCE_FIELDS = [
     "normalized_repeat_distance",
     "likelihood_weighted_snp_distance",
     "reference_tree_scale",
+    "placement_normalized_snp_distance",
+    "direct_snp_distance",
+    "direct_snp_scale",
+    "normalized_direct_snp_distance",
+    "exact_snp_match",
     "normalized_snp_distance",
     "placement_entropy",
 ]
@@ -83,6 +88,8 @@ COMBINED_MARKER_FIELDS = [
     "sample_id",
     "reference_id",
     "total_likelihood_weighted_snp_distance",
+    "total_placement_normalized_snp_distance",
+    "total_normalized_direct_snp_distance",
     "total_normalized_snp_distance",
     "total_repeat_count_distance",
     "total_normalized_repeat_distance",
@@ -91,6 +98,10 @@ COMBINED_MARKER_FIELDS = [
     "combined_marker_distance",
     "compared_loci",
     "repeat_compared_loci",
+    "exact_snp_loci",
+    "exact_marker_loci",
+    "match_status",
+    "ranking_warning",
     "distance_gap_to_next",
     "relative_distance_gap_to_next",
     "collection_date",
@@ -316,6 +327,30 @@ def _write_tsv(rows: list[dict], path: Path, fields: list[str]) -> None:
         writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _aligned_snp_distance(query: str, reference: str) -> float:
+    """Return an ambiguity-aware mismatch fraction from a shared alignment."""
+    if len(query) != len(reference):
+        raise ValueError("Aligned query and reference sequences have different lengths")
+    mismatches = 0
+    comparable = 0
+    for query_base, reference_base in zip(query.upper(), reference.upper()):
+        if query_base == "-" and reference_base == "-":
+            continue
+        comparable += 1
+        if query_base == reference_base:
+            continue
+        if query_base == "-" or reference_base == "-":
+            mismatches += 1
+            continue
+        query_states = _IUPAC.get(query_base)
+        reference_states = _IUPAC.get(reference_base)
+        if query_states is None or reference_states is None or query_states.isdisjoint(
+            reference_states
+        ):
+            mismatches += 1
+    return mismatches / comparable if comparable else 0.0
 
 
 @dataclass
@@ -1092,6 +1127,7 @@ def run_phylogenetic_placement(
     query_components_by_locus: dict[str, MarkerComponents] = {}
     reference_components_by_locus: dict[str, dict[str, MarkerComponents]] = {}
     reference_distance_matrices: dict[str, tuple[list[str], np.ndarray]] = {}
+    direct_snp_distances_by_locus: dict[str, dict[str, float]] = {}
     placement_jobs: dict[str, _PlacementJob] = {}
 
     for locus_id in sorted(references):
@@ -1281,6 +1317,24 @@ def run_phylogenetic_placement(
             raise RuntimeError(
                 f"EPA-ng tree/reference mismatch for {locus_id}: missing={missing}, unexpected={unexpected}"
             )
+        aligned_records = dict(_read_fasta(placement_jobs[locus_id].placed_alignment))
+        aligned_query = aligned_records.get(query_name)
+        if aligned_query is None:
+            raise RuntimeError(
+                f"MAFFT placement alignment for {locus_id} lacks query {query_name!r}"
+            )
+        missing_aligned_references = expected_references - set(aligned_records)
+        if missing_aligned_references:
+            raise RuntimeError(
+                f"MAFFT placement alignment for {locus_id} lacks references: "
+                + ", ".join(sorted(missing_aligned_references))
+            )
+        direct_snp_distances_by_locus[locus_id] = {
+            reference_id: _aligned_snp_distance(
+                aligned_query, aligned_records[reference_id]
+            )
+            for reference_id in expected_references
+        }
         for reference_id, distance in placement_distances.items():
             detail_rows.append(
                 {
@@ -1333,6 +1387,13 @@ def run_phylogenetic_placement(
             0.5, statistics.pstdev(counts) if len(counts) > 1 else 0.0
         )
 
+    direct_snp_scale_by_locus: dict[str, float] = {}
+    for locus_id, distances_by_reference in direct_snp_distances_by_locus.items():
+        positive = [distance for distance in distances_by_reference.values() if distance > 0]
+        direct_snp_scale_by_locus[locus_id] = (
+            statistics.median(positive) if positive else 1.0
+        )
+
     locus_marker_rows: list[dict] = []
     for row in detail_rows:
         locus_id = str(row["locus_id"])
@@ -1359,6 +1420,22 @@ def run_phylogenetic_placement(
             normalized_repeat = ""
         weighted_snp = float(row["likelihood_weighted_phylogenetic_distance"])
         tree_scale = max(float(row["reference_tree_scale"]), 1e-12)
+        placement_normalized_snp = weighted_snp / tree_scale
+        direct_snp = direct_snp_distances_by_locus[locus_id][reference_id]
+        direct_snp_scale = max(direct_snp_scale_by_locus[locus_id], 1e-12)
+        normalized_direct_snp = direct_snp / direct_snp_scale
+        exact_snp_match = (
+            query_components is not None
+            and reference_components is not None
+            and query_components.snp_sequence == reference_components.snp_sequence
+        )
+        if query_components is None or reference_components is None:
+            exact_snp_match = direct_snp == 0
+        normalized_snp = (
+            0.0
+            if exact_snp_match
+            else (placement_normalized_snp + normalized_direct_snp) / 2.0
+        )
         locus_marker_rows.append(
             {
                 "sample_id": sample_id,
@@ -1376,7 +1453,12 @@ def run_phylogenetic_placement(
                 else f"{float(normalized_repeat):.8f}",
                 "likelihood_weighted_snp_distance": f"{weighted_snp:.8f}",
                 "reference_tree_scale": f"{tree_scale:.8f}",
-                "normalized_snp_distance": f"{weighted_snp / tree_scale:.8f}",
+                "placement_normalized_snp_distance": f"{placement_normalized_snp:.8f}",
+                "direct_snp_distance": f"{direct_snp:.8f}",
+                "direct_snp_scale": f"{direct_snp_scale:.8f}",
+                "normalized_direct_snp_distance": f"{normalized_direct_snp:.8f}",
+                "exact_snp_match": "yes" if exact_snp_match else "no",
+                "normalized_snp_distance": f"{normalized_snp:.8f}",
                 "placement_entropy": row["placement_entropy"],
             }
         )
@@ -1449,20 +1531,37 @@ def run_phylogenetic_placement(
             reference_id,
             {
                 "snp": 0.0,
+                "placement_normalized_snp": 0.0,
+                "normalized_direct_snp": 0.0,
                 "normalized_snp": 0.0,
                 "repeat": 0.0,
                 "normalized_repeat": 0.0,
                 "loci": 0,
                 "repeat_loci": 0,
+                "exact_snp_loci": 0,
+                "exact_marker_loci": 0,
             },
         )
         values["snp"] += float(row["likelihood_weighted_snp_distance"])
+        values["placement_normalized_snp"] += float(
+            row["placement_normalized_snp_distance"]
+        )
+        values["normalized_direct_snp"] += float(
+            row["normalized_direct_snp_distance"]
+        )
         values["normalized_snp"] += float(row["normalized_snp_distance"])
         values["loci"] += 1
+        if row["exact_snp_match"] == "yes":
+            values["exact_snp_loci"] += 1
         if row["repeat_count_delta"] != "":
             values["repeat"] += float(row["repeat_count_delta"])
             values["normalized_repeat"] += float(row["normalized_repeat_distance"])
             values["repeat_loci"] += 1
+        repeat_matches = row["repeat_count_delta"] == "" or math.isclose(
+            float(row["repeat_count_delta"]), 0.0, abs_tol=1e-12
+        )
+        if row["exact_snp_match"] == "yes" and repeat_matches:
+            values["exact_marker_loci"] += 1
 
     required_repeat_loci = {
         locus_id
@@ -1493,9 +1592,29 @@ def run_phylogenetic_placement(
         )
         for reference_id in combined_order
     }
+    placement_only_scores = {
+        reference_id: (
+            snp_weight
+            * float(combined_totals[reference_id]["placement_normalized_snp"])
+            + repeat_weight
+            * float(combined_totals[reference_id]["normalized_repeat"])
+        )
+        for reference_id in combined_order
+    }
+    minimum_placement_only_score = min(placement_only_scores.values(), default=0.0)
+    previous_score: float | None = None
+    previous_rank = 0
     for index, reference_id in enumerate(combined_order):
         values = combined_totals[reference_id]
         score = combined_scores[reference_id]
+        rank = (
+            previous_rank
+            if previous_score is not None
+            and math.isclose(score, previous_score, rel_tol=1e-12, abs_tol=1e-12)
+            else index + 1
+        )
+        previous_score = score
+        previous_rank = rank
         if index + 1 < len(combined_order):
             next_score = combined_scores[combined_order[index + 1]]
             gap = next_score - score
@@ -1503,11 +1622,21 @@ def run_phylogenetic_placement(
         else:
             gap = ""
             relative_gap = ""
+        exact_marker_match = int(values["exact_marker_loci"]) == int(values["loci"])
+        ranking_warning = (
+            "EXACT_MATCH_OVERRIDES_PLACEMENT"
+            if exact_marker_match
+            and placement_only_scores[reference_id]
+            > minimum_placement_only_score + 1e-12
+            else ""
+        )
         combined_rows.append(
             {
                 "sample_id": sample_id,
                 "reference_id": reference_id,
                 "total_likelihood_weighted_snp_distance": f'{float(values["snp"]):.8f}',
+                "total_placement_normalized_snp_distance": f'{float(values["placement_normalized_snp"]):.8f}',
+                "total_normalized_direct_snp_distance": f'{float(values["normalized_direct_snp"]):.8f}',
                 "total_normalized_snp_distance": f'{float(values["normalized_snp"]):.8f}',
                 "total_repeat_count_distance": f'{float(values["repeat"]):.8f}',
                 "total_normalized_repeat_distance": f'{float(values["normalized_repeat"]):.8f}',
@@ -1516,6 +1645,12 @@ def run_phylogenetic_placement(
                 "combined_marker_distance": f"{score:.8f}",
                 "compared_loci": values["loci"],
                 "repeat_compared_loci": values["repeat_loci"],
+                "exact_snp_loci": values["exact_snp_loci"],
+                "exact_marker_loci": values["exact_marker_loci"],
+                "match_status": "EXACT_MARKER_MATCH"
+                if exact_marker_match
+                else "NON_EXACT",
+                "ranking_warning": ranking_warning,
                 "distance_gap_to_next": "" if gap == "" else f"{float(gap):.8f}",
                 "relative_distance_gap_to_next": ""
                 if relative_gap == ""
@@ -1527,7 +1662,7 @@ def run_phylogenetic_placement(
                 "longitude": reference_metadata.get(reference_id, {}).get("longitude", ""),
                 "location": reference_metadata.get(reference_id, {}).get("location", ""),
                 "source": reference_metadata.get(reference_id, {}).get("source", ""),
-                "rank": index + 1,
+                "rank": rank,
             }
         )
     combined_path = output / "combined_marker_matches.tsv"

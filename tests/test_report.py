@@ -1,5 +1,9 @@
 from mlvamaps.models import Locus
-from mlvamaps.report import _assembly_gel_svg, _gel_svg
+from mlvamaps.report import (
+    _assembly_gel_svg,
+    _gel_svg,
+    _phylogenetic_warning_html,
+)
 
 
 def test_gels_prefer_exact_phylogenetic_reference_amplicon_sizes():
@@ -59,3 +63,17 @@ def test_gels_prefer_exact_phylogenetic_reference_amplicon_sizes():
     assert "PHYLO_R1" in assembly_gel
     assert "VNTR_01 (6U) reference: 47 bp" in assembly_gel
     assert ">PROFILE_R1<" not in assembly_gel
+
+
+def test_phylogenetic_warning_explains_exact_match_override():
+    warning = _phylogenetic_warning_html(
+        [
+            {
+                "reference_id": "R1",
+                "ranking_warning": "EXACT_MATCH_OVERRIDES_PLACEMENT",
+            }
+        ]
+    )
+    assert "Exact-match placement warning" in warning
+    assert "R1" in warning
+    assert "likelihood-weighted placement distance" in warning

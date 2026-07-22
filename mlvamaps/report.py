@@ -11,6 +11,23 @@ def _safe(value) -> str:
     return html.escape(str(value))
 
 
+def _phylogenetic_warning_html(rows: list[dict]) -> str:
+    warned = [
+        str(row.get("reference_id", ""))
+        for row in rows
+        if row.get("ranking_warning") == "EXACT_MATCH_OVERRIDES_PLACEMENT"
+    ]
+    if not warned:
+        return ""
+    references = ", ".join(_safe(reference_id) for reference_id in warned)
+    return (
+        '<div class="warning-banner"><strong>Exact-match placement warning:</strong> '
+        "direct sequence identity identified an exact database marker match that "
+        "EPA-ng's likelihood-weighted placement distance would have ranked below "
+        f"another reference. Identity-aware ranking was applied for: {references}.</div>"
+    )
+
+
 def _called_count(value) -> int | float | None:
     if value in ("", None):
         return None
@@ -700,8 +717,12 @@ def write_report(
         f"<td>{_safe(row.get('reference_id', ''))}</td>"
         f"<td>{_safe(row.get('combined_marker_distance', ''))}</td>"
         f"<td>{_safe(row.get('total_normalized_snp_distance', ''))}</td>"
+        f"<td>{_safe(row.get('total_placement_normalized_snp_distance', ''))}</td>"
+        f"<td>{_safe(row.get('total_normalized_direct_snp_distance', ''))}</td>"
         f"<td>{_safe(row.get('total_normalized_repeat_distance', ''))}</td>"
         f"<td>{_safe(row.get('compared_loci', ''))}</td>"
+        f"<td>{_safe(row.get('exact_marker_loci', ''))}</td>"
+        f"<td>{_safe(row.get('match_status', ''))}</td>"
         f"<td>{_safe(row.get('distance_gap_to_next', ''))}</td>"
         f"<td>{_safe(row.get('collection_date', ''))}</td>"
         f"<td>{_safe(row.get('location', ''))}</td>"
@@ -710,11 +731,13 @@ def write_report(
     )
     phylogenetic_section = ""
     if phylogenetic_rows:
+        phylogenetic_warning = _phylogenetic_warning_html(phylogenetic_rows)
         phylogenetic_section = f"""
       <h2>Phylogenetic Placement</h2>
-      <p class="terminal-note">Ranked by the combined normalized SNP-tree and tandem-repeat distance across every placed locus. Component values remain separate for interpretation. Per-locus MAFFT alignments, repeat-masked RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
+      {phylogenetic_warning}
+      <p class="terminal-note">Ranked by identity-aware hybrid SNP distance plus tandem-repeat distance across every placed locus. Exact masked SNP matches contribute zero; non-exact comparisons average normalized EPA/tree distance with normalized direct aligned-sequence divergence. Component values remain separate for interpretation. Per-locus MAFFT alignments, repeat-masked RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
       <div class="table-scroll"><table>
-        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Normalized SNP distance</th><th>Normalized repeat distance</th><th>Compared loci</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
+        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
         <tbody>{phylogenetic_table_rows}</tbody>
       </table></div>
 """
@@ -776,6 +799,7 @@ def write_report(
     .metric strong {{ display: block; color: var(--cyan); font-size: 0.8rem; margin-bottom: 0.35rem; }}
     .metric span {{ color: var(--amber); font-size: 1.35rem; }}
     .terminal-note {{ color: var(--muted); }}
+    .warning-banner {{ margin: 0.75rem 0; padding: 0.8rem 1rem; color: #1b1200; background: var(--amber); border: 2px solid #ff8c42; border-radius: 5px; }}
     table {{ border-collapse: collapse; width: 100%; margin-top: 0.75rem; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 0.55rem; text-align: left; }}
     th {{ color: var(--cyan); font-size: 0.82rem; text-transform: uppercase; }}
@@ -973,8 +997,12 @@ def write_assembly_report(
         f"<td>{_safe(row.get('reference_id', ''))}</td>"
         f"<td>{_safe(row.get('combined_marker_distance', ''))}</td>"
         f"<td>{_safe(row.get('total_normalized_snp_distance', ''))}</td>"
+        f"<td>{_safe(row.get('total_placement_normalized_snp_distance', ''))}</td>"
+        f"<td>{_safe(row.get('total_normalized_direct_snp_distance', ''))}</td>"
         f"<td>{_safe(row.get('total_normalized_repeat_distance', ''))}</td>"
         f"<td>{_safe(row.get('compared_loci', ''))}</td>"
+        f"<td>{_safe(row.get('exact_marker_loci', ''))}</td>"
+        f"<td>{_safe(row.get('match_status', ''))}</td>"
         f"<td>{_safe(row.get('distance_gap_to_next', ''))}</td>"
         f"<td>{_safe(row.get('collection_date', ''))}</td>"
         f"<td>{_safe(row.get('location', ''))}</td>"
@@ -983,11 +1011,13 @@ def write_assembly_report(
     )
     phylogenetic_section = ""
     if phylogenetic_rows:
+        phylogenetic_warning = _phylogenetic_warning_html(phylogenetic_rows)
         phylogenetic_section = f"""
       <h2>Phylogenetic Placement</h2>
-      <p class="terminal-note">Ranked by combined normalized SNP-tree and tandem-repeat distance across every placed locus. Component values remain separate for interpretation. Per-locus MAFFT alignments, repeat-masked RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
+      {phylogenetic_warning}
+      <p class="terminal-note">Ranked by identity-aware hybrid SNP distance plus tandem-repeat distance across every placed locus. Exact masked SNP matches contribute zero; non-exact comparisons average normalized EPA/tree distance with normalized direct aligned-sequence divergence. Component values remain separate for interpretation. Per-locus MAFFT alignments, repeat-masked RAxML-NG reference trees, and EPA-ng jplace files are under <code>phylogeny/</code>.</p>
       <table>
-        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Normalized SNP distance</th><th>Normalized repeat distance</th><th>Compared loci</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
+        <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
         <tbody>{phylogenetic_table_rows}</tbody>
       </table>
 """
@@ -1032,6 +1062,7 @@ def write_assembly_report(
     h1 {{ font-size: clamp(1.7rem, 4vw, 3rem); margin: 0 0 0.35rem; }}
     h2 {{ font-size: 1.1rem; margin-top: 2rem; }}
     .subhead, .terminal-note {{ color: var(--muted); }}
+    .warning-banner {{ margin: 0.75rem 0; padding: 0.8rem 1rem; color: #1b1200; background: var(--amber); border: 2px solid #ff8c42; border-radius: 5px; }}
     .terminal {{
       border: 2px solid var(--line);
       background: linear-gradient(180deg, rgba(11, 33, 23, 0.94), rgba(4, 13, 9, 0.94));
