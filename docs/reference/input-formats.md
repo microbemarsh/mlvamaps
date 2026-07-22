@@ -126,6 +126,18 @@ R1	2024-01-02	40.0	-75.0	Site A	environment
 When the sequence database is a directory, a file named
 `reference_metadata.tsv` is detected automatically.
 
+Metadata from a completed Geonome reference build can be converted directly:
+
+```bash
+python scripts/convert_geonome_metadata.py /path/to/geonome/reference \
+  --output reference_metadata.tsv
+```
+
+The input may also be Geonome's `reference_manifest.json` or
+`normalized_metadata.tsv`. The converter maps `genome_id` to `reference_id`,
+retains normalized dates and coordinates, and maps Geonome location and sample
+source fields to the columns above.
+
 ## Existing alignment support
 
 Assembly mode accepts SAM or BAM aligned to the supplied assembly through
