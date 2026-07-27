@@ -1,9 +1,8 @@
 # Variant mixture abundance
 
-VSEARCH deliberately retains observed clusters. At deep coverage, a locus can
-therefore contain a dominant variant, genuine secondary variants, and small
-clusters compatible with sequencing or amplification error. Treating every
-retained cluster equally makes `MULTIPLE_VARIANTS` difficult to interpret.
+Competitive mapping can assign locus reads to multiple repeat-product classes.
+At deep coverage, these may represent a dominant allele, genuine secondary
+alleles, or small error-compatible groups.
 
 MLVAMaps adds a count-based expectation-maximization layer inspired by
 [Emu](https://github.com/treangenlab/emu), which uses alignment likelihoods and
@@ -16,9 +15,9 @@ locus.
 
 For each locus, the model uses:
 
-- The retained VSEARCH support count for every variant.
-- The observed representative repeat sequence for every variant.
-- The substitution and indel totals from Parasail cluster-member alignments.
+- The mapped-read support count for every product group.
+- A diagnostic repeat representative for every group.
+- Substitution and indel totals from Parasail group-member alignments.
 
 The within-cluster edits provide a smoothed locus error-rate estimate. Exact
 Parasail alignments between representative sequences convert their edit
@@ -28,9 +27,9 @@ representatives can borrow support according to their current abundance.
 
 ## EM iterations
 
-The model starts from smoothed VSEARCH count fractions. Each iteration:
+The model starts from smoothed mapped-group count fractions. Each iteration:
 
-1. Calculates the probability that each observed cluster count arose from each
+1. Calculates the probability that each observed mapped-group count arose from each
    candidate variant using sequence likelihood multiplied by current abundance.
 2. Distributes the cluster count across candidates using those probabilities.
 3. Normalizes the distributed counts to update variant fractions.

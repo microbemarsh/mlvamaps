@@ -36,15 +36,26 @@ def test_gels_prefer_exact_phylogenetic_reference_amplicon_sizes():
             {
                 "locus_id": "VNTR_01",
                 "called_repeat_count": "5",
+                "primary_product_size_bp": "44",
+                "primary_read_depth": "12",
                 "read_depth": "12",
             }
         ],
         profile,
-        [],
+        [
+            {
+                "locus_id": "VNTR_01",
+                "repeat_count": "8",
+                "support_reads": "12",
+                "frequency": "1.0",
+            }
+        ],
         reference_bands,
     )
     assert "PHYLO_R1" in fastq_gel
     assert "VNTR_01 reference: 47 bp" in fastq_gel
+    assert "VNTR_01: 44 bp" in fastq_gel
+    assert "VNTR_01: 53 bp" not in fastq_gel
     assert ">PROFILE_R1<" not in fastq_gel
 
     assembly_gel = _assembly_gel_svg(
@@ -111,6 +122,23 @@ def test_reports_prioritize_sample_findings_and_remove_novelty(tmp_path):
         ],
         [locus],
         phylogenetic_rows=phylogenetic_rows,
+        local_assembly_rows=[
+            {
+                "locus_id": "L1",
+                "dominant_variant_id": "L1_ASV1",
+                "input_reads": "20",
+                "unique_sequences": "2",
+                "observed_min_product_bp": "99",
+                "observed_modal_product_bp": "100",
+                "observed_max_product_bp": "101",
+                "poa_consensus_bp": "100",
+                "pcr_product_size_bp": "100",
+                "raw_repeat_count": "5",
+                "called_repeat_count": "5",
+                "measurement_source": "dominant_cluster_poa_assembly",
+                "pcr_status": "PASS",
+            }
+        ],
     )
     write_assembly_report(
         tmp_path / "assembly",
@@ -139,3 +167,10 @@ def test_reports_prioritize_sample_findings_and_remove_novelty(tmp_path):
         assert "Exact whole-genome match" in report
         assert "Technical marker-distance components" in report
         assert "Novelty" not in report
+    fastq_report = (tmp_path / "reads" / "report.html").read_text()
+    assert "FASTQ Local Assembly Concordance" in fastq_report
+    assert "Raw bp min / mode / max" in fastq_report
+    assert "dominant_cluster_poa_assembly" in fastq_report
+    assert "POA assembly calls" in fastq_report
+    assert "Generated " in fastq_report
+    assert "Cache-Control" in fastq_report

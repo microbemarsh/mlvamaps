@@ -63,8 +63,8 @@ Check:
 mlvamaps call new_panel.tsv known_amplicons.fastq.gz -o validation/reads
 ```
 
-Inspect assignment, repeat features, VSEARCH clusters, representative
-memberships, mapping coverage, and SNP evidence. Include negative controls,
+Inspect assignment, repeat features, mapped product groups, SPOARS assemblies,
+mapping coverage, and SNP evidence. Include negative controls,
 mixed alleles when relevant, low-depth samples, and reads with realistic
 sequencing errors.
 
@@ -86,7 +86,7 @@ Before operational use, define:
 - Minimum read depth.
 - Posterior and multi-variant handling.
 - Accepted primer mismatches.
-- VSEARCH identity and minimum cluster support.
+- Competitive mapping specificity and locus-score separation.
 - Representative-mapping and SNP evidence thresholds.
 - How ambiguous, out-of-range, mixed, and novel-looking results are reviewed.
 

@@ -6,7 +6,6 @@ dependencies:
   - python>=3.12
   - pip
   - setuptools>=68
-  - vsearch>=2.30
   - minimap2
   - mafft
   - raxml-ng

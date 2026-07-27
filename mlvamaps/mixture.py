@@ -120,8 +120,8 @@ def estimate_variant_mixtures(
 ) -> list[dict]:
     """Estimate per-locus variant abundance with an Emu-style count EM model.
 
-    VSEARCH support counts are the observations. Pairwise distances between
-    observed representatives define read-assignment likelihoods, and EM
+    Mapping-group support counts are the observations. Pairwise distances
+    between diagnostic representatives define read-assignment likelihoods, and EM
     alternates between abundance-dependent assignments and abundance updates.
     """
     if not 0.0 <= min_fraction <= 1.0:

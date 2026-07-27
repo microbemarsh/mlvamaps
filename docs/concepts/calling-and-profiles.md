@@ -2,7 +2,7 @@
 
 ## Read-level predictions
 
-Every read in a retained VSEARCH cluster receives:
+Every complete read in a mapping-derived product group receives:
 
 - Best integer or half-unit repeat count and probability.
 - Alternate repeat count and probability.
@@ -22,13 +22,12 @@ Reads with more edits receive less weight. These records are written to
 
 ## Locus posterior
 
-The novel caller first identifies the EM-dominant sequence variant, then
-evaluates only reads assigned to that primary cluster against an explicit
-half-unit allele grid with a Gaussian error model. Read quality, primer/flank
-agreement, and representative-alignment identity control each contribution.
-Independent read likelihoods are multiplied, so concordant primary reads
-increase confidence. Effective confidence depth is capped at 25 by default to
-limit overconfidence from correlated amplification or systematic errors.
+The caller first identifies the dominant mapped product group and builds a
+SPOARS consensus. The standard assembly PCR caller defines the primary allele
+from that product. Read quality, primer/flank agreement, and group-alignment
+identity control confidence contributions. Effective confidence depth is
+capped at 25 by default to limit overconfidence from correlated amplification
+or systematic errors.
 
 Secondary clusters never average the primary call toward a false intermediate
 allele. They are retained and interpreted separately by the mixture model.
@@ -55,7 +54,7 @@ every meaningful secondary variant; explicit isolate mode requires the
 dominant estimated fraction to be below 0.8. Raw low-count clusters that the
 mixture model classifies as trace evidence do not force this status.
 
-`allele_calls.tsv` records both the raw retained-ASV count and the number of
+`allele_calls.tsv` records both the raw mapped-group count and the number of
 EM-meaningful variants, plus the dominant estimated fraction. See
 [variant mixture abundance](variant-mixtures.md) for the model and thresholds.
 
@@ -76,9 +75,9 @@ confidence therefore reflects the evidence instead of always being 1.0.
 For every profile and every locus with both a called and expected value,
 MLVAMaps calculates the absolute repeat-count difference. Exact values count as
 matches; nonzero values contribute to distance and appear in
-`mismatched_loci`. FASTQ matching also evaluates the probability assigned to
-each profile allele and ranks profiles by mean negative log likelihood across
-observed loci. Unobserved loci are not imputed.
+`mismatched_loci`. Both workflows rank by this distance and matched-locus count;
+FASTQ probabilities only break otherwise equal matches. Unobserved loci are
+not imputed.
 
 `profile_matches.tsv` contains the closest 20 rows sorted by total distance
 and then matching-locus count. Confidence is the fraction of compared loci that

@@ -9,19 +9,16 @@ Current backend policy:
   FASTQ assignment, and bounded flank localization. MLVAMaps owns deterministic
   IUPAC expansion, MLVA_finder-compatible strand fallback and product pairing,
   product-length constraints, and result selection.
-- `vsearch>=2.30` performs exact dereplication and abundance-sorted global
-  clustering independently for each locus. Its SIMD alignment and identity
-  calculation include gaps. MLVAMaps consumes UC memberships and uses the
-  observed cluster seed as the representative; it never uses a consensus.
 - `parasail` computes exact Needleman-Wunsch global tracebacks between each
-  unique repeat sequence and its observed VSEARCH centroid. Independent
-  alignments are distributed across the configured Python thread pool.
+  mapped read repeat and its diagnostic product-group representative.
+- `spoars` performs SIMD-accelerated partial-order assembly of complete reads
+  in the dominant mapping-derived product group.
 - NumPy performs quality-score reductions, batched repeat-motif comparisons,
   and per-read repeat-count likelihood vectors in compiled loops.
   `pysam.FastxFile` delegates FASTA/FASTQ parsing to htslib.
-- `minimap2` maps FASTQ locus reads back to dominant observed VSEARCH
-  representative amplicons; `pysam` parses the resulting SAM for base depth
-  and reference-relative SNP evidence.
+- `minimap2` performs competitive FASTQ locus/product recruitment and maps
+  locus reads back to assembly-PCR-resolved SPOARS products; `pysam` parses
+  SAM evidence.
 - `minimap2` also maps accurate reads to extracted assembly products for depth
   support. `pysam` handles existing SAM/BAM support supplied by the user.
 - MUMmer4 `dnadiff` performs exact whole-genome alignments only when an assembly
@@ -36,8 +33,4 @@ Default threading policy:
 - Native backends receive the resolved thread count directly. MLVAMaps does
   not place a Python thread pool around Sassy's internally threaded batch
   search, which avoids nested parallelism and CPU oversubscription.
-- Loci are submitted to VSEARCH sequentially, and each `cluster_size` process
-  receives the full resolved thread count. This avoids competing native thread
-  pools while keeping locus membership isolated.
-- After VSEARCH clustering, unique Parasail alignments share the resolved
-  thread pool; identical repeat sequences reuse the same traceback metrics.
+- Native mapping and phylogenetic tools receive the resolved thread count.

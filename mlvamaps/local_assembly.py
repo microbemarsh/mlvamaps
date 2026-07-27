@@ -207,6 +207,7 @@ def assemble_dominant_locus_products(
         called_count = call.get("repeat_count", "")
         measurements[locus_id] = {
             "product_size_bp": int(product["product_size_bp"]),
+            "product_sequence": str(product["sequence"]),
             "raw_repeat_count": (
                 float(raw_count) if raw_count not in ("", None) else ""
             ),

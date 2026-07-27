@@ -108,47 +108,28 @@ mode, POA consensus length, PCR-derived assembly product size, raw repeat
 measurement, final allele, support depth, and fallback state for every
 assembled locus.
 
-## 6. Dereplicate and cluster with VSEARCH
+## 6. Build mapping-derived repeat groups
 
-Each locus is processed independently. VSEARCH performs exact amplicon
-dereplication followed by abundance-sorted global clustering. The identity
-definition includes gaps. Low-complexity masking is disabled because VNTR
-sequences are expected to be repetitive, and sensitive short-word seeding is
-used so indels do not disappear behind long-word requirements.
-
-Defaults:
-
-- Global identity: `0.97`
-- Minimum retained cluster size: `1`
-
-Controls:
-
-- `--cluster-min-identity`
-- `--min-cluster-size`
-- `--vsearch-bin`
-
-This stage returns `vntr_asv_table.tsv` and diagnostic files under
-`vsearch/`.
-
-## 7. Preserve observed representatives
-
-The VSEARCH centroid is an actual observed read. MLVAMaps never replaces it
-with a generated consensus. Parasail globally aligns each unique cluster repeat
-sequence to its selected observed representative and annotates substitutions,
-insertions, deletions, and edit distance without clipping sequence ends.
+The competitive recruitment mapping assigns each informative long read to a
+locus and candidate repeat-product class. These mappings define the groups
+used for abundance and dominant-product selection; sequence-ASV clustering is
+not run.
+Primer-only compatibility mode keeps all complete products at a locus together
+so SPOARS—not an individual read measurement—defines the allele.
 
 This stage returns:
 
-- `vntr_asv_representatives.fasta`
-- `vntr_asv_memberships.tsv`
+- `mapped_variant_table.tsv`
+- `mapped_variant_representatives.fasta`
+- `mapped_read_memberships.tsv`
 
-The FASTA contains representative repeat regions. The membership table retains
-the raw and aligned sequence evidence for every read in a retained cluster.
+The membership table retains the mapping group plus Parasail-derived
+substitution and indel diagnostics for every complete product.
 
 ## 8. Estimate variant mixture abundance
 
-MLVAMaps fits an Emu-inspired expectation-maximization model to retained
-VSEARCH count evidence. Pairwise representative similarity supplies the
+MLVAMaps fits an Emu-inspired expectation-maximization model to mapped-product
+counts. Pairwise group-representative similarity supplies the
 assignment likelihoods, while the abundance estimate from each iteration
 becomes the prior for the next iteration. This separates meaningful secondary
 variants from trace clusters and estimates the fraction of each component.
@@ -160,11 +141,12 @@ remain visible as `CANDIDATE` evidence but do not alter the primary signature.
 This stage returns `vntr_mixture_abundance.tsv`. Control the meaningful/trace
 boundary with `--min-mixture-fraction`.
 
-## 9. Map to dominant representatives
+## 9. Map to dominant POA products
 
-The most supported retained VSEARCH variant at each locus supplies its complete
-observed amplicon as a minimap2 reference. All usable reads assigned to that
-locus are mapped back to the representative.
+The assembly-PCR-resolved SPOARS product at each locus supplies the minimap2
+reference. All usable reads assigned to that locus are mapped back to the POA
+product. Raw reads and mapping groups therefore annotate confidence and
+mixtures but do not replace the primary assembly-derived sequence.
 
 This stage returns:
 

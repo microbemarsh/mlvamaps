@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from .bayesian_caller import call_loci
-from .clustering import cluster_vntr_asvs
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
@@ -17,10 +16,11 @@ from .mapping import (
     SNP_FIELDS,
     run_locus_mapping,
 )
+from .mapped_variants import mapped_read_variant_groups
 from .mixture import MIXTURE_FIELDS, estimate_variant_mixtures
 from .ml_classifier import predict_read_alleles
 from .profile_matching import build_fingerprint, match_profiles
-from .phylogeny import dominant_read_query_sequences, run_phylogenetic_placement
+from .phylogeny import run_phylogenetic_placement
 from .progress import ProgressReporter
 from .primers import read_loci_or_primers
 from .qc import filter_reads
@@ -494,18 +494,13 @@ def run_call(
     write_tsv(feature_rows, outdir_path / "read_repeat_features.tsv", FEATURE_FIELDS)
     progress.step(f"Extracted {len(features):,} repeat feature records")
 
-    vsearch_dir = outdir_path / "vsearch"
     progress.step(
-        f"Clustering VNTR reads per locus with VSEARCH using {thread_count} thread(s)"
+        "Grouping locus reads by competitive mapping evidence"
     )
-    asv_rows, fasta_records, asv_memberships = cluster_vntr_asvs(
+    asv_rows, fasta_records, asv_memberships = mapped_read_variant_groups(
         features,
-        loci,
-        vsearch_dir,
-        threads=thread_count,
-        min_cluster_size=min_cluster_size,
-        min_identity=cluster_min_identity,
-        executable=vsearch_bin,
+        recruited_rows,
+        sample_id,
     )
     fallback_asvs, fallback_predictions = recruitment_fallback_evidence(
         recruited_rows,
@@ -525,13 +520,18 @@ def run_call(
         row["sample_id"] = sample_id
     for row in asv_memberships:
         row["sample_id"] = sample_id
-    write_tsv(asv_rows, outdir_path / "vntr_asv_table.tsv", ASV_FIELDS)
+    mapped_variant_path = outdir_path / "mapped_variant_table.tsv"
+    mapped_membership_path = outdir_path / "mapped_read_memberships.tsv"
+    mapped_representative_path = (
+        outdir_path / "mapped_variant_representatives.fasta"
+    )
+    write_tsv(asv_rows, mapped_variant_path, ASV_FIELDS)
     write_tsv(
         asv_memberships,
-        outdir_path / "vntr_asv_memberships.tsv",
+        mapped_membership_path,
         ASV_MEMBERSHIP_FIELDS,
     )
-    write_fasta(fasta_records, outdir_path / "vntr_asv_representatives.fasta")
+    write_fasta(fasta_records, mapped_representative_path)
 
     progress.step("Estimating meaningful variant fractions with count-based EM")
     mixture_rows = estimate_variant_mixtures(
@@ -573,7 +573,7 @@ def run_call(
     snp_rows: list[dict] = []
     if locus_mapping:
         progress.step(
-            "Mapping locus reads to dominant VSEARCH representatives with minimap2"
+            "Mapping locus reads to assembly-PCR-resolved POA products with minimap2"
         )
         mapping_rows, snp_rows, _mapping_paths = run_locus_mapping(
             features,
@@ -587,6 +587,11 @@ def run_call(
             min_snp_depth=min_snp_depth,
             min_snp_alternate_reads=min_snp_alternate_reads,
             min_snp_frequency=min_snp_frequency,
+            primary_product_sequences={
+                locus_id: str(measurement["product_sequence"])
+                for locus_id, measurement in primary_product_measurements.items()
+                if measurement.get("product_sequence")
+            },
         )
         progress.step(
             f"Mapped reads at {len(mapping_rows):,} loci and retained {len(snp_rows):,} SNP call(s)"
@@ -663,7 +668,11 @@ def run_call(
             "Placing MAFFT-aligned queries with EPA-ng using reusable reference trees when available"
         )
         phylogeny_paths = run_phylogenetic_placement(
-            dominant_read_query_sequences(features, asv_rows),
+            {
+                locus_id: str(measurement["product_sequence"])
+                for locus_id, measurement in primary_product_measurements.items()
+                if measurement.get("product_sequence")
+            },
             database_path,
             outdir_path,
             sample_id,
@@ -697,6 +706,7 @@ def run_call(
         phylogenetic_rows,
         closest_reference_bands,
         presence_rows,
+        local_assembly_rows,
     )
     progress.step(f"Done. Main calls: {outdir_path / 'calls.tsv'}")
 
@@ -706,16 +716,19 @@ def run_call(
         "allele_calls": outdir_path / "allele_calls.tsv",
         "repeat_counts": outdir_path / "locus_repeat_counts.tsv",
         "allele_distribution": allele_distribution_path,
-        "asv_table": outdir_path / "vntr_asv_table.tsv",
-        "asv_memberships": outdir_path / "vntr_asv_memberships.tsv",
-        "asv_representatives": outdir_path / "vntr_asv_representatives.fasta",
+        "mapped_variant_table": mapped_variant_path,
+        "mapped_read_memberships": mapped_membership_path,
+        "mapped_variant_representatives": mapped_representative_path,
+        # Compatibility aliases for callers using the 0.1 result dictionary.
+        "asv_table": mapped_variant_path,
+        "asv_memberships": mapped_membership_path,
+        "asv_representatives": mapped_representative_path,
         "mixture_abundance": outdir_path / "vntr_mixture_abundance.tsv",
         "mapping_summary": outdir_path / "locus_mapping_summary.tsv",
         "mapping_snps": outdir_path / "locus_snps.tsv",
         "mapping_references": outdir_path / "locus_mapping_references.fasta",
         "mapping_alignments": outdir_path / "locus_read_alignments.sam",
         "minimap2": outdir_path / "minimap2",
-        "vsearch": vsearch_dir,
         "in_silico_pcr": outdir_path / "in_silico_pcr",
         "local_assembly_concordance": local_assembly_path,
         "local_assembly_pcr": outdir_path / "local_assembly_pcr",

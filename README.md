@@ -15,13 +15,12 @@ the sequence evidence behind them:
 - Primer-supported locus detection in compressed or uncompressed FASTQ.
 - Built-in, SIMD-accelerated in-silico PCR in either orientation, with matching
   behavior designed for MLVA_finder compatibility.
-- Fast, gap-aware VSEARCH clustering of observed VNTR sequences.
-- Per-read substitution and indel evidence without replacing observed reads
-  with a consensus.
-- Exact Parasail global alignments against observed cluster representatives.
+- Competitive mapping of long reads to locus and repeat-product classes.
+- Per-read substitution and indel evidence within mapped product groups.
+- SPOARS partial-order assembly of dominant mapped locus products.
 - Emu-inspired expectation-maximization estimates of meaningful variant
-  fractions from VSEARCH count evidence.
-- minimap2 mapping to sample-derived representative amplicons and
+  fractions from mapped-read counts.
+- minimap2 mapping to sample-derived POA amplicons and
   reference-relative SNP evidence.
 - Optional read-depth support for assembly products.
 - Dedicated individual-locus repeat-count tables and report graphics, separate
@@ -47,7 +46,6 @@ python setup.py install
 The environment includes
 [Sassy's Rust/Python bindings](https://github.com/RagnarGrootKoerkamp/sassy),
 [Python regex](https://github.com/mrabarnett/mrab-regex),
-[VSEARCH](https://github.com/torognes/vsearch),
 [Parasail's Python bindings](https://github.com/jeffdaily/parasail-python),
 [SPOARS' Python bindings](https://github.com/fg-labs/spoars),
 [minimap2](https://github.com/lh3/minimap2),
@@ -136,7 +134,7 @@ ties are resolved by canonical whole-genome identity followed by MUMmer4
 metadata can be joined to `phylogeny/combined_markers.tree` in MYOGA.
 
 FASTQ runs additionally provide native primer-pair evidence under
-`in_silico_pcr/`, VSEARCH variants, Parasail-aligned read memberships,
+`in_silico_pcr/`, mapping-derived variant groups, read memberships,
 EM-estimated mixture abundance, minimap2 mapping coverage, and SNP evidence.
 Assembly runs provide the same native primer-match evidence, extracted
 products, and optional read support. No Amplirust executable is required or
@@ -178,6 +176,11 @@ single-read candidates remain visible for rapid detection, confirmed
 secondaries trigger mixture interpretation, and neither is averaged into the
 primary signature.
 
+The FASTQ `report.html` includes a prominent **FASTQ Local Assembly
+Concordance** table. It shows the raw read-product length range and mode,
+SPOARS consensus length, assembly-PCR product length, raw/final repeat counts,
+support, measurement source, and fallback status for every locus.
+
 ## MLVA_finder-compatible in-silico PCR
 
 mlvamaps includes its own paired-primer engine for assembly extraction and
@@ -215,16 +218,14 @@ For FASTQ data, mlvamaps:
 2. Uses the built-in Sassy-backed engine to pair degenerate primers and orient
    each MLVA_finder-compatible product.
 3. Locates the repeat region and measures repeat/motif evidence.
-4. Dereplicates and clusters reads by locus with VSEARCH.
-5. Globally aligns repeat sequences to observed representatives with Parasail
-   and annotates complete per-read edits without clipping.
-6. Fits an Emu-inspired count mixture to estimate which variants are meaningful
-   and their relative fractions.
-7. Maps locus reads to the dominant observed amplicon with minimap2.
-8. Reports quality-filtered, representative-relative SNP evidence.
-9. Builds a dominant per-locus SPOARS POA contig and sends it through the same
+4. Groups reads by their competitive locus/product mapping.
+5. Uses mapped-read counts to distinguish dominant and secondary repeat-product
+   groups.
+6. Builds a dominant per-locus SPOARS POA contig and sends it through the same
    in-silico PCR, product-size calculation, and repeat caller as an assembly.
-   Supporting reads determine call confidence.
+7. Maps locus reads back to that POA product for support and SNP evidence.
+8. Uses supporting reads to determine confidence without redefining the
+   assembly-derived allele.
 10. Builds the fingerprint, compares profiles, and writes a
     plot-first HTML report.
 11. When `--database` is supplied, separates the tandem-repeat tract from the
@@ -343,7 +344,7 @@ mlvamaps extract-amplicons \
 
 mlvamaps uses 32 threads by default. Pass `-t N` or `--threads N`;
 `--threads 0` uses all available CPUs. Use `--quiet` to suppress progress.
-External executables can be overridden with `--vsearch-bin`, `--minimap2-bin`,
+External executables can be overridden with `--minimap2-bin`,
 `--mafft-bin`, `--raxml-ng-bin`, `--epa-ng-bin`, and `--dnadiff-bin`.
 RAxML-NG uses its `DNA` model-selection set by default to choose a nucleotide
 model independently for each locus; override it with `--raxml-model`.

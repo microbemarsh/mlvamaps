@@ -1,5 +1,6 @@
 from mlvamaps.bayesian_caller import call_loci
 from mlvamaps.local_assembly import assemble_dominant_locus_products
+from mlvamaps.mapped_variants import mapped_read_variant_groups
 from mlvamaps.models import Locus, ReadPrediction, ReadRecord, RepeatFeature
 from mlvamaps.recruitment import (
     build_recruitment_references,
@@ -318,6 +319,71 @@ def test_spoars_local_assembly_corrects_minority_product_indel(tmp_path):
     assert audit[0]["poa_consensus_bp"] == 44
     assert audit[0]["pcr_product_size_bp"] == 44
     assert audit[0]["pcr_status"] == "PASS"
+
+
+def test_competitive_mapping_replaces_asv_partitioning():
+    def feature(read_id, repeat_count):
+        repeat_sequence = "ATGC" * repeat_count
+        product = "AAAACCCCGCTA" + repeat_sequence + "TAGCAAAACCCC"
+        return RepeatFeature(
+            read_id=read_id,
+            locus_id="VNTR",
+            repeat_region_start=12,
+            repeat_region_end=12 + len(repeat_sequence),
+            repeat_region_length_bp=len(repeat_sequence),
+            repeat_motif="ATGC",
+            raw_repeat_count_estimate=float(repeat_count),
+            nearest_integer_repeat_count=repeat_count,
+            flank_quality_score=1.0,
+            repeat_pattern="-".join(["ATGC"] * repeat_count),
+            repeat_sequence=repeat_sequence,
+            mean_qscore=30.0,
+            mismatch_count_in_repeat_region=0,
+            motif_kmer_count=repeat_count,
+            left_primer_score=1.0,
+            right_primer_score=1.0,
+            left_flank_score=1.0,
+            right_flank_score=1.0,
+            amplicon_sequence=product,
+            amplicon_quality="I" * len(product),
+            product_size_bp=len(product),
+        )
+
+    features = [feature("r1", 5), feature("r2", 5), feature("r3", 6)]
+    recruitment = [
+        {
+            "read_id": "r1",
+            "candidate_allele": 5,
+            "genotype_informative": "yes",
+        },
+        {
+            "read_id": "r2",
+            "candidate_allele": 5,
+            "genotype_informative": "yes",
+        },
+        {
+            "read_id": "r3",
+            "candidate_allele": 6,
+            "genotype_informative": "yes",
+        },
+    ]
+
+    variants, _fasta, memberships = mapped_read_variant_groups(
+        features, recruitment, "sample"
+    )
+
+    assert [row["variant_id"] for row in variants] == [
+        "VNTR_MAP1",
+        "VNTR_MAP2",
+    ]
+    assert [row["repeat_count"] for row in variants] == [5, 6]
+    assert [row["support_reads"] for row in variants] == [2, 1]
+    by_read = {row["read_id"]: row["variant_id"] for row in memberships}
+    assert by_read == {
+        "r1": "VNTR_MAP1",
+        "r2": "VNTR_MAP1",
+        "r3": "VNTR_MAP2",
+    }
 
 
 def test_repeat_spanning_partial_read_produces_provisional_fallback():

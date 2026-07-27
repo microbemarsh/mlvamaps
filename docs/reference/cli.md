@@ -41,13 +41,13 @@ complete-primer-product workflow. `--recruitment-database` uses canonical
 products from a reference build without also requesting phylogenetic
 placement.
 
-## VSEARCH clustering
+## Deprecated clustering compatibility
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--min-cluster-size` | `1` | Minimum reads in a retained variant; singleton evidence remains provisional through depth status. |
-| `--cluster-min-identity` | `0.97` | Gap-aware global identity threshold. |
-| `--vsearch-bin` | `vsearch` | Executable or path override. |
+| `--min-cluster-size` | `1` | Ignored compatibility option; mapping groups retain low-depth evidence. |
+| `--cluster-min-identity` | `0.97` | Ignored compatibility option; FASTQ sequence clustering is no longer used. |
+| `--vsearch-bin` | `vsearch` | Ignored compatibility option retained for older command lines. |
 
 ## Variant mixture estimation
 
@@ -107,7 +107,6 @@ retain the original detection uncertainty.
 ## External executable overrides
 
 - `--amplirust-bin`
-- `--vsearch-bin`
 - `--minimap2-bin`
 - `--mafft-bin`
 - `--raxml-ng-bin`

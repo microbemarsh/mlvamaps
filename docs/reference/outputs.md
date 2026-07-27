@@ -8,7 +8,7 @@
 | `mlva_fingerprint.tsv` | Wide sample-by-locus repeat-count fingerprint. |
 | `mlva_fingerprint_probabilistic.tsv` | Long-form calls with confidence values. |
 | `profile_matches.tsv` | Closest profile rows; header-only without a profile database. |
-| `report.html` | Self-contained interpretation report with conditional sample findings, locus-quality flags, gel evidence, profile matches, closest reference genomes, and expandable technical tables. |
+| `report.html` | Self-contained interpretation report with sample findings, locus-quality flags, FASTQ SPOARS/assembly-PCR concordance, gel evidence, profile matches, closest reference genomes, and technical tables. |
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
 
@@ -121,18 +121,17 @@ data are supplied.
 | `recruitment/read_recruitment.sam` | Raw competitive long-read mappings used for presence and provisional genotype evidence. |
 | `read_locus_assignments.tsv` | Primer-supported locus, orientation, score, and assignment QC. |
 | `read_repeat_features.tsv` | Repeat coordinates, counts, patterns, motifs, and quality per read. |
-| `vntr_asv_table.tsv` | Retained VSEARCH variants and representative statistics. |
-| `vntr_asv_memberships.tsv` | Cluster membership and per-read substitution/indel evidence. |
-| `vntr_asv_representatives.fasta` | Observed representative repeat sequences. |
-| `vntr_mixture_abundance.tsv` | Emu-inspired EM abundance, estimated read count, and dominant/confirmed-secondary/candidate/trace evidence tier for every retained variant. |
-| `locus_mapping_references.fasta` | Dominant observed representative amplicons. |
+| `mapped_variant_table.tsv` | Competitive mapping-derived repeat-product groups and support statistics. |
+| `mapped_read_memberships.tsv` | Per-read mapping group plus substitution/indel evidence. |
+| `mapped_variant_representatives.fasta` | Diagnostic repeat representatives for mapped product groups. |
+| `vntr_mixture_abundance.tsv` | EM abundance, estimated read count, and dominant/confirmed-secondary/candidate/trace evidence tier for every mapped product group. |
+| `locus_mapping_references.fasta` | Dominant SPOARS assembly-PCR products used for read support and SNP mapping. |
 | `locus_read_alignments.sam` | minimap2 locus-relative mappings. |
 | `locus_mapping_summary.tsv` | Mapping rate, depth, coverage, and SNP totals by locus. |
 | `locus_snps.tsv` | Filtered representative-relative SNP evidence. |
 | `read_level_allele_predictions.tsv` | Per-read repeat-count probabilities, unrounded measurement, uncertainty, and evidence weights. |
 | `allele_calls.tsv` | Assembly-equivalent dominant-product calls plus capped read confidence, product size, raw repeat measurement, measurement source, total and primary depth, candidate/confirmed-secondary counts, and dominant mixture fraction. |
 | `in_silico_pcr/` | Native primer-pairing evidence from filtered reads. |
-| `vsearch/` | Native unique sequences, centroids, and memberships. |
 | `minimap2/` | Dominant-locus mapping FASTQ and reference diagnostics. |
 
 Recruitment presence statuses:

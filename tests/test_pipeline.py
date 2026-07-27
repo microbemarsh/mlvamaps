@@ -511,6 +511,77 @@ def test_legacy_amplirust_primer_export_and_removed_command(tmp_path):
         )
 
 
+def test_fastq_poa_and_assembly_produce_same_gold_standard_fingerprint(tmp_path):
+    loci_path, profiles = write_panel(tmp_path)
+    loci = read_loci(loci_path)
+    profile_counts = {"VNTR_01": 5, "VNTR_02": 4}
+    assembly = tmp_path / "gold_standard.fasta"
+    assembly.write_text(
+        "".join(
+            f">contig_{index}\n"
+            f"{locus.forward_primer}{locus.left_flank_sequence}"
+            f"{locus.repeat_motif * profile_counts[locus.locus_id]}"
+            f"{locus.right_flank_sequence}{sequence.revcomp(locus.reverse_primer)}\n"
+            for index, locus in enumerate(loci)
+        )
+    )
+    simulated = simulate_reads(
+        loci_path=str(loci_path),
+        profiles_path=str(profiles),
+        profile_id="P1",
+        outdir=str(tmp_path / "simulated"),
+        sample_id="SAME",
+        depth=30,
+        error_rate=0.01,
+    )
+    fastq_result = run_call(
+        reads_path=str(simulated["reads"]),
+        loci_path=str(loci_path),
+        profiles_path=str(profiles),
+        outdir=str(tmp_path / "fastq"),
+        sample_id="SAME",
+        min_read_length=20,
+        min_depth=5,
+        vsearch_bin="/deprecated/vsearch/is/not/invoked",
+        locus_mapping=False,
+        fastq_strategy="primer",
+        threads=1,
+    )
+    assembly_result = run_assembly_call(
+        assembly_path=str(assembly),
+        loci_path=str(loci_path),
+        profiles_path=str(profiles),
+        outdir=str(tmp_path / "assembly"),
+        sample_id="SAME",
+        threads=1,
+    )
+
+    fastq_fingerprint = read_tsv(fastq_result["fingerprint"])[0]
+    assembly_fingerprint = read_tsv(assembly_result["fingerprint"])[0]
+    assert fastq_fingerprint == assembly_fingerprint
+
+    fastq_calls = {
+        row["locus_id"]: row for row in read_tsv(fastq_result["calls"])
+    }
+    assembly_calls = {
+        row["locus_id"]: row for row in read_tsv(assembly_result["calls"])
+    }
+    assert {
+        locus_id: (
+            row["repeat_count"],
+            row["product_size_bp"],
+        )
+        for locus_id, row in fastq_calls.items()
+    } == {
+        locus_id: (
+            row["repeat_count"],
+            row["product_size_bp"],
+        )
+        for locus_id, row in assembly_calls.items()
+    }
+    assert "dominant_cluster_poa_assembly" in fastq_result["report"].read_text()
+
+
 def test_assembly_call_from_primer_products(tmp_path):
     amplirust = write_fake_amplirust(tmp_path)
     primers = tmp_path / "primers.tsv"

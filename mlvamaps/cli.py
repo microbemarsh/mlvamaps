@@ -270,13 +270,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-cluster-size",
         type=_positive_int,
         default=1,
-        help="Minimum read support for a retained VNTR cluster (default: %(default)s)",
+        help="Deprecated compatibility option; mapping groups retain low-depth evidence",
     )
     call.add_argument(
         "--cluster-min-identity",
         type=_fraction,
         default=0.97,
-        help="Minimum VSEARCH global identity within a locus (default: %(default)s)",
+        help="Deprecated compatibility option; sequence clustering is no longer used",
     )
     call.add_argument(
         "--min-mixture-fraction",
@@ -297,7 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--vsearch-bin",
         default="vsearch",
         metavar="PATH",
-        help="VSEARCH executable (default: %(default)s)",
+        help="Deprecated compatibility option; FASTQ grouping now uses read mapping",
     )
     call.add_argument(
         "--amplirust-bin",
@@ -543,9 +543,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")
             print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
-            print(f"Wrote VNTR variant clusters to {result['asv_table']}")
+            print(f"Wrote mapped VNTR variant groups to {result['mapped_variant_table']}")
             print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
-            print(f"Wrote per-read cluster and indel evidence to {result['asv_memberships']}")
+            print(f"Wrote mapped read-group evidence to {result['mapped_read_memberships']}")
             if not args.no_locus_mapping:
                 print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
                 print(f"Wrote locus SNP evidence to {result['mapping_snps']}")

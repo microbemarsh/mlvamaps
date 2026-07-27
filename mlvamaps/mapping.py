@@ -342,8 +342,9 @@ def run_locus_mapping(
     min_snp_depth: int = 3,
     min_snp_alternate_reads: int = 2,
     min_snp_frequency: float = 0.2,
+    primary_product_sequences: dict[str, str] | None = None,
 ) -> tuple[list[dict], list[dict], dict[str, Path]]:
-    """Map locus reads to dominant observed amplicons and report SNP evidence."""
+    """Map locus reads to POA products and report support/SNP evidence."""
     outdir = Path(outdir)
     minimap2_root = outdir / "minimap2"
     minimap2_root.mkdir(parents=True, exist_ok=True)
@@ -351,7 +352,24 @@ def run_locus_mapping(
     if work_dir.exists():
         shutil.rmtree(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
-    references = _dominant_references(features, asv_rows)
+    if primary_product_sequences:
+        references = [
+            {
+                "reference_name": _safe_name(
+                    f"{locus_id}_POA", f"locus_{index:04d}"
+                ),
+                "locus_id": locus_id,
+                "reference_variant_id": f"{locus_id}_POA",
+                "reference_read_id": "",
+                "sequence": sequence.upper(),
+            }
+            for index, (locus_id, sequence) in enumerate(
+                sorted(primary_product_sequences.items())
+            )
+            if sequence
+        ]
+    else:
+        references = _dominant_references(features, asv_rows)
     public_reference = outdir / "locus_mapping_references.fasta"
     internal_reference = work_dir / "locus_mapping_references.fasta"
     reads_path = work_dir / "locus_reads.fastq"

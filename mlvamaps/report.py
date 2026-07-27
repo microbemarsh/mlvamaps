@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import Locus
@@ -143,29 +144,41 @@ def _gel_svg(
 ) -> str:
     closest_reference_bands = closest_reference_bands or []
     allele_by_locus = {row["locus_id"]: row for row in allele_rows}
-    asv_by_locus: dict[str, list[dict]] = {}
-    for row in asv_rows:
-        asv_by_locus.setdefault(row["locus_id"], []).append(row)
-
     query_bands = []
     reference_bands = []
     for locus in loci:
-        locus_asvs = asv_by_locus.get(locus.locus_id, [])
-        if locus_asvs:
-            for asv in locus_asvs:
-                query_size = _amplicon_size(locus, _called_count(asv.get("repeat_count")))
-                if query_size:
-                    support = _called_count(asv.get("support_reads")) or 0
-                    frequency = float(asv.get("frequency") or 0)
-                    query_bands.append((locus.locus_id, query_size, support, frequency))
-        else:
-            allele = allele_by_locus.get(locus.locus_id, {})
-            query_size = _amplicon_size(locus, _called_count(allele.get("called_repeat_count")))
-            if query_size:
-                support = _called_count(allele.get("read_depth")) or 0
-                query_bands.append((locus.locus_id, query_size, support, 1.0 if support else 0.0))
+        allele = allele_by_locus.get(locus.locus_id, {})
+        called_repeat = _called_count(allele.get("called_repeat_count"))
+        query_size = _called_count(allele.get("primary_product_size_bp"))
+        if query_size is None:
+            query_size = _amplicon_size(locus, called_repeat)
+        if query_size:
+            support = _called_count(
+                allele.get("primary_read_depth", allele.get("read_depth"))
+            ) or 0
+            frequency = float(allele.get("dominant_variant_fraction") or 0)
+            query_bands.append(
+                (
+                    locus.locus_id,
+                    query_size,
+                    support,
+                    frequency if frequency > 0 else (1.0 if support else 0.0),
+                )
+            )
         if best_profile and not closest_reference_bands:
-            reference_size = _amplicon_size(locus, _called_count(best_profile.get(locus.locus_id)))
+            reference_repeat = _called_count(best_profile.get(locus.locus_id))
+            repeat_unit_bp = _locus_repeat_unit_bp(locus)
+            if (
+                query_size
+                and called_repeat is not None
+                and reference_repeat is not None
+                and repeat_unit_bp is not None
+            ):
+                reference_size = query_size + (
+                    (reference_repeat - called_repeat) * repeat_unit_bp
+                )
+            else:
+                reference_size = _amplicon_size(locus, reference_repeat)
             if reference_size:
                 reference_bands.append((locus.locus_id, reference_size, 0, 1.0))
 
@@ -652,7 +665,7 @@ def _variant_mixture_svg(
     <text class="chart-axis" x="{plot_left + plot_width}" y="26" text-anchor="end">100%</text>
     {"".join(rows_svg)}
   </svg>
-  <figcaption>Emu-inspired EM estimates from VSEARCH count evidence. Confirmed variants are colored separately, candidates are amber, and trace components are combined in gray.</figcaption>
+  <figcaption>Abundance estimates from competitive read-mapping groups. Confirmed variants are colored separately, candidates are amber, and trace components are combined in gray.</figcaption>
 </figure>
 """
 
@@ -705,6 +718,7 @@ def write_report(
     phylogenetic_rows: list[dict] | None = None,
     closest_reference_bands: list[dict] | None = None,
     presence_rows: list[dict] | None = None,
+    local_assembly_rows: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -718,6 +732,8 @@ def write_report(
     phylogenetic_rows = phylogenetic_rows or []
     closest_reference_bands = closest_reference_bands or []
     presence_rows = presence_rows or []
+    local_assembly_rows = local_assembly_rows or []
+    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
     dropout = sum(1 for row in allele_rows if row.get("call_status") == "LOCUS_DROPOUT")
@@ -756,6 +772,18 @@ def write_report(
                 "Recruited loci",
                 f"{detected}/{len(presence_rows)}",
                 f"{genotyped} with repeat-informative evidence",
+            )
+        )
+    if local_assembly_rows:
+        poa_passed = sum(
+            row.get("pcr_status") == "PASS" for row in local_assembly_rows
+        )
+        summary_cards.append(
+            _metric_card(
+                "POA assembly calls",
+                f"{poa_passed}/{len(local_assembly_rows)}",
+                "Dominant locus consensuses resolved by assembly PCR",
+                "good" if poa_passed == len(local_assembly_rows) else "warn",
             )
         )
     if mapping_rows:
@@ -797,6 +825,19 @@ def write_report(
         affected = [str(row.get("locus_id", "")) for row in allele_rows if row.get("call_status") == status]
         if affected:
             findings.append(_finding("warn", title, ", ".join(affected)))
+    poa_fallbacks = [
+        str(row.get("locus_id", ""))
+        for row in local_assembly_rows
+        if row.get("pcr_status") != "PASS"
+    ]
+    if poa_fallbacks:
+        findings.append(
+            _finding(
+                "warn",
+                "Local assembly fallbacks",
+                ", ".join(poa_fallbacks),
+            )
+        )
     if not findings:
         findings.append(_finding("good", "Panel quality", "No locus-level review flags were detected."))
     if phylogenetic_best.get("reference_id"):
@@ -823,6 +864,9 @@ def write_report(
     mapping_plot = _mapping_coverage_svg(mapping_rows)
     rows = "\n".join(
         f"<tr><td>{_safe(row['locus_id'])}</td><td>{_safe(row['called_repeat_count'])}</td>"
+        f"<td>{_safe(row.get('primary_product_size_bp', ''))}</td>"
+        f"<td>{_safe(row.get('primary_repeat_count_raw', ''))}</td>"
+        f"<td>{_safe(row.get('primary_measurement_source', ''))}</td>"
         f"<td>{_safe(row['posterior_probability'])}</td>"
         f"<td>{_safe(row.get('primary_read_depth', ''))}/{_safe(row['read_depth'])}</td>"
         f"<td>{_safe(row.get('num_meaningful_variants', ''))}</td>"
@@ -830,6 +874,37 @@ def write_report(
         f"<td>{_safe(row['call_status'])}</td></tr>"
         for row in allele_rows
     )
+    local_assembly_table_rows = "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('locus_id', ''))}</td>"
+        f"<td>{_safe(row.get('dominant_variant_id', ''))}</td>"
+        f"<td>{_safe(row.get('input_reads', ''))}</td>"
+        f"<td>{_safe(row.get('unique_sequences', ''))}</td>"
+        f"<td>{_safe(row.get('observed_min_product_bp', ''))} / "
+        f"{_safe(row.get('observed_modal_product_bp', ''))} / "
+        f"{_safe(row.get('observed_max_product_bp', ''))}</td>"
+        f"<td>{_safe(row.get('poa_consensus_bp', ''))}</td>"
+        f"<td>{_safe(row.get('pcr_product_size_bp', ''))}</td>"
+        f"<td>{_safe(row.get('raw_repeat_count', ''))}</td>"
+        f"<td>{_safe(row.get('called_repeat_count', ''))}</td>"
+        f"<td>{_safe(row.get('measurement_source', ''))}</td>"
+        f"<td><span class=\"status-pill {'status-good' if row.get('pcr_status') == 'PASS' else 'status-warn'}\">"
+        f"{_safe(row.get('pcr_status', ''))}</span></td>"
+        "</tr>"
+        for row in local_assembly_rows
+    )
+    local_assembly_section = ""
+    if local_assembly_rows:
+        local_assembly_section = f"""
+      <section class="report-section">
+        <h2>FASTQ Local Assembly Concordance</h2>
+        <p class="section-intro">SPOARS assembles the dominant mapping-derived product group, then the standard assembly PCR caller measures the consensus. Compare the PCR product and final repeat columns directly with the corresponding assembly report. Min / mode / max shows the uncorrected read-product length distribution.</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Dominant mapped group</th><th>Reads</th><th>Unique products</th><th>Raw bp min / mode / max</th><th>POA bp</th><th>Assembly PCR bp</th><th>Raw repeats</th><th>Final repeats</th><th>Call source</th><th>POA status</th></tr></thead>
+          <tbody>{local_assembly_table_rows}</tbody>
+        </table></div>
+      </section>
+"""
     presence_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
@@ -1007,14 +1082,14 @@ def write_report(
       <details>
         <summary>Representative mapping details</summary>
         <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Reference ASV</th><th>Mapped</th><th>Rate</th><th>Mean depth</th><th>Covered %</th><th>SNPs</th></tr></thead>
+          <thead><tr><th>Locus</th><th>POA reference</th><th>Mapped</th><th>Rate</th><th>Mean depth</th><th>Covered %</th><th>SNPs</th></tr></thead>
           <tbody>{mapping_table_rows}</tbody>
         </table></div>
       </details>
       <details>
         <summary>SNP evidence details ({len(snp_rows)} rows)</summary>
         <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Reference ASV</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
+          <thead><tr><th>Locus</th><th>POA reference</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
           <tbody>{snp_table_rows}</tbody>
         </table></div>
       </details>
@@ -1023,6 +1098,9 @@ def write_report(
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>MLVAMaps Report - {sample_id}</title>
   <style>
     :root {{
@@ -1051,6 +1129,7 @@ def write_report(
     h1 {{ font-size: clamp(1.7rem, 4vw, 3rem); margin: 0 0 0.35rem; }}
     h2 {{ font-size: 1.1rem; margin-top: 2rem; }}
     .subhead {{ color: var(--muted); margin: 0 0 1.5rem; }}
+    .generated-at {{ color: var(--muted); font-size: 0.78rem; margin: -1rem 0 1.5rem; }}
     .terminal {{
       border: 2px solid var(--line);
       background: linear-gradient(180deg, rgba(11, 33, 23, 0.94), rgba(4, 13, 9, 0.94));
@@ -1088,6 +1167,9 @@ def write_report(
     th {{ color: var(--cyan); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }}
     td {{ color: #d8fbe2; }}
     .primary-table tbody tr:first-child {{ background: rgba(98,255,155,0.08); }}
+    .status-pill {{ display: inline-block; border: 1px solid; border-radius: 999px; padding: 0.16rem 0.48rem; white-space: nowrap; font-size: 0.78rem; }}
+    .status-good {{ color: var(--phosphor); border-color: var(--phosphor); background: rgba(98,255,155,0.08); }}
+    .status-warn {{ color: var(--amber); border-color: var(--amber); background: rgba(255,200,87,0.08); }}
     .gel-panel {{ margin: 1rem 0 1.5rem; }}
     .gel-panel svg {{ width: 100%; max-height: 620px; display: block; }}
     .gel-panel figcaption {{ color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }}
@@ -1129,6 +1211,7 @@ def write_report(
   <main>
     <h1>MLVAMaps Report: {_safe(sample_id)}</h1>
     <p class="subhead">VNTR calls, sample quality, mixture evidence, and closest-reference interpretation.</p>
+    <p class="generated-at">Generated {_safe(generated_at)} UTC</p>
     <section class="terminal">
       <h2>Sample Overview</h2>
       <div class="summary">
@@ -1137,6 +1220,7 @@ def write_report(
       <div class="findings">{findings_html}</div>
       <h2>Individual Locus Repeat Counts</h2>
       <div class="chart-scroll">{repeat_count_plot}</div>
+      {local_assembly_section}
       <h2>Locus Confidence</h2>
       <div class="chart-scroll">{confidence_plot}</div>
       {mixture_overview_section}
@@ -1150,7 +1234,7 @@ def write_report(
       <details>
         <summary>Allele call details</summary>
         <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Primary call</th><th>Confidence</th><th>Primary/total depth</th><th>Meaningful variants</th><th>Dominant fraction</th><th>Status</th></tr></thead>
+          <thead><tr><th>Locus</th><th>Primary call</th><th>Product bp</th><th>Raw repeat</th><th>Measurement source</th><th>Confidence</th><th>Primary/total depth</th><th>Meaningful variants</th><th>Dominant fraction</th><th>Status</th></tr></thead>
           <tbody>{rows}</tbody>
         </table></div>
       </details>

@@ -1,28 +1,28 @@
 # Representative mapping and SNP evidence
 
 MLVAMaps adds mapping without introducing an external species reference.
-Instead, each sample supplies its own observed locus references.
+Instead, each sample supplies its own SPOARS-assembled locus references.
 
 ## Reference selection
 
-VSEARCH returns one or more retained sequence variants per locus. MLVAMaps
-selects the variant with the greatest read support. Its representative is the
-observed read chosen by VSEARCH, not a generated consensus.
+Competitive recruitment maps reads to locus and repeat-product classes.
+MLVAMaps selects the dominant mapped product group and builds a SPOARS POA
+consensus. The standard assembly PCR caller must resolve that consensus before
+it becomes the primary mapping reference.
 
 Two representative files serve different purposes:
 
-- `vntr_asv_representatives.fasta` contains the repeat region for every
-  retained variant.
+- `mapped_variant_representatives.fasta` contains diagnostic repeat
+  representatives for mapped product groups.
 - `locus_mapping_references.fasta` contains the complete primer-oriented
-  amplicon for the dominant variant at each locus.
+  assembly-PCR-resolved POA product at each locus.
 
-## Cluster-member alignment
+## Mapped-group read alignment
 
 Before locus-wide SNP mapping, Parasail globally aligns each unique repeat
-sequence in a retained VSEARCH cluster to that cluster's observed repeat
-representative. These exact end-to-end tracebacks
-populate `vntr_asv_memberships.tsv` with substitutions, insertions, deletions,
-and edit distance relative to the read's own selected cluster representative.
+sequence in a mapped product group to its diagnostic repeat representative.
+These exact end-to-end tracebacks populate `mapped_read_memberships.tsv` with
+substitutions, insertions, deletions, and edit distance.
 
 Global Needleman-Wunsch alignment consumes both complete repeat sequences, so
 this stage has no local-alignment or soft-clipping path.
@@ -30,8 +30,8 @@ this stage has no local-alignment or soft-clipping path.
 ## Dominant-locus mapping
 
 All usable reads assigned to a locus are written to the internal mapping FASTQ,
-including reads that did not enter a retained cluster. minimap2 maps those reads
-against the collection of dominant amplicons. MLVAMaps accepts a primary
+including low-depth observations. minimap2 maps those reads against the
+collection of assembly-PCR-resolved POA products. MLVAMaps accepts a primary
 alignment as evidence only when it maps to that read's assigned locus
 representative and passes the MAPQ threshold.
 
@@ -73,7 +73,7 @@ passes the thresholds.
 
 ## Coordinate and interpretation limits
 
-Positions are relative to the sample-derived representative amplicon. They are
+Positions are relative to the sample-derived POA amplicon. They are
 not chromosome coordinates, even when optional coordinates exist in the panel.
 
 This lightweight table makes read evidence inspectable and useful for
@@ -81,6 +81,6 @@ within-sample diversity or troubleshooting. It is not a whole-genome variant
 caller, clinical VCF, or substitute for mapping all reads to a validated genome
 reference.
 
-Indels are reported separately in `vntr_asv_memberships.tsv`, where global
-repeat-region alignments preserve insertions and deletions relative to each
-retained representative.
+Indels are reported separately in `mapped_read_memberships.tsv`, where global
+repeat-region alignments preserve insertions and deletions within each mapped
+product group.

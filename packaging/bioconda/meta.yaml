@@ -23,7 +23,6 @@ requirements:
     - setuptools >=68
   run:
     - python >=3.10
-    - vsearch >=2.30
     - minimap2
     - mafft
     - raxml-ng
