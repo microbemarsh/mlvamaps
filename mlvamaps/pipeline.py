@@ -22,6 +22,14 @@ from .primers import read_loci_or_primers
 from .qc import filter_reads
 from .repeat_parser import extract_repeat_features
 from .report import write_report
+from .recruitment import (
+    RECRUITMENT_READ_FIELDS,
+    RECRUITMENT_SUMMARY_FIELDS,
+    local_product_records,
+    recruitment_fallback_evidence,
+    recruitment_summary_rows,
+    run_read_recruitment,
+)
 
 
 ASSIGNMENT_FIELDS = [
@@ -283,6 +291,7 @@ def run_call(
     primers_path: str | None = None,
     profiles_path: str | None = None,
     database_path: str | None = None,
+    recruitment_database_path: str | None = None,
     min_read_length: int = 50,
     max_read_length: int = 100000,
     min_qscore: float = 17.0,
@@ -315,7 +324,14 @@ def run_call(
     assembly_equivalent_reads: bool = True,
     assembly_round_tolerance: float = 0.25,
     max_confidence_depth: float = 25.0,
+    fastq_strategy: str = "recruit",
+    recruitment_preset: str | None = None,
+    recruitment_min_identity: float = 0.9,
+    recruitment_min_aligned_bp: int = 100,
+    recruitment_min_locus_margin: int = 10,
 ) -> dict[str, Path]:
+    if fastq_strategy not in {"recruit", "primer"}:
+        raise ValueError("fastq_strategy must be 'recruit' or 'primer'")
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
     progress = ProgressReporter(enabled=show_progress)
@@ -340,6 +356,53 @@ def run_call(
     write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
 
+    recruitment_paths = {
+        "recruited_reads": outdir_path / "locus_recruited_reads.tsv",
+        "locus_presence": outdir_path / "locus_presence.tsv",
+        "local_products": outdir_path / "local_locus_products.fasta",
+        "recruitment_references": (
+            outdir_path / "recruitment" / "locus_recruitment_references.fasta"
+        ),
+        "recruitment_alignments": (
+            outdir_path / "recruitment" / "read_recruitment.sam"
+        ),
+    }
+    recruited_assignments = []
+    recruited_rows: list[dict] = []
+    if fastq_strategy == "recruit":
+        progress.step("Recruiting reads competitively to locus product references")
+        (
+            recruited_rows,
+            _presence_rows,
+            recruited_assignments,
+            recruitment_paths,
+        ) = run_read_recruitment(
+            filtered_reads,
+            loci,
+            outdir_path,
+            sample_id,
+            recruitment_database_path or database_path,
+            thread_count,
+            executable=minimap2_bin,
+            preset=recruitment_preset,
+            min_mapping_quality=min_mapping_quality,
+            min_alignment_identity=recruitment_min_identity,
+            min_aligned_bp=recruitment_min_aligned_bp,
+            min_locus_score_margin=recruitment_min_locus_margin,
+        )
+    else:
+        write_tsv(
+            [],
+            recruitment_paths["recruited_reads"],
+            RECRUITMENT_READ_FIELDS,
+        )
+        write_tsv(
+            [],
+            recruitment_paths["locus_presence"],
+            RECRUITMENT_SUMMARY_FIELDS,
+        )
+        recruitment_paths["local_products"].write_text("")
+
     if filtered_reads:
         progress.step("Assigning reads with MLVA_finder-compatible Sassy primer matching")
         assignment_fasta = outdir_path / "filtered_reads.fasta"
@@ -351,7 +414,7 @@ def run_call(
             max_errors=max_primer_mismatches,
             threads=threads,
         )
-        assignments = assignments_from_pcr(
+        primer_assignments = assignments_from_pcr(
             filtered_reads,
             loci,
             read_pcr_results(pcr_paths["stats"], pcr_paths["products"]),
@@ -359,7 +422,69 @@ def run_call(
             progress=progress,
         )
     else:
-        assignments = []
+        primer_assignments = []
+    recruited_by_read = {
+        assignment.read_id: assignment for assignment in recruited_assignments
+    }
+    assignments = [
+        (
+            assignment
+            if assignment.passes_assignment_qc
+            else recruited_by_read.get(assignment.read_id, assignment)
+        )
+        for assignment in primer_assignments
+    ]
+    primer_read_ids = {assignment.read_id for assignment in primer_assignments}
+    assignments.extend(
+        assignment
+        for assignment in recruited_assignments
+        if assignment.read_id not in primer_read_ids
+    )
+    recruited_read_ids = {str(row["read_id"]) for row in recruited_rows}
+    for assignment in assignments:
+        if (
+            not assignment.passes_assignment_qc
+            or assignment.read_id in recruited_read_ids
+        ):
+            continue
+        recruited_rows.append(
+            {
+                "read_id": assignment.read_id,
+                "locus_id": assignment.assigned_locus,
+                "reference_name": "",
+                "reference_source": "primer_fallback",
+                "candidate_allele": "",
+                "mapping_quality": "",
+                "alignment_identity": assignment.assignment_score,
+                "locus_score_margin": "",
+                "aligned_query_bp": len(assignment.oriented_sequence),
+                "reference_coverage": "",
+                "full_product": "yes",
+                "genotype_informative": "yes",
+                "evidence_class": "FULL_PRODUCT",
+            }
+        )
+    presence_rows = recruitment_summary_rows(sample_id, loci, recruited_rows)
+    write_tsv(
+        recruited_rows,
+        recruitment_paths["recruited_reads"],
+        RECRUITMENT_READ_FIELDS,
+    )
+    write_tsv(
+        presence_rows,
+        recruitment_paths["locus_presence"],
+        RECRUITMENT_SUMMARY_FIELDS,
+    )
+    write_fasta(
+        local_product_records(
+            [
+                assignment
+                for assignment in assignments
+                if assignment.passes_assignment_qc
+            ]
+        ),
+        recruitment_paths["local_products"],
+    )
     assignment_rows = [{field: getattr(row, field) for field in ASSIGNMENT_FIELDS} for row in assignments]
     write_tsv(assignment_rows, outdir_path / "read_locus_assignments.tsv", ASSIGNMENT_FIELDS)
     assigned_count = sum(1 for row in assignments if row.passes_assignment_qc)
@@ -382,6 +507,20 @@ def run_call(
         min_cluster_size=min_cluster_size,
         min_identity=cluster_min_identity,
         executable=vsearch_bin,
+    )
+    fallback_asvs, fallback_predictions = recruitment_fallback_evidence(
+        recruited_rows,
+        loci,
+        {feature.locus_id for feature in features},
+        sample_id,
+    )
+    asv_rows.extend(fallback_asvs)
+    fasta_records.extend(
+        (
+            str(row["variant_id"]),
+            str(row["representative_sequence"]),
+        )
+        for row in fallback_asvs
     )
     for row in asv_rows:
         row["sample_id"] = sample_id
@@ -444,6 +583,7 @@ def run_call(
         assembly_equivalent=assembly_equivalent_reads,
         assembly_round_tolerance=assembly_round_tolerance,
     )
+    predictions.extend(fallback_predictions)
     prediction_rows = [{field: getattr(row, field) for field in PREDICTION_FIELDS} for row in predictions]
     write_tsv(prediction_rows, outdir_path / "read_level_allele_predictions.tsv", PREDICTION_FIELDS)
 
@@ -530,6 +670,7 @@ def run_call(
         mixture_rows,
         phylogenetic_rows,
         closest_reference_bands,
+        presence_rows,
     )
     progress.step(f"Done. Main calls: {outdir_path / 'calls.tsv'}")
 
@@ -552,5 +693,6 @@ def run_call(
         "in_silico_pcr": outdir_path / "in_silico_pcr",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "report": outdir_path / "report.html",
+        **recruitment_paths,
         **phylogeny_paths,
     }

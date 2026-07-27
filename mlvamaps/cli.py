@@ -179,6 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
             "98%% per-base accuracy)"
         ),
     )
+    call.add_argument(
+        "--recruitment-database",
+        help=(
+            "Reference-build directory supplying canonical locus products for "
+            "FASTQ recruitment without enabling phylogenetic placement"
+        ),
+    )
     call.add_argument("--max-primer-mismatches", type=int, default=2)
     call.add_argument(
         "--algorithm",
@@ -212,6 +219,41 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("isolate", "metagenome"),
         default="metagenome",
         help="Interpret FASTQ evidence as an isolate or metagenome (default: %(default)s)",
+    )
+    call.add_argument(
+        "--fastq-strategy",
+        choices=("recruit", "primer"),
+        default="recruit",
+        help=(
+            "FASTQ discovery strategy: competitive locus recruitment with "
+            "primer fallback, or legacy primer-only assignment "
+            "(default: %(default)s)"
+        ),
+    )
+    call.add_argument(
+        "--recruitment-preset",
+        help="Optional minimap2 -x preset for competitive long-read recruitment",
+    )
+    call.add_argument(
+        "--recruitment-min-identity",
+        type=_fraction,
+        default=0.9,
+        help="Minimum recruitment alignment identity (default: %(default)s)",
+    )
+    call.add_argument(
+        "--recruitment-min-aligned-bp",
+        type=_positive_int,
+        default=100,
+        help="Minimum aligned bases for locus presence (default: %(default)s)",
+    )
+    call.add_argument(
+        "--recruitment-min-locus-margin",
+        type=_nonnegative_int,
+        default=10,
+        help=(
+            "Minimum alignment-score lead over the next-best locus "
+            "(default: %(default)s)"
+        ),
     )
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
@@ -457,6 +499,7 @@ def main(argv: list[str] | None = None) -> int:
                 primers_path=args.primers,
                 profiles_path=args.profiles,
                 database_path=args.database,
+                recruitment_database_path=args.recruitment_database,
                 outdir=args.outdir,
                 sample_id=sample_id,
                 min_read_length=args.min_read_length,
@@ -491,6 +534,11 @@ def main(argv: list[str] | None = None) -> int:
                 assembly_equivalent_reads=args.read_calling_convention == "assembly",
                 assembly_round_tolerance=args.assembly_round_tolerance,
                 max_confidence_depth=args.max_confidence_depth,
+                fastq_strategy=args.fastq_strategy,
+                recruitment_preset=args.recruitment_preset,
+                recruitment_min_identity=args.recruitment_min_identity,
+                recruitment_min_aligned_bp=args.recruitment_min_aligned_bp,
+                recruitment_min_locus_margin=args.recruitment_min_locus_margin,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")

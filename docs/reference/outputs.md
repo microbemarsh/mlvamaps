@@ -110,6 +110,11 @@ size but no read depth unless support data are supplied.
 | `qc_summary.tsv` | Input and read-filtering totals. |
 | `filtered_reads.fastq.gz` | Reads retained after length and quality filtering. |
 | `filtered_reads.fasta` | Lossless sequence projection used by Amplirust. |
+| `locus_recruited_reads.tsv` | Competitive per-read locus mapping, candidate allele, alignment quality, and presence/genotype evidence class. |
+| `locus_presence.tsv` | Per-locus mapped, full-product, and repeat-informative read counts with presence status. |
+| `local_locus_products.fasta` | Modal-length majority products reconstructed independently at recruited loci. |
+| `recruitment/locus_recruitment_references.fasta` | Database-derived or synthetic competitive locus/allele reference bank. |
+| `recruitment/read_recruitment.sam` | Raw competitive long-read mappings used for presence and provisional genotype evidence. |
 | `read_locus_assignments.tsv` | Primer-supported locus, orientation, score, and assignment QC. |
 | `read_repeat_features.tsv` | Repeat coordinates, counts, patterns, motifs, and quality per read. |
 | `vntr_asv_table.tsv` | Retained VSEARCH variants and representative statistics. |
@@ -125,6 +130,15 @@ size but no read depth unless support data are supplied.
 | `amplirust/` | Native primer-pairing evidence. |
 | `vsearch/` | Native unique sequences, centroids, and memberships. |
 | `minimap2/` | Dominant-locus mapping FASTQ and reference diagnostics. |
+
+Recruitment presence statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `PRESENT_GENOTYPED` | At least two complete recruited products support genotyping. |
+| `PRESENT_PROVISIONAL` | One complete product or repeat-boundary-spanning partial evidence is available. |
+| `PRESENT_UNTYPED` | Locus-specific mapping establishes presence but does not resolve both repeat boundaries. |
+| `NO_EVIDENCE` | No mapping passed recruitment thresholds. |
 
 When `--no-locus-mapping` is used, the mapping summary and SNP tables are
 header-only and the dominant-locus reference/SAM diagnostics are not produced.

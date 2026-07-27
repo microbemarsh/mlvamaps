@@ -145,19 +145,21 @@ invoked.
 
 | Input | What mlvamaps assesses |
 | --- | --- |
-| High-accuracy long-read FASTQ/FASTQ.GZ | Primer-supported VNTR reads, assembly-equivalent repeat counts, sequence variants, representative mapping, and SNP evidence. |
-| Accurate primer-spanning WGS reads | Reads containing both required primers and a valid product are analyzed through the same FASTQ path. |
+| High-accuracy long-read FASTQ/FASTQ.GZ | Competitively recruited full and partial locus reads, presence evidence, local products, assembly-equivalent repeat counts, variants, and SNP evidence. |
+| Accurate long-read WGS/metagenomic reads | Complete products are genotyped directly; repeat-spanning partial reads can provide provisional alleles and locus-specific partial reads establish untyped presence. |
 | Assembly FASTA | In-silico primer products, product coordinates, sizes, and repeat counts. |
 | Assembly plus accurate FASTQ | Assembly calls plus minimap2 read count and mean coverage for extracted products. |
 | Assembly plus SAM/BAM | Assembly calls plus overlap-based read support from existing alignments. |
 | Known profile TSV | Closest MLVA profiles, mismatched loci, distance, and comparison confidence. |
 | Per-locus sequence database | Fixed-tree phylogenetic placement and a closest-reference ranking across callable loci. |
 
-FASTQ assignment requires both primers to occur in a valid product. Ordinary
-shotgun reads that do not span the complete target amplicon are therefore not
-treated as locus calls. Assembly mode is the appropriate route when the target
-is represented across multiple non-spanning reads. The mapping paths are scoped
-to accurate reads; noisy long-read mapping is not supported.
+FASTQ mode competitively recruits reads to complete locus products before
+primer pairing. Database products are preferred; rich panels can synthesize
+auditable fallback templates. Presence-only mappings are never promoted to
+repeat calls, while reads spanning both repeat boundaries can provide
+provisional genotypes even when the complete product or whole genome cannot be
+assembled. The mapping paths are scoped to accurate reads; noisy long-read
+mapping is not supported.
 
 FASTQ calls default to mean Q17 or better (approximately 98% per-base
 accuracy), retain singleton locus evidence, and use the same calibrated

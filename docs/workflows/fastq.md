@@ -1,8 +1,8 @@
 # FASTQ and amplicon sequencing workflow
 
 The FASTQ path accepts `.fastq`, `.fq`, and gzip-compressed equivalents. It
-is intended for current high-accuracy long-read sequencing in which individual
-reads contain a valid forward-primer/reverse-primer product. The default
+is intended for current high-accuracy long-read sequencing. Reads may span a
+complete primer product or cover only part of a locus. The default
 minimum mean Q score is 17, approximately 98% per-base accuracy.
 
 ```bash
@@ -32,12 +32,44 @@ This stage returns:
 - `qc_summary.tsv`
 - `filtered_reads.fastq.gz`
 
-## 3. Pair primers and assign loci
+## 3. Recruit reads competitively to loci
+
+The default `--fastq-strategy recruit` builds a competitive reference bank for
+every panel locus and allowed repeat allele, then maps all retained reads
+against that bank in one minimap2 operation. Complete products from
+`--recruitment-database` (or `--database`) are preferred. The dedicated option
+does not activate phylogenetic placement. When no database product exists, a
+rich panel can generate a recorded synthetic product from its primers, flanks,
+motif, and repeat range.
+
+Mapped evidence is separated into:
+
+- `FULL_PRODUCT`: covers the complete product and can enter the normal
+  assembly-equivalent calling path.
+- `REPEAT_INFORMATIVE`: spans both repeat boundaries but not the complete
+  product; supplies a provisional candidate allele.
+- `PRESENCE_ONLY`: maps specifically to the locus but cannot measure the
+  complete repeat.
+
+This stage returns:
+
+- `locus_recruited_reads.tsv`
+- `locus_presence.tsv`
+- `local_locus_products.fasta`
+- Native references and alignments under `recruitment/`
+
+Presence statuses are `PRESENT_GENOTYPED`, `PRESENT_PROVISIONAL`,
+`PRESENT_UNTYPED`, and `NO_EVIDENCE`. Presence is intentionally independent
+from whether a repeat count can be reported.
+
+## 4. Pair primers and apply the specificity fallback
 
 MLVAMaps creates a lossless FASTA projection of retained reads for Amplirust.
 Amplirust handles IUPAC primer bases, both orientations, primer alignment, and
 valid product-length constraints. The original FASTQ qualities remain connected
-to the assigned read.
+to the assigned read. A valid primer-pair assignment takes precedence when it
+and recruitment both recover the same read. Primer pairing also supplies a
+fallback when a panel lacks a usable complete recruitment product.
 
 This stage returns:
 
@@ -45,10 +77,10 @@ This stage returns:
 - `read_locus_assignments.tsv`
 - Native evidence under `amplirust/`
 
-Assignment requires a valid paired-primer product. A shotgun read covering only
-part of a target is not called by this workflow.
+Use `--fastq-strategy primer` to disable recruitment and retain the historical
+primer-only workflow.
 
-## 4. Extract repeat evidence
+## 5. Extract repeat evidence and local products
 
 Accepted reads are oriented to the forward-primer direction. MLVAMaps defines
 the inner primer-to-primer region and refines it with optional locus flanks.
@@ -62,7 +94,12 @@ For each usable read it calculates:
 
 This stage returns `read_repeat_features.tsv`.
 
-## 5. Dereplicate and cluster with VSEARCH
+For recruited full products, reads of the modal product length are combined
+into a local majority product in `local_locus_products.fasta`. Repeat-spanning
+partial reads can produce provisional allele evidence when no full product is
+available. Presence-only reads never become allele calls.
+
+## 6. Dereplicate and cluster with VSEARCH
 
 Each locus is processed independently. VSEARCH performs exact amplicon
 dereplication followed by abundance-sorted global clustering. The identity
@@ -73,7 +110,7 @@ used so indels do not disappear behind long-word requirements.
 Defaults:
 
 - Global identity: `0.97`
-- Minimum retained cluster size: `2`
+- Minimum retained cluster size: `1`
 
 Controls:
 
@@ -84,7 +121,7 @@ Controls:
 This stage returns `vntr_asv_table.tsv` and diagnostic files under
 `vsearch/`.
 
-## 6. Preserve observed representatives
+## 7. Preserve observed representatives
 
 The VSEARCH centroid is an actual observed read. MLVAMaps never replaces it
 with a generated consensus. Parasail globally aligns each unique cluster repeat
@@ -99,7 +136,7 @@ This stage returns:
 The FASTA contains representative repeat regions. The membership table retains
 the raw and aligned sequence evidence for every read in a retained cluster.
 
-## 7. Estimate variant mixture abundance
+## 8. Estimate variant mixture abundance
 
 MLVAMaps fits an Emu-inspired expectation-maximization model to retained
 VSEARCH count evidence. Pairwise representative similarity supplies the
@@ -114,7 +151,7 @@ remain visible as `CANDIDATE` evidence but do not alter the primary signature.
 This stage returns `vntr_mixture_abundance.tsv`. Control the meaningful/trace
 boundary with `--min-mixture-fraction`.
 
-## 8. Map to dominant representatives
+## 9. Map to dominant representatives
 
 The most supported retained VSEARCH variant at each locus supplies its complete
 observed amplicon as a minimap2 reference. All usable reads assigned to that
@@ -131,7 +168,7 @@ This stage returns:
 See [representative mapping and SNP evidence](../concepts/representative-mapping.md)
 for thresholds and interpretation.
 
-## 9. Predict read alleles
+## 10. Predict read alleles
 
 Reads in the EM-dominant cluster contribute primary repeat-count likelihoods.
 Representative-relative edits reduce evidence weight so clean observations
@@ -153,7 +190,7 @@ fingerprint; `--min-depth` still marks insufficient support as `LOW_DEPTH`.
 
 This stage returns `read_level_allele_predictions.tsv`.
 
-## 10. Call each locus
+## 11. Call each locus
 
 The Bayesian caller combines primary-cluster read probabilities and reports
 the best and second-best repeat count, posterior values, total and primary
@@ -179,7 +216,7 @@ later cultured assembly without erasing the original uncertainty.
 Alleles at loci that are not linked by the same reads cannot be phased into
 organism-specific metagenomic signatures.
 
-## 11. Fingerprint, profiles, and report
+## 12. Fingerprint, profiles, and report
 
 MLVAMaps converts the locus calls to wide and probabilistic fingerprints. If a
 profile database is present, it ranks known rows using the full allele

@@ -27,6 +27,19 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | `--min-qscore` | `17.0` (approximately 98% accuracy) |
 | `--sample-mode` | `metagenome` |
 | `--read-calling-convention` | `assembly` |
+| `--fastq-strategy` | `recruit` |
+| `--recruitment-preset` | None |
+| `--recruitment-min-identity` | `0.9` |
+| `--recruitment-min-aligned-bp` | `100` |
+| `--recruitment-min-locus-margin` | `10` |
+| `--recruitment-database` | None; falls back to `--database` |
+
+`--fastq-strategy recruit` competitively maps retained reads to database or
+synthetic locus products, records presence independently from genotype, and
+uses primer pairing as a specificity fallback. Use `primer` for the historical
+complete-primer-product workflow. `--recruitment-database` uses canonical
+products from a reference build without also requesting phylogenetic
+placement.
 
 ## VSEARCH clustering
 
@@ -51,7 +64,7 @@ are combined into one trace segment in the report.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `--minimap2-bin` | `minimap2` | Executable or path override. |
-| `--no-locus-mapping` | Off | Skip dominant-locus minimap2 mapping and SNP evidence. |
+| `--no-locus-mapping` | Off | Skip downstream dominant-representative mapping and SNP evidence; default locus recruitment still runs unless `--fastq-strategy primer` is selected. |
 | `--min-mapping-quality` | `0` | Minimum accepted primary-alignment MAPQ. |
 | `--min-base-quality` | `20` | Minimum base quality used in depth and SNP evidence. |
 | `--min-snp-depth` | `3` | Minimum quality-filtered depth at a position. |

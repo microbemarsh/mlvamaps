@@ -704,6 +704,7 @@ def write_report(
     mixture_rows: list[dict] | None = None,
     phylogenetic_rows: list[dict] | None = None,
     closest_reference_bands: list[dict] | None = None,
+    presence_rows: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -716,6 +717,7 @@ def write_report(
     mixture_rows = mixture_rows or []
     phylogenetic_rows = phylogenetic_rows or []
     closest_reference_bands = closest_reference_bands or []
+    presence_rows = presence_rows or []
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
     dropout = sum(1 for row in allele_rows if row.get("call_status") == "LOCUS_DROPOUT")
@@ -739,6 +741,23 @@ def write_report(
             "warn" if flagged else "good",
         ),
     ]
+    if presence_rows:
+        detected = sum(
+            row.get("presence_status") != "NO_EVIDENCE"
+            for row in presence_rows
+        )
+        genotyped = sum(
+            row.get("presence_status")
+            in {"PRESENT_GENOTYPED", "PRESENT_PROVISIONAL"}
+            for row in presence_rows
+        )
+        summary_cards.append(
+            _metric_card(
+                "Recruited loci",
+                f"{detected}/{len(presence_rows)}",
+                f"{genotyped} with repeat-informative evidence",
+            )
+        )
     if mapping_rows:
         summary_cards.extend(
             [
@@ -811,6 +830,29 @@ def write_report(
         f"<td>{_safe(row['call_status'])}</td></tr>"
         for row in allele_rows
     )
+    presence_table_rows = "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('locus_id', ''))}</td>"
+        f"<td>{_safe(row.get('presence_status', ''))}</td>"
+        f"<td>{_safe(row.get('mapped_reads', ''))}</td>"
+        f"<td>{_safe(row.get('full_product_reads', ''))}</td>"
+        f"<td>{_safe(row.get('genotype_informative_reads', ''))}</td>"
+        f"<td>{_safe(row.get('candidate_alleles', ''))}</td>"
+        f"<td>{_safe(row.get('reference_source', ''))}</td>"
+        "</tr>"
+        for row in presence_rows
+    )
+    presence_detail_section = ""
+    if presence_rows:
+        presence_detail_section = f"""
+      <details>
+        <summary>Locus recruitment and presence evidence</summary>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Presence</th><th>Mapped reads</th><th>Full products</th><th>Repeat-informative</th><th>Candidate alleles</th><th>Reference source</th></tr></thead>
+          <tbody>{presence_table_rows}</tbody>
+        </table></div>
+      </details>
+"""
     mixture_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
@@ -1112,6 +1154,7 @@ def write_report(
           <tbody>{rows}</tbody>
         </table></div>
       </details>
+      {presence_detail_section}
       {mixture_detail_section}
       {mapping_detail_section}
     </section>

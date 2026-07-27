@@ -428,6 +428,7 @@ def test_simulate_and_call_pipeline(tmp_path):
         vsearch_bin=str(vsearch),
         amplirust_bin=str(amplirust),
         locus_mapping=False,
+        fastq_strategy="primer",
     )
 
     calls = {row["locus_id"]: row for row in read_tsv(result["allele_calls"])}
@@ -926,6 +927,8 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
             "--amplirust-bin",
             str(amplirust),
             "--no-locus-mapping",
+            "--fastq-strategy",
+            "primer",
         ]
     )
     assert exit_code == 0
@@ -947,6 +950,12 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.min_qscore == 17.0
     assert default_call_args.read_calling_convention == "assembly"
     assert default_call_args.sample_mode == "metagenome"
+    assert default_call_args.fastq_strategy == "recruit"
+    assert default_call_args.recruitment_preset is None
+    assert default_call_args.recruitment_min_identity == 0.9
+    assert default_call_args.recruitment_min_aligned_bp == 100
+    assert default_call_args.recruitment_min_locus_margin == 10
+    assert default_call_args.recruitment_database is None
     assert default_call_args.min_secondary_reads == 2
     assert default_call_args.max_confidence_depth == 25.0
     assert default_call_args.cluster_min_identity == 0.97
