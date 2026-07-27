@@ -8,6 +8,10 @@ from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
 from .locus_assignment import assignments_from_pcr
+from .local_assembly import (
+    LOCAL_ASSEMBLY_FIELDS,
+    assemble_dominant_locus_products,
+)
 from .mapping import (
     MAPPING_SUMMARY_FIELDS,
     SNP_FIELDS,
@@ -25,7 +29,6 @@ from .report import write_report
 from .recruitment import (
     RECRUITMENT_READ_FIELDS,
     RECRUITMENT_SUMMARY_FIELDS,
-    dominant_local_product_measurements,
     recruitment_fallback_evidence,
     recruitment_summary_rows,
     run_read_recruitment,
@@ -541,16 +544,30 @@ def run_call(
         outdir_path / "vntr_mixture_abundance.tsv",
         MIXTURE_FIELDS,
     )
-    local_products, primary_product_measurements = (
-        dominant_local_product_measurements(
-            features,
-            asv_memberships,
-            mixture_rows,
-            loci,
-            round_tolerance=assembly_round_tolerance,
-        )
+    progress.step("Building dominant per-locus SPOARS POA assemblies")
+    (
+        local_products,
+        primary_product_measurements,
+        local_assembly_rows,
+        _local_assembly_pcr_paths,
+    ) = assemble_dominant_locus_products(
+        features,
+        asv_memberships,
+        mixture_rows,
+        loci,
+        outdir_path / "local_assembly_pcr",
+        sample_id,
+        max_primer_mismatches,
+        assembly_round_tolerance,
+        thread_count,
     )
     write_fasta(local_products, recruitment_paths["local_products"])
+    local_assembly_path = outdir_path / "local_assembly_concordance.tsv"
+    write_tsv(
+        local_assembly_rows,
+        local_assembly_path,
+        LOCAL_ASSEMBLY_FIELDS,
+    )
 
     mapping_rows: list[dict] = []
     snp_rows: list[dict] = []
@@ -700,6 +717,8 @@ def run_call(
         "minimap2": outdir_path / "minimap2",
         "vsearch": vsearch_dir,
         "in_silico_pcr": outdir_path / "in_silico_pcr",
+        "local_assembly_concordance": local_assembly_path,
+        "local_assembly_pcr": outdir_path / "local_assembly_pcr",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "report": outdir_path / "report.html",
         **recruitment_paths,

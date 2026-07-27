@@ -111,10 +111,12 @@ data are supplied.
 | --- | --- |
 | `qc_summary.tsv` | Input and read-filtering totals. |
 | `filtered_reads.fastq.gz` | Reads retained after length and quality filtering. |
-| `filtered_reads.fasta` | Lossless sequence projection used by Amplirust. |
+| `filtered_reads.fasta` | Lossless sequence projection used by native primer pairing. |
 | `locus_recruited_reads.tsv` | Competitive per-read locus mapping, candidate allele, alignment quality, and presence/genotype evidence class. |
 | `locus_presence.tsv` | Per-locus mapped, full-product, and repeat-informative read counts with presence status. |
-| `local_locus_products.fasta` | Modal-length majority products reconstructed from the dominant read cluster and used for assembly-equivalent primary repeat counts. |
+| `local_locus_products.fasta` | SPOARS POA consensus contigs reconstructed from the dominant cluster and passed through assembly-mode PCR calling. |
+| `local_assembly_concordance.tsv` | Per-locus raw read-length range and mode, POA consensus length, PCR product size, raw/final repeat calls, support, and fallback status. |
+| `local_assembly_pcr/` | Native Sassy primer matches and extracted products from the per-locus POA contigs. |
 | `recruitment/locus_recruitment_references.fasta` | Database-derived or synthetic competitive locus/allele reference bank. |
 | `recruitment/read_recruitment.sam` | Raw competitive long-read mappings used for presence and provisional genotype evidence. |
 | `read_locus_assignments.tsv` | Primer-supported locus, orientation, score, and assignment QC. |
@@ -129,7 +131,7 @@ data are supplied.
 | `locus_snps.tsv` | Filtered representative-relative SNP evidence. |
 | `read_level_allele_predictions.tsv` | Per-read repeat-count probabilities, unrounded measurement, uncertainty, and evidence weights. |
 | `allele_calls.tsv` | Assembly-equivalent dominant-product calls plus capped read confidence, product size, raw repeat measurement, measurement source, total and primary depth, candidate/confirmed-secondary counts, and dominant mixture fraction. |
-| `amplirust/` | Native primer-pairing evidence. |
+| `in_silico_pcr/` | Native primer-pairing evidence from filtered reads. |
 | `vsearch/` | Native unique sequences, centroids, and memberships. |
 | `minimap2/` | Dominant-locus mapping FASTQ and reference diagnostics. |
 

@@ -18,3 +18,4 @@ dependencies:
   - regex
   - pip:
       - sassy-rs>=0.2.6
+      - spoars>=0.1.3,<0.2

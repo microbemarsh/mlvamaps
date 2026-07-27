@@ -1,4 +1,5 @@
 from mlvamaps.bayesian_caller import call_loci
+from mlvamaps.local_assembly import assemble_dominant_locus_products
 from mlvamaps.models import Locus, ReadPrediction, ReadRecord, RepeatFeature
 from mlvamaps.recruitment import (
     build_recruitment_references,
@@ -233,6 +234,90 @@ def test_dominant_local_product_fixes_primary_allele_while_reads_set_confidence(
     assert measurements["VNTR"]["called_repeat_count"] == 5
     assert calls[0]["called_repeat_count"] == 5
     assert calls[0]["primary_measurement_source"] == "dominant_cluster_local_product"
+
+
+def test_spoars_local_assembly_corrects_minority_product_indel(tmp_path):
+    locus = Locus(
+        **{
+            **_locus().__dict__,
+            # Keep the two primer sites distinct so this regression exercises
+            # POA correction rather than the legacy repeated-primer tie rule.
+            "reverse_primer": "CCCCAAAA",
+        }
+    )
+    sequence = next(
+        row["sequence"]
+        for row in build_recruitment_references([locus])
+        if row["candidate_allele"] == 5
+    )
+
+    def feature(read_id, product):
+        return RepeatFeature(
+            read_id=read_id,
+            locus_id="VNTR",
+            repeat_region_start=12,
+            repeat_region_end=32,
+            repeat_region_length_bp=20,
+            repeat_motif="ATGC",
+            raw_repeat_count_estimate=5.0,
+            nearest_integer_repeat_count=5,
+            flank_quality_score=1.0,
+            repeat_pattern="ATGC-ATGC-ATGC-ATGC-ATGC",
+            repeat_sequence="ATGC" * 5,
+            mean_qscore=30.0,
+            mismatch_count_in_repeat_region=0,
+            motif_kmer_count=5,
+            left_primer_score=1.0,
+            right_primer_score=1.0,
+            left_flank_score=1.0,
+            right_flank_score=1.0,
+            amplicon_sequence=product,
+            amplicon_quality="I" * len(product),
+            product_size_bp=len(product),
+        )
+
+    features = [
+        feature("r1", sequence),
+        feature("r2", sequence),
+        feature("r3", sequence),
+        feature("indel", sequence[:22] + "A" + sequence[22:]),
+    ]
+    memberships = [
+        {
+            "read_id": item.read_id,
+            "locus_id": "VNTR",
+            "variant_id": "VNTR_ASV1",
+        }
+        for item in features
+    ]
+    mixture = [
+        {
+            "locus_id": "VNTR",
+            "variant_id": "VNTR_ASV1",
+            "estimated_fraction": 1.0,
+        }
+    ]
+
+    records, measurements, audit, _paths = assemble_dominant_locus_products(
+        features,
+        memberships,
+        mixture,
+        [locus],
+        tmp_path / "local_assembly_pcr",
+        "sample",
+        max_primer_mismatches=2,
+        round_tolerance=0.25,
+        threads=1,
+    )
+
+    assert records == [("VNTR_local_primary", sequence)]
+    assert measurements["VNTR"]["product_size_bp"] == 44
+    assert measurements["VNTR"]["called_repeat_count"] == 5
+    assert measurements["VNTR"]["source"] == "dominant_cluster_poa_assembly"
+    assert audit[0]["observed_max_product_bp"] == 45
+    assert audit[0]["poa_consensus_bp"] == 44
+    assert audit[0]["pcr_product_size_bp"] == 44
+    assert audit[0]["pcr_status"] == "PASS"
 
 
 def test_repeat_spanning_partial_read_produces_provisional_fallback():

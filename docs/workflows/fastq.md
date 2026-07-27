@@ -94,11 +94,19 @@ For each usable read it calculates:
 
 This stage returns `read_repeat_features.tsv`.
 
-Within the EM-dominant cluster, reads of the modal product length are combined
-into a local majority product in `local_locus_products.fasta`. Its product
-length is the primary repeat measurement. Repeat-spanning partial reads can
-produce provisional allele evidence only when no complete dominant product is
-available. Presence-only reads never become allele calls.
+Complete products in the EM-dominant cluster are globally aligned as a partial
+order alignment with the `spoars` Python bindings. Its consensus is written to
+`local_locus_products.fasta`, then processed by the same Sassy in-silico PCR,
+legacy primer-coordinate product-size calculation, and repeat caller used for
+whole assemblies. This corrects minority read insertions and deletions before
+repeat counting. Repeat-spanning partial reads can produce provisional allele
+evidence only when no complete dominant product can be assembled and resolved
+by PCR. Presence-only reads never become allele calls.
+
+`local_assembly_concordance.tsv` records the observed read-length range and
+mode, POA consensus length, PCR-derived assembly product size, raw repeat
+measurement, final allele, support depth, and fallback state for every
+assembled locus.
 
 ## 6. Dereplicate and cluster with VSEARCH
 
@@ -178,15 +186,14 @@ combined multiplicatively, allowing confidence to increase with support.
 `--max-confidence-depth` caps the effective evidence at 25 by default to limit
 overconfidence from correlated reads.
 
-By default, the dominant cluster's modal complete product uses the same
-product-length conversion and historical rounding function as an assembly
-product. This is a single counting contract: equal product lengths produce
-equal raw and rounded alleles in FASTQ and FASTA workflows. Per-read
-likelihoods increase or decrease confidence around that allele but cannot move
-the primary call to a different repeat count. The unrounded product
-measurement is retained in `allele_calls.tsv` and `calls.tsv`. Use
-`--read-calling-convention probabilistic` to retain direct per-read half-unit
-inference instead.
+By default, the dominant cluster's SPOARS consensus goes through the complete
+assembly calling path. This includes primer matching, legacy-compatible product
+boundary calculation, product selection, repeat conversion, and historical
+rounding. Per-read likelihoods increase or decrease confidence around that
+allele but cannot move the primary call to a different repeat count. The
+unrounded product measurement is retained in `allele_calls.tsv` and
+`calls.tsv`. Use `--read-calling-convention probabilistic` to retain direct
+per-read half-unit inference instead.
 
 Singleton clusters are retained by default (`--min-cluster-size 1`). A single
 spanning read can therefore contribute a provisional allele and remain in the

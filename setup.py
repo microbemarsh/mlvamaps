@@ -41,6 +41,7 @@ setup(
         "pysam>=0.22",
         "regex>=2024.5.15",
         "sassy-rs>=0.2.6",
+        "spoars>=0.1.3,<0.2",
     ],
     extras_require={
         "dev": ["pytest"],
