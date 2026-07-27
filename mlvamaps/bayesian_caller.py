@@ -1,9 +1,85 @@
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 
 from .calling import allele_grid, gaussian_allele_probabilities
 from .models import Locus, ReadPrediction
+
+
+def _prediction_probabilities(
+    prediction: ReadPrediction,
+    candidates: list[int | float],
+) -> list[float]:
+    measurement = (
+        prediction.measurement_repeat_count_estimate
+        if prediction.measurement_repeat_count_estimate is not None
+        else prediction.raw_repeat_count_estimate
+    )
+    if measurement is not None and prediction.measurement_sigma is not None:
+        return gaussian_allele_probabilities(
+            measurement,
+            candidates,
+            prediction.measurement_sigma,
+        )
+    probabilities = {candidate: 1e-12 for candidate in candidates}
+    probabilities[prediction.predicted_repeat_count] = max(
+        prediction.probability, 1e-12
+    )
+    if prediction.top_alt_repeat_count is not None:
+        probabilities[prediction.top_alt_repeat_count] = max(
+            prediction.top_alt_probability, 1e-12
+        )
+    total = sum(probabilities.values())
+    return [probabilities[candidate] / total for candidate in candidates]
+
+
+def _combined_allele_posterior(
+    predictions: list[ReadPrediction],
+    candidates: list[int | float],
+    max_confidence_depth: float,
+) -> tuple[list[tuple[int | float, float]], float, float]:
+    """Combine independent read evidence while capping correlated confidence."""
+    raw_effective_depth = sum(
+        max(0.0, prediction.evidence_weight) for prediction in predictions
+    )
+    capped_effective_depth = min(raw_effective_depth, max_confidence_depth)
+    scale = (
+        capped_effective_depth / raw_effective_depth
+        if raw_effective_depth > 0
+        else 0.0
+    )
+    log_likelihoods = [0.0 for _candidate in candidates]
+    for prediction in predictions:
+        probabilities = _prediction_probabilities(prediction, candidates)
+        evidence_weight = max(0.0, prediction.evidence_weight) * scale
+        for index, probability in enumerate(probabilities):
+            log_likelihoods[index] += evidence_weight * math.log(
+                max(probability, 1e-300)
+            )
+    maximum = max(log_likelihoods, default=0.0)
+    weights = [math.exp(value - maximum) for value in log_likelihoods]
+    total = sum(weights)
+    if total <= 0:
+        normalized = [1.0 / len(candidates) for _candidate in candidates]
+    else:
+        normalized = [weight / total for weight in weights]
+    ranked = sorted(
+        zip(candidates, normalized),
+        key=lambda item: (-item[1], float(item[0])),
+    )
+    return ranked, raw_effective_depth, capped_effective_depth
+
+
+def _variant_allele(predictions: list[ReadPrediction]) -> int | float | str:
+    support: dict[int | float, float] = defaultdict(float)
+    for prediction in predictions:
+        support[prediction.predicted_repeat_count] += max(
+            0.0, prediction.evidence_weight
+        )
+    if not support:
+        return ""
+    return min(support, key=lambda allele: (-support[allele], float(allele)))
 
 
 def call_loci(
@@ -13,7 +89,16 @@ def call_loci(
     min_depth: int = 10,
     min_posterior: float = 0.75,
     mixture_rows: list[dict] | None = None,
+    sample_mode: str = "metagenome",
+    calling_convention: str = "probabilistic",
+    max_confidence_depth: float = 25.0,
 ) -> list[dict]:
+    if sample_mode not in {"isolate", "metagenome"}:
+        raise ValueError("sample_mode must be 'isolate' or 'metagenome'")
+    if calling_convention not in {"assembly", "probabilistic"}:
+        raise ValueError("calling_convention must be 'assembly' or 'probabilistic'")
+    if max_confidence_depth <= 0:
+        raise ValueError("max_confidence_depth must be positive")
     pred_by_locus: dict[str, list[ReadPrediction]] = defaultdict(list)
     for prediction in predictions:
         pred_by_locus[prediction.locus_id].append(prediction)
@@ -40,47 +125,23 @@ def call_loci(
                     "second_best_posterior": 0.0,
                     "read_depth": 0,
                     "effective_read_depth": 0.0,
+                    "primary_read_depth": 0,
+                    "primary_effective_read_depth": 0.0,
+                    "confidence_effective_depth": 0.0,
                     "num_vntr_asvs": 0,
                     "num_meaningful_variants": 0,
+                    "num_candidate_variants": 0,
+                    "num_confirmed_secondary_variants": 0,
                     "dominant_vntr_asv": "",
                     "dominant_variant_fraction": 0.0,
+                    "secondary_alleles": "",
                     "call_status": "LOCUS_DROPOUT",
+                    "sample_mode": sample_mode,
+                    "calling_convention": calling_convention,
                 }
             )
             continue
 
-        candidates = allele_grid(locus, step=0.5)
-        weights = {count: 1e-6 for count in candidates}
-        effective_read_depth = sum(pred.evidence_weight for pred in preds)
-        measurement_groups: dict[tuple[float, float], float] = defaultdict(float)
-        for pred in preds:
-            if pred.raw_repeat_count_estimate is not None and pred.measurement_sigma is not None:
-                measurement_groups[
-                    (pred.raw_repeat_count_estimate, pred.measurement_sigma)
-                ] += pred.evidence_weight
-            else:
-                weights[pred.predicted_repeat_count] = (
-                    weights.get(pred.predicted_repeat_count, 1e-6)
-                    + pred.probability * pred.evidence_weight
-                )
-                if pred.top_alt_repeat_count is not None:
-                    weights[pred.top_alt_repeat_count] = (
-                        weights.get(pred.top_alt_repeat_count, 1e-6)
-                        + pred.top_alt_probability * pred.evidence_weight
-                    )
-        # Identical read lengths and quality-derived sigmas are common at high
-        # depth. Collapse them before evaluating the grid to keep inference
-        # proportional to distinct observations rather than total reads.
-        for (raw_count, sigma), group_weight in measurement_groups.items():
-            probabilities = gaussian_allele_probabilities(
-                raw_count, candidates, sigma
-            )
-            for count, probability in zip(candidates, probabilities):
-                weights[count] += probability * group_weight
-        total = sum(weights.values())
-        ranked = sorted(((count, weight / total) for count, weight in weights.items()), key=lambda item: item[1], reverse=True)
-        best = ranked[0]
-        second = ranked[1] if len(ranked) > 1 else ("", 0.0)
         locus_asvs = sorted(asv_by_locus.get(locus.locus_id, []), key=lambda row: row["support_reads"], reverse=True)
         locus_mixture = sorted(
             mixture_by_locus.get(locus.locus_id, []),
@@ -90,6 +151,17 @@ def call_loci(
         meaningful_variants = [
             row for row in locus_mixture if str(row.get("meaningful", "")).lower() == "yes"
         ]
+        candidate_variants = [
+            row
+            for row in locus_mixture
+            if str(row.get("evidence_class", "")).upper() == "CANDIDATE"
+        ]
+        confirmed_secondary = [
+            row
+            for row in locus_mixture
+            if str(row.get("evidence_class", "")).upper()
+            == "CONFIRMED_SECONDARY"
+        ]
         if locus_mixture:
             dominant = str(locus_mixture[0]["variant_id"])
             dominant_freq = float(locus_mixture[0].get("estimated_fraction") or 0)
@@ -97,15 +169,55 @@ def call_loci(
         else:
             dominant = locus_asvs[0]["variant_id"] if locus_asvs else ""
             dominant_freq = float(locus_asvs[0]["frequency"]) if locus_asvs else 0.0
-            meaningful_count = len(locus_asvs)
+            meaningful_count = 1 if dominant else 0
+        primary_preds = [
+            prediction for prediction in preds if prediction.variant_id == dominant
+        ]
+        if not primary_preds:
+            primary_preds = preds
+        candidates = allele_grid(locus, step=0.5)
+        ranked, primary_effective_depth, confidence_effective_depth = (
+            _combined_allele_posterior(
+                primary_preds,
+                candidates,
+                max_confidence_depth,
+            )
+        )
+        best = ranked[0]
+        second = ranked[1] if len(ranked) > 1 else ("", 0.0)
+        effective_read_depth = sum(pred.evidence_weight for pred in preds)
+        predictions_by_variant: dict[str, list[ReadPrediction]] = defaultdict(list)
+        for prediction in preds:
+            predictions_by_variant[prediction.variant_id].append(prediction)
+        secondary_alleles = []
+        for variant in locus_mixture[1:]:
+            evidence_class = str(
+                variant.get("evidence_class")
+                or (
+                    "CONFIRMED_SECONDARY"
+                    if str(variant.get("meaningful", "")).lower() == "yes"
+                    else "TRACE"
+                )
+            )
+            if evidence_class == "TRACE":
+                continue
+            variant_id = str(variant.get("variant_id", ""))
+            allele = _variant_allele(predictions_by_variant.get(variant_id, []))
+            secondary_alleles.append(
+                f"{variant_id}|{allele}|"
+                f"{float(variant.get('estimated_fraction') or 0):.6f}|"
+                f"{evidence_class}"
+            )
         status = "PASS"
-        if len(preds) < min_depth:
+        if len(primary_preds) < min_depth:
             status = "LOW_DEPTH"
         elif best[1] < min_posterior or (best[1] - second[1]) < 0.2:
             status = "AMBIGUOUS"
         elif best[0] < locus.expected_min_repeats or best[0] > locus.expected_max_repeats:
             status = "OUT_OF_RANGE"
-        elif meaningful_count > 1 and dominant_freq < 0.8:
+        elif meaningful_count > 1 and (
+            sample_mode == "metagenome" or dominant_freq < 0.8
+        ):
             status = "MULTIPLE_VARIANTS"
         rows.append(
             {
@@ -117,14 +229,22 @@ def call_loci(
                 "second_best_posterior": round(second[1], 6),
                 "read_depth": len(preds),
                 "effective_read_depth": round(effective_read_depth, 4),
+                "primary_read_depth": len(primary_preds),
+                "primary_effective_read_depth": round(primary_effective_depth, 4),
+                "confidence_effective_depth": round(confidence_effective_depth, 4),
                 "num_vntr_asvs": len(locus_asvs),
                 "num_meaningful_variants": meaningful_count,
+                "num_candidate_variants": len(candidate_variants),
+                "num_confirmed_secondary_variants": len(confirmed_secondary),
                 "dominant_vntr_asv": dominant,
                 "dominant_variant_fraction": round(dominant_freq, 6),
+                "secondary_alleles": ";".join(secondary_alleles),
                 "allele_distribution": ";".join(
                     f"{count}:{probability:.6f}" for count, probability in ranked
                 ),
                 "call_status": status,
+                "sample_mode": sample_mode,
+                "calling_convention": calling_convention,
             }
         )
     return rows

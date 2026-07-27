@@ -318,7 +318,13 @@ def test_emu_style_mixture_filters_trace_variants_and_refines_status():
         )
         for index in range(20)
     ]
-    call = call_loci(predictions, [locus], asv_rows, mixture_rows=mixture)[0]
+    call = call_loci(
+        predictions,
+        [locus],
+        asv_rows,
+        mixture_rows=mixture,
+        sample_mode="isolate",
+    )[0]
     assert call["call_status"] == "PASS"
     assert call["num_vntr_asvs"] == 3
     assert call["num_meaningful_variants"] == 2
@@ -447,6 +453,9 @@ def test_simulate_and_call_pipeline(tmp_path):
     easy_calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
     assert easy_calls["VNTR_01"]["present"] == "yes"
     assert easy_calls["VNTR_01"]["repeat_count"] == "5"
+    assert easy_calls["VNTR_01"]["primary_read_depth"] == "25"
+    assert easy_calls["VNTR_01"]["num_candidate_variants"] == "0"
+    assert easy_calls["VNTR_01"]["num_confirmed_secondary_variants"] == "0"
     matches = read_tsv(tmp_path / "results" / "profile_matches.tsv")
     assert matches[0]["best_profile_id"] == "P1"
     assert matches[0]["distance"] == "0.0"
@@ -934,7 +943,12 @@ def test_cli_has_conventional_output_and_thread_options():
     default_call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz"])
     assert default_call_args.outdir == "results"
     assert default_call_args.threads == 32
-    assert default_call_args.min_cluster_size == 2
+    assert default_call_args.min_cluster_size == 1
+    assert default_call_args.min_qscore == 17.0
+    assert default_call_args.read_calling_convention == "assembly"
+    assert default_call_args.sample_mode == "metagenome"
+    assert default_call_args.min_secondary_reads == 2
+    assert default_call_args.max_confidence_depth == 25.0
     assert default_call_args.cluster_min_identity == 0.97
     assert default_call_args.min_mixture_fraction == 0.01
     assert default_call_args.vsearch_bin == "vsearch"

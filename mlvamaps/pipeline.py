@@ -33,6 +33,7 @@ ASSIGNMENT_FIELDS = [
     "primer_forward_detected",
     "primer_reverse_detected",
     "passes_assignment_qc",
+    "product_size_bp",
 ]
 
 FEATURE_FIELDS = [
@@ -54,6 +55,8 @@ FEATURE_FIELDS = [
     "right_primer_score",
     "left_flank_score",
     "right_flank_score",
+    "product_size_bp",
+    "repeat_measurement_method",
 ]
 
 ASV_FIELDS = [
@@ -105,6 +108,7 @@ PREDICTION_FIELDS = [
     "evidence_weight",
     "raw_repeat_count_estimate",
     "measurement_sigma",
+    "measurement_repeat_count_estimate",
 ]
 
 ALLELE_FIELDS = [
@@ -116,12 +120,20 @@ ALLELE_FIELDS = [
     "second_best_posterior",
     "read_depth",
     "effective_read_depth",
+    "primary_read_depth",
+    "primary_effective_read_depth",
+    "confidence_effective_depth",
     "num_vntr_asvs",
     "num_meaningful_variants",
+    "num_candidate_variants",
+    "num_confirmed_secondary_variants",
     "dominant_vntr_asv",
     "dominant_variant_fraction",
+    "secondary_alleles",
     "allele_distribution",
     "call_status",
+    "sample_mode",
+    "calling_convention",
 ]
 
 MATCH_FIELDS = [
@@ -132,6 +144,9 @@ MATCH_FIELDS = [
     "matched_loci",
     "mismatched_loci",
     "confidence",
+    "compared_loci",
+    "mean_negative_log_likelihood",
+    "profile_probability_score",
 ]
 
 
@@ -143,11 +158,16 @@ SIMPLE_CALL_FIELDS = [
     "repeat_count_raw",
     "product_size_bp",
     "read_depth",
+    "primary_read_depth",
     "mean_coverage",
     "allele_confidence",
     "second_best_repeat_count",
     "second_best_probability",
     "inference_method",
+    "dominant_variant_fraction",
+    "num_candidate_variants",
+    "num_confirmed_secondary_variants",
+    "secondary_alleles",
     "allele_distribution",
     "status",
     "evidence",
@@ -159,7 +179,10 @@ REPEAT_COUNT_FIELDS = [
     "repeat_count",
     "repeat_count_raw",
     "read_depth",
+    "primary_read_depth",
     "allele_confidence",
+    "dominant_variant_fraction",
+    "secondary_alleles",
     "status",
 ]
 
@@ -205,13 +228,15 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
         read_depth = int(row.get("read_depth") or 0)
         present = read_depth > 0
         repeat_count = row.get("called_repeat_count", "") if present else ""
+        dominant_fraction = float(row.get("dominant_variant_fraction") or 0)
         if present:
             dominant = row.get("dominant_vntr_asv", "")
-            dominant_fraction = float(row.get("dominant_variant_fraction") or 0)
             meaningful = int(row.get("num_meaningful_variants") or 0)
             evidence = (
-                f"{read_depth} assigned reads; {meaningful} meaningful variant(s); "
-                f"dominant {dominant} at {dominant_fraction:.1%}"
+                f"{read_depth} assigned reads; "
+                f"{int(row.get('primary_read_depth') or 0)} primary reads; "
+                f"{meaningful} meaningful variant(s); dominant {dominant} at "
+                f"{dominant_fraction:.1%}"
             )
         else:
             evidence = "no assigned reads"
@@ -224,11 +249,24 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
                 "repeat_count_raw": repeat_count,
                 "product_size_bp": "",
                 "read_depth": read_depth,
+                "primary_read_depth": int(row.get("primary_read_depth") or 0),
                 "mean_coverage": "",
                 "allele_confidence": row.get("posterior_probability", 0.0),
                 "second_best_repeat_count": row.get("second_best_repeat_count", ""),
                 "second_best_probability": row.get("second_best_posterior", 0.0),
-                "inference_method": "read_distribution",
+                "inference_method": (
+                    "assembly_equivalent_read_distribution"
+                    if row.get("calling_convention") == "assembly"
+                    else "read_distribution"
+                ),
+                "dominant_variant_fraction": dominant_fraction,
+                "num_candidate_variants": int(
+                    row.get("num_candidate_variants") or 0
+                ),
+                "num_confirmed_secondary_variants": int(
+                    row.get("num_confirmed_secondary_variants") or 0
+                ),
+                "secondary_alleles": row.get("secondary_alleles", ""),
                 "allele_distribution": row.get("allele_distribution", ""),
                 "status": row["call_status"],
                 "evidence": evidence,
@@ -247,13 +285,14 @@ def run_call(
     database_path: str | None = None,
     min_read_length: int = 50,
     max_read_length: int = 100000,
-    min_qscore: float = 0.0,
+    min_qscore: float = 17.0,
     max_primer_mismatches: int = 3,
     min_depth: int = 10,
     min_posterior: float = 0.75,
-    min_cluster_size: int = 2,
+    min_cluster_size: int = 1,
     cluster_min_identity: float = 0.97,
     min_mixture_fraction: float = 0.01,
+    min_secondary_reads: int = 2,
     vsearch_bin: str = "vsearch",
     amplirust_bin: str = "amplirust",
     minimap2_bin: str = "minimap2",
@@ -272,6 +311,10 @@ def run_call(
     min_snp_frequency: float = 0.2,
     threads: int = DEFAULT_THREADS,
     show_progress: bool = False,
+    sample_mode: str = "metagenome",
+    assembly_equivalent_reads: bool = True,
+    assembly_round_tolerance: float = 0.25,
+    max_confidence_depth: float = 25.0,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
@@ -354,7 +397,9 @@ def run_call(
 
     progress.step("Estimating meaningful variant fractions with count-based EM")
     mixture_rows = estimate_variant_mixtures(
-        asv_rows, min_fraction=min_mixture_fraction
+        asv_rows,
+        min_fraction=min_mixture_fraction,
+        min_secondary_reads=min_secondary_reads,
     )
     write_tsv(
         mixture_rows,
@@ -392,7 +437,13 @@ def run_call(
     write_tsv(snp_rows, outdir_path / "locus_snps.tsv", SNP_FIELDS)
 
     progress.step("Calling repeat counts")
-    predictions = predict_read_alleles(features, loci, asv_memberships)
+    predictions = predict_read_alleles(
+        features,
+        loci,
+        asv_memberships,
+        assembly_equivalent=assembly_equivalent_reads,
+        assembly_round_tolerance=assembly_round_tolerance,
+    )
     prediction_rows = [{field: getattr(row, field) for field in PREDICTION_FIELDS} for row in predictions]
     write_tsv(prediction_rows, outdir_path / "read_level_allele_predictions.tsv", PREDICTION_FIELDS)
 
@@ -403,6 +454,11 @@ def run_call(
         min_depth,
         min_posterior,
         mixture_rows=mixture_rows,
+        sample_mode=sample_mode,
+        calling_convention=(
+            "assembly" if assembly_equivalent_reads else "probabilistic"
+        ),
+        max_confidence_depth=max_confidence_depth,
     )
     for row in allele_rows:
         row["sample_id"] = sample_id
@@ -426,7 +482,12 @@ def run_call(
         ["sample_id", "locus_id", "repeat_count", "posterior_probability"],
     )
 
-    match_rows = match_profiles(sample_id, fingerprint_rows[0], profiles)
+    match_rows = match_profiles(
+        sample_id,
+        fingerprint_rows[0],
+        profiles,
+        allele_rows=allele_rows,
+    )
     write_tsv(match_rows, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
     phylogeny_paths: dict[str, Path] = {}
     phylogenetic_rows: list[dict] = []

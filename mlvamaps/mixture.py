@@ -17,7 +17,9 @@ MIXTURE_FIELDS = [
     "estimated_reads",
     "estimated_fraction",
     "abundance_class",
+    "evidence_class",
     "meaningful",
+    "minimum_secondary_reads",
     "meaningful_threshold",
     "adaptive_em_floor",
     "estimated_error_rate",
@@ -112,6 +114,7 @@ def _adaptive_em_floor(read_count: int) -> float:
 def estimate_variant_mixtures(
     asv_rows: list[dict],
     min_fraction: float = 0.01,
+    min_secondary_reads: int = 2,
     tolerance: float = 1e-7,
     max_iterations: int = 200,
 ) -> list[dict]:
@@ -123,6 +126,8 @@ def estimate_variant_mixtures(
     """
     if not 0.0 <= min_fraction <= 1.0:
         raise ValueError("min_fraction must be between 0 and 1")
+    if min_secondary_reads < 1:
+        raise ValueError("min_secondary_reads must be at least 1")
     if tolerance <= 0:
         raise ValueError("tolerance must be positive")
     if max_iterations < 1:
@@ -179,22 +184,30 @@ def estimate_variant_mixtures(
                 iterations += extra_iterations
                 converged = converged and reconverged
 
-        meaningful = frequencies >= max(min_fraction, adaptive_floor)
-        if not np.any(meaningful):
-            meaningful[int(np.argmax(frequencies))] = True
+        fraction_supported = frequencies >= max(min_fraction, adaptive_floor)
         ranking = np.argsort(-frequencies, kind="stable")
         rank_by_index = {int(index): rank for rank, index in enumerate(ranking, start=1)}
 
         for index in ranking:
             index = int(index)
             fraction = float(frequencies[index])
-            is_meaningful = bool(meaningful[index])
+            observed_reads = int(counts[index])
             if rank_by_index[index] == 1:
                 abundance_class = "DOMINANT"
-            elif is_meaningful:
-                abundance_class = "SECONDARY"
-            else:
+                evidence_class = "DOMINANT"
+                is_meaningful = True
+            elif not bool(fraction_supported[index]):
                 abundance_class = "TRACE"
+                evidence_class = "TRACE"
+                is_meaningful = False
+            elif observed_reads >= min_secondary_reads:
+                abundance_class = "SECONDARY"
+                evidence_class = "CONFIRMED_SECONDARY"
+                is_meaningful = True
+            else:
+                abundance_class = "SECONDARY"
+                evidence_class = "CANDIDATE"
+                is_meaningful = False
             row = rows[index]
             output.append(
                 {
@@ -202,12 +215,14 @@ def estimate_variant_mixtures(
                     "locus_id": locus_id,
                     "variant_id": row["variant_id"],
                     "repeat_count": row.get("repeat_count", ""),
-                    "observed_reads": int(counts[index]),
+                    "observed_reads": observed_reads,
                     "observed_fraction": round(float(observed_fractions[index]), 8),
                     "estimated_reads": round(fraction * total_reads, 3),
                     "estimated_fraction": round(fraction, 8),
                     "abundance_class": abundance_class,
+                    "evidence_class": evidence_class,
                     "meaningful": "yes" if is_meaningful else "no",
+                    "minimum_secondary_reads": min_secondary_reads,
                     "meaningful_threshold": round(
                         max(min_fraction, adaptive_floor), 8
                     ),

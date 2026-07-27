@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 
 RESERVED_PROFILE_COLUMNS = {"profile_id", "strain_id", "metadata"}
 
@@ -23,9 +25,29 @@ def build_fingerprint(sample_id: str, allele_rows: list[dict], loci: list) -> tu
     return [fingerprint], probabilistic
 
 
-def match_profiles(sample_id: str, fingerprint: dict, profiles: list[dict]) -> list[dict]:
+def _allele_probability_map(row: dict) -> dict[float, float]:
+    probabilities = {}
+    for entry in filter(None, str(row.get("allele_distribution", "")).split(";")):
+        try:
+            allele, probability = entry.rsplit(":", 1)
+            probabilities[float(allele)] = float(probability)
+        except (TypeError, ValueError):
+            continue
+    return probabilities
+
+
+def match_profiles(
+    sample_id: str,
+    fingerprint: dict,
+    profiles: list[dict],
+    allele_rows: list[dict] | None = None,
+) -> list[dict]:
     if not profiles:
         return []
+    probability_by_locus = {
+        str(row["locus_id"]): _allele_probability_map(row)
+        for row in allele_rows or []
+    }
     locus_columns = [col for col in profiles[0] if col not in RESERVED_PROFILE_COLUMNS]
     rows = []
     for profile in profiles:
@@ -33,6 +55,7 @@ def match_profiles(sample_id: str, fingerprint: dict, profiles: list[dict]) -> l
         mismatched = []
         distance = 0.0
         compared = 0
+        negative_log_likelihood = 0.0
         for locus in locus_columns:
             called = fingerprint.get(locus, "")
             expected = profile.get(locus, "")
@@ -48,7 +71,15 @@ def match_profiles(sample_id: str, fingerprint: dict, profiles: list[dict]) -> l
             else:
                 mismatched.append(locus)
                 distance += delta
+            distribution = probability_by_locus.get(locus, {})
+            if distribution:
+                try:
+                    probability = distribution.get(float(expected), 1e-9)
+                except ValueError:
+                    probability = 1.0 if str(called) == str(expected) else 1e-9
+                negative_log_likelihood -= math.log(max(probability, 1e-9))
         confidence = matched / compared if compared else 0.0
+        mean_nll = negative_log_likelihood / compared if compared else float("inf")
         rows.append(
             {
                 "sample_id": sample_id,
@@ -58,6 +89,22 @@ def match_profiles(sample_id: str, fingerprint: dict, profiles: list[dict]) -> l
                 "matched_loci": matched,
                 "mismatched_loci": ",".join(mismatched),
                 "confidence": round(confidence, 6),
+                "compared_loci": compared,
+                "mean_negative_log_likelihood": (
+                    round(mean_nll, 6) if math.isfinite(mean_nll) else ""
+                ),
+                "profile_probability_score": (
+                    round(math.exp(-mean_nll), 6) if math.isfinite(mean_nll) else 0.0
+                ),
             }
         )
+    if allele_rows:
+        return sorted(
+            rows,
+            key=lambda row: (
+                float(row["mean_negative_log_likelihood"] or "inf"),
+                row["distance"],
+                -row["matched_loci"],
+            ),
+        )[:20]
     return sorted(rows, key=lambda row: (row["distance"], -row["matched_loci"]))[:20]

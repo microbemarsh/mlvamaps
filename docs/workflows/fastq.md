@@ -1,8 +1,9 @@
 # FASTQ and amplicon sequencing workflow
 
 The FASTQ path accepts `.fastq`, `.fq`, and gzip-compressed equivalents. It
-is intended for accurate amplicon or long-read sequencing in which individual
-reads contain a valid forward-primer/reverse-primer product.
+is intended for current high-accuracy long-read sequencing in which individual
+reads contain a valid forward-primer/reverse-primer product. The default
+minimum mean Q score is 17, approximately 98% per-base accuracy.
 
 ```bash
 mlvamaps call primers.tsv sample.fastq.gz -o results
@@ -23,6 +24,8 @@ Reads are parsed with their original qualities and filtered by:
 - `--min-read-length`
 - `--max-read-length`
 - `--min-qscore`
+
+Lower `--min-qscore` explicitly when working with older or noisier base calls.
 
 This stage returns:
 
@@ -104,6 +107,10 @@ assignment likelihoods, while the abundance estimate from each iteration
 becomes the prior for the next iteration. This separates meaningful secondary
 variants from trace clusters and estimates the fraction of each component.
 
+Secondary variants require both the configured abundance fraction and
+`--min-secondary-reads` (default 2) to become confirmed. Singleton secondaries
+remain visible as `CANDIDATE` evidence but do not alter the primary signature.
+
 This stage returns `vntr_mixture_abundance.tsv`. Control the meaningful/trace
 boundary with `--min-mixture-fraction`.
 
@@ -126,17 +133,33 @@ for thresholds and interpretation.
 
 ## 9. Predict read alleles
 
-Every read in a retained cluster contributes a repeat-count probability.
+Reads in the EM-dominant cluster contribute primary repeat-count likelihoods.
 Representative-relative edits reduce evidence weight so clean observations
-contribute more than heavily edited sequences.
+contribute more than heavily edited sequences. Concordant likelihoods are
+combined multiplicatively, allowing confidence to increase with support.
+`--max-confidence-depth` caps the effective evidence at 25 by default to limit
+overconfidence from correlated reads.
+
+By default, primer-spanning reads use the same calibrated product-length
+conversion and historical rounding convention as assembly calls. This makes
+the FASTQ fingerprint comparable to the fingerprint obtained after assembling
+the same sample. The unrounded measurement remains in the read-level output.
+Use `--read-calling-convention probabilistic` to retain direct half-unit
+inference instead.
+
+Singleton clusters are retained by default (`--min-cluster-size 1`). A single
+spanning read can therefore contribute a provisional allele and remain in the
+fingerprint; `--min-depth` still marks insufficient support as `LOW_DEPTH`.
 
 This stage returns `read_level_allele_predictions.tsv`.
 
 ## 10. Call each locus
 
-The Bayesian caller combines read probabilities and reports the best and
-second-best repeat count, posterior values, raw and effective depth, retained
-variant count, and dominant variant.
+The Bayesian caller combines primary-cluster read probabilities and reports
+the best and second-best repeat count, posterior values, total and primary
+depth, retained candidate and confirmed variant counts, dominant fraction, and
+secondary alleles. Secondary variants are interpreted independently and never
+averaged into the primary allele posterior.
 
 This stage returns:
 
@@ -146,11 +169,22 @@ This stage returns:
 Statuses include `PASS`, `LOW_DEPTH`, `AMBIGUOUS`, `OUT_OF_RANGE`,
 `MULTIPLE_VARIANTS`, and `LOCUS_DROPOUT`.
 
+The default is `--sample-mode metagenome`, where any meaningful secondary allele causes
+`MULTIPLE_VARIANTS`, even when one allele exceeds 80%, so the dominant
+per-locus signature is not mistaken for an unqualified single-strain result.
+Use `--sample-mode isolate` explicitly for cultured material. Both modes keep
+the assembly-equivalent dominant allele, posterior probability, and dominant
+variant fraction, allowing a rapid metagenomic detection to be compared with a
+later cultured assembly without erasing the original uncertainty.
+Alleles at loci that are not linked by the same reads cannot be phased into
+organism-specific metagenomic signatures.
+
 ## 11. Fingerprint, profiles, and report
 
 MLVAMaps converts the locus calls to wide and probabilistic fingerprints. If a
-profile database is present, it ranks known rows by repeat-count distance and
-reports mismatched loci and comparison confidence.
+profile database is present, it ranks known rows using the full allele
+probability distributions at observed loci, while also reporting conventional
+repeat-count distance, missing-locus-aware comparison counts, and confidence.
 
 This stage returns:
 

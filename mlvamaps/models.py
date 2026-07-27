@@ -50,6 +50,7 @@ class Assignment:
     reverse_end: Optional[int]
     forward_mismatches: Optional[int]
     reverse_mismatches: Optional[int]
+    product_size_bp: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,8 @@ class RepeatFeature:
     right_flank_score: float
     amplicon_sequence: str = ""
     amplicon_quality: Optional[str] = None
+    product_size_bp: int = 0
+    repeat_measurement_method: str = "repeat_region_length"
 
 
 @dataclass(frozen=True)
@@ -91,3 +94,4 @@ class ReadPrediction:
     evidence_weight: float
     raw_repeat_count_estimate: Optional[float] = None
     measurement_sigma: Optional[float] = None
+    measurement_repeat_count_estimate: Optional[float] = None

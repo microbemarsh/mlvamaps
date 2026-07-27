@@ -110,3 +110,32 @@ def estimate_repeat_count_from_inner_length(locus: Locus, inner_size_bp: int) ->
         return inner_size_bp / repeat_bp
     inner_nonrepeat_bp = max(0, nonrepeat_bp - len(locus.forward_primer) - len(locus.reverse_primer))
     return max(0, inner_size_bp - inner_nonrepeat_bp) / repeat_bp
+
+
+def estimate_repeat_count_from_spanning_read(
+    locus: Locus,
+    product_size_bp: int,
+    repeat_region_size_bp: int,
+    flanks_resolved: bool = False,
+) -> tuple[float | None, str]:
+    """Measure a primer-spanning read with the assembly allele convention.
+
+    Rich MLVA panels encode the historical product-size calibration used for
+    assembly calls. Prefer that calibration so FASTQ and FASTA observations of
+    the same product have the same raw allele. For minimal panels, a repeat
+    region bounded by both configured flanks is already isolated and must not
+    have the non-repeat interior subtracted a second time.
+    """
+    if locus.expected_product_size_bp and locus.nominal_repeat_units:
+        return (
+            estimate_repeat_count_from_product_length(locus, product_size_bp),
+            "assembly_product_length",
+        )
+    repeat_bp = repeat_unit_length(locus)
+    if flanks_resolved and repeat_bp:
+        return repeat_region_size_bp / repeat_bp, "flank_bounded_repeat_length"
+    inner_size = max(
+        0,
+        product_size_bp - len(locus.forward_primer) - len(locus.reverse_primer),
+    )
+    return estimate_repeat_count_from_inner_length(locus, inner_size), "inner_product_length"

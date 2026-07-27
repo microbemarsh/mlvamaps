@@ -55,6 +55,13 @@ def _nonnegative_float(value: str) -> float:
     return parsed
 
 
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return parsed
+
+
 def _input_kind(path: str) -> str:
     lower = path.lower()
     if lower.endswith((".fastq", ".fq", ".fastq.gz", ".fq.gz")):
@@ -163,7 +170,15 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--sample-id")
     call.add_argument("--min-read-length", type=int, default=50)
     call.add_argument("--max-read-length", type=int, default=100000)
-    call.add_argument("--min-qscore", type=float, default=0.0)
+    call.add_argument(
+        "--min-qscore",
+        type=float,
+        default=17.0,
+        help=(
+            "Minimum mean read Phred score (default: %(default)s, approximately "
+            "98%% per-base accuracy)"
+        ),
+    )
     call.add_argument("--max-primer-mismatches", type=int, default=2)
     call.add_argument(
         "--algorithm",
@@ -182,12 +197,37 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="FRACTION",
         help="Legacy integer-rounding tolerance (default: %(default)s)",
     )
+    call.add_argument(
+        "--read-calling-convention",
+        choices=("assembly", "probabilistic"),
+        default="assembly",
+        help=(
+            "FASTQ allele convention: assembly uses the same calibrated "
+            "product-length rounding as FASTA calls; probabilistic retains "
+            "raw half-unit inference (default: %(default)s)"
+        ),
+    )
+    call.add_argument(
+        "--sample-mode",
+        choices=("isolate", "metagenome"),
+        default="metagenome",
+        help="Interpret FASTQ evidence as an isolate or metagenome (default: %(default)s)",
+    )
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
+        "--max-confidence-depth",
+        type=_positive_float,
+        default=25.0,
+        help=(
+            "Cap on effective primary-read evidence used to sharpen allele "
+            "confidence (default: %(default)s)"
+        ),
+    )
+    call.add_argument(
         "--min-cluster-size",
         type=_positive_int,
-        default=2,
+        default=1,
         help="Minimum read support for a retained VNTR cluster (default: %(default)s)",
     )
     call.add_argument(
@@ -201,6 +241,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=_fraction,
         default=0.01,
         help="Minimum EM-estimated fraction for a meaningful variant (default: %(default)s)",
+    )
+    call.add_argument(
+        "--min-secondary-reads",
+        type=_positive_int,
+        default=2,
+        help=(
+            "Minimum reads required to promote a secondary variant from "
+            "candidate to confirmed (default: %(default)s)"
+        ),
     )
     call.add_argument(
         "--vsearch-bin",
@@ -419,6 +468,7 @@ def main(argv: list[str] | None = None) -> int:
                 min_cluster_size=args.min_cluster_size,
                 cluster_min_identity=args.cluster_min_identity,
                 min_mixture_fraction=args.min_mixture_fraction,
+                min_secondary_reads=args.min_secondary_reads,
                 vsearch_bin=args.vsearch_bin,
                 amplirust_bin=args.amplirust_bin,
                 minimap2_bin=args.minimap2_bin,
@@ -437,6 +487,10 @@ def main(argv: list[str] | None = None) -> int:
                 min_snp_frequency=args.min_snp_frequency,
                 threads=args.threads,
                 show_progress=not args.quiet,
+                sample_mode=args.sample_mode,
+                assembly_equivalent_reads=args.read_calling_convention == "assembly",
+                assembly_round_tolerance=args.assembly_round_tolerance,
+                max_confidence_depth=args.max_confidence_depth,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")

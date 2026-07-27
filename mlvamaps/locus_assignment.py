@@ -51,6 +51,7 @@ def assignments_from_pcr(
                 int(row["rev_end"]),
                 f_mm,
                 r_mm,
+                product_size,
             )
         )
 
@@ -100,7 +101,20 @@ def _assignment_from_candidates(
             None,
         )
 
-    score, orientation, sequence, quality, locus, f_pos, f_end, r_pos, r_end, f_mm, r_mm = max(
+    (
+        score,
+        orientation,
+        sequence,
+        quality,
+        locus,
+        f_pos,
+        f_end,
+        r_pos,
+        r_end,
+        f_mm,
+        r_mm,
+        product_size,
+    ) = max(
         candidates, key=lambda item: item[0]
     )
     primers_ordered = f_pos is not None and r_pos is not None and r_pos > f_pos
@@ -121,4 +135,5 @@ def _assignment_from_candidates(
         r_end,
         f_mm,
         r_mm,
+        product_size,
     )

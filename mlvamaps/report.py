@@ -517,7 +517,10 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
     for index, row in enumerate(rows):
         y = 54 + (index * row_height)
         posterior = max(0.0, min(1.0, float(row.get("posterior_probability") or 0)))
-        depth = max(0, int(row.get("read_depth") or 0))
+        depth = max(
+            0,
+            int(row.get("primary_read_depth", row.get("read_depth")) or 0),
+        )
         radius = min(12.0, 4.5 + math.log10(depth + 1) * 2.2)
         status = str(row.get("call_status") or "")
         color = _STATUS_COLORS.get(status, "#8dd7aa")
@@ -534,11 +537,11 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
 <figure class="chart-panel" aria-label="Locus call posterior plot">
   <svg viewBox="0 0 {width} {height}" role="img">
     <title>Locus call confidence</title>
-    <desc>Posterior probability by locus. Point size reflects read depth and color reflects call status.</desc>
+    <desc>Posterior probability by locus. Point size reflects primary-cluster read depth and color reflects call status.</desc>
     {"".join(ticks)}
     {"".join(marks)}
   </svg>
-  <figcaption>Farther right is more confident. Point size scales with read depth; color indicates status.</figcaption>
+  <figcaption>Farther right is more confident. Point size scales with dominant-cluster read depth; color indicates status.</figcaption>
 </figure>
 """
 
@@ -575,7 +578,16 @@ def _variant_mixture_svg(
             if str(row.get("meaningful", "")).lower() == "yes"
             and float(row.get("estimated_fraction") or 0) > 0
         ]
-        trace_rows = [row for row in estimates if row not in meaningful]
+        candidate_rows = [
+            row
+            for row in estimates
+            if str(row.get("evidence_class", "")).upper() == "CANDIDATE"
+        ]
+        trace_rows = [
+            row
+            for row in estimates
+            if row not in meaningful and row not in candidate_rows
+        ]
         segments = [
             (
                 str(row.get("variant_id", "")),
@@ -585,6 +597,15 @@ def _variant_mixture_svg(
             )
             for index, row in enumerate(meaningful)
         ]
+        segments.extend(
+            (
+                f'{row.get("variant_id", "")} candidate',
+                float(row.get("estimated_fraction") or 0),
+                "#ffc857",
+                f'{row.get("repeat_count", "")}U candidate',
+            )
+            for row in candidate_rows
+        )
         trace_fraction = sum(
             float(row.get("estimated_fraction") or 0) for row in trace_rows
         )
@@ -626,12 +647,12 @@ def _variant_mixture_svg(
 <figure class="chart-panel" aria-label="EM-estimated variant abundance plot">
   <svg viewBox="0 0 1000 {height}" role="img">
     <title>Variant mixture abundance</title>
-    <desc>Stacked estimated fractions of meaningful variants at each locus. Trace components are combined.</desc>
+    <desc>Stacked estimated fractions of confirmed, candidate, and trace variants at each locus.</desc>
     <text class="chart-axis" x="{plot_left}" y="26">0%</text>
     <text class="chart-axis" x="{plot_left + plot_width}" y="26" text-anchor="end">100%</text>
     {"".join(rows_svg)}
   </svg>
-  <figcaption>Emu-inspired EM estimates from VSEARCH count evidence. Meaningful variants are colored separately; components below the configured threshold are combined as trace.</figcaption>
+  <figcaption>Emu-inspired EM estimates from VSEARCH count evidence. Confirmed variants are colored separately, candidates are amber, and trace components are combined in gray.</figcaption>
 </figure>
 """
 
@@ -783,7 +804,8 @@ def write_report(
     mapping_plot = _mapping_coverage_svg(mapping_rows)
     rows = "\n".join(
         f"<tr><td>{_safe(row['locus_id'])}</td><td>{_safe(row['called_repeat_count'])}</td>"
-        f"<td>{_safe(row['posterior_probability'])}</td><td>{_safe(row['read_depth'])}</td>"
+        f"<td>{_safe(row['posterior_probability'])}</td>"
+        f"<td>{_safe(row.get('primary_read_depth', ''))}/{_safe(row['read_depth'])}</td>"
         f"<td>{_safe(row.get('num_meaningful_variants', ''))}</td>"
         f"<td>{_safe(row.get('dominant_variant_fraction', ''))}</td>"
         f"<td>{_safe(row['call_status'])}</td></tr>"
@@ -799,13 +821,14 @@ def write_report(
         f"<td>{_safe(row.get('estimated_reads', ''))}</td>"
         f"<td>{float(row.get('estimated_fraction') or 0) * 100:.3f}%</td>"
         f"<td>{_safe(row.get('abundance_class', ''))}</td>"
+        f"<td>{_safe(row.get('evidence_class', ''))}</td>"
         f"<td>{_safe(row.get('meaningful', ''))}</td>"
         "</tr>"
         for row in mixture_rows
     )
     if not mixture_table_rows:
         mixture_table_rows = (
-            '<tr><td colspan="9">No retained variants were available for mixture estimation.</td></tr>'
+            '<tr><td colspan="10">No retained variants were available for mixture estimation.</td></tr>'
         )
     mapping_table_rows = "\n".join(
         "<tr>"
@@ -925,7 +948,7 @@ def write_report(
       <details>
         <summary>Variant mixture details</summary>
         <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Variant</th><th>Repeat</th><th>Observed reads</th><th>Observed %</th><th>EM reads</th><th>EM %</th><th>Class</th><th>Meaningful</th></tr></thead>
+          <thead><tr><th>Locus</th><th>Variant</th><th>Repeat</th><th>Observed reads</th><th>Observed %</th><th>EM reads</th><th>EM %</th><th>Abundance</th><th>Evidence tier</th><th>Meaningful</th></tr></thead>
           <tbody>{mixture_table_rows}</tbody>
         </table></div>
       </details>
@@ -1085,7 +1108,7 @@ def write_report(
       <details>
         <summary>Allele call details</summary>
         <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Call</th><th>Posterior</th><th>Depth</th><th>Meaningful variants</th><th>Dominant fraction</th><th>Status</th></tr></thead>
+          <thead><tr><th>Locus</th><th>Primary call</th><th>Confidence</th><th>Primary/total depth</th><th>Meaningful variants</th><th>Dominant fraction</th><th>Status</th></tr></thead>
           <tbody>{rows}</tbody>
         </table></div>
       </details>
@@ -1426,7 +1449,7 @@ def write_assembly_report(
           </table></div>
         </details>
         <details>
-          <summary>Assembly amplicon coordinates and primer mismatches</summary>
+          <summary>Assembly Amplicons: coordinates and primer mismatches</summary>
           <div class="table-scroll"><table>
             <thead><tr><th>Locus</th><th>Contig</th><th>Coordinates</th><th>Orientation</th><th>Product bp</th><th>Forward mismatches</th><th>Reverse mismatches</th></tr></thead>
             <tbody>{product_table_rows}</tbody>

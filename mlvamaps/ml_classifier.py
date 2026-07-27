@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from .calling import allele_grid
+from .calling import (
+    allele_grid,
+    legacy_round_repeat_count,
+    repeat_unit_length,
+)
 from .models import Locus, ReadPrediction, RepeatFeature
 
 
@@ -10,6 +14,8 @@ def predict_read_alleles(
     features: list[RepeatFeature],
     loci: list[Locus],
     cluster_memberships: list[dict],
+    assembly_equivalent: bool = True,
+    assembly_round_tolerance: float = 0.25,
 ) -> list[ReadPrediction]:
     by_locus = {locus.locus_id: locus for locus in loci}
     membership_by_read = {
@@ -35,13 +41,26 @@ def predict_read_alleles(
         quality_weight = 0.5 + max(0.0, min(feature.mean_qscore, 30)) / 60
         flank_weight = max(0.0, min(feature.flank_quality_score, 1.0))
         evidence_weight = flank_weight * quality_weight * alignment_identity
-        # High-quality spanning reads resolve half-unit alleles without forcing
-        # every observation through integer rounding. Lower quality broadens
-        # the likelihood instead of changing the observed repeat length.
-        sigma = max(0.12, 0.50 - min(feature.mean_qscore, 30) / 80)
+        # Q17 corresponds to roughly 98% per-base accuracy. At that quality,
+        # primer-spanning reads should use a sharp assembly-like measurement;
+        # lower qualities broaden the distribution without moving its center.
+        error_probability = 10 ** (-max(feature.mean_qscore, 0.0) / 10)
+        sigma = max(
+            0.08,
+            0.5 / max(repeat_unit_length(locus), 1),
+            0.12 + (2.0 * error_probability),
+        )
         counts = allele_grid(locus, step=0.5)
+        measurement_center = (
+            legacy_round_repeat_count(
+                feature.raw_repeat_count_estimate,
+                assembly_round_tolerance,
+            )
+            if assembly_equivalent
+            else feature.raw_repeat_count_estimate
+        )
         count_values = np.asarray(counts, dtype=np.float64)
-        distances = feature.raw_repeat_count_estimate - count_values
+        distances = float(measurement_center) - count_values
         squared_distances = distances * distances
         weights = np.exp(
             -(squared_distances - squared_distances.min()) / (2 * sigma * sigma)
@@ -69,6 +88,7 @@ def predict_read_alleles(
                 round(evidence_weight, 6),
                 feature.raw_repeat_count_estimate,
                 round(sigma, 6),
+                float(measurement_center),
             )
         )
     return predictions

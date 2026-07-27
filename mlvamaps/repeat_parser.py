@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
-from .calling import estimate_repeat_count_from_inner_length, repeat_unit_length
+from .calling import estimate_repeat_count_from_spanning_read, repeat_unit_length
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .models import Assignment, Locus, RepeatFeature
 from .progress import ProgressReporter
@@ -36,24 +36,47 @@ def extract_repeat_features(
         repeat_end = assignment.reverse_start if assignment.reverse_start is not None else len(sequence)
         left_flank_score = 0.0
         right_flank_score = 0.0
+        left_flank_resolved = False
+        right_flank_resolved = False
         if locus.left_flank_sequence:
             pos, mm = _bounded_find(locus.left_flank_sequence, sequence, repeat_start, repeat_end, 3)
             if pos is not None:
                 repeat_start = pos + len(locus.left_flank_sequence)
                 left_flank_score = 1 - (mm or 0) / max(len(locus.left_flank_sequence), 1)
+                left_flank_resolved = True
         if locus.right_flank_sequence:
             pos, mm = _bounded_find(locus.right_flank_sequence, sequence, repeat_start, repeat_end, 3)
             if pos is not None:
                 repeat_end = pos
                 right_flank_score = 1 - (mm or 0) / max(len(locus.right_flank_sequence), 1)
+                right_flank_resolved = True
         if repeat_end < repeat_start:
             return None
         repeat_sequence = sequence[repeat_start:repeat_end]
         motif = locus.repeat_motif or "N"
         motif_len = repeat_unit_length(locus) or max(len(motif), 1)
-        raw_count = estimate_repeat_count_from_inner_length(locus, len(repeat_sequence))
+        amplicon_start = assignment.forward_start or 0
+        amplicon_end = assignment.reverse_end if assignment.reverse_end is not None else len(sequence)
+        amplicon_sequence = sequence[amplicon_start:amplicon_end]
+        amplicon_quality = (
+            assignment.oriented_quality[amplicon_start:amplicon_end]
+            if assignment.oriented_quality is not None
+            else None
+        )
+        raw_count, measurement_method = estimate_repeat_count_from_spanning_read(
+            locus,
+            assignment.product_size_bp or len(amplicon_sequence),
+            len(repeat_sequence),
+            flanks_resolved=(
+                bool(locus.left_flank_sequence)
+                and bool(locus.right_flank_sequence)
+                and left_flank_resolved
+                and right_flank_resolved
+            ),
+        )
         if raw_count is None:
             raw_count = len(repeat_sequence) / motif_len
+            measurement_method = "repeat_region_length"
         nearest = round(raw_count)
         pattern_parts, mismatches, motif_kmers = repeat_motif_statistics(
             repeat_sequence, motif, motif_len
@@ -66,14 +89,6 @@ def extract_repeat_features(
         if locus.right_flank_sequence:
             flank_scores.append(right_flank_score)
         flank_quality = sum(flank_scores) / len(flank_scores)
-        amplicon_start = assignment.forward_start or 0
-        amplicon_end = assignment.reverse_end if assignment.reverse_end is not None else len(sequence)
-        amplicon_sequence = sequence[amplicon_start:amplicon_end]
-        amplicon_quality = (
-            assignment.oriented_quality[amplicon_start:amplicon_end]
-            if assignment.oriented_quality is not None
-            else None
-        )
         return RepeatFeature(
             assignment.read_id,
             locus.locus_id,
@@ -95,6 +110,8 @@ def extract_repeat_features(
             round(right_flank_score, 4),
             amplicon_sequence,
             amplicon_quality,
+            assignment.product_size_bp or len(amplicon_sequence),
+            measurement_method,
         )
 
     thread_count = resolve_threads(threads)

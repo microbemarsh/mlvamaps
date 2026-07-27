@@ -145,7 +145,7 @@ invoked.
 
 | Input | What mlvamaps assesses |
 | --- | --- |
-| Amplicon FASTQ/FASTQ.GZ | Primer-supported VNTR reads, sequence variants, repeat counts, representative mapping, and SNP evidence. |
+| High-accuracy long-read FASTQ/FASTQ.GZ | Primer-supported VNTR reads, assembly-equivalent repeat counts, sequence variants, representative mapping, and SNP evidence. |
 | Accurate primer-spanning WGS reads | Reads containing both required primers and a valid product are analyzed through the same FASTQ path. |
 | Assembly FASTA | In-silico primer products, product coordinates, sizes, and repeat counts. |
 | Assembly plus accurate FASTQ | Assembly calls plus minimap2 read count and mean coverage for extracted products. |
@@ -158,6 +158,19 @@ shotgun reads that do not span the complete target amplicon are therefore not
 treated as locus calls. Assembly mode is the appropriate route when the target
 is represented across multiple non-spanning reads. The mapping paths are scoped
 to accurate reads; noisy long-read mapping is not supported.
+
+FASTQ calls default to mean Q17 or better (approximately 98% per-base
+accuracy), retain singleton locus evidence, and use the same calibrated
+product-length allele convention as assembly calls. Low-depth calls remain in
+the fingerprint with an explicit `LOW_DEPTH` status. Metagenome interpretation
+is the default and conservatively flags meaningful secondary alleles; use
+`--sample-mode isolate` for cultured material.
+
+Primary allele confidence increases when multiple reads in the dominant
+sequence cluster agree. Secondary variants are evaluated separately:
+single-read candidates remain visible for rapid detection, confirmed
+secondaries trigger mixture interpretation, and neither is averaged into the
+primary signature.
 
 ## MLVA_finder-compatible in-silico PCR
 

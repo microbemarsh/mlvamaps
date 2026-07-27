@@ -24,13 +24,15 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | --- | --- |
 | `--min-read-length` | `50` |
 | `--max-read-length` | `100000` |
-| `--min-qscore` | `0.0` |
+| `--min-qscore` | `17.0` (approximately 98% accuracy) |
+| `--sample-mode` | `metagenome` |
+| `--read-calling-convention` | `assembly` |
 
 ## VSEARCH clustering
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--min-cluster-size` | `2` | Minimum reads in a retained variant. |
+| `--min-cluster-size` | `1` | Minimum reads in a retained variant; singleton evidence remains provisional through depth status. |
 | `--cluster-min-identity` | `0.97` | Gap-aware global identity threshold. |
 | `--vsearch-bin` | `vsearch` | Executable or path override. |
 
@@ -39,6 +41,7 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `--min-mixture-fraction` | `0.01` | Minimum EM-estimated fraction for a variant to affect mixed-locus status and appear separately in the main abundance plot. |
+| `--min-secondary-reads` | `2` | Reads required to promote an abundance-supported secondary from candidate to confirmed. |
 
 Lower estimates remain in `vntr_mixture_abundance.tsv` as `TRACE` evidence and
 are combined into one trace segment in the report.
@@ -61,6 +64,20 @@ are combined into one trace segment in the report.
 | --- | --- | --- |
 | `--min-depth` | `10` | Reads required to avoid `LOW_DEPTH`. |
 | `--min-posterior` | `0.75` | Required top repeat-count probability for FASTQ and assembly calls. |
+| `--max-confidence-depth` | `25` | Maximum effective dominant-cluster evidence used to sharpen FASTQ allele confidence. |
+
+`--read-calling-convention assembly` makes primer-spanning reads use the same
+product-size calibration and rounding as assembly products. The alternative
+`probabilistic` convention evaluates the unrounded read measurement directly
+on the half-unit grid.
+
+The default `--sample-mode metagenome` flags any meaningful secondary allele
+as `MULTIPLE_VARIANTS`; candidates below `--min-secondary-reads` remain visible
+without changing the signature. Use `--sample-mode isolate` for cultured material to
+retain the historical 80% dominance rule. In both modes the dominant allele
+uses the assembly-equivalent convention, so it can be compared directly with
+a later cultured assembly while posterior probability and dominant fraction
+retain the original detection uncertainty.
 
 ## Assembly read support
 

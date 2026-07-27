@@ -47,22 +47,29 @@ floor: `1 / (reads + 1)` through 1,000 retained reads and `10 / reads` above
 1,000 reads. Components below that floor are removed and the model is refit.
 
 The final `--min-mixture-fraction` threshold, 0.01 by default, determines which
-remaining variants are considered meaningful for interpretation. The most
-abundant component is always retained. Output classes are:
+remaining variants have enough abundance for interpretation. A secondary
+variant must also have at least `--min-secondary-reads` observations, two by
+default, before it can alter mixture status. The most abundant component is
+always retained. Evidence tiers are:
 
 - `DOMINANT`: highest estimated fraction.
-- `SECONDARY`: another variant at or above the meaningful threshold.
+- `CONFIRMED_SECONDARY`: passes both abundance and read-support thresholds.
+- `CANDIDATE`: passes the abundance threshold but lacks independent read
+  support; retained for rapid low-coverage detection without changing the
+  primary signature.
 - `TRACE`: below the meaningful threshold.
 
-`MULTIPLE_VARIANTS` is assigned only when at least two meaningful variants
-remain and the dominant estimated fraction is below 0.8. Trace rows are never
-discarded from the abundance TSV; the HTML report combines them visually so
-the main plot stays readable.
+In default metagenome mode, `MULTIPLE_VARIANTS` is assigned only when a
+confirmed secondary remains. Candidate and trace variants never change the
+primary allele or force mixture status. Isolate mode additionally requires the
+dominant estimated fraction to be below 0.8. No tier is discarded from the
+abundance TSV; the HTML report shows candidates separately and combines trace
+components visually.
 
 ## Output
 
 `vntr_mixture_abundance.tsv` reports observed and EM-estimated fractions,
-estimated read counts, class, threshold, inferred error rate, iteration count,
-and convergence for every retained variant. Fractions describe retained
+estimated read counts, abundance class, evidence tier, thresholds, inferred
+error rate, iteration count, and convergence for every retained variant. Fractions describe retained
 variant-supporting reads at that locus, not organism abundance or absolute cell
 counts.
