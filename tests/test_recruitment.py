@@ -1,6 +1,8 @@
-from mlvamaps.models import Locus, ReadRecord
+from mlvamaps.bayesian_caller import call_loci
+from mlvamaps.models import Locus, ReadPrediction, ReadRecord, RepeatFeature
 from mlvamaps.recruitment import (
     build_recruitment_references,
+    dominant_local_product_measurements,
     local_product_records,
     parse_recruitment_sam,
     recruitment_fallback_evidence,
@@ -134,6 +136,103 @@ def test_local_product_uses_modal_length_and_read_consensus(tmp_path):
     products = local_product_records(assignments)
 
     assert products == [("VNTR_local_primary", sequence)]
+
+
+def test_dominant_local_product_fixes_primary_allele_while_reads_set_confidence():
+    locus = _locus()
+    sequence = next(
+        row["sequence"]
+        for row in build_recruitment_references([locus])
+        if row["candidate_allele"] == 5
+    )
+
+    def feature(read_id, product):
+        return RepeatFeature(
+            read_id=read_id,
+            locus_id="VNTR",
+            repeat_region_start=12,
+            repeat_region_end=32,
+            repeat_region_length_bp=20,
+            repeat_motif="ATGC",
+            raw_repeat_count_estimate=5.0,
+            nearest_integer_repeat_count=5,
+            flank_quality_score=1.0,
+            repeat_pattern="ATGC-ATGC-ATGC-ATGC-ATGC",
+            repeat_sequence="ATGC" * 5,
+            mean_qscore=30.0,
+            mismatch_count_in_repeat_region=0,
+            motif_kmer_count=5,
+            left_primer_score=1.0,
+            right_primer_score=1.0,
+            left_flank_score=1.0,
+            right_flank_score=1.0,
+            amplicon_sequence=product,
+            amplicon_quality="I" * len(product),
+            product_size_bp=len(product),
+        )
+
+    features = [
+        feature("r1", sequence),
+        feature("r2", sequence),
+        feature("r3", sequence),
+        feature("noisy", sequence + "A"),
+    ]
+    memberships = [
+        {
+            "read_id": item.read_id,
+            "locus_id": "VNTR",
+            "variant_id": "VNTR_ASV1",
+        }
+        for item in features
+    ]
+    mixture = [
+        {
+            "locus_id": "VNTR",
+            "variant_id": "VNTR_ASV1",
+            "estimated_fraction": 1.0,
+            "meaningful": "yes",
+            "evidence_class": "DOMINANT",
+        }
+    ]
+
+    records, measurements = dominant_local_product_measurements(
+        features, memberships, mixture, [locus]
+    )
+    predictions = [
+        ReadPrediction(
+            read_id=item.read_id,
+            locus_id="VNTR",
+            predicted_repeat_count=5.5,
+            probability=0.9,
+            top_alt_repeat_count=5,
+            top_alt_probability=0.1,
+            variant_id="VNTR_ASV1",
+            insertions_vs_representative=0,
+            deletions_vs_representative=0,
+            substitutions_vs_representative=0,
+            evidence_weight=1.0,
+            raw_repeat_count_estimate=5.5,
+            measurement_sigma=0.2,
+            measurement_repeat_count_estimate=5.5,
+        )
+        for item in features
+    ]
+    calls = call_loci(
+        predictions,
+        [locus],
+        [{"locus_id": "VNTR", "variant_id": "VNTR_ASV1", "support_reads": 4}],
+        min_depth=1,
+        mixture_rows=mixture,
+        calling_convention="assembly",
+        primary_product_measurements=measurements,
+    )
+
+    assert records == [("VNTR_local_primary", sequence)]
+    assert measurements["VNTR"]["product_size_bp"] == 44
+    assert measurements["VNTR"]["raw_repeat_count"] == 5
+    assert measurements["VNTR"]["called_repeat_count"] == 5
+    assert calls[0]["called_repeat_count"] == 5
+    assert calls[0]["primary_measurement_source"] == "dominant_cluster_local_product"
 
 
 def test_repeat_spanning_partial_read_produces_provisional_fallback():

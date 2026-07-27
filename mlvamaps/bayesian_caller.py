@@ -10,11 +10,16 @@ from .models import Locus, ReadPrediction
 def _prediction_probabilities(
     prediction: ReadPrediction,
     candidates: list[int | float],
+    measurement_override: float | None = None,
 ) -> list[float]:
     measurement = (
-        prediction.measurement_repeat_count_estimate
-        if prediction.measurement_repeat_count_estimate is not None
-        else prediction.raw_repeat_count_estimate
+        measurement_override
+        if measurement_override is not None
+        else (
+            prediction.measurement_repeat_count_estimate
+            if prediction.measurement_repeat_count_estimate is not None
+            else prediction.raw_repeat_count_estimate
+        )
     )
     if measurement is not None and prediction.measurement_sigma is not None:
         return gaussian_allele_probabilities(
@@ -38,6 +43,7 @@ def _combined_allele_posterior(
     predictions: list[ReadPrediction],
     candidates: list[int | float],
     max_confidence_depth: float,
+    measurement_override: float | None = None,
 ) -> tuple[list[tuple[int | float, float]], float, float]:
     """Combine independent read evidence while capping correlated confidence."""
     raw_effective_depth = sum(
@@ -51,7 +57,11 @@ def _combined_allele_posterior(
     )
     log_likelihoods = [0.0 for _candidate in candidates]
     for prediction in predictions:
-        probabilities = _prediction_probabilities(prediction, candidates)
+        probabilities = _prediction_probabilities(
+            prediction,
+            candidates,
+            measurement_override=measurement_override,
+        )
         evidence_weight = max(0.0, prediction.evidence_weight) * scale
         for index, probability in enumerate(probabilities):
             log_likelihoods[index] += evidence_weight * math.log(
@@ -92,6 +102,7 @@ def call_loci(
     sample_mode: str = "metagenome",
     calling_convention: str = "probabilistic",
     max_confidence_depth: float = 25.0,
+    primary_product_measurements: dict[str, dict] | None = None,
 ) -> list[dict]:
     if sample_mode not in {"isolate", "metagenome"}:
         raise ValueError("sample_mode must be 'isolate' or 'metagenome'")
@@ -99,6 +110,7 @@ def call_loci(
         raise ValueError("calling_convention must be 'assembly' or 'probabilistic'")
     if max_confidence_depth <= 0:
         raise ValueError("max_confidence_depth must be positive")
+    primary_product_measurements = primary_product_measurements or {}
     pred_by_locus: dict[str, list[ReadPrediction]] = defaultdict(list)
     for prediction in predictions:
         pred_by_locus[prediction.locus_id].append(prediction)
@@ -138,6 +150,9 @@ def call_loci(
                     "call_status": "LOCUS_DROPOUT",
                     "sample_mode": sample_mode,
                     "calling_convention": calling_convention,
+                    "primary_product_size_bp": "",
+                    "primary_repeat_count_raw": "",
+                    "primary_measurement_source": "",
                 }
             )
             continue
@@ -176,11 +191,20 @@ def call_loci(
         if not primary_preds:
             primary_preds = preds
         candidates = allele_grid(locus, step=0.5)
+        primary_measurement = primary_product_measurements.get(
+            locus.locus_id, {}
+        )
+        measurement_override = primary_measurement.get("called_repeat_count")
         ranked, primary_effective_depth, confidence_effective_depth = (
             _combined_allele_posterior(
                 primary_preds,
                 candidates,
                 max_confidence_depth,
+                measurement_override=(
+                    float(measurement_override)
+                    if measurement_override not in ("", None)
+                    else None
+                ),
             )
         )
         best = ranked[0]
@@ -245,6 +269,22 @@ def call_loci(
                 "call_status": status,
                 "sample_mode": sample_mode,
                 "calling_convention": calling_convention,
+                "primary_product_size_bp": primary_measurement.get(
+                    "product_size_bp", ""
+                ),
+                "primary_repeat_count_raw": primary_measurement.get(
+                    "raw_repeat_count", ""
+                ),
+                "primary_measurement_source": primary_measurement.get(
+                    "source",
+                    (
+                        "recruitment_partial"
+                        if dominant.endswith("_RECRUITED")
+                        else "per_read_fallback"
+                        if calling_convention == "assembly"
+                        else "read_distribution"
+                    ),
+                ),
             }
         )
     return rows

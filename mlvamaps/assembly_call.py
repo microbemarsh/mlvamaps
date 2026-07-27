@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .calling import (
     allele_grid,
+    assembly_equivalent_product_allele,
     estimate_repeat_count_from_product_length,
     gaussian_allele_probabilities,
     legacy_round_repeat_count,
@@ -530,8 +531,10 @@ def legacy_assembly_call_rows(
         locus_products = products_by_locus.get(locus.locus_id, [])
         eligible = []
         for product in locus_products:
-            raw_count = estimate_repeat_count_from_product_length(
-                locus, int(product["product_size_bp"])
+            raw_count, _called_count = assembly_equivalent_product_allele(
+                locus,
+                int(product["product_size_bp"]),
+                round_tolerance,
             )
             if raw_count is not None and raw_count < 100:
                 eligible.append((product, raw_count))
@@ -596,7 +599,11 @@ def legacy_assembly_call_rows(
             ),
             key=lambda item: item[1],
         )
-        called_count = legacy_round_repeat_count(raw_count, round_tolerance)
+        _raw_count, called_count = assembly_equivalent_product_allele(
+            locus,
+            int(product["product_size_bp"]),
+            round_tolerance,
+        )
         support_probability = 1.0
         support = read_support.get(product["product_id"], {})
         rows.append(

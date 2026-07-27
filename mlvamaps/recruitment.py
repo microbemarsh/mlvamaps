@@ -8,6 +8,7 @@ from pathlib import Path
 import pysam
 
 from .calling import (
+    assembly_equivalent_product_allele,
     estimate_repeat_count_from_product_length,
     legacy_round_repeat_count,
     normalize_allele,
@@ -18,7 +19,7 @@ from .mapping import (
     check_minimap2,
     run_minimap2_command,
 )
-from .models import Assignment, Locus, ReadPrediction, ReadRecord
+from .models import Assignment, Locus, ReadPrediction, ReadRecord, RepeatFeature
 from .sequence import majority_consensus, revcomp
 
 
@@ -174,12 +175,12 @@ def build_recruitment_references(
                     * math.ceil(max(repeat_bp, 1) / len(locus.repeat_motif))
                 )[:repeat_bp]
                 product = canonical[:start] + repeated + canonical[end:]
-                raw = estimate_repeat_count_from_product_length(
+                raw, allele = assembly_equivalent_product_allele(
                     locus, len(product)
                 )
                 if raw is None:
                     raw = repeat_bp / repeat_length
-                allele = legacy_round_repeat_count(raw)
+                    allele = legacy_round_repeat_count(raw)
                 products.append(
                     (
                         allele,
@@ -599,6 +600,84 @@ def local_product_records(
         ]
         products.append((f"{locus_id}_local_primary", majority_consensus(sequences)))
     return products
+
+
+def dominant_local_product_measurements(
+    features: list[RepeatFeature],
+    memberships: list[dict],
+    mixture_rows: list[dict],
+    loci: list[Locus],
+    round_tolerance: float = 0.25,
+) -> tuple[list[tuple[str, str]], dict[str, dict]]:
+    """Measure each dominant read cluster using the assembly product rule."""
+    locus_by_id = {locus.locus_id: locus for locus in loci}
+    dominant_by_locus: dict[str, str] = {}
+    for row in sorted(
+        mixture_rows,
+        key=lambda item: (
+            str(item.get("locus_id", "")),
+            -float(item.get("estimated_fraction") or 0),
+        ),
+    ):
+        dominant_by_locus.setdefault(
+            str(row["locus_id"]), str(row["variant_id"])
+        )
+
+    variant_by_read = {
+        (str(row["locus_id"]), str(row["read_id"])): str(row["variant_id"])
+        for row in memberships
+    }
+    by_locus: dict[str, list[RepeatFeature]] = defaultdict(list)
+    for feature in features:
+        dominant = dominant_by_locus.get(feature.locus_id)
+        if (
+            dominant
+            and variant_by_read.get((feature.locus_id, feature.read_id))
+            == dominant
+            and feature.product_size_bp > 0
+            and feature.amplicon_sequence
+        ):
+            by_locus[feature.locus_id].append(feature)
+
+    records: list[tuple[str, str]] = []
+    measurements: dict[str, dict] = {}
+    for locus_id, locus_features in sorted(by_locus.items()):
+        lengths = Counter(feature.product_size_bp for feature in locus_features)
+        modal_length = min(
+            lengths,
+            key=lambda length: (-lengths[length], length),
+        )
+        modal_features = [
+            feature
+            for feature in locus_features
+            if feature.product_size_bp == modal_length
+            and len(feature.amplicon_sequence) == modal_length
+        ]
+        if not modal_features:
+            continue
+        raw_count, called_count = assembly_equivalent_product_allele(
+            locus_by_id[locus_id],
+            modal_length,
+            round_tolerance,
+        )
+        if raw_count is None or called_count is None:
+            continue
+        records.append(
+            (
+                f"{locus_id}_local_primary",
+                majority_consensus(
+                    [feature.amplicon_sequence for feature in modal_features]
+                ),
+            )
+        )
+        measurements[locus_id] = {
+            "product_size_bp": modal_length,
+            "raw_repeat_count": raw_count,
+            "called_repeat_count": called_count,
+            "supporting_reads": len(modal_features),
+            "source": "dominant_cluster_local_product",
+        }
+    return records, measurements
 
 
 def run_read_recruitment(

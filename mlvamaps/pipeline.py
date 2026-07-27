@@ -25,7 +25,7 @@ from .report import write_report
 from .recruitment import (
     RECRUITMENT_READ_FIELDS,
     RECRUITMENT_SUMMARY_FIELDS,
-    local_product_records,
+    dominant_local_product_measurements,
     recruitment_fallback_evidence,
     recruitment_summary_rows,
     run_read_recruitment,
@@ -142,6 +142,9 @@ ALLELE_FIELDS = [
     "call_status",
     "sample_mode",
     "calling_convention",
+    "primary_product_size_bp",
+    "primary_repeat_count_raw",
+    "primary_measurement_source",
 ]
 
 MATCH_FIELDS = [
@@ -254,8 +257,10 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
                 "locus_id": row["locus_id"],
                 "present": "yes" if present else "no",
                 "repeat_count": repeat_count,
-                "repeat_count_raw": repeat_count,
-                "product_size_bp": "",
+                "repeat_count_raw": row.get(
+                    "primary_repeat_count_raw", repeat_count
+                ),
+                "product_size_bp": row.get("primary_product_size_bp", ""),
                 "read_depth": read_depth,
                 "primary_read_depth": int(row.get("primary_read_depth") or 0),
                 "mean_coverage": "",
@@ -263,7 +268,8 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
                 "second_best_repeat_count": row.get("second_best_repeat_count", ""),
                 "second_best_probability": row.get("second_best_posterior", 0.0),
                 "inference_method": (
-                    "assembly_equivalent_read_distribution"
+                    row.get("primary_measurement_source")
+                    or "assembly_equivalent_read_distribution"
                     if row.get("calling_convention") == "assembly"
                     else "read_distribution"
                 ),
@@ -475,16 +481,6 @@ def run_call(
         recruitment_paths["locus_presence"],
         RECRUITMENT_SUMMARY_FIELDS,
     )
-    write_fasta(
-        local_product_records(
-            [
-                assignment
-                for assignment in assignments
-                if assignment.passes_assignment_qc
-            ]
-        ),
-        recruitment_paths["local_products"],
-    )
     assignment_rows = [{field: getattr(row, field) for field in ASSIGNMENT_FIELDS} for row in assignments]
     write_tsv(assignment_rows, outdir_path / "read_locus_assignments.tsv", ASSIGNMENT_FIELDS)
     assigned_count = sum(1 for row in assignments if row.passes_assignment_qc)
@@ -545,6 +541,16 @@ def run_call(
         outdir_path / "vntr_mixture_abundance.tsv",
         MIXTURE_FIELDS,
     )
+    local_products, primary_product_measurements = (
+        dominant_local_product_measurements(
+            features,
+            asv_memberships,
+            mixture_rows,
+            loci,
+            round_tolerance=assembly_round_tolerance,
+        )
+    )
+    write_fasta(local_products, recruitment_paths["local_products"])
 
     mapping_rows: list[dict] = []
     snp_rows: list[dict] = []
@@ -599,6 +605,9 @@ def run_call(
             "assembly" if assembly_equivalent_reads else "probabilistic"
         ),
         max_confidence_depth=max_confidence_depth,
+        primary_product_measurements=(
+            primary_product_measurements if assembly_equivalent_reads else None
+        ),
     )
     for row in allele_rows:
         row["sample_id"] = sample_id

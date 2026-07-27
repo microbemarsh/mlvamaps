@@ -78,7 +78,15 @@ def estimate_repeat_count_from_product_length(locus: Locus, product_size_bp: int
         )
     nonrepeat_bp = expected_nonrepeat_bp(locus)
     if nonrepeat_bp is None:
-        nonrepeat_bp = len(locus.forward_primer) + len(locus.reverse_primer)
+        # Minimal panels often omit historical product-size calibration but
+        # provide the two sequences that bound the VNTR. Those configured
+        # flanks are non-repeat product sequence in both FASTA and FASTQ.
+        nonrepeat_bp = (
+            len(locus.forward_primer)
+            + len(locus.left_flank_sequence)
+            + len(locus.right_flank_sequence)
+            + len(locus.reverse_primer)
+        )
     repeat_region_bp = max(0, product_size_bp - nonrepeat_bp)
     return repeat_region_bp / repeat_bp
 
@@ -99,6 +107,18 @@ def legacy_round_repeat_count(value: float, tolerance: float = 0.25) -> int | fl
     if value > upper - tolerance:
         return upper
     return lower + 0.5
+
+
+def assembly_equivalent_product_allele(
+    locus: Locus,
+    product_size_bp: int,
+    tolerance: float = 0.25,
+) -> tuple[float | None, int | float | None]:
+    """Convert a complete product with the shared FASTA/FASTQ allele rule."""
+    raw_count = estimate_repeat_count_from_product_length(locus, product_size_bp)
+    if raw_count is None:
+        return None, None
+    return raw_count, legacy_round_repeat_count(raw_count, tolerance)
 
 
 def estimate_repeat_count_from_inner_length(locus: Locus, inner_size_bp: int) -> float | None:

@@ -162,11 +162,14 @@ assembled. The mapping paths are scoped to accurate reads; noisy long-read
 mapping is not supported.
 
 FASTQ calls default to mean Q17 or better (approximately 98% per-base
-accuracy), retain singleton locus evidence, and use the same calibrated
-product-length allele convention as assembly calls. Low-depth calls remain in
-the fingerprint with an explicit `LOW_DEPTH` status. Metagenome interpretation
-is the default and conservatively flags meaningful secondary alleles; use
-`--sample-mode isolate` for cultured material.
+accuracy) and retain singleton locus evidence. For every locus with complete
+products, the dominant read cluster is reduced to a modal-length local product.
+That product size is converted and rounded by the exact same function used for
+an assembly product. Individual reads determine confidence and variant
+evidence; they do not redefine that primary repeat count. Low-depth calls
+remain in the fingerprint with an explicit `LOW_DEPTH` status. Metagenome
+interpretation is the default and conservatively flags meaningful secondary
+alleles; use `--sample-mode isolate` for cultured material.
 
 Primary allele confidence increases when multiple reads in the dominant
 sequence cluster agree. Secondary variants are evaluated separately:
@@ -218,7 +221,8 @@ For FASTQ data, mlvamaps:
    and their relative fractions.
 7. Maps locus reads to the dominant observed amplicon with minimap2.
 8. Reports quality-filtered, representative-relative SNP evidence.
-9. Combines read probabilities into per-locus repeat-count calls.
+9. Converts the dominant local product with the assembly repeat-count rule,
+   then combines its supporting read probabilities into call confidence.
 10. Builds the fingerprint, compares profiles, and writes a
     plot-first HTML report.
 11. When `--database` is supplied, separates the tandem-repeat tract from the
@@ -239,6 +243,11 @@ For assemblies, mlvamaps:
 4. Builds the same fingerprint, profile comparison, and report formats.
 5. Optionally performs the same per-locus MAFFT, RAxML-NG, and EPA-ng fixed-tree
    placement from extracted assembly products.
+
+FASTQ and assembly profile matches use repeat-count distance and matched-locus
+count in the same order. FASTQ allele probabilities are used only to break an
+otherwise equal profile match, so uncertainty cannot displace a closer
+assembly-equivalent signature.
 
 The minimap2 mapping coordinates are positions within the sample-derived
 representative amplicon, not chromosome coordinates. The SNP table is

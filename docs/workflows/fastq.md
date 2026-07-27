@@ -94,9 +94,10 @@ For each usable read it calculates:
 
 This stage returns `read_repeat_features.tsv`.
 
-For recruited full products, reads of the modal product length are combined
-into a local majority product in `local_locus_products.fasta`. Repeat-spanning
-partial reads can produce provisional allele evidence when no full product is
+Within the EM-dominant cluster, reads of the modal product length are combined
+into a local majority product in `local_locus_products.fasta`. Its product
+length is the primary repeat measurement. Repeat-spanning partial reads can
+produce provisional allele evidence only when no complete dominant product is
 available. Presence-only reads never become allele calls.
 
 ## 6. Dereplicate and cluster with VSEARCH
@@ -170,18 +171,21 @@ for thresholds and interpretation.
 
 ## 10. Predict read alleles
 
-Reads in the EM-dominant cluster contribute primary repeat-count likelihoods.
+Reads in the EM-dominant cluster contribute primary repeat-count confidence.
 Representative-relative edits reduce evidence weight so clean observations
 contribute more than heavily edited sequences. Concordant likelihoods are
 combined multiplicatively, allowing confidence to increase with support.
 `--max-confidence-depth` caps the effective evidence at 25 by default to limit
 overconfidence from correlated reads.
 
-By default, primer-spanning reads use the same calibrated product-length
-conversion and historical rounding convention as assembly calls. This makes
-the FASTQ fingerprint comparable to the fingerprint obtained after assembling
-the same sample. The unrounded measurement remains in the read-level output.
-Use `--read-calling-convention probabilistic` to retain direct half-unit
+By default, the dominant cluster's modal complete product uses the same
+product-length conversion and historical rounding function as an assembly
+product. This is a single counting contract: equal product lengths produce
+equal raw and rounded alleles in FASTQ and FASTA workflows. Per-read
+likelihoods increase or decrease confidence around that allele but cannot move
+the primary call to a different repeat count. The unrounded product
+measurement is retained in `allele_calls.tsv` and `calls.tsv`. Use
+`--read-calling-convention probabilistic` to retain direct per-read half-unit
 inference instead.
 
 Singleton clusters are retained by default (`--min-cluster-size 1`). A single
@@ -192,11 +196,12 @@ This stage returns `read_level_allele_predictions.tsv`.
 
 ## 11. Call each locus
 
-The Bayesian caller combines primary-cluster read probabilities and reports
-the best and second-best repeat count, posterior values, total and primary
-depth, retained candidate and confirmed variant counts, dominant fraction, and
-secondary alleles. Secondary variants are interpreted independently and never
-averaged into the primary allele posterior.
+The caller fixes the primary allele from the dominant complete local product,
+then combines primary-cluster read probabilities to report its confidence and
+the alternatives. It also reports total and primary depth, retained candidate
+and confirmed variant counts, dominant fraction, and secondary alleles.
+Secondary variants are interpreted independently and never averaged into the
+primary allele posterior.
 
 This stage returns:
 
@@ -219,9 +224,10 @@ organism-specific metagenomic signatures.
 ## 12. Fingerprint, profiles, and report
 
 MLVAMaps converts the locus calls to wide and probabilistic fingerprints. If a
-profile database is present, it ranks known rows using the full allele
-probability distributions at observed loci, while also reporting conventional
-repeat-count distance, missing-locus-aware comparison counts, and confidence.
+profile database is present, conventional repeat-count distance and
+matched-locus count are the primary ranking keys in both FASTQ and assembly
+modes. FASTQ allele probabilities break otherwise equal matches. The output
+also reports missing-locus-aware comparison counts and confidence.
 
 This stage returns:
 

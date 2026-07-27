@@ -98,13 +98,12 @@ def match_profiles(
                 ),
             }
         )
-    if allele_rows:
-        return sorted(
-            rows,
-            key=lambda row: (
-                float(row["mean_negative_log_likelihood"] or "inf"),
-                row["distance"],
-                -row["matched_loci"],
-            ),
-        )[:20]
-    return sorted(rows, key=lambda row: (row["distance"], -row["matched_loci"]))[:20]
+    return sorted(
+        rows,
+        key=lambda row: (
+            row["distance"],
+            -row["matched_loci"],
+            float(row["mean_negative_log_likelihood"] or "inf"),
+            str(row["best_profile_id"]),
+        ),
+    )[:20]

@@ -99,9 +99,11 @@ status
 evidence
 ```
 
-Fields that do not apply to an input mode remain blank. A FASTQ call normally
-has read depth but no assembly product size. An assembly-only call has product
-size but no read depth unless support data are supplied.
+Fields that do not apply to an input mode remain blank. A FASTQ call based on a
+complete dominant local product includes its `product_size_bp` and unrounded
+`repeat_count_raw`; a provisional partial-read call may leave product size
+blank. An assembly-only call has product size but no read depth unless support
+data are supplied.
 
 ## FASTQ outputs
 
@@ -112,7 +114,7 @@ size but no read depth unless support data are supplied.
 | `filtered_reads.fasta` | Lossless sequence projection used by Amplirust. |
 | `locus_recruited_reads.tsv` | Competitive per-read locus mapping, candidate allele, alignment quality, and presence/genotype evidence class. |
 | `locus_presence.tsv` | Per-locus mapped, full-product, and repeat-informative read counts with presence status. |
-| `local_locus_products.fasta` | Modal-length majority products reconstructed independently at recruited loci. |
+| `local_locus_products.fasta` | Modal-length majority products reconstructed from the dominant read cluster and used for assembly-equivalent primary repeat counts. |
 | `recruitment/locus_recruitment_references.fasta` | Database-derived or synthetic competitive locus/allele reference bank. |
 | `recruitment/read_recruitment.sam` | Raw competitive long-read mappings used for presence and provisional genotype evidence. |
 | `read_locus_assignments.tsv` | Primer-supported locus, orientation, score, and assignment QC. |
@@ -126,7 +128,7 @@ size but no read depth unless support data are supplied.
 | `locus_mapping_summary.tsv` | Mapping rate, depth, coverage, and SNP totals by locus. |
 | `locus_snps.tsv` | Filtered representative-relative SNP evidence. |
 | `read_level_allele_predictions.tsv` | Per-read repeat-count probabilities, unrounded measurement, uncertainty, and evidence weights. |
-| `allele_calls.tsv` | Primary-cluster Bayesian calls, capped confidence evidence, total and primary depth, candidate/confirmed-secondary counts, and dominant mixture fraction. |
+| `allele_calls.tsv` | Assembly-equivalent dominant-product calls plus capped read confidence, product size, raw repeat measurement, measurement source, total and primary depth, candidate/confirmed-secondary counts, and dominant mixture fraction. |
 | `amplirust/` | Native primer-pairing evidence. |
 | `vsearch/` | Native unique sequences, centroids, and memberships. |
 | `minimap2/` | Dominant-locus mapping FASTQ and reference diagnostics. |

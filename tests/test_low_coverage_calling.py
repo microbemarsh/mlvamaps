@@ -414,3 +414,22 @@ def test_partial_profile_ranking_uses_full_allele_probabilities():
 
     assert matches[0]["best_profile_id"] == "B"
     assert matches[0]["compared_loci"] == 2
+
+
+def test_profile_distance_has_same_priority_with_or_without_read_probabilities():
+    fingerprint = {"sample_id": "sample", "L1": 5}
+    profiles = [
+        {"profile_id": "ASSEMBLY_MATCH", "strain_id": "A", "L1": "5"},
+        {"profile_id": "LIKELIHOOD_ONLY", "strain_id": "B", "L1": "5.5"},
+    ]
+    allele_rows = [
+        {"locus_id": "L1", "allele_distribution": "5:0.1;5.5:0.9"}
+    ]
+
+    assembly_matches = match_profiles("sample", fingerprint, profiles)
+    fastq_matches = match_profiles(
+        "sample", fingerprint, profiles, allele_rows=allele_rows
+    )
+
+    assert assembly_matches[0]["best_profile_id"] == "ASSEMBLY_MATCH"
+    assert fastq_matches[0]["best_profile_id"] == "ASSEMBLY_MATCH"
