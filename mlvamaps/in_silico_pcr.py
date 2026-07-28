@@ -5,6 +5,7 @@ import gzip
 import itertools
 import re
 import warnings
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -198,14 +199,72 @@ def _legacy_primer_matches(
     """Match an IUPAC primer with MLVA_finder's equal-length preference."""
     matches: dict[tuple[int, int], _PrimerMatch] = {}
     for concrete in _expand_degenerate(primer):
-        for match in _sassy_matches(searcher, concrete, sequence, max_errors):
+        concrete_matches = _sassy_matches(
+            searcher, concrete, sequence, max_errors
+        )
+        equal_length = [
+            match for match in concrete_matches if match.length == len(concrete)
+        ]
+        for match in equal_length or concrete_matches:
             key = (match.start, match.end)
             previous = matches.get(key)
             if previous is None or (match.cost, match.cigar) < (previous.cost, previous.cigar):
                 matches[key] = match
-    ordered = sorted(matches.values(), key=_match_key)
-    equal_length = [match for match in ordered if match.length == len(primer)]
-    return equal_length or ordered
+    return sorted(matches.values(), key=_match_key)
+
+
+def _legacy_first_primer_orientations(
+    searcher,
+    primer: str,
+    original: str,
+    reverse: str,
+    max_errors: int,
+    search_rc: bool,
+) -> list[tuple[str, str, list[_PrimerMatch]]]:
+    """Preserve MLVA_finder's reverse fallback for each IUPAC expansion."""
+    forward: dict[tuple[int, int], _PrimerMatch] = {}
+    reverse_matches: dict[tuple[int, int], _PrimerMatch] = {}
+    for concrete in _expand_degenerate(primer):
+        concrete_forward = _sassy_matches(
+            searcher, concrete, original, max_errors
+        )
+        equal_forward = [
+            match
+            for match in concrete_forward
+            if match.length == len(concrete)
+        ]
+        concrete_forward = equal_forward or concrete_forward
+        target = forward
+        concrete_matches = concrete_forward
+        if not concrete_matches and search_rc:
+            concrete_matches = _sassy_matches(
+                searcher, concrete, reverse, max_errors
+            )
+            equal_reverse = [
+                match
+                for match in concrete_matches
+                if match.length == len(concrete)
+            ]
+            concrete_matches = equal_reverse or concrete_matches
+            target = reverse_matches
+        for match in concrete_matches:
+            key = (match.start, match.end)
+            previous = target.get(key)
+            if previous is None or (match.cost, match.cigar) < (
+                previous.cost,
+                previous.cigar,
+            ):
+                target[key] = match
+    orientations = []
+    if forward:
+        orientations.append(
+            ("+", original, sorted(forward.values(), key=_match_key))
+        )
+    if reverse_matches:
+        orientations.append(
+            ("-", reverse, sorted(reverse_matches.values(), key=_match_key))
+        )
+    return orientations
 
 
 def write_primer_pairs(loci: list[Locus], path: str | Path) -> Path:
@@ -227,6 +286,149 @@ def expected_amplicon_bounds(loci: list[Locus]) -> tuple[int, int]:
     return (min(mins) if mins else 50, max(maxes) if maxes else 5000)
 
 
+def _locus_product_rows(
+    source: str,
+    reference_id: str,
+    original: str,
+    locus: Locus,
+    max_errors: int,
+    min_len: int,
+    max_len: int,
+    search_rc: bool,
+    trim_primers: bool,
+    max_n_fraction: float,
+    searcher=None,
+) -> list[dict[str, str | int]]:
+    searcher = searcher or _new_searcher()
+    rows: list[dict[str, str | int]] = []
+    seen_products: set[tuple[str, int, int, int, int]] = set()
+    original = original.upper()
+    reverse = _reverse_complement(original)
+    # The legacy program reruns unresolved loci at thresholds 0..k. Retain the
+    # union and let the assembly caller choose the first successful round.
+    for error_round in range(max_errors + 1):
+        orientations = _legacy_first_primer_orientations(
+            searcher,
+            locus.forward_primer,
+            original,
+            reverse,
+            error_round,
+            search_rc,
+        )
+        for strand, sequence, first_matches in orientations:
+            second_matches = _legacy_primer_matches(
+                searcher,
+                _reverse_complement(locus.reverse_primer),
+                sequence,
+                error_round,
+            )
+            for first in first_matches:
+                for second in second_matches:
+                    product_key = (
+                        strand,
+                        first.start,
+                        first.end,
+                        second.start,
+                        second.end,
+                    )
+                    if product_key in seen_products:
+                        continue
+                    seen_products.add(product_key)
+                    row = _paired_product_row(
+                        source,
+                        reference_id,
+                        original,
+                        locus,
+                        strand,
+                        sequence,
+                        first,
+                        second,
+                        min_len,
+                        max_len,
+                        trim_primers,
+                        max_n_fraction,
+                        len(rows) + 1,
+                    )
+                    if row is not None:
+                        rows.append(row)
+    return rows
+
+
+def _record_product_rows(
+    task: tuple[
+        str,
+        str,
+        str,
+        list[Locus],
+        int,
+        int,
+        int,
+        bool,
+        bool,
+        float,
+    ],
+) -> list[dict[str, str | int]]:
+    (
+        source,
+        reference_id,
+        original,
+        loci,
+        max_errors,
+        min_len,
+        max_len,
+        search_rc,
+        trim_primers,
+        max_n_fraction,
+    ) = task
+    searcher = _new_searcher()
+    rows = []
+    for locus in loci:
+        rows.extend(
+            _locus_product_rows(
+                source,
+                reference_id,
+                original,
+                locus,
+                max_errors,
+                min_len,
+                max_len,
+                search_rc,
+                trim_primers,
+                max_n_fraction,
+                searcher,
+            )
+        )
+    return rows
+
+
+def _bounded_ordered_map(executor, function, iterable, max_pending: int):
+    """Map with bounded input consumption while preserving FASTA order."""
+    iterator = iter(enumerate(iterable))
+    pending = {}
+    buffered = {}
+    next_output = 0
+
+    def submit_next() -> bool:
+        try:
+            index, item = next(iterator)
+        except StopIteration:
+            return False
+        pending[executor.submit(function, item)] = index
+        return True
+
+    for _ in range(max_pending):
+        if not submit_next():
+            break
+    while pending:
+        completed, _remaining = wait(pending, return_when=FIRST_COMPLETED)
+        for future in completed:
+            buffered[pending.pop(future)] = future.result()
+            submit_next()
+        while next_output in buffered:
+            yield buffered.pop(next_output)
+            next_output += 1
+
+
 def _product_rows(
     input_path: str | Path,
     loci: list[Locus],
@@ -236,72 +438,46 @@ def _product_rows(
     search_rc: bool,
     trim_primers: bool,
     max_n_fraction: float,
+    threads: int,
 ) -> list[dict[str, str | int]]:
-    searcher = _new_searcher()
-    rows: list[dict[str, str | int]] = []
-    seen_products: set[tuple[str, str, str, int, int, int, int]] = set()
     source = str(input_path)
-    for reference_id, original in _read_fasta(input_path):
-        original = original.upper()
-        reverse = _reverse_complement(original)
-        for locus in loci:
-            # The legacy program reruns unresolved loci at thresholds 0..k.
-            # Strand fallback and equal-length/indel preference are evaluated
-            # independently at each threshold, so retain their union here and
-            # let the caller choose the first successful round.
-            for error_round in range(max_errors + 1):
-                forward_matches = _legacy_primer_matches(
-                    searcher, locus.forward_primer, original, error_round
-                )
-                orientations = [("+", original, forward_matches)]
-                if not forward_matches and search_rc:
-                    orientations = [
-                        (
-                            "-",
-                            reverse,
-                            _legacy_primer_matches(
-                                searcher, locus.forward_primer, reverse, error_round
-                            ),
-                        )
-                    ]
-                for strand, sequence, first_matches in orientations:
-                    second_matches = _legacy_primer_matches(
-                        searcher,
-                        _reverse_complement(locus.reverse_primer),
-                        sequence,
-                        error_round,
-                    )
-                    for first in first_matches:
-                        for second in second_matches:
-                            product_key = (
-                                reference_id,
-                                locus.locus_id,
-                                strand,
-                                first.start,
-                                first.end,
-                                second.start,
-                                second.end,
-                            )
-                            if product_key in seen_products:
-                                continue
-                            seen_products.add(product_key)
-                            row = _paired_product_row(
-                                source,
-                                reference_id,
-                                original,
-                                locus,
-                                strand,
-                                sequence,
-                                first,
-                                second,
-                                min_len,
-                                max_len,
-                                trim_primers,
-                                max_n_fraction,
-                                len(rows) + 1,
-                            )
-                            if row is not None:
-                                rows.append(row)
+    records = _read_fasta(input_path)
+    thread_count = resolve_threads(threads)
+
+    def tasks():
+        for reference_id, original in records:
+            yield (
+                source,
+                reference_id,
+                original,
+                loci,
+                max_errors,
+                min_len,
+                max_len,
+                search_rc,
+                trim_primers,
+                max_n_fraction,
+            )
+
+    rows = []
+    if thread_count == 1:
+        record_results = map(_record_product_rows, tasks())
+        for record_rows in record_results:
+            rows.extend(record_rows)
+    else:
+        with ThreadPoolExecutor(max_workers=thread_count) as executor:
+            for record_rows in _bounded_ordered_map(
+                executor,
+                _record_product_rows,
+                tasks(),
+                max_pending=max(2, thread_count * 2),
+            ):
+                rows.extend(record_rows)
+    for ordinal, row in enumerate(rows, start=1):
+        row["amplicon_id"] = (
+            f"{row['reference_id']}:{row['primer_name']}:{ordinal}"
+            + ("_rc" if row["strand"] == "-" else "")
+        )
     return rows
 
 
@@ -402,7 +578,7 @@ def run_in_silico_pcr_loci(
         raise ValueError("max_n_fraction must be between 0 and 1")
     if max_errors < 0:
         raise ValueError("max_errors must be non-negative")
-    resolve_threads(threads)  # validate the shared CLI option; Sassy owns SIMD work.
+    resolve_threads(threads)
     if circular:
         warnings.warn(
             "Circular-wrap products are not yet emitted by the MLVA_finder compatibility engine",
@@ -425,6 +601,7 @@ def run_in_silico_pcr_loci(
         search_rc,
         trim_primers,
         max_n_fraction,
+        threads,
     )
     with products_path.open("w") as handle:
         for row in rows:

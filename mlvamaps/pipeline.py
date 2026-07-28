@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from .bayesian_caller import call_loci
@@ -467,14 +468,24 @@ def run_call(
     recruited_by_read = {
         assignment.read_id: assignment for assignment in recruited_assignments
     }
-    assignments = [
-        (
-            assignment
-            if assignment.passes_assignment_qc
-            else recruited_by_read.get(assignment.read_id, assignment)
-        )
-        for assignment in primer_assignments
-    ]
+    assignments = []
+    for assignment in primer_assignments:
+        recruited = recruited_by_read.get(assignment.read_id)
+        if not assignment.passes_assignment_qc:
+            assignments.append(recruited or assignment)
+        elif (
+            recruited is not None
+            and recruited.assigned_locus == assignment.assigned_locus
+            and recruited.locus_measurement is not None
+        ):
+            assignments.append(
+                replace(
+                    assignment,
+                    locus_measurement=recruited.locus_measurement,
+                )
+            )
+        else:
+            assignments.append(assignment)
     primer_read_ids = {assignment.read_id for assignment in primer_assignments}
     assignments.extend(
         assignment
@@ -533,6 +544,7 @@ def run_call(
         features,
         recruited_rows,
         sample_id,
+        threads=thread_count,
     )
     fallback_asvs, fallback_predictions = recruitment_fallback_evidence(
         recruited_rows,

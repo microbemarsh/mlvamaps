@@ -438,6 +438,7 @@ def parse_recruitment_sam(
                 recruitment_cigar=alignment.cigarstring or "",
                 extracted_query_start=measurement.product_start,
                 extracted_query_end=measurement.product_end,
+                locus_measurement=measurement,
             )
         )
     return rows, assignments

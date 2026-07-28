@@ -60,6 +60,7 @@ class Assignment:
     recruitment_cigar: str = ""
     extracted_query_start: Optional[int] = None
     extracted_query_end: Optional[int] = None
+    locus_measurement: Optional["LocusMeasurement"] = None
 
 
 @dataclass(frozen=True)

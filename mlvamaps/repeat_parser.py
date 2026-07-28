@@ -33,7 +33,7 @@ def extract_repeat_features(
             return None
         locus = by_locus[assignment.assigned_locus]
         sequence = assignment.oriented_sequence
-        shared = measure_locus_product(
+        shared = assignment.locus_measurement or measure_locus_product(
             sequence,
             locus,
             assignment.oriented_quality,

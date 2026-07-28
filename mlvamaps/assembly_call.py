@@ -200,6 +200,7 @@ def pcr_rows_to_products(
     sample_id: str,
     enforce_locus_bounds: bool = True,
     reference_order: dict[str, int] | None = None,
+    measure_products: bool = True,
 ) -> list[dict]:
     """Convert native PCR output into MLVAMaps assembly-product records.
 
@@ -256,16 +257,24 @@ def pcr_rows_to_products(
         else:
             forward_start_0based = original_end - forward_match_length
             reverse_start_0based = original_start
-        measurement = measure_locus_product(
-            sequence,
-            locus,
-            source="assembly",
-            sequence_id=product_id,
-            calibrated_product_size_bp=product_size,
+        measurement = (
+            measure_locus_product(
+                sequence,
+                locus,
+                source="assembly",
+                sequence_id=product_id,
+                calibrated_product_size_bp=product_size,
+            )
+            if measure_products
+            else None
         )
-        raw_count = measurement.raw_repeat_count
+        raw_count = (
+            measurement.raw_repeat_count if measurement is not None else None
+        )
         if raw_count is None:
-            raw_count = estimate_repeat_count_from_product_length(locus, product_size)
+            raw_count = estimate_repeat_count_from_product_length(
+                locus, product_size
+            )
         products.append(
             {
                 "sample_id": sample_id,
@@ -291,10 +300,14 @@ def pcr_rows_to_products(
                 "reverse_match_length": reverse_match_length,
                 "contig_index": reference_order.get(contig, 0),
                 "sequence": sequence,
-                "measurement_status": measurement.status,
-                "measured_repeat_length_bp": measurement.repeat_length_bp,
-                "measured_raw_repeat_count": measurement.raw_repeat_count,
-                "measured_allele": measurement.called_allele,
+                "measurement_status": measurement.status if measurement else "",
+                "measured_repeat_length_bp": (
+                    measurement.repeat_length_bp if measurement else ""
+                ),
+                "measured_raw_repeat_count": (
+                    measurement.raw_repeat_count if measurement else ""
+                ),
+                "measured_allele": measurement.called_allele if measurement else "",
             }
         )
     return products
@@ -1010,6 +1023,10 @@ def run_assembly_call(
         sample_id,
         enforce_locus_bounds=False,
         reference_order=reference_order,
+        # The historical caller derives its allele exclusively from the
+        # calibrated product length. Avoid a second anchor search whose result
+        # cannot affect the legacy call.
+        measure_products=algorithm != "legacy",
     )
     progress.step(f"Found {len(products):,} primer product(s)")
     write_tsv(products, outdir_path / "assembly_amplicons.tsv", AMPLICON_FIELDS)

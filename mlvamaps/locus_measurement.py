@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Sequence
 
 from .calling import allele_grid, estimate_repeat_count_from_spanning_read, gaussian_allele_probabilities, legacy_round_repeat_count, repeat_unit_length
 from .models import AnchorMeasurement, Locus, LocusMeasurement
-from .sequence import mean_qscore, repeat_motif_statistics, revcomp
+from .sequence import _sassy_searcher, mean_qscore, repeat_motif_statistics, revcomp
 
 
 @dataclass(frozen=True)
@@ -31,42 +32,25 @@ def _compatible(pattern_base: str, observed_base: str) -> bool:
     return observed_base in _IUPAC.get(pattern_base, frozenset(pattern_base))
 
 
-def _edit_alignment(pattern: str, observed: str) -> tuple[int, int, int, int]:
-    """Return edit distance and substitution/insertion/deletion counts."""
-    rows, cols = len(pattern) + 1, len(observed) + 1
-    scores = [[0] * cols for _ in range(rows)]
-    trace = [[""] * cols for _ in range(rows)]
-    for i in range(1, rows):
-        scores[i][0], trace[i][0] = i, "D"
-    for j in range(1, cols):
-        scores[0][j], trace[0][j] = j, "I"
-    for i in range(1, rows):
-        for j in range(1, cols):
-            choices = (
-                (scores[i - 1][j - 1] + (not _compatible(pattern[i - 1], observed[j - 1])), "M"),
-                (scores[i][j - 1] + 1, "I"),
-                (scores[i - 1][j] + 1, "D"),
-            )
-            scores[i][j], trace[i][j] = min(choices, key=lambda item: item[0])
-    i, j = len(pattern), len(observed)
+_CIGAR_OPERATION_RE = re.compile(r"(\d+)([=XIDM])")
+
+
+def _sassy_edit_counts(cigar: str) -> tuple[int, int, int]:
+    """Translate a Sassy pattern-to-text CIGAR into read-relative edits."""
     mismatches = insertions = deletions = 0
-    while i or j:
-        operation = trace[i][j]
-        if operation == "M":
-            mismatches += not _compatible(pattern[i - 1], observed[j - 1])
-            i -= 1
-            j -= 1
+    for length_text, operation in _CIGAR_OPERATION_RE.findall(cigar):
+        length = int(length_text)
+        if operation == "X":
+            mismatches += length
+        elif operation == "D":
+            insertions += length
         elif operation == "I":
-            insertions += 1
-            j -= 1
-        else:
-            deletions += 1
-            i -= 1
-    return scores[-1][-1], mismatches, insertions, deletions
+            deletions += length
+    return mismatches, insertions, deletions
 
 
 def find_anchor(pattern: str, sequence: str, max_edits: int = 3, search_start: int = 0, search_end: int | None = None) -> AnchorMeasurement | None:
-    """Find a complete anchor with substitutions and small indels."""
+    """Find a complete anchor with Sassy's native SIMD edit-distance search."""
     pattern = pattern.upper()
     sequence = sequence.upper()
     search_end = len(sequence) if search_end is None else min(search_end, len(sequence))
@@ -78,21 +62,48 @@ def find_anchor(pattern: str, sequence: str, max_edits: int = 3, search_start: i
     # Short flanks cannot tolerate the same absolute error count as a 20--25 bp
     # primer without becoming non-specific.
     max_edits = min(max_edits, max(1, len(pattern) // 5))
-    minimum_length = max(1, len(pattern) - max_edits)
-    maximum_length = len(pattern) + max_edits
-    best = None
-    for start in range(max(0, search_start), search_end):
-        for length in range(minimum_length, maximum_length + 1):
-            end = start + length
-            if end > search_end:
-                break
-            distance, mismatches, insertions, deletions = _edit_alignment(pattern, sequence[start:end])
-            candidate = (distance, -((len(pattern) - distance) / max(len(pattern), length)), start, abs(length - len(pattern)), end, mismatches, insertions, deletions)
-            if best is None or candidate < best:
-                best = candidate
-    if best is None or best[0] > max_edits:
+    offset = max(0, search_start)
+    window = sequence[offset:search_end]
+    searcher = _sassy_searcher("iupac")
+    matches = searcher.search(
+        pattern.encode("ascii"),
+        window.encode("ascii"),
+        k=max_edits,
+    )
+    candidates = []
+    for match in matches:
+        if (
+            int(getattr(match, "pattern_start", 0)) != 0
+            or int(getattr(match, "pattern_end", len(pattern))) != len(pattern)
+        ):
+            continue
+        relative_start = int(match.text_start)
+        relative_end = int(match.text_end)
+        if relative_start < 0 or relative_end <= relative_start:
+            continue
+        observed = window[relative_start:relative_end]
+        # The previous measurement engine treated ambiguity in the configured
+        # anchor as IUPAC but did not treat N in a read/assembly as a wildcard.
+        if any(base not in "ACGT" for base in observed):
+            continue
+        distance = int(match.cost)
+        identity = (len(pattern) - distance) / max(len(pattern), len(observed))
+        start = offset + relative_start
+        end = offset + relative_end
+        candidates.append(
+            (
+                distance,
+                -identity,
+                start,
+                abs(len(observed) - len(pattern)),
+                end,
+                str(match.cigar),
+            )
+        )
+    if not candidates:
         return None
-    distance, _identity, start, _delta, end, mm, ins, dels = best
+    distance, _identity, start, _delta, end, cigar = min(candidates)
+    mm, ins, dels = _sassy_edit_counts(cigar)
     identity = max(0.0, 1.0 - distance / max(len(pattern), end - start, 1))
     return AnchorMeasurement(start, end, round(identity, 6), distance, mm, ins, dels, True)
 

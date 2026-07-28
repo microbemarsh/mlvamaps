@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import spoars
 
+from .concurrency import resolve_threads
 from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import write_fasta
 from .models import Locus, RepeatFeature
@@ -55,6 +57,13 @@ def _poa_consensus(features: list[RepeatFeature]) -> str:
     ):
         graph.add(feature.amplicon_sequence.upper())
     return str(graph.consensus()).upper()
+
+
+def _assemble_locus_item(
+    item: tuple[str, list[RepeatFeature]],
+) -> tuple[str, list[RepeatFeature], str]:
+    locus_id, features = item
+    return locus_id, features, _poa_consensus(features)
 
 
 def assemble_dominant_locus_products(
@@ -108,10 +117,16 @@ def assemble_dominant_locus_products(
         for locus in loci
     }
     contig_locus: dict[str, str] = {}
-    for index, (locus_id, locus_features) in enumerate(
-        sorted(by_locus.items())
+    locus_items = sorted(by_locus.items())
+    thread_count = min(resolve_threads(threads), max(len(locus_items), 1))
+    if thread_count > 1:
+        with ThreadPoolExecutor(max_workers=thread_count) as executor:
+            assembled_loci = list(executor.map(_assemble_locus_item, locus_items))
+    else:
+        assembled_loci = [_assemble_locus_item(item) for item in locus_items]
+    for index, (locus_id, locus_features, consensus) in enumerate(
+        assembled_loci
     ):
-        consensus = _poa_consensus(locus_features)
         if not consensus:
             continue
         contig_id = f"local_poa_{index:06d}"
@@ -164,6 +179,7 @@ def assemble_dominant_locus_products(
         reference_order={
             contig_id: index for index, contig_id in enumerate(contig_locus)
         },
+        measure_products=False,
     )
     # A locally assembled contig is evidence only for the cluster from which
     # it was built, even if a short primer cross-matches elsewhere.
