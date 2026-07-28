@@ -697,7 +697,6 @@ def novel_assembly_call_rows(
             ),
         )
         product = legacy_ranked[0]
-        candidates = allele_grid(locus, step=0.5)
         raw_by_product = {
             item["product_id"]: estimate_repeat_count_from_product_length(
                 locus, int(item["product_size_bp"])
@@ -709,6 +708,11 @@ def novel_assembly_call_rows(
             for item in locus_products
             if raw_by_product[item["product_id"]] is not None
         ]
+        candidates = allele_grid(
+            locus,
+            step=0.5,
+            observed_values=raw_by_product.values(),
+        )
         has_depth_support = any(
             int(read_support.get(item["product_id"], {}).get("mapped_reads", 0)) > 0
             for item in count_known_products

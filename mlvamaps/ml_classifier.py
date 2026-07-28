@@ -50,7 +50,6 @@ def predict_read_alleles(
             0.5 / max(repeat_unit_length(locus), 1),
             0.12 + (2.0 * error_probability),
         )
-        counts = allele_grid(locus, step=0.5)
         measurement_center = (
             legacy_round_repeat_count(
                 feature.raw_repeat_count_estimate,
@@ -58,6 +57,11 @@ def predict_read_alleles(
             )
             if assembly_equivalent
             else feature.raw_repeat_count_estimate
+        )
+        counts = allele_grid(
+            locus,
+            step=0.5,
+            observed_values=[measurement_center],
         )
         count_values = np.asarray(counts, dtype=np.float64)
         distances = float(measurement_center) - count_values

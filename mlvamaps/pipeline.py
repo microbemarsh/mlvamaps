@@ -385,6 +385,7 @@ def run_call(
     max_primer_mismatches: int = 3,
     min_depth: int = 1,
     min_posterior: float = 0.75,
+    repeat_range_tolerance: float = 1.0,
     min_cluster_size: int = 1,
     cluster_min_identity: float = 0.97,
     min_mixture_fraction: float = 0.01,
@@ -765,6 +766,7 @@ def run_call(
             "assembly" if assembly_equivalent_reads else "probabilistic"
         ),
         max_confidence_depth=max_confidence_depth,
+        repeat_range_tolerance=repeat_range_tolerance,
         primary_product_measurements=(
             primary_product_measurements if assembly_equivalent_reads else None
         ),

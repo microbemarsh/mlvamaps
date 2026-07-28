@@ -174,7 +174,7 @@ they are independent of locus-wide read mapping.
 | `PASS` | Sufficient depth and a decisive in-range posterior. |
 | `LOW_DEPTH` | Fewer dominant-cluster reads than `--min-depth`. |
 | `AMBIGUOUS` | Weak top posterior or insufficient separation from the second call. |
-| `OUT_OF_RANGE` | Best repeat count lies outside the configured locus range. |
+| `OUT_OF_RANGE` | Best repeat count exceeds the configured review range by more than `--repeat-range-tolerance`. The observed allele is retained rather than clipped. |
 | `MULTIPLE_VARIANTS` | At least one confirmed secondary remains in metagenome mode; isolate mode additionally requires dominant fraction below 0.8. Candidate and trace variants do not force this status. |
 | `LOCUS_DROPOUT` | No retained read evidence produced a prediction. |
 

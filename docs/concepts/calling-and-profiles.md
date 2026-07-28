@@ -50,8 +50,13 @@ is `AMBIGUOUS` when the top posterior is below `--min-posterior` or leads the
 second-best count by less than 0.2.
 
 An otherwise decisive call is `OUT_OF_RANGE` when it lies outside the panel's
-expected count range. It is `MULTIPLE_VARIANTS` when at least two variants pass
-the EM mixture threshold. Metagenome interpretation is the default and flags
+expected count range. Expected bounds are review thresholds rather than hard
+allele limits: an observed allele outside the interval remains callable and is
+reported without being pulled back to the nearest boundary. By default, calls
+up to one repeat beyond either boundary remain `PASS`; configure this margin
+with `--repeat-range-tolerance`. It is
+`MULTIPLE_VARIANTS` when at least two variants pass the EM mixture threshold.
+Metagenome interpretation is the default and flags
 every meaningful secondary variant; explicit isolate mode requires the
 dominant estimated fraction to be below 0.8. Raw low-count clusters that the
 mixture model classifies as trace evidence do not force this status.

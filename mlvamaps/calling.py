@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 
 from .models import Locus
 
@@ -12,9 +13,12 @@ def normalize_allele(value: float, precision: int = 6) -> int | float:
 
 
 def allele_grid(
-    locus: Locus, step: float = 0.5, padding: float = 1.0
+    locus: Locus,
+    step: float = 0.5,
+    padding: float = 1.0,
+    observed_values: Iterable[float | int | None] | None = None,
 ) -> list[int | float]:
-    """Create the explicit allele states considered by probabilistic callers."""
+    """Create allele states without censoring observations outside panel bounds."""
     if step <= 0 or step > 1:
         raise ValueError("allele grid step must be greater than 0 and at most 1")
     if padding < 0:
@@ -25,7 +29,34 @@ def allele_grid(
     values = [normalize_allele(lower + index * step) for index in range(count + 1)]
     if not values or float(values[-1]) < upper - 1e-9:
         values.append(normalize_allele(upper))
-    return values
+    # Expected bounds are biological review limits, not hard calling limits.
+    # Add a compact local grid around each observed out-of-range measurement
+    # without materializing every state between a distant observation and the
+    # configured interval.
+    states = set(values)
+    for observed in observed_values or ():
+        if observed is None:
+            continue
+        try:
+            center = float(observed)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(center) or center < 0:
+            continue
+        observed_lower = max(
+            0.0,
+            math.floor((center - padding) / step) * step,
+        )
+        observed_upper = math.ceil((center + padding) / step) * step
+        observed_count = int(
+            math.floor((observed_upper - observed_lower) / step + 1e-9)
+        )
+        states.update(
+            normalize_allele(observed_lower + index * step)
+            for index in range(observed_count + 1)
+        )
+        states.add(normalize_allele(observed_upper))
+    return sorted(states, key=float)
 
 
 def gaussian_allele_probabilities(

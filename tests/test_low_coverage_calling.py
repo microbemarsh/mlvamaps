@@ -2,6 +2,7 @@ import pytest
 
 from mlvamaps.bayesian_caller import call_loci
 from mlvamaps.calling import (
+    allele_grid,
     estimate_repeat_count_from_product_length,
     estimate_repeat_count_from_spanning_read,
 )
@@ -183,6 +184,51 @@ def test_single_spanning_read_is_retained_by_default():
 def test_minimum_depth_cannot_be_below_one():
     with pytest.raises(ValueError, match="at least 1"):
         call_loci([], [], [], min_depth=0)
+
+
+def test_expected_range_warns_without_censoring_observed_allele():
+    locus = Locus(
+        locus_id="VNTR",
+        repeat_unit_length_bp=4,
+        expected_min_repeats=3,
+        expected_max_repeats=7,
+    )
+    prediction = predict_read_alleles([_feature(12.0)], [locus], _membership())[0]
+
+    row = call_loci([prediction], [locus], [])[0]
+
+    assert 12 in allele_grid(locus, observed_values=[12.0])
+    assert prediction.predicted_repeat_count == 12
+    assert row["called_repeat_count"] == 12
+    assert row["call_status"] == "OUT_OF_RANGE"
+
+
+def test_repeat_range_tolerance_allows_near_boundary_call_to_pass():
+    locus = Locus(
+        locus_id="VNTR",
+        repeat_unit_length_bp=4,
+        expected_min_repeats=3,
+        expected_max_repeats=7,
+    )
+    prediction = predict_read_alleles([_feature(8.0)], [locus], _membership())[0]
+
+    tolerant = call_loci([prediction] * 5, [locus], [])[0]
+    strict = call_loci(
+        [prediction] * 5,
+        [locus],
+        [],
+        repeat_range_tolerance=0,
+    )[0]
+
+    assert tolerant["called_repeat_count"] == 8
+    assert tolerant["call_status"] == "PASS"
+    assert strict["called_repeat_count"] == 8
+    assert strict["call_status"] == "OUT_OF_RANGE"
+
+
+def test_repeat_range_tolerance_cannot_be_negative():
+    with pytest.raises(ValueError, match="cannot be negative"):
+        call_loci([], [], [], repeat_range_tolerance=-0.5)
 
 
 def test_metagenome_mode_flags_any_meaningful_secondary_allele():

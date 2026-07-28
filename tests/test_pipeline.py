@@ -1078,6 +1078,7 @@ def test_cli_has_conventional_output_and_thread_options():
     assert call_args.outdir == "run"
     assert call_args.threads == 4
     assert call_args.min_depth == 1
+    assert call_args.repeat_range_tolerance == 1.0
 
     default_call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz"])
     assert default_call_args.outdir == "results"

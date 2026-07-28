@@ -292,6 +292,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
+        "--repeat-range-tolerance",
+        type=_nonnegative_float,
+        default=1.0,
+        metavar="REPEATS",
+        help=(
+            "Allowed repeat-count distance beyond expected locus bounds before "
+            "setting OUT_OF_RANGE (default: %(default)s)"
+        ),
+    )
+    call.add_argument(
         "--max-confidence-depth",
         type=_positive_float,
         default=25.0,
@@ -547,6 +557,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_primer_mismatches=args.max_primer_mismatches,
                 min_depth=args.min_depth,
                 min_posterior=args.min_posterior,
+                repeat_range_tolerance=args.repeat_range_tolerance,
                 min_cluster_size=args.min_cluster_size,
                 cluster_min_identity=args.cluster_min_identity,
                 min_mixture_fraction=args.min_mixture_fraction,

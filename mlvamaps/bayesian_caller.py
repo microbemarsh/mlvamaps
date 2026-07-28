@@ -103,6 +103,7 @@ def call_loci(
     sample_mode: str = "metagenome",
     calling_convention: str = "probabilistic",
     max_confidence_depth: float = 25.0,
+    repeat_range_tolerance: float = 1.0,
     primary_product_measurements: dict[str, dict] | None = None,
     read_evidence_rows: list[dict] | None = None,
 ) -> list[dict]:
@@ -114,6 +115,8 @@ def call_loci(
         raise ValueError("max_confidence_depth must be positive")
     if min_depth < 1:
         raise ValueError("min_depth must be at least 1")
+    if repeat_range_tolerance < 0:
+        raise ValueError("repeat_range_tolerance cannot be negative")
     primary_product_measurements = primary_product_measurements or {}
     evidence_by_locus: dict[str, list[dict]] = defaultdict(list)
     for evidence in read_evidence_rows or []:
@@ -206,11 +209,24 @@ def call_loci(
         ]
         if not primary_preds:
             primary_preds = preds
-        candidates = allele_grid(locus, step=0.5)
         primary_measurement = primary_product_measurements.get(
             locus.locus_id, {}
         )
         measurement_override = primary_measurement.get("called_repeat_count")
+        observed_values = [
+            measurement_override,
+            *(
+                prediction.measurement_repeat_count_estimate
+                if prediction.measurement_repeat_count_estimate is not None
+                else prediction.raw_repeat_count_estimate
+                for prediction in primary_preds
+            ),
+        ]
+        candidates = allele_grid(
+            locus,
+            step=0.5,
+            observed_values=observed_values,
+        )
         ranked, primary_effective_depth, confidence_effective_depth = (
             _combined_allele_posterior(
                 primary_preds,
@@ -281,7 +297,10 @@ def call_loci(
             status = "LOW_DEPTH"
         elif best[1] < min_posterior or (best[1] - second[1]) < 0.2:
             status = "AMBIGUOUS"
-        elif best[0] < locus.expected_min_repeats or best[0] > locus.expected_max_repeats:
+        elif (
+            best[0] < locus.expected_min_repeats - repeat_range_tolerance
+            or best[0] > locus.expected_max_repeats + repeat_range_tolerance
+        ):
             status = "OUT_OF_RANGE"
         elif meaningful_count > 1 and (
             sample_mode == "metagenome" or dominant_freq < 0.8

@@ -227,7 +227,11 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
     second_allele = None
     second_probability = None
     if raw_count is not None:
-        candidates = allele_grid(locus_model, step=0.5)
+        candidates = allele_grid(
+            locus_model,
+            step=0.5,
+            observed_values=[raw_count, called],
+        )
         anchor_indels = sum(anchor.insertions + anchor.deletions for anchor in (forward, reverse, left, right) if anchor is not None)
         qscore = mean_qscore(quality[repeat_start:repeat_end] if quality is not None and repeat_start is not None and repeat_end is not None else quality)
         sigma = max(0.08, (0.35 + 0.12 * anchor_indels + max(0.0, 15.0 - qscore) / 30.0) / max(math.sqrt(unit_length or 1), 1.0))
