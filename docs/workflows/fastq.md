@@ -19,6 +19,21 @@ repeat interpretation, and fingerprint column order.
 
 ## 2. Filter reads
 
+For metagenomic input, an optional target-taxon screen can run before ordinary
+read QC:
+
+```bash
+deacon index build target_pangenome.fasta -o target_taxon.idx
+mlvamaps call primers.tsv metagenome.fastq.gz \
+  --taxon-screen-index target_taxon.idx
+```
+
+Deacon performs native SIMD minimizer matching and retains target-like reads.
+MLVAMaps records the original, retained, and rejected read totals in
+`qc_summary.tsv`; the retained FASTQ and full native summary are written under
+`taxon_screen/`. Screening is bypassed when no index is supplied, so pure
+culture FASTQ behavior is unchanged.
+
 Reads are parsed with their original qualities and filtered by:
 
 - `--min-read-length`
@@ -177,9 +192,11 @@ unrounded product measurement is retained in `allele_calls.tsv` and
 `calls.tsv`. Use `--read-calling-convention probabilistic` to retain direct
 per-read half-unit inference instead.
 
-Singleton clusters are retained by default (`--min-cluster-size 1`). A single
-spanning read can therefore contribute a provisional allele and remain in the
-fingerprint; `--min-depth` still marks insufficient support as `LOW_DEPTH`.
+Singleton clusters are retained by default (`--min-cluster-size 1` and
+`--min-depth 1`). A single spanning read can therefore contribute a
+provisional allele and remain in the fingerprint. The
+`SINGLE_MOLECULE_PROVISIONAL` evidence label preserves the distinction between
+detection and replicated support.
 
 This stage returns `read_level_allele_predictions.tsv`.
 

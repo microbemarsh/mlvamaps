@@ -29,6 +29,9 @@ allele on the last FASTA record with a valid product in that round. Product
 sizes also follow the original configured-primer-length formula when a primer
 match contains an indel. `--algorithm novel` selects the probabilistic caller
 described below. All accepted products remain available in the amplicon table.
+The regression suite includes a self-contained MLVA_finder oracle covering
+perfect and mismatched primers, strict half-unit rounding, multiple FASTA
+records, and parallel PCR execution.
 
 ## 2. Estimate repeat count
 

@@ -20,6 +20,17 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 
 ## FASTQ filtering
 
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--taxon-screen-index DEACON_IDX` | None | Retain only reads matching a target-taxon Deacon pangenome index before loading reads into MLVAMaps. |
+| `--taxon-screen-abs-threshold` | `2` | Required absolute number of shared minimizers. |
+| `--taxon-screen-rel-threshold` | `0.01` | Required relative proportion of shared minimizers. |
+| `--deacon-bin PATH` | `deacon` | Deacon executable. |
+
+The taxon screen is opt-in. When enabled, Deacon receives the same `--threads`
+budget as the rest of the pipeline and writes its retained FASTQ and JSON
+summary under `taxon_screen/`.
+
 | Option | Default |
 | --- | --- |
 | `--min-read-length` | `50` |
@@ -75,7 +86,7 @@ are combined into one trace segment in the report.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--min-depth` | `10` | Reads required to avoid `LOW_DEPTH`. |
+| `--min-depth` | `1` | Informative reads required to avoid `LOW_DEPTH`. One repeat-informative read is sufficient for a provisional call. |
 | `--min-posterior` | `0.75` | Required top repeat-count probability for FASTQ and assembly calls. |
 | `--max-confidence-depth` | `25` | Maximum effective dominant-cluster evidence used to sharpen FASTQ allele confidence. |
 | `--debug-disagreements` | Off | Write read-level mapping-versus-anchor-measurement evidence and a locus-level disagreement summary. |

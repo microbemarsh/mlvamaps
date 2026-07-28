@@ -281,7 +281,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Deacon executable used by --taxon-screen-index (default: %(default)s)",
     )
-    call.add_argument("--min-depth", type=int, default=10)
+    call.add_argument(
+        "--min-depth",
+        type=_positive_int,
+        default=1,
+        help=(
+            "Minimum informative reads required to avoid LOW_DEPTH "
+            "(default: %(default)s)"
+        ),
+    )
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
         "--max-confidence-depth",
@@ -582,6 +590,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote mapped VNTR variant groups to {result['mapped_variant_table']}")
             print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
             print(f"Wrote mapped read-group evidence to {result['mapped_read_memberships']}")
+            if args.profiles:
+                print(f"Wrote ranked profile matches to {result['profile_matches']}")
+                print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
             if not args.no_locus_mapping:
                 print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
                 print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
@@ -623,6 +634,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
             print(f"Wrote assembly amplicons to {result['amplicons']}")
+            if args.profiles:
+                print(f"Wrote ranked profile matches to {result['profile_matches']}")
+                print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
             print(f"Wrote report to {result['report']}")
             if args.database:
                 print(f"Wrote per-locus trees to {result['phylogeny']}")

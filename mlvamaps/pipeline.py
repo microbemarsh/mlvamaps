@@ -20,7 +20,12 @@ from .mapping import (
 from .mapped_variants import mapped_read_variant_groups
 from .mixture import MIXTURE_FIELDS, estimate_variant_mixtures
 from .ml_classifier import predict_read_alleles
-from .profile_matching import build_fingerprint, match_profiles
+from .profile_matching import (
+    PROFILE_MATCH_LOCUS_FIELDS,
+    build_fingerprint,
+    match_profiles,
+    profile_match_locus_rows,
+)
 from .phylogeny import run_phylogenetic_placement
 from .progress import ProgressReporter
 from .primers import read_loci_or_primers
@@ -185,15 +190,24 @@ ALLELE_FIELDS = [
 
 MATCH_FIELDS = [
     "sample_id",
+    "rank",
+    "profile_id",
     "best_profile_id",
+    "is_best_match",
     "strain_id",
+    "metadata",
     "distance",
     "matched_loci",
+    "matched_locus_ids",
     "mismatched_loci",
+    "uncompared_loci",
     "confidence",
     "compared_loci",
     "mean_negative_log_likelihood",
     "profile_probability_score",
+    "query_alleles",
+    "profile_alleles",
+    "locus_differences",
 ]
 
 
@@ -338,7 +352,7 @@ def run_call(
     max_read_length: int = 100000,
     min_qscore: float = 17.0,
     max_primer_mismatches: int = 3,
-    min_depth: int = 10,
+    min_depth: int = 1,
     min_posterior: float = 0.75,
     min_cluster_size: int = 1,
     cluster_min_identity: float = 0.97,
@@ -790,7 +804,20 @@ def run_call(
         profiles,
         allele_rows=allele_rows,
     )
-    write_tsv(match_rows, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
+    profile_matches_path = outdir_path / "profile_matches.tsv"
+    profile_match_loci_path = outdir_path / "profile_match_loci.tsv"
+    write_tsv(match_rows, profile_matches_path, MATCH_FIELDS)
+    write_tsv(
+        profile_match_locus_rows(
+            sample_id,
+            fingerprint_rows[0],
+            profiles,
+            match_rows,
+            allele_rows,
+        ),
+        profile_match_loci_path,
+        PROFILE_MATCH_LOCUS_FIELDS,
+    )
     phylogeny_paths: dict[str, Path] = {}
     phylogenetic_rows: list[dict] = []
     closest_reference_bands: list[dict] = []
@@ -865,6 +892,8 @@ def run_call(
         "local_assembly_concordance": local_assembly_path,
         "local_assembly_pcr": outdir_path / "local_assembly_pcr",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
+        "profile_matches": profile_matches_path,
+        "profile_match_loci": profile_match_loci_path,
         "report": outdir_path / "report.html",
         "disagreement_audit": disagreement_audit_path,
         "disagreement_summary": disagreement_summary_path,

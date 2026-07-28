@@ -1,3 +1,5 @@
+import pytest
+
 from mlvamaps.bayesian_caller import call_loci
 from mlvamaps.calling import (
     estimate_repeat_count_from_product_length,
@@ -160,6 +162,27 @@ def test_single_spanning_read_remains_in_signature_with_low_depth_status():
     assert row["called_repeat_count"] == 5
     assert row["call_status"] == "LOW_DEPTH"
     assert fingerprint[0]["VNTR"] == 5
+
+
+def test_single_spanning_read_is_retained_by_default():
+    locus = Locus(
+        locus_id="VNTR",
+        repeat_unit_length_bp=4,
+        expected_min_repeats=3,
+        expected_max_repeats=7,
+    )
+    prediction = predict_read_alleles([_feature(5.0)], [locus], _membership())[0]
+
+    row = call_loci([prediction], [locus], [])[0]
+
+    assert row["called_repeat_count"] == 5
+    assert row["evidence_status"] == "SINGLE_MOLECULE_PROVISIONAL"
+    assert row["call_status"] != "LOW_DEPTH"
+
+
+def test_minimum_depth_cannot_be_below_one():
+    with pytest.raises(ValueError, match="at least 1"):
+        call_loci([], [], [], min_depth=0)
 
 
 def test_metagenome_mode_flags_any_meaningful_secondary_allele():

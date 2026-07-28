@@ -5,7 +5,7 @@ import gzip
 import itertools
 import re
 import warnings
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -441,11 +441,24 @@ def _product_rows(
     threads: int,
 ) -> list[dict[str, str | int]]:
     source = str(input_path)
-    records = _read_fasta(input_path)
     thread_count = resolve_threads(threads)
+    record_iterator = iter(_read_fasta(input_path))
+    try:
+        first_record = next(record_iterator)
+    except StopIteration:
+        return []
+    sentinel = object()
+    second_record = next(record_iterator, sentinel)
 
-    def tasks():
-        for reference_id, original in records:
+    def record_tasks():
+        initial_records = (
+            (first_record,)
+            if second_record is sentinel
+            else (first_record, second_record)
+        )
+        for reference_id, original in itertools.chain(
+            initial_records, record_iterator
+        ):
             yield (
                 source,
                 reference_id,
@@ -460,16 +473,48 @@ def _product_rows(
             )
 
     rows = []
-    if thread_count == 1:
-        record_results = map(_record_product_rows, tasks())
+    if (
+        thread_count > 1
+        and second_record is sentinel
+        and len(loci) > 1
+    ):
+        reference_id, original = first_record
+
+        def locus_tasks():
+            for locus in loci:
+                yield (
+                    source,
+                    reference_id,
+                    original,
+                    [locus],
+                    max_errors,
+                    min_len,
+                    max_len,
+                    search_rc,
+                    trim_primers,
+                    max_n_fraction,
+                )
+
+        with ProcessPoolExecutor(
+            max_workers=min(thread_count, len(loci))
+        ) as executor:
+            for locus_rows in _bounded_ordered_map(
+                executor,
+                _record_product_rows,
+                locus_tasks(),
+                max_pending=max(2, thread_count * 2),
+            ):
+                rows.extend(locus_rows)
+    elif thread_count == 1:
+        record_results = map(_record_product_rows, record_tasks())
         for record_rows in record_results:
             rows.extend(record_rows)
     else:
-        with ThreadPoolExecutor(max_workers=thread_count) as executor:
+        with ProcessPoolExecutor(max_workers=thread_count) as executor:
             for record_rows in _bounded_ordered_map(
                 executor,
                 _record_product_rows,
-                tasks(),
+                record_tasks(),
                 max_pending=max(2, thread_count * 2),
             ):
                 rows.extend(record_rows)

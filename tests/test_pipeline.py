@@ -40,6 +40,7 @@ from mlvamaps.models import Locus, ReadPrediction, ReadRecord, RepeatFeature
 from mlvamaps.ml_classifier import predict_read_alleles
 from mlvamaps.pipeline import run_call
 from mlvamaps.primers import read_primer_pairs
+from mlvamaps.profile_matching import match_profiles
 from mlvamaps.simulation import simulate_reads
 from scripts.convert_uf_ba_vntrs import convert_profiles
 
@@ -77,6 +78,29 @@ def write_panel(tmp_path):
 def read_tsv(path):
     with path.open() as handle:
         return list(csv.DictReader(handle, delimiter="\t"))
+
+
+def test_profile_matching_retains_every_reference_in_machine_readable_output():
+    profiles = [
+        {
+            "profile_id": f"P{index:02d}",
+            "strain_id": "",
+            "metadata": "",
+            "VNTR_01": index,
+        }
+        for index in range(30)
+    ]
+
+    matches = match_profiles(
+        "sample",
+        {"sample_id": "sample", "VNTR_01": 0},
+        profiles,
+    )
+
+    assert len(matches) == 30
+    assert matches[0]["profile_id"] == "P00"
+    assert matches[0]["is_best_match"] == "yes"
+    assert matches[-1]["profile_id"] == "P29"
 
 
 def make_repeat_feature(read_id, sequence, repeat_count=4):
@@ -459,7 +483,17 @@ def test_simulate_and_call_pipeline(tmp_path):
     assert easy_calls["VNTR_01"]["num_confirmed_secondary_variants"] == "0"
     matches = read_tsv(tmp_path / "results" / "profile_matches.tsv")
     assert matches[0]["best_profile_id"] == "P1"
+    assert matches[0]["profile_id"] == "P1"
+    assert matches[0]["is_best_match"] == "yes"
     assert matches[0]["distance"] == "0.0"
+    assert matches[0]["rank"] == "1"
+    assert matches[0]["matched_locus_ids"] == "VNTR_01,VNTR_02"
+    assert matches[0]["query_alleles"] == "VNTR_01=5;VNTR_02=4"
+    assert matches[0]["profile_alleles"] == "VNTR_01=5;VNTR_02=4"
+    match_loci = read_tsv(result["profile_match_loci"])
+    assert {row["match_status"] for row in match_loci if row["rank"] == "1"} == {
+        "MATCH"
+    }
     report = result["report"].read_text()
     assert "Generated MLVA agarose gel comparison" in report
     assert "P1" in report
@@ -1013,6 +1047,7 @@ def test_cli_has_conventional_output_and_thread_options():
     call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz", "-o", "run", "-t", "4"])
     assert call_args.outdir == "run"
     assert call_args.threads == 4
+    assert call_args.min_depth == 1
 
     default_call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz"])
     assert default_call_args.outdir == "results"

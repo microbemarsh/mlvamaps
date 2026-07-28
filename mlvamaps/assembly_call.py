@@ -31,7 +31,12 @@ from .pipeline import (
     allele_distribution_rows,
 )
 from .progress import ProgressReporter
-from .profile_matching import build_fingerprint, match_profiles
+from .profile_matching import (
+    PROFILE_MATCH_LOCUS_FIELDS,
+    build_fingerprint,
+    match_profiles,
+    profile_match_locus_rows,
+)
 from .phylogeny import run_phylogenetic_placement
 from .primers import LEGACY_NAME_RE, read_loci_or_primers
 from .report import write_assembly_report
@@ -1094,7 +1099,20 @@ def run_assembly_call(
         ["sample_id", "locus_id", "repeat_count", "posterior_probability"],
     )
     match_rows = match_profiles(sample_id, fingerprint_rows[0], profiles)
-    write_tsv(match_rows, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
+    profile_matches_path = outdir_path / "profile_matches.tsv"
+    profile_match_loci_path = outdir_path / "profile_match_loci.tsv"
+    write_tsv(match_rows, profile_matches_path, MATCH_FIELDS)
+    write_tsv(
+        profile_match_locus_rows(
+            sample_id,
+            fingerprint_rows[0],
+            profiles,
+            match_rows,
+            allele_rows,
+        ),
+        profile_match_loci_path,
+        PROFILE_MATCH_LOCUS_FIELDS,
+    )
     # Re-run product selection without depth so the comparison files retain
     # historical mismatch-round behavior even when modern calls use support.
     legacy_call_rows = legacy_assembly_call_rows(
@@ -1169,7 +1187,8 @@ def run_assembly_call(
         "in_silico_pcr": outdir_path / "in_silico_pcr",
         "read_support": support_path,
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
-        "profile_matches": outdir_path / "profile_matches.tsv",
+        "profile_matches": profile_matches_path,
+        "profile_match_loci": profile_match_loci_path,
         "report": outdir_path / "report.html",
         **legacy_paths,
         **phylogeny_paths,

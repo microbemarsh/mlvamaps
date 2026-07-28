@@ -44,8 +44,10 @@ variant counts, and a compact secondary-allele representation.
 ## Status logic
 
 A locus is `LOW_DEPTH` when its dominant cluster has fewer reads than
-`--min-depth`. With enough primary reads, it is `AMBIGUOUS` when the top posterior is below
-`--min-posterior` or leads the second-best count by less than 0.2.
+`--min-depth`, which defaults to one. A single informative molecule is
+retained as `SINGLE_MOLECULE_PROVISIONAL`. With enough primary reads, a locus
+is `AMBIGUOUS` when the top posterior is below `--min-posterior` or leads the
+second-best count by less than 0.2.
 
 An otherwise decisive call is `OUT_OF_RANGE` when it lies outside the panel's
 expected count range. It is `MULTIPLE_VARIANTS` when at least two variants pass
@@ -79,9 +81,48 @@ matches; nonzero values contribute to distance and appear in
 FASTQ probabilities only break otherwise equal matches. Unobserved loci are
 not imputed.
 
-`profile_matches.tsv` contains the closest 20 rows sorted by total distance
-and then matching-locus count. Confidence is the fraction of compared loci that
-match exactly.
+Let \(q_\ell\) be the query repeat count at locus \(\ell\), \(p_\ell\) the
+profile repeat count, and
+\(C(q,p)=\{\ell:q_\ell\text{ and }p_\ell\text{ are both observed}\}\).
+The reported MLVA distance is the Manhattan (L1) distance on repeat counts:
+
+```latex
+D_{\mathrm{MLVA}}(q,p)
+  = \sum_{\ell \in C(q,p)} \left|q_\ell-p_\ell\right|.
+```
+
+A one-repeat disagreement therefore contributes 1, while a half-repeat
+disagreement contributes 0.5. Missing loci do not contribute a zero or a
+penalty; they are listed in `uncompared_loci`. For that reason, distance should
+be interpreted together with `compared_loci` and `recovered_loci`.
+
+The exact-match confidence reported alongside distance is:
+
+```latex
+\operatorname{confidence}(q,p)
+  = \frac{\sum_{\ell \in C(q,p)}
+      \mathbf{1}\!\left[q_\ell=p_\ell\right]}
+    {|C(q,p)|}.
+```
+
+When per-locus FASTQ probability distributions are available, MLVAMaps also
+calculates the mean negative log likelihood of the profile:
+
+```latex
+\overline{\operatorname{NLL}}(q,p)
+  = -\frac{1}{|C(q,p)|}
+      \sum_{\ell \in C(q,p)}
+      \log\!\left(\max(P_\ell(p_\ell),10^{-9})\right).
+```
+
+Profiles are sorted by distance ascending, exact matching loci descending,
+mean NLL ascending, and profile ID. The NLL is a tie-breaker; it does not
+change the repeat-count distance.
+
+`profile_matches.tsv` contains every ranked reference profile, aggregate
+comparison fields, and compact per-locus allele vectors.
+`profile_match_loci.tsv` expands those comparisons to one machine-readable row
+per profile and locus.
 
 Profiles from different panels or repeat-number conventions should not be
 compared without a documented conversion.

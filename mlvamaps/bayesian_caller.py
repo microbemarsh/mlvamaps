@@ -97,7 +97,7 @@ def call_loci(
     predictions: list[ReadPrediction],
     loci: list[Locus],
     asv_rows: list[dict],
-    min_depth: int = 10,
+    min_depth: int = 1,
     min_posterior: float = 0.75,
     mixture_rows: list[dict] | None = None,
     sample_mode: str = "metagenome",
@@ -112,6 +112,8 @@ def call_loci(
         raise ValueError("calling_convention must be 'assembly' or 'probabilistic'")
     if max_confidence_depth <= 0:
         raise ValueError("max_confidence_depth must be positive")
+    if min_depth < 1:
+        raise ValueError("min_depth must be at least 1")
     primary_product_measurements = primary_product_measurements or {}
     evidence_by_locus: dict[str, list[dict]] = defaultdict(list)
     for evidence in read_evidence_rows or []:

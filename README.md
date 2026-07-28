@@ -48,6 +48,7 @@ The environment includes
 [Python regex](https://github.com/mrabarnett/mrab-regex),
 [Parasail's Python bindings](https://github.com/jeffdaily/parasail-python),
 [SPOARS' Python bindings](https://github.com/fg-labs/spoars),
+[Deacon](https://github.com/bede/deacon),
 [minimap2](https://github.com/lh3/minimap2),
 [MAFFT](https://mafft.cbrc.jp/alignment/software/),
 [RAxML-NG](https://github.com/amkozlov/raxml-ng),
@@ -87,6 +88,22 @@ Compare the fingerprint with known profiles:
 mlvamaps call primers.tsv sample.fastq.gz --profiles profiles.tsv
 ```
 
+Pre-screen a metagenomic FASTQ against a target-taxon Deacon pangenome index:
+
+```bash
+deacon index build target_pangenome.fasta -o target_taxon.idx
+mlvamaps call primers.tsv metagenome.fastq.gz \
+  --taxon-screen-index target_taxon.idx \
+  --profiles profiles.tsv
+```
+
+The screen runs before MLVAMaps loads or quality-filters reads. Deacon receives
+the shared `--threads` CPU budget and writes the retained reads plus its JSON
+summary under `results/taxon_screen/`. The default Deacon retention thresholds
+are two shared minimizers and a 1% relative match. For closely related
+background taxa, build the index from a broad target pangenome and consider
+subtracting non-target minimizers with `deacon index diff`.
+
 Place each callable query locus in fixed reference trees:
 
 ```bash
@@ -120,6 +137,8 @@ Results are written to `results/` by default. Start with:
 - `calls.tsv` for compact per-locus calls.
 - `locus_repeat_counts.tsv` for explicit individual-locus repeat counts.
 - `mlva_fingerprint.tsv` for the conventional wide fingerprint.
+- `profile_matches.tsv` for ranked, metadata-rich profile comparisons.
+- `profile_match_loci.tsv` for one machine-readable row per profile and locus.
 - `report.html` for the visual summary.
 
 With `--database`, `phylogeny/phylogenetic_matches.tsv` ranks complete

@@ -7,7 +7,8 @@
 | `calls.tsv` | Compact per-locus result shared by FASTQ and assembly modes. |
 | `mlva_fingerprint.tsv` | Wide sample-by-locus repeat-count fingerprint. |
 | `mlva_fingerprint_probabilistic.tsv` | Long-form calls with confidence values. |
-| `profile_matches.tsv` | Closest profile rows; header-only without a profile database. |
+| `profile_matches.tsv` | Every reference profile, ranked, with strain/metadata, aggregate distance, matched/mismatched/uncompared loci, query/profile allele vectors, per-locus differences, and probability score. Header-only without `--profiles`. |
+| `profile_match_loci.tsv` | Long-form profile comparison with one row per profile and locus, including query/profile alleles, absolute difference, match status, and profile-allele probability. |
 | `report.html` | Self-contained interpretation report with sample findings, locus-quality flags, FASTQ SPOARS/assembly-PCR concordance, gel evidence, profile matches, closest reference genomes, and technical tables. |
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
@@ -110,6 +111,8 @@ data are supplied.
 | File | Meaning |
 | --- | --- |
 | `qc_summary.tsv` | Input and read-filtering totals. |
+| `taxon_screen/taxon_screened_reads.fastq.gz` | Optional reads retained by the target-taxon Deacon pangenome screen before downstream analysis. |
+| `taxon_screen/taxon_screen_summary.json` | Native Deacon input/output read and base totals, thresholds, and throughput. |
 | `filtered_reads.fastq.gz` | Reads retained after length and quality filtering. |
 | `filtered_reads.fasta` | Lossless sequence projection used by native primer pairing. |
 | `locus_recruited_reads.tsv` | Competitive per-read locus mapping, candidate allele, alignment quality, and presence/genotype evidence class. |
