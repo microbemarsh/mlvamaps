@@ -16,6 +16,7 @@ from .calling import (
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import read_fasta, read_profiles, write_fasta, write_tsv
+from .locus_measurement import measure_locus_product
 from .models import Locus
 from .mapping import (
     build_minimap2_map_command,
@@ -255,7 +256,16 @@ def pcr_rows_to_products(
         else:
             forward_start_0based = original_end - forward_match_length
             reverse_start_0based = original_start
-        raw_count = estimate_repeat_count_from_product_length(locus, product_size)
+        measurement = measure_locus_product(
+            sequence,
+            locus,
+            source="assembly",
+            sequence_id=product_id,
+            calibrated_product_size_bp=product_size,
+        )
+        raw_count = measurement.raw_repeat_count
+        if raw_count is None:
+            raw_count = estimate_repeat_count_from_product_length(locus, product_size)
         products.append(
             {
                 "sample_id": sample_id,
@@ -281,6 +291,10 @@ def pcr_rows_to_products(
                 "reverse_match_length": reverse_match_length,
                 "contig_index": reference_order.get(contig, 0),
                 "sequence": sequence,
+                "measurement_status": measurement.status,
+                "measured_repeat_length_bp": measurement.repeat_length_bp,
+                "measured_raw_repeat_count": measurement.raw_repeat_count,
+                "measured_allele": measurement.called_allele,
             }
         )
     return products

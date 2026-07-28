@@ -35,6 +35,28 @@ from .recruitment import (
 )
 
 
+DISAGREEMENT_AUDIT_FIELDS = [
+    "sample", "locus", "read_id", "read_length", "strand",
+    "candidate_reference", "candidate_reference_allele", "mapq",
+    "alignment_score", "cigar", "reference_start", "reference_end",
+    "query_alignment_start", "query_alignment_end", "softclip_left",
+    "softclip_right", "extracted_query_start", "extracted_query_end",
+    "extracted_product_length", "forward_anchor_start", "forward_anchor_end",
+    "forward_anchor_identity", "reverse_anchor_start", "reverse_anchor_end",
+    "reverse_anchor_identity", "repeat_start", "repeat_end", "repeat_length_bp",
+    "raw_repeat_count", "measured_read_allele", "top_allele_probability",
+    "second_allele", "second_allele_probability", "measurement_status",
+    "failure_reason", "assembly_product_length", "assembly_repeat_length_bp",
+    "assembly_raw_repeat_count", "assembly_allele", "fastq_matches_assembly",
+]
+
+DISAGREEMENT_SUMMARY_FIELDS = [
+    "sample", "locus", "mapped_reads", "informative_reads",
+    "full_product_reads", "mapping_measurement_disagreements",
+    "combined_read_allele", "consensus_allele", "calls_agree",
+]
+
+
 ASSIGNMENT_FIELDS = [
     "read_id",
     "sample_id",
@@ -148,6 +170,15 @@ ALLELE_FIELDS = [
     "primary_product_size_bp",
     "primary_repeat_count_raw",
     "primary_measurement_source",
+    "evidence_status",
+    "credible_alleles",
+    "full_product_reads",
+    "repeat_informative_reads",
+    "forward_strand_reads",
+    "reverse_strand_reads",
+    "median_mapping_quality",
+    "median_anchor_identity",
+    "consensus_read_agreement",
 ]
 
 MATCH_FIELDS = [
@@ -338,6 +369,7 @@ def run_call(
     recruitment_min_identity: float = 0.9,
     recruitment_min_aligned_bp: int = 100,
     recruitment_min_locus_margin: int = 10,
+    debug_disagreements: bool = False,
 ) -> dict[str, Path]:
     if fastq_strategy not in {"recruit", "primer"}:
         raise ValueError("fastq_strategy must be 'recruit' or 'primer'")
@@ -630,6 +662,7 @@ def run_call(
         primary_product_measurements=(
             primary_product_measurements if assembly_equivalent_reads else None
         ),
+        read_evidence_rows=recruited_rows,
     )
     for row in allele_rows:
         row["sample_id"] = sample_id
@@ -641,6 +674,43 @@ def run_call(
         ALLELE_DISTRIBUTION_FIELDS,
     )
     simple_call_rows = simple_call_rows_from_alleles(sample_id, allele_rows)
+    disagreement_audit_path = outdir_path / "read_locus_disagreement_audit.tsv"
+    disagreement_summary_path = outdir_path / "locus_disagreement_summary.tsv"
+    if debug_disagreements:
+        detailed_rows = []
+        for row in recruited_rows:
+            detailed_rows.append({
+                **{field: row.get(field, "") for field in DISAGREEMENT_AUDIT_FIELDS},
+                "sample": sample_id,
+                "locus": row.get("locus_id", ""),
+                "read_id": row.get("read_id", ""),
+                "read_length": row.get("read_length", ""),
+                "strand": row.get("strand", ""),
+                "candidate_reference": row.get("reference_name", ""),
+                "candidate_reference_allele": row.get("candidate_allele", ""),
+                "mapq": row.get("mapping_quality", ""),
+                "alignment_score": row.get("recruitment_alignment_score", ""),
+            })
+        write_tsv(detailed_rows, disagreement_audit_path, DISAGREEMENT_AUDIT_FIELDS)
+        call_by_locus = {str(row["locus_id"]): row for row in allele_rows}
+        summary_rows = []
+        for locus in loci:
+            locus_rows = [row for row in recruited_rows if str(row.get("locus_id", "")) == locus.locus_id]
+            call = call_by_locus.get(locus.locus_id, {})
+            combined = call.get("called_repeat_count", "")
+            consensus = primary_product_measurements.get(locus.locus_id, {}).get("called_repeat_count", "")
+            summary_rows.append({
+                "sample": sample_id,
+                "locus": locus.locus_id,
+                "mapped_reads": len(locus_rows),
+                "informative_reads": sum(row.get("genotype_informative") == "yes" for row in locus_rows),
+                "full_product_reads": sum(row.get("full_product") == "yes" for row in locus_rows),
+                "mapping_measurement_disagreements": sum(str(row.get("candidate_allele", "")) != str(row.get("measured_read_allele", "")) for row in locus_rows if row.get("measured_read_allele", "") != ""),
+                "combined_read_allele": combined,
+                "consensus_allele": consensus,
+                "calls_agree": "" if combined == "" or consensus == "" else ("yes" if str(combined) == str(consensus) else "no"),
+            })
+        write_tsv(summary_rows, disagreement_summary_path, DISAGREEMENT_SUMMARY_FIELDS)
     write_tsv(simple_call_rows, outdir_path / "calls.tsv", SIMPLE_CALL_FIELDS)
     write_tsv(simple_call_rows, outdir_path / "locus_repeat_counts.tsv", REPEAT_COUNT_FIELDS)
 
@@ -734,6 +804,8 @@ def run_call(
         "local_assembly_pcr": outdir_path / "local_assembly_pcr",
         "fingerprint": outdir_path / "mlva_fingerprint.tsv",
         "report": outdir_path / "report.html",
+        "disagreement_audit": disagreement_audit_path,
+        "disagreement_summary": disagreement_summary_path,
         **recruitment_paths,
         **phylogeny_paths,
     }

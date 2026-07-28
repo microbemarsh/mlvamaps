@@ -12,8 +12,14 @@ from .calling import (
     estimate_repeat_count_from_product_length,
     legacy_round_repeat_count,
     normalize_allele,
+    repeat_unit_length,
 )
 from .io import read_fasta, write_fasta, write_fastq, write_tsv
+from .locus_measurement import (
+    measure_locus_product,
+    original_read_in_locus_orientation,
+    reference_interval_to_query_interval,
+)
 from .mapping import (
     build_minimap2_map_command,
     check_minimap2,
@@ -37,6 +43,12 @@ RECRUITMENT_READ_FIELDS = [
     "full_product",
     "genotype_informative",
     "evidence_class",
+    "recruitment_reference_allele",
+    "measured_read_allele",
+    "recruitment_mapq",
+    "recruitment_alignment_score",
+    "measurement_status",
+    "failure_reason",
 ]
 
 RECRUITMENT_SUMMARY_FIELDS = [
@@ -244,6 +256,7 @@ def parse_recruitment_sam(
         raise ValueError("minimum locus score margin must be non-negative")
     reference_by_name = {row["reference_name"]: row for row in references}
     locus_by_id = {locus.locus_id: locus for locus in loci}
+    read_by_id = {read.read_id: read for read in reads}
     rows = []
     assignments = []
     candidates_by_read: dict[str, list[dict]] = defaultdict(list)
@@ -326,90 +339,77 @@ def parse_recruitment_sam(
         reference_length = len(reference["sequence"])
         reference_start = int(alignment.reference_start)
         reference_end = int(alignment.reference_end or 0)
-        repeat_start = reference.get("repeat_start")
-        repeat_end = reference.get("repeat_end")
-        aligned_reference_positions = {
-            int(reference_position)
-            for query_position, reference_position in alignment.get_aligned_pairs(
-                matches_only=False
-            )
-            if query_position is not None and reference_position is not None
-        }
-
-        def anchor_supported(window_start: int, window_end: int) -> bool:
-            window_length = max(0, window_end - window_start)
-            required = min(4, window_length)
-            return (
-                sum(
-                    position in aligned_reference_positions
-                    for position in range(window_start, window_end)
-                )
-                >= required
-            )
-
-        left_anchor = (
-            repeat_start not in ("", None)
-            and anchor_supported(max(0, int(repeat_start) - 8), int(repeat_start))
-        )
-        right_anchor = (
-            repeat_end not in ("", None)
-            and anchor_supported(
-                int(repeat_end),
-                min(reference_length, int(repeat_end) + 8),
-            )
-        )
-        genotype_informative = (
-            repeat_start not in ("", None)
-            and repeat_end not in ("", None)
-            and reference_start <= int(repeat_start)
-            and reference_end >= int(repeat_end)
-            and left_anchor
-            and right_anchor
-        )
-        full_product = (
-            reference_start <= full_product_edge_tolerance
-            and reference_end >= reference_length - full_product_edge_tolerance
-        )
-        evidence_class = (
-            "FULL_PRODUCT"
-            if full_product
-            else "REPEAT_INFORMATIVE"
-            if genotype_informative
-            else "PRESENCE_ONLY"
-        )
-        rows.append(
-            {
-                "read_id": query_name,
-                "locus_id": reference["locus_id"],
-                "reference_name": reference["reference_name"],
-                "reference_source": reference["reference_source"],
-                "candidate_allele": reference["candidate_allele"],
-                "mapping_quality": alignment.mapping_quality,
-                "alignment_identity": round(identity, 6),
-                "locus_score_margin": locus_margin,
-                "aligned_query_bp": aligned_bp,
-                "reference_coverage": round(
-                    (reference_end - reference_start)
-                    / max(reference_length, 1),
-                    6,
-                ),
-                "full_product": "yes" if full_product else "no",
-                "genotype_informative": "yes" if genotype_informative else "no",
-                "evidence_class": evidence_class,
-            }
-        )
-        if not full_product:
+        read = read_by_id.get(query_name)
+        if read is None:
             continue
+        oriented_sequence, oriented_quality = original_read_in_locus_orientation(
+            alignment, read.sequence, read.quality
+        )
         locus = locus_by_id[reference["locus_id"]]
-        product_sequence = (alignment.query_alignment_sequence or "").upper()
-        if not product_sequence:
-            continue
-        quality_values = (
-            list(alignment.query_alignment_qualities)
-            if alignment.query_alignment_qualities is not None
-            else None
+        measurement = measure_locus_product(
+            oriented_sequence,
+            locus,
+            oriented_quality,
+            source="fastq_read",
+            sequence_id=query_name,
         )
-        quality = _quality_string(quality_values, len(product_sequence))
+        projected = reference_interval_to_query_interval(
+            alignment, max(reference_start, 0), min(reference_end, reference_length)
+        )
+        full_product = measurement.status == "FULL_PRODUCT"
+        genotype_informative = measurement.status in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}
+        evidence_class = measurement.status
+        row = {
+            "read_id": query_name,
+            "locus_id": reference["locus_id"],
+            "reference_name": reference["reference_name"],
+            "reference_source": reference["reference_source"],
+            "candidate_allele": reference["candidate_allele"],
+            "mapping_quality": alignment.mapping_quality,
+            "alignment_identity": round(identity, 6),
+            "locus_score_margin": locus_margin,
+            "aligned_query_bp": aligned_bp,
+            "reference_coverage": round((reference_end - reference_start) / max(reference_length, 1), 6),
+            "full_product": "yes" if full_product else "no",
+            "genotype_informative": "yes" if genotype_informative else "no",
+            "evidence_class": evidence_class,
+            "recruitment_reference_allele": reference["candidate_allele"],
+            "measured_read_allele": "" if measurement.called_allele is None else measurement.called_allele,
+            "recruitment_mapq": alignment.mapping_quality,
+            "recruitment_alignment_score": selected["score"],
+            "measurement_status": measurement.status,
+            "failure_reason": measurement.failure_reason or "",
+            "read_length": len(read.sequence),
+            "strand": "reverse" if alignment.is_reverse else "forward",
+            "cigar": alignment.cigarstring or "",
+            "reference_start": reference_start,
+            "reference_end": reference_end,
+            "query_alignment_start": alignment.query_alignment_start,
+            "query_alignment_end": alignment.query_alignment_end,
+            "softclip_left": alignment.query_alignment_start,
+            "softclip_right": len(oriented_sequence) - int(alignment.query_alignment_end or 0),
+            "extracted_query_start": measurement.product_start if measurement.product_start is not None else (projected[0] if projected else ""),
+            "extracted_query_end": measurement.product_end if measurement.product_end is not None else (projected[1] if projected else ""),
+            "extracted_product_length": len(measurement.product_sequence),
+            "forward_anchor_start": measurement.forward_anchor_start if measurement.forward_anchor_start is not None else "",
+            "forward_anchor_end": measurement.forward_anchor_end if measurement.forward_anchor_end is not None else "",
+            "forward_anchor_identity": measurement.forward_anchor_identity if measurement.forward_anchor_identity is not None else "",
+            "reverse_anchor_start": measurement.reverse_anchor_start if measurement.reverse_anchor_start is not None else "",
+            "reverse_anchor_end": measurement.reverse_anchor_end if measurement.reverse_anchor_end is not None else "",
+            "reverse_anchor_identity": measurement.reverse_anchor_identity if measurement.reverse_anchor_identity is not None else "",
+            "repeat_start": measurement.repeat_start if measurement.repeat_start is not None else "",
+            "repeat_end": measurement.repeat_end if measurement.repeat_end is not None else "",
+            "repeat_length_bp": measurement.repeat_length_bp if measurement.repeat_length_bp is not None else "",
+            "raw_repeat_count": measurement.raw_repeat_count if measurement.raw_repeat_count is not None else "",
+            "top_allele_probability": measurement.confidence if measurement.confidence is not None else "",
+            "second_allele": measurement.second_allele if measurement.second_allele is not None else "",
+            "second_allele_probability": measurement.second_allele_probability if measurement.second_allele_probability is not None else "",
+        }
+        rows.append(row)
+        if not full_product or not measurement.product_sequence:
+            continue
+        forward = measurement.forward_anchor
+        reverse = measurement.reverse_anchor
         assignments.append(
             Assignment(
                 read_id=query_name,
@@ -417,20 +417,27 @@ def parse_recruitment_sam(
                 assigned_locus=locus.locus_id,
                 assignment_score=round(identity, 4),
                 orientation="reverse" if alignment.is_reverse else "forward",
-                primer_forward_detected=True,
-                primer_reverse_detected=True,
+                primer_forward_detected=forward is not None,
+                primer_reverse_detected=reverse is not None,
                 passes_assignment_qc=True,
-                oriented_sequence=product_sequence,
-                oriented_quality=quality,
-                forward_start=0,
-                forward_end=min(len(locus.forward_primer), len(product_sequence)),
-                reverse_start=max(
-                    0, len(product_sequence) - len(locus.reverse_primer)
-                ),
-                reverse_end=len(product_sequence),
-                forward_mismatches=0,
-                reverse_mismatches=0,
-                product_size_bp=len(product_sequence),
+                oriented_sequence=oriented_sequence,
+                oriented_quality=oriented_quality if isinstance(oriented_quality, str) else None,
+                forward_start=measurement.forward_anchor_start,
+                forward_end=measurement.forward_anchor_end,
+                reverse_start=measurement.reverse_anchor_start,
+                reverse_end=measurement.reverse_anchor_end,
+                forward_mismatches=forward.mismatches if forward else None,
+                reverse_mismatches=reverse.mismatches if reverse else None,
+                product_size_bp=len(measurement.product_sequence),
+                measurement_status=measurement.status,
+                failure_reason=measurement.failure_reason,
+                recruitment_reference=reference["reference_name"],
+                recruitment_reference_allele=reference["candidate_allele"],
+                recruitment_mapq=alignment.mapping_quality,
+                recruitment_alignment_score=selected["score"],
+                recruitment_cigar=alignment.cigarstring or "",
+                extracted_query_start=measurement.product_start,
+                extracted_query_end=measurement.product_end,
             )
         )
     return rows, assignments
@@ -496,7 +503,14 @@ def recruitment_fallback_evidence(
         if locus_id in feature_loci or row.get("genotype_informative") != "yes":
             continue
         try:
-            allele = normalize_allele(float(row.get("candidate_allele")))
+            # Recruitment identifies the locus; only query-sequence
+            # measurement is allowed to contribute an allele.
+            measured = row.get("measured_read_allele")
+            # Rows produced by current recruitment always carry this field.
+            # Fall back only for callers constructing legacy API rows.
+            if measured in ("", None) and "measured_read_allele" not in row:
+                measured = row.get("candidate_allele")
+            allele = normalize_allele(float(measured))
         except (TypeError, ValueError):
             continue
         grouped[(locus_id, allele)].append(row)
@@ -564,7 +578,7 @@ def recruitment_fallback_evidence(
                     substitutions_vs_representative=0,
                     evidence_weight=round(max(0.0, min(identity, 1.0)), 6),
                     raw_repeat_count_estimate=float(allele),
-                    measurement_sigma=0.2,
+                    measurement_sigma=max(0.08, 0.35 / math.sqrt(max(repeat_length, 1))),
                     measurement_repeat_count_estimate=float(allele),
                 )
             )
@@ -593,10 +607,13 @@ def local_product_records(
             len(sequence) for sequence in product_sequences
         )
         modal_length = min(lengths, key=lambda length: (-lengths[length], length))
+        # Sequencing indels of one base must not exclude an otherwise
+        # compatible product from consensus. Locus-aware clustering below uses
+        # the configured repeat unit; this compatibility helper has no panel.
         sequences = [
             sequence
             for sequence in product_sequences
-            if len(sequence) == modal_length
+            if abs(len(sequence) - modal_length) <= 1
         ]
         products.append((f"{locus_id}_local_primary", majority_consensus(sequences)))
     return products
@@ -647,34 +664,44 @@ def dominant_local_product_measurements(
             lengths,
             key=lambda length: (-lengths[length], length),
         )
-        modal_features = [
+        tolerance_bp = max(1, repeat_unit_length(locus_by_id[locus_id]) // 2)
+        compatible_features = [
             feature
             for feature in locus_features
-            if feature.product_size_bp == modal_length
-            and len(feature.amplicon_sequence) == modal_length
+            if abs(feature.product_size_bp - modal_length) <= tolerance_bp
+            and abs(len(feature.amplicon_sequence) - modal_length) <= tolerance_bp
         ]
-        if not modal_features:
+        if not compatible_features:
             continue
-        raw_count, called_count = assembly_equivalent_product_allele(
-            locus_by_id[locus_id],
-            modal_length,
-            round_tolerance,
+        consensus = majority_consensus(
+            [feature.amplicon_sequence for feature in compatible_features]
         )
+        # Do not extend a consensus with a terminal insertion supported by a
+        # lone read in an otherwise modal-length cluster.
+        consensus = consensus[:modal_length]
+        consensus_measurement = measure_locus_product(
+            consensus,
+            locus_by_id[locus_id],
+            source="fastq_consensus",
+            sequence_id=f"{locus_id}_local_primary",
+            round_tolerance=round_tolerance,
+        )
+        raw_count = consensus_measurement.raw_repeat_count
+        called_count = consensus_measurement.called_allele
+        if raw_count is None or called_count is None:
+            raw_count, called_count = assembly_equivalent_product_allele(
+                locus_by_id[locus_id], len(consensus), round_tolerance
+            )
         if raw_count is None or called_count is None:
             continue
-        records.append(
-            (
-                f"{locus_id}_local_primary",
-                majority_consensus(
-                    [feature.amplicon_sequence for feature in modal_features]
-                ),
-            )
-        )
+        records.append((f"{locus_id}_local_primary", consensus))
         measurements[locus_id] = {
-            "product_size_bp": modal_length,
+            "product_size_bp": len(consensus),
             "raw_repeat_count": raw_count,
             "called_repeat_count": called_count,
-            "supporting_reads": len(modal_features),
+            "supporting_reads": len(compatible_features),
+            "cluster_tolerance_bp": tolerance_bp,
+            "consensus_status": consensus_measurement.status,
             "source": "dominant_cluster_local_product",
         }
     return records, measurements

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from statistics import median
 
 from .calling import allele_grid, gaussian_allele_probabilities
 from .models import Locus, ReadPrediction
@@ -103,6 +104,7 @@ def call_loci(
     calling_convention: str = "probabilistic",
     max_confidence_depth: float = 25.0,
     primary_product_measurements: dict[str, dict] | None = None,
+    read_evidence_rows: list[dict] | None = None,
 ) -> list[dict]:
     if sample_mode not in {"isolate", "metagenome"}:
         raise ValueError("sample_mode must be 'isolate' or 'metagenome'")
@@ -111,6 +113,9 @@ def call_loci(
     if max_confidence_depth <= 0:
         raise ValueError("max_confidence_depth must be positive")
     primary_product_measurements = primary_product_measurements or {}
+    evidence_by_locus: dict[str, list[dict]] = defaultdict(list)
+    for evidence in read_evidence_rows or []:
+        evidence_by_locus[str(evidence.get("locus_id", ""))].append(evidence)
     pred_by_locus: dict[str, list[ReadPrediction]] = defaultdict(list)
     for prediction in predictions:
         pred_by_locus[prediction.locus_id].append(prediction)
@@ -153,6 +158,15 @@ def call_loci(
                     "primary_product_size_bp": "",
                     "primary_repeat_count_raw": "",
                     "primary_measurement_source": "",
+                    "evidence_status": "NO_INFORMATIVE_READS",
+                    "credible_alleles": "",
+                    "full_product_reads": 0,
+                    "repeat_informative_reads": 0,
+                    "forward_strand_reads": 0,
+                    "reverse_strand_reads": 0,
+                    "median_mapping_quality": "",
+                    "median_anchor_identity": "",
+                    "consensus_read_agreement": "",
                 }
             )
             continue
@@ -233,6 +247,34 @@ def call_loci(
                 f"{evidence_class}"
             )
         status = "PASS"
+        locus_evidence = evidence_by_locus.get(locus.locus_id, [])
+        full_product_reads = sum(row.get("measurement_status", row.get("evidence_class")) == "FULL_PRODUCT" for row in locus_evidence)
+        repeat_informative_reads = sum(row.get("measurement_status", row.get("evidence_class")) == "REPEAT_INFORMATIVE" for row in locus_evidence)
+        strand_counts = {
+            "forward": sum(row.get("strand") == "forward" for row in locus_evidence),
+            "reverse": sum(row.get("strand") == "reverse" for row in locus_evidence),
+        }
+        mapping_qualities = [float(row["mapping_quality"]) for row in locus_evidence if row.get("mapping_quality") not in ("", None)]
+        anchor_identities = [
+            (float(row["forward_anchor_identity"]) + float(row["reverse_anchor_identity"])) / 2
+            for row in locus_evidence
+            if row.get("forward_anchor_identity") not in ("", None)
+            and row.get("reverse_anchor_identity") not in ("", None)
+        ]
+        credible, credible_mass = [], 0.0
+        for allele, probability in ranked:
+            credible.append(allele)
+            credible_mass += probability
+            if credible_mass >= 0.95:
+                break
+        if len(primary_preds) == 1:
+            evidence_status = "SINGLE_MOLECULE_PROVISIONAL"
+        elif len(primary_preds) < min_depth:
+            evidence_status = "PROVISIONAL_LOW_DEPTH"
+        elif best[1] < min_posterior or (best[1] - second[1]) < 0.2:
+            evidence_status = "AMBIGUOUS"
+        else:
+            evidence_status = "CONFIDENT"
         if len(primary_preds) < min_depth:
             status = "LOW_DEPTH"
         elif best[1] < min_posterior or (best[1] - second[1]) < 0.2:
@@ -284,6 +326,19 @@ def call_loci(
                         if calling_convention == "assembly"
                         else "read_distribution"
                     ),
+                ),
+                "evidence_status": evidence_status,
+                "credible_alleles": ",".join(str(allele) for allele in credible),
+                "full_product_reads": full_product_reads,
+                "repeat_informative_reads": repeat_informative_reads,
+                "forward_strand_reads": strand_counts["forward"],
+                "reverse_strand_reads": strand_counts["reverse"],
+                "median_mapping_quality": round(median(mapping_qualities), 3) if mapping_qualities else "",
+                "median_anchor_identity": round(median(anchor_identities), 6) if anchor_identities else "",
+                "consensus_read_agreement": (
+                    "" if primary_measurement.get("called_repeat_count", "") == ""
+                    else "yes" if str(primary_measurement.get("called_repeat_count")) == str(best[0])
+                    else "no"
                 ),
             }
         )

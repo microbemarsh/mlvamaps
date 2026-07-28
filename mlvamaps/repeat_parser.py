@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from .calling import estimate_repeat_count_from_spanning_read, repeat_unit_length
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .models import Assignment, Locus, RepeatFeature
+from .locus_measurement import measure_locus_product
 from .progress import ProgressReporter
 from .sequence import find_best, mean_qscore, repeat_motif_statistics
 
@@ -32,6 +33,17 @@ def extract_repeat_features(
             return None
         locus = by_locus[assignment.assigned_locus]
         sequence = assignment.oriented_sequence
+        shared = measure_locus_product(
+            sequence,
+            locus,
+            assignment.oriented_quality,
+            source="fastq_read",
+            sequence_id=assignment.read_id,
+            calibrated_product_size_bp=assignment.product_size_bp,
+        )
+        # Preserve the established flank scoring pass below; the shared
+        # measurement supplies the final calibrated allele and independently
+        # verifies the same anchors.
         repeat_start = assignment.forward_end or 0
         repeat_end = assignment.reverse_start if assignment.reverse_start is not None else len(sequence)
         left_flank_score = 0.0
@@ -74,6 +86,9 @@ def extract_repeat_features(
                 and right_flank_resolved
             ),
         )
+        if shared.raw_repeat_count is not None:
+            raw_count = shared.raw_repeat_count
+            measurement_method = shared.measurement_method
         if raw_count is None:
             raw_count = len(repeat_sequence) / motif_len
             measurement_method = "repeat_region_length"

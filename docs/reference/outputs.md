@@ -130,6 +130,8 @@ data are supplied.
 | `locus_mapping_summary.tsv` | Mapping rate, depth, coverage, and SNP totals by locus. |
 | `locus_snps.tsv` | Filtered representative-relative SNP evidence. |
 | `read_level_allele_predictions.tsv` | Per-read repeat-count probabilities, unrounded measurement, uncertainty, and evidence weights. |
+| `read_locus_disagreement_audit.tsv` | Optional (`--debug-disagreements`) CIGAR, extraction, anchor, repeat, mapping-reference allele, and measured-read allele evidence per recruited read. |
+| `locus_disagreement_summary.tsv` | Optional (`--debug-disagreements`) mapping/measurement disagreement counts and combined-read versus consensus call agreement. |
 | `allele_calls.tsv` | Assembly-equivalent dominant-product calls plus capped read confidence, product size, raw repeat measurement, measurement source, total and primary depth, candidate/confirmed-secondary counts, and dominant mixture fraction. |
 | `in_silico_pcr/` | Native primer-pairing evidence from filtered reads. |
 | `minimap2/` | Dominant-locus mapping FASTQ and reference diagnostics. |
@@ -172,6 +174,11 @@ they are independent of locus-wide read mapping.
 | `OUT_OF_RANGE` | Best repeat count lies outside the configured locus range. |
 | `MULTIPLE_VARIANTS` | At least one confirmed secondary remains in metagenome mode; isolate mode additionally requires dominant fraction below 0.8. Candidate and trace variants do not force this status. |
 | `LOCUS_DROPOUT` | No retained read evidence produced a prediction. |
+
+`allele_calls.tsv` also contains a more explicit `evidence_status`: `CONFIDENT`,
+`PROVISIONAL_LOW_DEPTH`, `SINGLE_MOLECULE_PROVISIONAL`, `AMBIGUOUS`, or
+`NO_INFORMATIVE_READS`. The legacy `call_status` values remain unchanged for
+backwards compatibility.
 
 ## Assembly call statuses
 

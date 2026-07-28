@@ -8,7 +8,7 @@ import numpy as np
 import sassy
 
 
-_RC = str.maketrans("ACGTNacgtn", "TGCANtgcan")
+_RC = str.maketrans("ACGTRYSWKMBDHVNacgtryswkmbdhvn", "TGCAYRSWMKVHDBNtgcayrswmkvhdbn")
 _SASSY_LOCAL = local()
 
 

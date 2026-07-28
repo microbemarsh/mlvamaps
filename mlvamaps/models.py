@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass(frozen=True)
@@ -51,6 +51,63 @@ class Assignment:
     forward_mismatches: Optional[int]
     reverse_mismatches: Optional[int]
     product_size_bp: Optional[int] = None
+    measurement_status: str = ""
+    failure_reason: Optional[str] = None
+    recruitment_reference: str = ""
+    recruitment_reference_allele: int | float | str | None = None
+    recruitment_mapq: Optional[int] = None
+    recruitment_alignment_score: Optional[int] = None
+    recruitment_cigar: str = ""
+    extracted_query_start: Optional[int] = None
+    extracted_query_end: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class AnchorMeasurement:
+    start: int
+    end: int
+    identity: float
+    edit_distance: int
+    mismatches: int
+    insertions: int
+    deletions: int
+    complete: bool = True
+
+
+@dataclass(frozen=True)
+class LocusMeasurement:
+    locus_id: str
+    sequence_id: Optional[str]
+    source: str
+    product_start: Optional[int]
+    product_end: Optional[int]
+    forward_anchor_start: Optional[int]
+    forward_anchor_end: Optional[int]
+    reverse_anchor_start: Optional[int]
+    reverse_anchor_end: Optional[int]
+    repeat_start: Optional[int]
+    repeat_end: Optional[int]
+    repeat_length_bp: Optional[int]
+    repeat_unit_length: Optional[int]
+    raw_repeat_count: Optional[float]
+    called_allele: int | float | str | None
+    forward_anchor_identity: Optional[float]
+    reverse_anchor_identity: Optional[float]
+    repeat_motif_identity: Optional[float]
+    allele_likelihoods: Optional[dict[int | float, float]]
+    confidence: Optional[float]
+    status: str
+    failure_reason: Optional[str]
+    forward_anchor: Optional[AnchorMeasurement] = None
+    reverse_anchor: Optional[AnchorMeasurement] = None
+    credible_alleles: tuple[int | float, ...] = ()
+    second_allele: int | float | str | None = None
+    second_allele_probability: Optional[float] = None
+    product_sequence: str = ""
+    product_quality: Optional[str] = None
+    repeat_sequence: str = ""
+    measurement_method: str = ""
+    metadata: Optional[dict[str, Any]] = None
 
 
 @dataclass(frozen=True)

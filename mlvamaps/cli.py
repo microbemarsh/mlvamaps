@@ -400,6 +400,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional minimap2 -x preset for assembly read-depth mapping",
     )
     call.add_argument("--quiet", action="store_true", help="Suppress live progress updates")
+    call.add_argument(
+        "--debug-disagreements",
+        action="store_true",
+        help="Write read- and locus-level mapping versus measurement audit TSVs",
+    )
 
     simulate = subparsers.add_parser("simulate", help="Simulate amplicon reads for a VNTR panel")
     simulate.add_argument("--loci", required=True)
@@ -539,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
                 recruitment_min_identity=args.recruitment_min_identity,
                 recruitment_min_aligned_bp=args.recruitment_min_aligned_bp,
                 recruitment_min_locus_margin=args.recruitment_min_locus_margin,
+                debug_disagreements=args.debug_disagreements,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")

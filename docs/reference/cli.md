@@ -78,6 +78,7 @@ are combined into one trace segment in the report.
 | `--min-depth` | `10` | Reads required to avoid `LOW_DEPTH`. |
 | `--min-posterior` | `0.75` | Required top repeat-count probability for FASTQ and assembly calls. |
 | `--max-confidence-depth` | `25` | Maximum effective dominant-cluster evidence used to sharpen FASTQ allele confidence. |
+| `--debug-disagreements` | Off | Write read-level mapping-versus-anchor-measurement evidence and a locus-level disagreement summary. |
 
 `--read-calling-convention assembly` makes primer-spanning reads use the same
 product-size calibration and rounding as assembly products. The alternative
