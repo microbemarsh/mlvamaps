@@ -255,6 +255,32 @@ def build_parser() -> argparse.ArgumentParser:
             "(default: %(default)s)"
         ),
     )
+    call.add_argument(
+        "--taxon-screen-index",
+        metavar="DEACON_IDX",
+        help=(
+            "Before MLVA analysis, retain only reads matching this target-taxon "
+            "Deacon pangenome index"
+        ),
+    )
+    call.add_argument(
+        "--taxon-screen-abs-threshold",
+        type=_positive_int,
+        default=2,
+        help="Minimum shared Deacon minimizers for target retention (default: %(default)s)",
+    )
+    call.add_argument(
+        "--taxon-screen-rel-threshold",
+        type=_fraction,
+        default=0.01,
+        help="Minimum relative Deacon minimizer match fraction (default: %(default)s)",
+    )
+    call.add_argument(
+        "--deacon-bin",
+        default="deacon",
+        metavar="PATH",
+        help="Deacon executable used by --taxon-screen-index (default: %(default)s)",
+    )
     call.add_argument("--min-depth", type=int, default=10)
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
@@ -545,6 +571,10 @@ def main(argv: list[str] | None = None) -> int:
                 recruitment_min_aligned_bp=args.recruitment_min_aligned_bp,
                 recruitment_min_locus_margin=args.recruitment_min_locus_margin,
                 debug_disagreements=args.debug_disagreements,
+                taxon_screen_index=args.taxon_screen_index,
+                taxon_screen_abs_threshold=args.taxon_screen_abs_threshold,
+                taxon_screen_rel_threshold=args.taxon_screen_rel_threshold,
+                deacon_bin=args.deacon_bin,
             )
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote detailed allele evidence to {result['allele_calls']}")

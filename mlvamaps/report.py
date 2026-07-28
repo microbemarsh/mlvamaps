@@ -719,6 +719,7 @@ def write_report(
     closest_reference_bands: list[dict] | None = None,
     presence_rows: list[dict] | None = None,
     local_assembly_rows: list[dict] | None = None,
+    taxon_screen_summary: dict | None = None,
 ) -> None:
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -733,6 +734,7 @@ def write_report(
     closest_reference_bands = closest_reference_bands or []
     presence_rows = presence_rows or []
     local_assembly_rows = local_assembly_rows or []
+    taxon_screen_summary = taxon_screen_summary or {}
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
@@ -757,6 +759,20 @@ def write_report(
             "warn" if flagged else "good",
         ),
     ]
+    if taxon_screen_summary:
+        screen_input = int(taxon_screen_summary.get("seqs_in", 0))
+        screen_retained = int(taxon_screen_summary.get("seqs_out", 0))
+        retained_fraction = (
+            screen_retained / screen_input if screen_input else 0.0
+        )
+        summary_cards.append(
+            _metric_card(
+                "Target-taxon screen",
+                f"{screen_retained:,}/{screen_input:,}",
+                f"{retained_fraction:.2%} of reads retained by Deacon",
+                "good" if screen_retained else "warn",
+            )
+        )
     if presence_rows:
         detected = sum(
             row.get("presence_status") != "NO_EVIDENCE"
@@ -815,6 +831,15 @@ def write_report(
             )
         )
     findings = []
+    if taxon_screen_summary and not int(taxon_screen_summary.get("seqs_out", 0)):
+        findings.append(
+            _finding(
+                "warn",
+                "Target taxon not detected",
+                "The Deacon screen retained no reads; downstream locus calls "
+                "represent target-taxon dropout rather than an unfiltered sample.",
+            )
+        )
     for status, title in (
         ("LOCUS_DROPOUT", "Missing loci"),
         ("LOW_DEPTH", "Low-depth loci"),

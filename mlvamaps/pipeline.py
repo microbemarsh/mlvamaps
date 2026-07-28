@@ -34,6 +34,7 @@ from .recruitment import (
     recruitment_summary_rows,
     run_read_recruitment,
 )
+from .taxon_screen import run_taxon_screen
 
 
 DISAGREEMENT_AUDIT_FIELDS = [
@@ -371,6 +372,10 @@ def run_call(
     recruitment_min_aligned_bp: int = 100,
     recruitment_min_locus_margin: int = 10,
     debug_disagreements: bool = False,
+    taxon_screen_index: str | None = None,
+    taxon_screen_abs_threshold: int = 2,
+    taxon_screen_rel_threshold: float = 0.01,
+    deacon_bin: str = "deacon",
 ) -> dict[str, Path]:
     if fastq_strategy not in {"recruit", "primer"}:
         raise ValueError("fastq_strategy must be 'recruit' or 'primer'")
@@ -385,15 +390,59 @@ def run_call(
     profiles = read_profiles(profiles_path)
     progress.step(f"Loaded {len(loci):,} loci" + (f" and {len(profiles):,} reference profiles" if profiles else ""))
 
-    progress.step(f"Reading reads from {reads_path}")
+    screen_summary: dict = {}
+    screen_paths: dict[str, Path] = {}
+    downstream_reads_path = Path(reads_path)
+    if taxon_screen_index:
+        (
+            downstream_reads_path,
+            taxon_screen_summary_path,
+            screen_summary,
+        ) = run_taxon_screen(
+            reads_path,
+            taxon_screen_index,
+            outdir_path / "taxon_screen",
+            thread_count,
+            absolute_threshold=taxon_screen_abs_threshold,
+            relative_threshold=taxon_screen_rel_threshold,
+            executable=deacon_bin,
+            progress=progress,
+        )
+        screen_paths = {
+            "taxon_screened_reads": downstream_reads_path,
+            "taxon_screen_summary": taxon_screen_summary_path,
+        }
+
+    progress.step(f"Reading reads from {downstream_reads_path}")
     reads = []
-    for idx, read in enumerate(read_fastq(reads_path), start=1):
+    for idx, read in enumerate(read_fastq(downstream_reads_path), start=1):
         reads.append(read)
         progress.count("Read FASTQ records", idx)
     progress.count("Read FASTQ records", len(reads), force=True)
 
     progress.step("Filtering reads")
     filtered_reads, qc_rows = filter_reads(reads, min_read_length, max_read_length, min_qscore, progress)
+    if screen_summary:
+        qc_rows.extend(
+            [
+                {
+                    "metric": "taxon_screen_input_reads",
+                    "value": int(screen_summary.get("seqs_in", 0)),
+                },
+                {
+                    "metric": "taxon_screen_retained_reads",
+                    "value": int(screen_summary.get("seqs_out", 0)),
+                },
+                {
+                    "metric": "taxon_screen_rejected_reads",
+                    "value": int(screen_summary.get("seqs_removed", 0)),
+                },
+                {
+                    "metric": "taxon_screen_retained_bp",
+                    "value": int(screen_summary.get("bp_out", 0)),
+                },
+            ]
+        )
     progress.step(f"Kept {len(filtered_reads):,}/{len(reads):,} reads after QC")
     write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
@@ -789,6 +838,7 @@ def run_call(
         closest_reference_bands,
         presence_rows,
         local_assembly_rows,
+        screen_summary,
     )
     progress.step(f"Done. Main calls: {outdir_path / 'calls.tsv'}")
 
@@ -818,6 +868,7 @@ def run_call(
         "report": outdir_path / "report.html",
         "disagreement_audit": disagreement_audit_path,
         "disagreement_summary": disagreement_summary_path,
+        **screen_paths,
         **recruitment_paths,
         **phylogeny_paths,
     }
