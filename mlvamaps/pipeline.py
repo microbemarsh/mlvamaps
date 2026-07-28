@@ -25,6 +25,7 @@ from .profile_matching import (
     build_fingerprint,
     match_profiles,
     profile_match_locus_rows,
+    sequence_reference_match_rows,
 )
 from .phylogeny import run_phylogenetic_placement
 from .progress import ProgressReporter
@@ -190,9 +191,11 @@ ALLELE_FIELDS = [
 
 MATCH_FIELDS = [
     "sample_id",
+    "match_type",
     "rank",
     "profile_id",
     "best_profile_id",
+    "reference_id",
     "is_best_match",
     "strain_id",
     "metadata",
@@ -208,6 +211,34 @@ MATCH_FIELDS = [
     "query_alleles",
     "profile_alleles",
     "locus_differences",
+    "total_likelihood_weighted_snp_distance",
+    "total_placement_normalized_snp_distance",
+    "total_normalized_direct_snp_distance",
+    "total_normalized_snp_distance",
+    "total_repeat_count_distance",
+    "total_normalized_repeat_distance",
+    "snp_weight",
+    "repeat_weight",
+    "combined_marker_distance",
+    "repeat_compared_loci",
+    "exact_snp_loci",
+    "exact_marker_loci",
+    "match_status",
+    "ranking_warning",
+    "whole_genome_exact_match",
+    "whole_genome_snps",
+    "whole_genome_indel_bases",
+    "whole_genome_align_fraction_ref",
+    "whole_genome_align_fraction_query",
+    "tie_break_method",
+    "tie_break_status",
+    "distance_gap_to_next",
+    "relative_distance_gap_to_next",
+    "collection_date",
+    "latitude",
+    "longitude",
+    "location",
+    "source",
 ]
 
 
@@ -806,7 +837,6 @@ def run_call(
     )
     profile_matches_path = outdir_path / "profile_matches.tsv"
     profile_match_loci_path = outdir_path / "profile_match_loci.tsv"
-    write_tsv(match_rows, profile_matches_path, MATCH_FIELDS)
     write_tsv(
         profile_match_locus_rows(
             sample_id,
@@ -849,6 +879,10 @@ def run_call(
         closest_reference_bands = read_profiles(
             phylogeny_paths["closest_reference_bands"]
         )
+    output_match_rows = match_rows + sequence_reference_match_rows(
+        phylogenetic_rows
+    )
+    write_tsv(output_match_rows, profile_matches_path, MATCH_FIELDS)
     progress.step("Writing HTML report")
     write_report(
         outdir_path,

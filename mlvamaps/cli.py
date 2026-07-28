@@ -590,7 +590,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote mapped VNTR variant groups to {result['mapped_variant_table']}")
             print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
             print(f"Wrote mapped read-group evidence to {result['mapped_read_memberships']}")
-            if args.profiles:
+            if args.profiles or args.database:
                 print(f"Wrote ranked profile matches to {result['profile_matches']}")
                 print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
             if not args.no_locus_mapping:
@@ -634,7 +634,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote easy MLVA calls to {result['calls']}")
             print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
             print(f"Wrote assembly amplicons to {result['amplicons']}")
-            if args.profiles:
+            if args.profiles or args.database:
                 print(f"Wrote ranked profile matches to {result['profile_matches']}")
                 print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
             print(f"Wrote report to {result['report']}")

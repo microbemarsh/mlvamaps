@@ -119,8 +119,11 @@ Profiles are sorted by distance ascending, exact matching loci descending,
 mean NLL ascending, and profile ID. The NLL is a tie-breaker; it does not
 change the repeat-count distance.
 
-`profile_matches.tsv` contains every ranked reference profile, aggregate
-comparison fields, and compact per-locus allele vectors.
+`profile_matches.tsv` contains every ranked reference match. The `match_type`
+column distinguishes direct `mlva_profile` comparisons from
+`sequence_reference` matches produced by `--database`; the latter retain their
+combined SNP/repeat marker fields from the HTML report. Direct profile rows
+include aggregate comparison fields and compact per-locus allele vectors.
 `profile_match_loci.tsv` expands those comparisons to one machine-readable row
 per profile and locus.
 

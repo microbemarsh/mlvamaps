@@ -7,7 +7,7 @@
 | `calls.tsv` | Compact per-locus result shared by FASTQ and assembly modes. |
 | `mlva_fingerprint.tsv` | Wide sample-by-locus repeat-count fingerprint. |
 | `mlva_fingerprint_probabilistic.tsv` | Long-form calls with confidence values. |
-| `profile_matches.tsv` | Every reference profile, ranked, with strain/metadata, aggregate distance, matched/mismatched/uncompared loci, query/profile allele vectors, per-locus differences, and probability score. Header-only without `--profiles`. |
+| `profile_matches.tsv` | Complete machine-readable match table corresponding to the HTML results. Rows are labeled `mlva_profile` for direct repeat-profile comparisons and `sequence_reference` for combined marker references. Includes every ranked match, metadata, distances, comparison counts, and source-specific SNP/repeat fields. Header-only only when neither `--profiles` nor `--database` supplies reference matches. |
 | `profile_match_loci.tsv` | Long-form profile comparison with one row per profile and locus, including query/profile alleles, absolute difference, match status, and profile-allele probability. |
 | `report.html` | Self-contained interpretation report with sample findings, locus-quality flags, FASTQ SPOARS/assembly-PCR concordance, gel evidence, profile matches, closest reference genomes, and technical tables. |
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |

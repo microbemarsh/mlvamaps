@@ -36,6 +36,7 @@ from .profile_matching import (
     build_fingerprint,
     match_profiles,
     profile_match_locus_rows,
+    sequence_reference_match_rows,
 )
 from .phylogeny import run_phylogenetic_placement
 from .primers import LEGACY_NAME_RE, read_loci_or_primers
@@ -1101,7 +1102,6 @@ def run_assembly_call(
     match_rows = match_profiles(sample_id, fingerprint_rows[0], profiles)
     profile_matches_path = outdir_path / "profile_matches.tsv"
     profile_match_loci_path = outdir_path / "profile_match_loci.tsv"
-    write_tsv(match_rows, profile_matches_path, MATCH_FIELDS)
     write_tsv(
         profile_match_locus_rows(
             sample_id,
@@ -1164,6 +1164,10 @@ def run_assembly_call(
         closest_reference_bands = read_profiles(
             phylogeny_paths["closest_reference_bands"]
         )
+    output_match_rows = match_rows + sequence_reference_match_rows(
+        phylogenetic_rows
+    )
+    write_tsv(output_match_rows, profile_matches_path, MATCH_FIELDS)
     progress.step("Writing HTML report")
     write_assembly_report(
         outdir_path,

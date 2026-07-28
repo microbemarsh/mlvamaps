@@ -40,7 +40,10 @@ from mlvamaps.models import Locus, ReadPrediction, ReadRecord, RepeatFeature
 from mlvamaps.ml_classifier import predict_read_alleles
 from mlvamaps.pipeline import run_call
 from mlvamaps.primers import read_primer_pairs
-from mlvamaps.profile_matching import match_profiles
+from mlvamaps.profile_matching import (
+    match_profiles,
+    sequence_reference_match_rows,
+)
 from mlvamaps.simulation import simulate_reads
 from scripts.convert_uf_ba_vntrs import convert_profiles
 
@@ -101,6 +104,33 @@ def test_profile_matching_retains_every_reference_in_machine_readable_output():
     assert matches[0]["profile_id"] == "P00"
     assert matches[0]["is_best_match"] == "yes"
     assert matches[-1]["profile_id"] == "P29"
+
+
+def test_sequence_reference_matches_are_available_in_profile_match_schema():
+    rows = sequence_reference_match_rows(
+        [
+            {
+                "sample_id": "sample",
+                "reference_id": "REF_A",
+                "rank": "1",
+                "combined_marker_distance": "0.125",
+                "total_normalized_snp_distance": "0.1",
+                "total_repeat_count_distance": "0.5",
+                "compared_loci": "4",
+                "exact_marker_loci": "3",
+                "match_status": "CLOSEST_REFERENCE",
+                "location": "Houston",
+                "source": "clinical",
+            }
+        ]
+    )
+
+    assert rows[0]["match_type"] == "sequence_reference"
+    assert rows[0]["profile_id"] == "REF_A"
+    assert rows[0]["reference_id"] == "REF_A"
+    assert rows[0]["distance"] == "0.125"
+    assert rows[0]["confidence"] == 0.75
+    assert rows[0]["metadata"] == "location=Houston;source=clinical"
 
 
 def make_repeat_feature(read_id, sequence, repeat_count=4):

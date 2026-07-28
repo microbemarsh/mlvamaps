@@ -109,7 +109,9 @@ def match_profiles(
         rows.append(
             {
                 "sample_id": sample_id,
+                "match_type": "mlva_profile",
                 "profile_id": profile.get("profile_id", ""),
+                "reference_id": "",
                 "best_profile_id": profile.get("profile_id", ""),
                 "strain_id": profile.get("strain_id", ""),
                 "metadata": profile.get("metadata", ""),
@@ -144,6 +146,61 @@ def match_profiles(
         row["rank"] = rank
         row["is_best_match"] = "yes" if rank == 1 else "no"
     return ranked
+
+
+def sequence_reference_match_rows(rows: list[dict]) -> list[dict]:
+    """Normalize combined-marker reference matches for profile_matches.tsv."""
+    normalized = []
+    for fallback_rank, source in enumerate(rows, start=1):
+        row = dict(source)
+        reference_id = str(source.get("reference_id", ""))
+        rank = source.get("rank", fallback_rank)
+        compared = _numeric_count(source.get("compared_loci"))
+        exact = _numeric_count(source.get("exact_marker_loci"))
+        distance = source.get("combined_marker_distance") or source.get(
+            "total_likelihood_weighted_snp_distance", ""
+        )
+        metadata = ";".join(
+            f"{key}={source[key]}"
+            for key in ("collection_date", "location", "source")
+            if source.get(key) not in ("", None)
+        )
+        row.update(
+            {
+                "sample_id": source.get("sample_id", ""),
+                "match_type": "sequence_reference",
+                "profile_id": reference_id,
+                "best_profile_id": reference_id,
+                "reference_id": reference_id,
+                "is_best_match": "yes" if _numeric_count(rank) == 1 else "no",
+                "strain_id": "",
+                "metadata": metadata,
+                "distance": distance,
+                "matched_loci": exact,
+                "matched_locus_ids": "",
+                "mismatched_loci": "",
+                "uncompared_loci": "",
+                "confidence": (
+                    round(exact / compared, 6) if compared else 0.0
+                ),
+                "compared_loci": compared,
+                "mean_negative_log_likelihood": "",
+                "profile_probability_score": "",
+                "query_alleles": "",
+                "profile_alleles": "",
+                "locus_differences": "",
+                "rank": rank,
+            }
+        )
+        normalized.append(row)
+    return normalized
+
+
+def _numeric_count(value) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def profile_match_locus_rows(
