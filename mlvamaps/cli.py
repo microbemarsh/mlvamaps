@@ -12,10 +12,23 @@ from .reference_builder import build_reference_database
 from .simulation import simulate_reads
 
 
+FASTQ_SUFFIXES = (".fastq", ".fq", ".fastq.gz", ".fq.gz")
+FASTA_SUFFIXES = (
+    ".fasta",
+    ".fa",
+    ".fna",
+    ".fas",
+    ".fasta.gz",
+    ".fa.gz",
+    ".fna.gz",
+    ".fas.gz",
+)
+
+
 def _sample_id_from_path(path: str) -> str:
     sample = Path(path).name
-    for suffix in (".fastq.gz", ".fq.gz", ".fasta.gz", ".fa.gz", ".fna.gz"):
-        if sample.endswith(suffix):
+    for suffix in FASTQ_SUFFIXES + FASTA_SUFFIXES:
+        if sample.lower().endswith(suffix):
             return sample[: -len(suffix)]
     return Path(sample).stem
 
@@ -64,9 +77,9 @@ def _positive_float(value: str) -> float:
 
 def _input_kind(path: str) -> str:
     lower = path.lower()
-    if lower.endswith((".fastq", ".fq", ".fastq.gz", ".fq.gz")):
+    if lower.endswith(FASTQ_SUFFIXES):
         return "fastq"
-    if lower.endswith((".fasta", ".fa", ".fna", ".fas", ".fasta.gz", ".fa.gz", ".fna.gz")):
+    if lower.endswith(FASTA_SUFFIXES):
         return "fasta"
     with open(path) as handle:
         first = handle.read(1)
@@ -75,6 +88,34 @@ def _input_kind(path: str) -> str:
     if first == ">":
         return "fasta"
     raise ValueError(f"Could not tell whether {path!r} is FASTQ reads or FASTA assembly.")
+
+
+def _input_files(path: str) -> list[Path]:
+    """Resolve one input file or the supported sequence files in a directory."""
+    input_path = Path(path)
+    if input_path.is_file():
+        return [input_path]
+    if not input_path.exists():
+        raise ValueError(f"Input path does not exist: {path}")
+    if not input_path.is_dir():
+        raise ValueError(f"Input path is not a file or directory: {path}")
+    supported = FASTQ_SUFFIXES + FASTA_SUFFIXES
+    files = sorted(
+        (
+            candidate
+            for candidate in input_path.iterdir()
+            if candidate.is_file()
+            and candidate.name.lower().endswith(supported)
+        ),
+        key=lambda candidate: candidate.name.lower(),
+    )
+    if not files:
+        suffixes = ", ".join(supported)
+        raise ValueError(
+            f"Input directory {path!r} contains no supported FASTA or FASTQ "
+            f"files ({suffixes})."
+        )
+    return files
 
 
 def _looks_like_loci_file(path: str) -> bool:
@@ -98,7 +139,10 @@ def _set_panel_path(args: argparse.Namespace, path: str) -> None:
 def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     paths = list(args.paths)
     if len(paths) > 2:
-        parser.error("call accepts at most two positional paths: primers.tsv and sample.fastq.gz or assembly.fasta")
+        parser.error(
+            "call accepts at most two positional paths: primers.tsv and a "
+            "FASTQ/FASTA file or input directory"
+        )
     if len(paths) == 2:
         if not args.loci and not args.primers:
             _set_panel_path(args, paths[0])
@@ -119,32 +163,46 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         args.input_path = args.reads_path
         args.reads_path = None
     if not args.loci and not args.primers:
-        parser.error("call requires a primer file, for example: mlvamaps call primers.tsv sample.fastq.gz")
+        parser.error(
+            "call requires a primer file, for example: "
+            "mlvamaps call primers.tsv sample.fastq.gz"
+        )
     if not args.input_path:
-        parser.error("call requires an input FASTQ or FASTA file")
+        parser.error("call requires an input FASTQ/FASTA file or a directory containing them")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mlvamaps",
-        description="Simple MLVA/VNTR calling from primers plus FASTQ or FASTA",
+        description="Simple MLVA/VNTR calling from primers plus FASTQ, FASTA, or an input directory",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     call = subparsers.add_parser(
         "call",
-        help="Call VNTRs from primers plus FASTQ reads or a FASTA assembly",
+        help="Call VNTRs from primers plus FASTQ/FASTA files or a directory",
         epilog=(
             "Examples:\n"
             "  mlvamaps call primers.tsv sample.fastq.gz\n"
             "  mlvamaps call primers.tsv assembly.fasta\n"
+            "  mlvamaps call primers.tsv sequence_files/\n"
             "  mlvamaps call primers.tsv assembly.fasta --reads sample.fastq.gz\n"
             "  mlvamaps call primers.tsv assembly.fasta --bam assembly_reads.bam"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    call.add_argument("paths", nargs="*", metavar="PATH", help="primers.tsv plus sample.fastq.gz or assembly.fasta")
-    call.add_argument("--input", dest="input_path", metavar="PATH", help="FASTQ reads or FASTA assembly")
+    call.add_argument(
+        "paths",
+        nargs="*",
+        metavar="PATH",
+        help="primers.tsv plus a FASTQ/FASTA file or directory",
+    )
+    call.add_argument(
+        "--input",
+        dest="input_path",
+        metavar="PATH",
+        help="FASTQ/FASTA file or directory containing supported sequence files",
+    )
     call.add_argument("--reads", dest="reads_path", metavar="FASTQ", help="Reads to map for assembly depth support")
     call.add_argument("--bam", "--alignments", dest="alignments_path", metavar="BAM/SAM", help="Assembly-aligned BAM/SAM for assembly depth support")
     call.add_argument("--loci")
@@ -260,7 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DEACON_IDX",
         help=(
             "Before MLVA analysis, retain only reads matching this target-taxon "
-            "Deacon pangenome index"
+            "Deacon pangenome index (see github.com/bede/deacon-indexes)"
         ),
     )
     call.add_argument(
@@ -533,129 +591,161 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _run_single_input(
+    args: argparse.Namespace,
+    input_path: Path,
+    outdir: Path,
+    sample_id: str,
+) -> None:
+    if _input_kind(str(input_path)) == "fastq":
+        result = run_call(
+            reads_path=str(input_path),
+            loci_path=args.loci,
+            primers_path=args.primers,
+            profiles_path=args.profiles,
+            database_path=args.database,
+            recruitment_database_path=args.recruitment_database,
+            outdir=str(outdir),
+            sample_id=sample_id,
+            min_read_length=args.min_read_length,
+            max_read_length=args.max_read_length,
+            min_qscore=args.min_qscore,
+            max_primer_mismatches=args.max_primer_mismatches,
+            min_depth=args.min_depth,
+            min_posterior=args.min_posterior,
+            repeat_range_tolerance=args.repeat_range_tolerance,
+            min_cluster_size=args.min_cluster_size,
+            cluster_min_identity=args.cluster_min_identity,
+            min_mixture_fraction=args.min_mixture_fraction,
+            min_secondary_reads=args.min_secondary_reads,
+            vsearch_bin=args.vsearch_bin,
+            amplirust_bin=args.amplirust_bin,
+            minimap2_bin=args.minimap2_bin,
+            mafft_bin=args.mafft_bin,
+            raxml_ng_bin=args.raxml_ng_bin,
+            epa_ng_bin=args.epa_ng_bin,
+            raxml_model=args.raxml_model,
+            phylogeny_snp_weight=args.phylogeny_snp_weight,
+            phylogeny_repeat_weight=args.phylogeny_repeat_weight,
+            reference_metadata_path=args.reference_metadata,
+            locus_mapping=not args.no_locus_mapping,
+            min_mapping_quality=args.min_mapping_quality,
+            min_base_quality=args.min_base_quality,
+            min_snp_depth=args.min_snp_depth,
+            min_snp_alternate_reads=args.min_snp_alternate_reads,
+            min_snp_frequency=args.min_snp_frequency,
+            threads=args.threads,
+            show_progress=not args.quiet,
+            sample_mode=args.sample_mode,
+            assembly_equivalent_reads=args.read_calling_convention == "assembly",
+            assembly_round_tolerance=args.assembly_round_tolerance,
+            max_confidence_depth=args.max_confidence_depth,
+            fastq_strategy=args.fastq_strategy,
+            recruitment_preset=args.recruitment_preset,
+            recruitment_min_identity=args.recruitment_min_identity,
+            recruitment_min_aligned_bp=args.recruitment_min_aligned_bp,
+            recruitment_min_locus_margin=args.recruitment_min_locus_margin,
+            debug_disagreements=args.debug_disagreements,
+            taxon_screen_index=args.taxon_screen_index,
+            taxon_screen_abs_threshold=args.taxon_screen_abs_threshold,
+            taxon_screen_rel_threshold=args.taxon_screen_rel_threshold,
+            deacon_bin=args.deacon_bin,
+        )
+        print(f"Wrote easy MLVA calls to {result['calls']}")
+        print(f"Wrote detailed allele evidence to {result['allele_calls']}")
+        print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
+        print(f"Wrote mapped VNTR variant groups to {result['mapped_variant_table']}")
+        print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
+        print(f"Wrote mapped read-group evidence to {result['mapped_read_memberships']}")
+        if args.profiles or args.database:
+            print(f"Wrote ranked profile matches to {result['profile_matches']}")
+            print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
+        if not args.no_locus_mapping:
+            print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
+            print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
+        print(f"Wrote report to {result['report']}")
+        if args.database:
+            print(f"Wrote per-locus trees to {result['phylogeny']}")
+            print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
+            print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
+            print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
+        return
+
+    result = run_assembly_call(
+        assembly_path=str(input_path),
+        loci_path=args.loci,
+        primers_path=args.primers,
+        outdir=str(outdir),
+        sample_id=sample_id,
+        reads_path=args.reads_path,
+        alignments_path=args.alignments_path,
+        profiles_path=args.profiles,
+        database_path=args.database,
+        max_primer_mismatches=args.max_primer_mismatches,
+        assembly_round_tolerance=args.assembly_round_tolerance,
+        algorithm=args.algorithm,
+        min_posterior=args.min_posterior,
+        threads=args.threads,
+        minimap2_preset=args.minimap2_preset,
+        minimap2_bin=args.minimap2_bin,
+        amplirust_bin=args.amplirust_bin,
+        mafft_bin=args.mafft_bin,
+        raxml_ng_bin=args.raxml_ng_bin,
+        epa_ng_bin=args.epa_ng_bin,
+        dnadiff_bin=args.dnadiff_bin,
+        raxml_model=args.raxml_model,
+        phylogeny_snp_weight=args.phylogeny_snp_weight,
+        phylogeny_repeat_weight=args.phylogeny_repeat_weight,
+        reference_metadata_path=args.reference_metadata,
+        show_progress=not args.quiet,
+    )
+    print(f"Wrote easy MLVA calls to {result['calls']}")
+    print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
+    print(f"Wrote assembly amplicons to {result['amplicons']}")
+    if args.profiles or args.database:
+        print(f"Wrote ranked profile matches to {result['profile_matches']}")
+        print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
+    print(f"Wrote report to {result['report']}")
+    if args.database:
+        print(f"Wrote per-locus trees to {result['phylogeny']}")
+        print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
+        print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
+        print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
+    if args.reads_path or args.alignments_path:
+        print(f"Wrote read-depth support to {result['read_support']}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "call":
         _resolve_call_args(parser, args)
-        sample_id = args.sample_id or _sample_id_from_path(args.input_path)
         if args.reads_path and args.alignments_path:
             parser.error("call accepts either --reads or --bam/--alignments for assembly depth support, not both")
-        if _input_kind(args.input_path) == "fastq":
-            result = run_call(
-                reads_path=args.input_path,
-                loci_path=args.loci,
-                primers_path=args.primers,
-                profiles_path=args.profiles,
-                database_path=args.database,
-                recruitment_database_path=args.recruitment_database,
-                outdir=args.outdir,
-                sample_id=sample_id,
-                min_read_length=args.min_read_length,
-                max_read_length=args.max_read_length,
-                min_qscore=args.min_qscore,
-                max_primer_mismatches=args.max_primer_mismatches,
-                min_depth=args.min_depth,
-                min_posterior=args.min_posterior,
-                repeat_range_tolerance=args.repeat_range_tolerance,
-                min_cluster_size=args.min_cluster_size,
-                cluster_min_identity=args.cluster_min_identity,
-                min_mixture_fraction=args.min_mixture_fraction,
-                min_secondary_reads=args.min_secondary_reads,
-                vsearch_bin=args.vsearch_bin,
-                amplirust_bin=args.amplirust_bin,
-                minimap2_bin=args.minimap2_bin,
-                mafft_bin=args.mafft_bin,
-                raxml_ng_bin=args.raxml_ng_bin,
-                epa_ng_bin=args.epa_ng_bin,
-                raxml_model=args.raxml_model,
-                phylogeny_snp_weight=args.phylogeny_snp_weight,
-                phylogeny_repeat_weight=args.phylogeny_repeat_weight,
-                reference_metadata_path=args.reference_metadata,
-                locus_mapping=not args.no_locus_mapping,
-                min_mapping_quality=args.min_mapping_quality,
-                min_base_quality=args.min_base_quality,
-                min_snp_depth=args.min_snp_depth,
-                min_snp_alternate_reads=args.min_snp_alternate_reads,
-                min_snp_frequency=args.min_snp_frequency,
-                threads=args.threads,
-                show_progress=not args.quiet,
-                sample_mode=args.sample_mode,
-                assembly_equivalent_reads=args.read_calling_convention == "assembly",
-                assembly_round_tolerance=args.assembly_round_tolerance,
-                max_confidence_depth=args.max_confidence_depth,
-                fastq_strategy=args.fastq_strategy,
-                recruitment_preset=args.recruitment_preset,
-                recruitment_min_identity=args.recruitment_min_identity,
-                recruitment_min_aligned_bp=args.recruitment_min_aligned_bp,
-                recruitment_min_locus_margin=args.recruitment_min_locus_margin,
-                debug_disagreements=args.debug_disagreements,
-                taxon_screen_index=args.taxon_screen_index,
-                taxon_screen_abs_threshold=args.taxon_screen_abs_threshold,
-                taxon_screen_rel_threshold=args.taxon_screen_rel_threshold,
-                deacon_bin=args.deacon_bin,
+        try:
+            input_files = _input_files(args.input_path)
+        except ValueError as exc:
+            parser.error(str(exc))
+        batch = Path(args.input_path).is_dir()
+        if batch and args.sample_id:
+            parser.error("--sample-id cannot be used with an input directory; sample IDs come from filenames")
+        if batch and (args.reads_path or args.alignments_path):
+            parser.error("--reads and --bam/--alignments can only be used with a single input file")
+        sample_ids = [_sample_id_from_path(str(path)) for path in input_files]
+        duplicate_ids = sorted(
+            sample_id for sample_id in set(sample_ids) if sample_ids.count(sample_id) > 1
+        )
+        if duplicate_ids:
+            parser.error(
+                "input filenames produce duplicate sample IDs: "
+                + ", ".join(duplicate_ids)
             )
-            print(f"Wrote easy MLVA calls to {result['calls']}")
-            print(f"Wrote detailed allele evidence to {result['allele_calls']}")
-            print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
-            print(f"Wrote mapped VNTR variant groups to {result['mapped_variant_table']}")
-            print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
-            print(f"Wrote mapped read-group evidence to {result['mapped_read_memberships']}")
-            if args.profiles or args.database:
-                print(f"Wrote ranked profile matches to {result['profile_matches']}")
-                print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
-            if not args.no_locus_mapping:
-                print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
-                print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
-            print(f"Wrote report to {result['report']}")
-            if args.database:
-                print(f"Wrote per-locus trees to {result['phylogeny']}")
-                print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
-                print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
-                print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
-        else:
-            result = run_assembly_call(
-                assembly_path=args.input_path,
-                loci_path=args.loci,
-                primers_path=args.primers,
-                outdir=args.outdir,
-                sample_id=sample_id,
-                reads_path=args.reads_path,
-                alignments_path=args.alignments_path,
-                profiles_path=args.profiles,
-                database_path=args.database,
-                max_primer_mismatches=args.max_primer_mismatches,
-                assembly_round_tolerance=args.assembly_round_tolerance,
-                algorithm=args.algorithm,
-                min_posterior=args.min_posterior,
-                threads=args.threads,
-                minimap2_preset=args.minimap2_preset,
-                minimap2_bin=args.minimap2_bin,
-                amplirust_bin=args.amplirust_bin,
-                mafft_bin=args.mafft_bin,
-                raxml_ng_bin=args.raxml_ng_bin,
-                epa_ng_bin=args.epa_ng_bin,
-                dnadiff_bin=args.dnadiff_bin,
-                raxml_model=args.raxml_model,
-                phylogeny_snp_weight=args.phylogeny_snp_weight,
-                phylogeny_repeat_weight=args.phylogeny_repeat_weight,
-                reference_metadata_path=args.reference_metadata,
-                show_progress=not args.quiet,
-            )
-            print(f"Wrote easy MLVA calls to {result['calls']}")
-            print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
-            print(f"Wrote assembly amplicons to {result['amplicons']}")
-            if args.profiles or args.database:
-                print(f"Wrote ranked profile matches to {result['profile_matches']}")
-                print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
-            print(f"Wrote report to {result['report']}")
-            if args.database:
-                print(f"Wrote per-locus trees to {result['phylogeny']}")
-                print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
-                print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
-                print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
-            if args.reads_path or args.alignments_path:
-                print(f"Wrote read-depth support to {result['read_support']}")
+        for input_path, derived_sample_id in zip(input_files, sample_ids):
+            sample_id = args.sample_id or derived_sample_id
+            outdir = Path(args.outdir) / sample_id if batch else Path(args.outdir)
+            if batch:
+                print(f"Processing {input_path} as sample {sample_id}")
+            _run_single_input(args, input_path, outdir, sample_id)
         return 0
     if args.command == "simulate":
         result = simulate_reads(

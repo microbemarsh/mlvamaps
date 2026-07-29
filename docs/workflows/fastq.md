@@ -23,10 +23,13 @@ For metagenomic input, an optional target-taxon screen can run before ordinary
 read QC:
 
 ```bash
-deacon index build target_pangenome.fasta -o target_taxon.idx
 mlvamaps call primers.tsv metagenome.fastq.gz \
   --taxon-screen-index target_taxon.idx
 ```
+
+The index is supplied rather than built by MLVAMaps. See
+[bede/deacon-indexes](https://github.com/bede/deacon-indexes) for
+index-building information.
 
 Deacon performs native SIMD minimizer matching and retains target-like reads.
 MLVAMaps records the original, retained, and rejected read totals in

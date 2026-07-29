@@ -14,6 +14,24 @@ This directly supports amplicon sequencing. Accurate primer-spanning reads from
 other assays can also be used, while non-spanning shotgun reads should be
 supplied as assembly support instead.
 
+## Input directories
+
+`mlvamaps call` accepts a directory in place of one input file:
+
+```bash
+mlvamaps call primers.tsv sequence_files/ -o results
+```
+
+MLVAMaps processes supported FASTA and FASTQ files directly inside the
+directory in filename order. Discovery is non-recursive, unrelated files are
+ignored, and FASTA and FASTQ inputs may be mixed. Each input filename supplies
+the sample ID and gets a separate `results/<sample-id>/` directory. Filenames
+that collapse to the same sample ID, such as `sample.fasta` and
+`sample.fastq`, are rejected to prevent output collisions.
+
+`--sample-id`, `--reads`, and `--bam`/`--alignments` apply to single-file calls
+and cannot be combined with directory input.
+
 ## Assemblies
 
 Supported assembly suffixes include:

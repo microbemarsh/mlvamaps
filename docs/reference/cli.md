@@ -2,6 +2,10 @@
 
 Run `mlvamaps call --help` for the complete parser-generated reference.
 
+The primary input may be one supported FASTA/FASTQ file or a directory of such
+files. Directory discovery is non-recursive, and each file is written beneath
+`OUTDIR/<sample-id>/`; see [input formats](input-formats.md#input-directories).
+
 ## General controls
 
 | Option | Default | Purpose |
@@ -22,7 +26,7 @@ Run `mlvamaps call --help` for the complete parser-generated reference.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--taxon-screen-index DEACON_IDX` | None | Retain only reads matching a target-taxon Deacon pangenome index before loading reads into MLVAMaps. |
+| `--taxon-screen-index DEACON_IDX` | None | Retain only reads matching a supplied target-taxon Deacon pangenome index before loading reads into MLVAMaps. See [bede/deacon-indexes](https://github.com/bede/deacon-indexes) for build information. |
 | `--taxon-screen-abs-threshold` | `2` | Required absolute number of shared minimizers. |
 | `--taxon-screen-rel-threshold` | `0.01` | Required relative proportion of shared minimizers. |
 | `--deacon-bin PATH` | `deacon` | Deacon executable. |

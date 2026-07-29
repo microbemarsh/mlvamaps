@@ -70,6 +70,16 @@ Analyze an assembly:
 mlvamaps call primers.tsv assembly.fasta
 ```
 
+Analyze every supported FASTA or FASTQ file in a directory:
+
+```bash
+mlvamaps call primers.tsv sequence_files/ -o results
+```
+
+Directory input is non-recursive and may contain a mixture of FASTA and FASTQ
+files. Each file is treated as one sample and written to
+`results/<filename-stem>/`. Unrelated files are ignored.
+
 Analyze an assembly with FASTQ read-depth support:
 
 ```bash
@@ -91,18 +101,19 @@ mlvamaps call primers.tsv sample.fastq.gz --profiles profiles.tsv
 Pre-screen a metagenomic FASTQ against a target-taxon Deacon pangenome index:
 
 ```bash
-deacon index build target_pangenome.fasta -o target_taxon.idx
 mlvamaps call primers.tsv metagenome.fastq.gz \
   --taxon-screen-index target_taxon.idx \
   --profiles profiles.tsv
 ```
 
+Supply an existing target index to `--taxon-screen-index`. See
+[bede/deacon-indexes](https://github.com/bede/deacon-indexes) for information
+on building indexes.
+
 The screen runs before MLVAMaps loads or quality-filters reads. Deacon receives
 the shared `--threads` CPU budget and writes the retained reads plus its JSON
 summary under `results/taxon_screen/`. The default Deacon retention thresholds
-are two shared minimizers and a 1% relative match. For closely related
-background taxa, build the index from a broad target pangenome and consider
-subtracting non-target minimizers with `deacon index diff`.
+are two shared minimizers and a 1% relative match.
 
 Place each callable query locus in fixed reference trees:
 
@@ -163,6 +174,7 @@ invoked.
 
 | Input | What mlvamaps assesses |
 | --- | --- |
+| Directory of FASTA/FASTQ files | Runs each supported top-level file as a separate sample under its own output subdirectory. |
 | High-accuracy long-read FASTQ/FASTQ.GZ | Competitively recruited full and partial locus reads, presence evidence, local products, assembly-equivalent repeat counts, variants, and SNP evidence. |
 | Accurate long-read WGS/metagenomic reads | Complete products are genotyped directly; repeat-spanning partial reads can provide provisional alleles and locus-specific partial reads establish untyped presence. |
 | Assembly FASTA | In-silico primer products, product coordinates, sizes, and repeat counts. |
