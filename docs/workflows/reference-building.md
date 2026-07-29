@@ -68,7 +68,9 @@ separate commands when taxa require different MLVA schemes.
 
 `--loci` accepts the same rich comma- or tab-delimited locus table used by
 `mlvamaps call`. Minimal three-column primer CSV/TSV files can instead be
-passed with `--primers`.
+passed with `--primers`; they are also accepted through `--loci` for CLI
+compatibility. Header aliases are normalized in both cases, including
+`name`/`locus`/`id`, `forward`/`fwd`, and `reverse`/`rev`.
 
 ## Prepare now, build later
 

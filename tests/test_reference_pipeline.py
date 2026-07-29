@@ -49,7 +49,7 @@ def test_taxid_csv_rejects_duplicate_taxids_and_unsafe_names(tmp_path):
 def test_rich_loci_csv_uses_the_same_schema_as_call(tmp_path):
     loci_csv = tmp_path / "loci.csv"
     loci_csv.write_text(
-        "locus_id,forward_primer,reverse_primer,repeat_motif,"
+        "name,forward,reverse,repeat_motif,"
         "expected_min_repeats,expected_max_repeats\n"
         "VNTR_1,AAACCC,GGGTTT,AT,2,20\n"
     )
@@ -63,6 +63,14 @@ def test_rich_loci_csv_uses_the_same_schema_as_call(tmp_path):
     assert loci[0].repeat_motif == "AT"
     assert loci[0].expected_min_repeats == 2
     assert loci[0].expected_max_repeats == 20
+
+
+def test_loci_csv_reports_available_columns_instead_of_key_error(tmp_path):
+    loci_csv = tmp_path / "loci.csv"
+    loci_csv.write_text("marker,forward,reverse\nVNTR_1,AAA,CCC\n")
+
+    with pytest.raises(ValueError, match=r"needs a locus_id.*found: marker"):
+        read_loci(loci_csv)
 
 
 def test_ncbi_download_retries_after_a_partial_stream_failure(tmp_path, monkeypatch):

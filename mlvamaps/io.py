@@ -59,7 +59,35 @@ def read_loci(path: str | Path) -> list[Locus]:
         first_line = sample.splitlines()[0] if sample.splitlines() else ""
         delimiter = "," if "," in first_line and "\t" not in first_line else "\t"
         reader = csv.DictReader(handle, delimiter=delimiter)
-        for row in reader:
+        aliases = {
+            "name": "locus_id",
+            "locus": "locus_id",
+            "id": "locus_id",
+            "forward": "forward_primer",
+            "reverse": "reverse_primer",
+            "fwd": "forward_primer",
+            "rev": "reverse_primer",
+            "repeat_bp": "repeat_unit_length_bp",
+            "amplicon_bp": "expected_product_size_bp",
+            "product_bp": "expected_product_size_bp",
+            "units": "nominal_repeat_units",
+        }
+        normalized_fields = {
+            aliases.get(str(field).strip().lower(), str(field).strip().lower())
+            for field in (reader.fieldnames or [])
+        }
+        if "locus_id" not in normalized_fields:
+            fields = ", ".join(str(field) for field in (reader.fieldnames or []))
+            raise ValueError(
+                f"Loci table needs a locus_id, name, locus, or id column; "
+                f"found: {fields or '(no header)'}"
+            )
+        for raw_row in reader:
+            row = {
+                aliases.get(str(key).strip().lower(), str(key).strip().lower()): value
+                for key, value in raw_row.items()
+                if key is not None
+            }
             loci.append(
                 Locus(
                     locus_id=row["locus_id"],
