@@ -320,6 +320,45 @@ recommended metadata, validation, and profile-table setup.
 
 ## Additional commands
 
+Build directly from a single NCBI taxonomy identifier. This downloads a
+reproducible NCBI Datasets package and then feeds its assemblies and normalized
+metadata into the same per-locus builder:
+
+```bash
+mlvamaps build-reference \
+  --taxid 86661 \
+  --loci mlva_loci.tsv \
+  -o reference_builds \
+  -t 16
+```
+
+For several organisms, provide a CSV with a required `taxid` column and an
+optional filesystem-safe `name`:
+
+```csv
+taxid,name
+86661,bacillus_cereus_group
+1280,staphylococcus_aureus
+```
+
+```bash
+mlvamaps build-reference \
+  --taxids-csv taxids.csv \
+  --loci mlva_loci.tsv \
+  -o reference_builds \
+  -t 16
+```
+
+Every row is isolated under
+`reference_builds/NAME/{prepared,reference}`. The database passed to
+`mlvamaps call --database` is
+`reference_builds/NAME/reference/database`. A top-level
+`reference_pipeline_manifest.json` records all completed builds. Use
+`mlvamaps prepare-reference --taxid ...` or `--taxids-csv ...` to download and
+normalize the NCBI inputs without running MLVA extraction or tree building.
+Both taxid commands require the NCBI `datasets` and `dataformat` executables,
+provided by the `ncbi-datasets-cli` conda package.
+
 Build a reference sequence database and one maximum-likelihood phylogeny per
 locus from a directory of assemblies. Assembly basenames must match the
 metadata identifier unless the metadata has an `assembly_file`, `filename`, or

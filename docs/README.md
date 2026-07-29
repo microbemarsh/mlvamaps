@@ -8,6 +8,7 @@ path, intermediate stage, output, and interpretation boundary.
 
 - [FASTQ and amplicon sequencing](workflows/fastq.md)
 - [Assemblies and assembly read support](workflows/assembly.md)
+- [Reference building](workflows/reference-building.md)
 
 ## Concepts
 

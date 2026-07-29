@@ -12,6 +12,7 @@ dependencies:
   - raxml-ng
   - epa-ng
   - mummer4
+  - ncbi-datasets-cli
   - numpy>=1.24
   - parasail-python>=1.3.4
   - pysam

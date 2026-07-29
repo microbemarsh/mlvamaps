@@ -9,6 +9,11 @@ from .in_silico_pcr import run_in_silico_pcr
 from .io import open_text
 from .pipeline import run_call
 from .reference_builder import build_reference_database
+from .reference_pipeline import (
+    build_taxon_references,
+    prepare_taxon_references,
+    read_taxon_references,
+)
 from .simulation import simulate_reads
 
 
@@ -549,16 +554,79 @@ def build_parser() -> argparse.ArgumentParser:
     extract.add_argument("--trim-primers", action="store_true")
     extract.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
 
+    prepare_reference = subparsers.add_parser(
+        "prepare-reference",
+        help="Download reproducible NCBI assembly inputs for one taxid or a CSV of taxids",
+    )
+    prepare_source = prepare_reference.add_mutually_exclusive_group(required=True)
+    prepare_source.add_argument("--taxid", help="Single NCBI taxonomy identifier")
+    prepare_source.add_argument(
+        "--taxids-csv",
+        help="CSV/TSV with a taxid column and optional name column",
+    )
+    prepare_reference.add_argument(
+        "-o", "--output", "--outdir", dest="outdir", default="reference_builds"
+    )
+    prepare_reference.add_argument(
+        "--assembly-source",
+        choices=("refseq", "genbank", "all"),
+        default="refseq",
+        help="NCBI assembly source (default: %(default)s)",
+    )
+    prepare_reference.add_argument(
+        "--datasets-arg",
+        action="append",
+        default=[],
+        help="Extra NCBI Datasets argument; repeat as needed",
+    )
+    prepare_reference.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse each existing prepared/ncbi_dataset.zip",
+    )
+    prepare_reference.add_argument("--datasets-bin", default="datasets", help=argparse.SUPPRESS)
+    prepare_reference.add_argument("--dataformat-bin", default="dataformat", help=argparse.SUPPRESS)
+
     reference = subparsers.add_parser(
         "build-reference",
-        help="Build a per-locus reference database and reference phylogenies from assemblies",
+        help="Build reference databases from local assemblies, one taxid, or a CSV of taxids",
     )
-    reference.add_argument("--assemblies", required=True, help="Directory containing reference FASTA assemblies")
+    reference_source = reference.add_mutually_exclusive_group(required=True)
+    reference_source.add_argument(
+        "--assemblies", help="Directory containing reference FASTA assemblies"
+    )
+    reference_source.add_argument("--taxid", help="Single NCBI taxonomy identifier")
+    reference_source.add_argument(
+        "--taxids-csv",
+        help="CSV/TSV with a taxid column and optional name column",
+    )
     panel = reference.add_mutually_exclusive_group(required=True)
     panel.add_argument("--primers", help="Primer-pair CSV/TSV with locus, forward, and reverse columns")
     panel.add_argument("--loci", help="Rich loci TSV (recommended when repeat motif/flanks are known)")
-    reference.add_argument("--metadata", required=True, help="Reference metadata CSV/TSV")
+    reference.add_argument(
+        "--metadata",
+        help="Reference metadata CSV/TSV; required with --assemblies",
+    )
     reference.add_argument("-o", "--output", "--outdir", dest="outdir", default="reference_build")
+    reference.add_argument(
+        "--assembly-source",
+        choices=("refseq", "genbank", "all"),
+        default="refseq",
+        help="NCBI assembly source for taxid inputs (default: %(default)s)",
+    )
+    reference.add_argument(
+        "--datasets-arg",
+        action="append",
+        default=[],
+        help="Extra NCBI Datasets argument for taxid inputs; repeat as needed",
+    )
+    reference.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse each existing prepared/ncbi_dataset.zip for taxid inputs",
+    )
+    reference.add_argument("--datasets-bin", default="datasets", help=argparse.SUPPRESS)
+    reference.add_argument("--dataformat-bin", default="dataformat", help=argparse.SUPPRESS)
     reference.add_argument("--max-primer-mismatches", type=_nonnegative_int, default=2)
     reference.add_argument(
         "--multiple-products",
@@ -779,7 +847,61 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote extracted amplicons to {result['products']}")
         print(f"Wrote primer-match stats to {result['stats']}")
         return 0
+    if args.command == "prepare-reference":
+        references = read_taxon_references(
+            taxid=args.taxid, taxids_csv=args.taxids_csv
+        )
+        results = prepare_taxon_references(
+            references,
+            args.outdir,
+            assembly_source=args.assembly_source,
+            datasets_args=args.datasets_arg,
+            datasets_bin=args.datasets_bin,
+            dataformat_bin=args.dataformat_bin,
+            resume=args.resume,
+        )
+        for result in results:
+            print(
+                f"Prepared taxid {result['taxid']} ({result['name']}) in "
+                f"{result['outdir']}"
+            )
+        return 0
     if args.command == "build-reference":
+        if args.assemblies and not args.metadata:
+            parser.error("build-reference with --assemblies also requires --metadata")
+        if not args.assemblies and args.metadata:
+            parser.error("--metadata is only accepted with --assemblies")
+        if not args.assemblies:
+            references = read_taxon_references(
+                taxid=args.taxid, taxids_csv=args.taxids_csv
+            )
+            result = build_taxon_references(
+                references,
+                primers_path=args.primers or args.loci,
+                loci_path=args.loci,
+                outdir=args.outdir,
+                assembly_source=args.assembly_source,
+                datasets_args=args.datasets_arg,
+                datasets_bin=args.datasets_bin,
+                dataformat_bin=args.dataformat_bin,
+                resume=args.resume,
+                multiple_products=args.multiple_products,
+                max_primer_mismatches=args.max_primer_mismatches,
+                min_references_per_tree=args.min_references_per_tree,
+                threads=args.threads,
+                amplirust_bin=args.amplirust_bin,
+                mafft_bin=args.mafft_bin,
+                raxml_ng_bin=args.raxml_ng_bin,
+                raxml_model=args.raxml_model,
+                show_progress=not args.quiet,
+            )
+            for reference in result["references"]:
+                print(
+                    f"Built taxid {reference['taxid']} ({reference['name']}) "
+                    f"database at {reference['database']}"
+                )
+            print(f"Wrote taxid pipeline manifest to {result['manifest']}")
+            return 0
         result = build_reference_database(
             assemblies_dir=args.assemblies,
             primers_path=args.primers or args.loci,
