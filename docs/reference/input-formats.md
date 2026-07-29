@@ -70,7 +70,7 @@ degenerate bases are handled by Amplirust.
 
 ## Rich locus table
 
-A richer TSV can additionally define:
+A richer CSV or TSV can additionally define:
 
 | Column | Purpose |
 | --- | --- |

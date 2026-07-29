@@ -8,6 +8,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -166,6 +167,37 @@ def _run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
             + (f"\n{detail[-3000:]}" if detail else "")
         )
     return result
+
+
+def _download_package(
+    command: list[str], package: Path, attempts: int
+) -> None:
+    """Run an NCBI download with bounded retries and reject partial archives."""
+    if attempts < 1:
+        raise ValueError("download attempts must be at least 1")
+    errors: list[str] = []
+    for attempt in range(1, attempts + 1):
+        package.unlink(missing_ok=True)
+        try:
+            _run_command(command)
+            if not package.is_file():
+                raise RuntimeError(
+                    f"NCBI Datasets did not create the requested package: {package}"
+                )
+            if not zipfile.is_zipfile(package):
+                raise RuntimeError(
+                    f"NCBI Datasets created an incomplete or invalid ZIP archive: {package}"
+                )
+            return
+        except RuntimeError as exc:
+            errors.append(str(exc))
+            package.unlink(missing_ok=True)
+            if attempt < attempts:
+                time.sleep(min(2 ** (attempt - 1), 10))
+    raise RuntimeError(
+        f"NCBI Datasets download failed after {attempts} attempt(s). "
+        f"Last error:\n{errors[-1]}"
+    )
 
 
 def _tool_version(executable: str) -> str:
@@ -329,6 +361,7 @@ def prepare_taxon_reference(
     datasets_bin: str = "datasets",
     dataformat_bin: str = "dataformat",
     resume: bool = False,
+    download_retries: int = 3,
 ) -> dict[str, Any]:
     """Download and normalize one NCBI taxid as a portable build input."""
     if assembly_source not in {"refseq", "genbank", "all"}:
@@ -336,10 +369,17 @@ def prepare_taxon_reference(
     datasets = _resolve_executable(datasets_bin, "datasets")
     dataformat = _resolve_executable(dataformat_bin, "dataformat")
     output_path = Path(output).resolve()
-    if output_path.exists() and any(output_path.iterdir()) and not resume:
-        raise ValueError(f"prepared output directory is not empty: {output_path}")
-    output_path.mkdir(parents=True, exist_ok=True)
     package = output_path / "ncbi_dataset.zip"
+    if output_path.exists() and not resume:
+        existing = list(output_path.iterdir())
+        interrupted_download = (
+            existing == [package] and not zipfile.is_zipfile(package)
+        )
+        if interrupted_download:
+            package.unlink()
+        elif existing:
+            raise ValueError(f"prepared output directory is not empty: {output_path}")
+    output_path.mkdir(parents=True, exist_ok=True)
     download_command = [
         datasets,
         "download",
@@ -356,15 +396,18 @@ def prepare_taxon_reference(
         str(package),
         *(datasets_args or []),
     ]
-    reused_package = resume and package.is_file()
+    reused_package = resume and package.is_file() and zipfile.is_zipfile(package)
+    if resume and package.is_file() and not reused_package:
+        package.unlink()
     if resume and not reused_package:
-        raise ValueError(
-            f"cannot resume preparation because the package is missing: {package}"
-        )
-    if not reused_package:
-        _run_command(download_command)
-    if not package.is_file():
-        raise RuntimeError(f"NCBI Datasets did not create the requested package: {package}")
+        if any(output_path.iterdir()):
+            raise ValueError(
+                f"cannot resume preparation because a valid package is missing: {package}"
+            )
+        _download_package(download_command, package, download_retries)
+        reused_package = False
+    elif not reused_package:
+        _download_package(download_command, package, download_retries)
 
     package_dir = output_path / "package"
     _safe_extract(package, package_dir)
@@ -450,6 +493,7 @@ def build_taxon_references(
     datasets_bin: str = "datasets",
     dataformat_bin: str = "dataformat",
     resume: bool = False,
+    download_retries: int = 3,
     multiple_products: str = "exclude",
     max_primer_mismatches: int = 2,
     min_references_per_tree: int = 3,
@@ -474,6 +518,7 @@ def build_taxon_references(
             datasets_bin=datasets_bin,
             dataformat_bin=dataformat_bin,
             resume=resume,
+            download_retries=download_retries,
         )
         database_outdir = output / reference.name / "reference"
         built = builder(

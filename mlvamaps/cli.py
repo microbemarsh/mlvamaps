@@ -584,6 +584,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Reuse each existing prepared/ncbi_dataset.zip",
     )
+    prepare_reference.add_argument(
+        "--download-retries",
+        type=_positive_int,
+        default=3,
+        help="NCBI download attempts after transient failures (default: %(default)s)",
+    )
     prepare_reference.add_argument("--datasets-bin", default="datasets", help=argparse.SUPPRESS)
     prepare_reference.add_argument("--dataformat-bin", default="dataformat", help=argparse.SUPPRESS)
 
@@ -602,7 +608,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     panel = reference.add_mutually_exclusive_group(required=True)
     panel.add_argument("--primers", help="Primer-pair CSV/TSV with locus, forward, and reverse columns")
-    panel.add_argument("--loci", help="Rich loci TSV (recommended when repeat motif/flanks are known)")
+    panel.add_argument(
+        "--loci",
+        help="Rich loci CSV/TSV (recommended when repeat motif/flanks are known)",
+    )
     reference.add_argument(
         "--metadata",
         help="Reference metadata CSV/TSV; required with --assemblies",
@@ -624,6 +633,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--resume",
         action="store_true",
         help="Reuse each existing prepared/ncbi_dataset.zip for taxid inputs",
+    )
+    reference.add_argument(
+        "--download-retries",
+        type=_positive_int,
+        default=3,
+        help="NCBI download attempts after transient failures (default: %(default)s)",
     )
     reference.add_argument("--datasets-bin", default="datasets", help=argparse.SUPPRESS)
     reference.add_argument("--dataformat-bin", default="dataformat", help=argparse.SUPPRESS)
@@ -859,6 +874,7 @@ def main(argv: list[str] | None = None) -> int:
             datasets_bin=args.datasets_bin,
             dataformat_bin=args.dataformat_bin,
             resume=args.resume,
+            download_retries=args.download_retries,
         )
         for result in results:
             print(
@@ -885,6 +901,7 @@ def main(argv: list[str] | None = None) -> int:
                 datasets_bin=args.datasets_bin,
                 dataformat_bin=args.dataformat_bin,
                 resume=args.resume,
+                download_retries=args.download_retries,
                 multiple_products=args.multiple_products,
                 max_primer_mismatches=args.max_primer_mismatches,
                 min_references_per_tree=args.min_references_per_tree,

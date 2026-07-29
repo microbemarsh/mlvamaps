@@ -54,7 +54,11 @@ def _int_or_default(value: str | None, default: int) -> int:
 def read_loci(path: str | Path) -> list[Locus]:
     loci = []
     with open_text(path, "rt") as handle:
-        reader = csv.DictReader(handle, delimiter="\t")
+        sample = handle.read(4096)
+        handle.seek(0)
+        first_line = sample.splitlines()[0] if sample.splitlines() else ""
+        delimiter = "," if "," in first_line and "\t" not in first_line else "\t"
+        reader = csv.DictReader(handle, delimiter=delimiter)
         for row in reader:
             loci.append(
                 Locus(

@@ -15,7 +15,7 @@ original local-assembly behavior.
 ```bash
 mlvamaps build-reference \
   --taxid 86661 \
-  --loci panels/b_cereus_group.tsv \
+  --loci panels/b_cereus_group.csv \
   --assembly-source refseq \
   --output references \
   --threads 32
@@ -66,6 +66,10 @@ references/
 All taxids in one invocation use the same `--primers` or `--loci` panel. Run
 separate commands when taxa require different MLVA schemes.
 
+`--loci` accepts the same rich comma- or tab-delimited locus table used by
+`mlvamaps call`. Minimal three-column primer CSV/TSV files can instead be
+passed with `--primers`.
+
 ## Prepare now, build later
 
 To acquire inputs without performing the computational build:
@@ -102,3 +106,8 @@ are included in the conda environment through `ncbi-datasets-cli`.
 and `all` asks NCBI for both sources. Extra NCBI Datasets options can be passed
 by repeating `--datasets-arg`; use the `--datasets-arg=--option` form for values
 that begin with a dash.
+
+NCBI downloads are retried three times by default when a transient network
+error or incomplete ZIP is detected. Change this with `--download-retries N`.
+An incomplete archive is removed before retrying, while a completed,
+ZIP-validated archive can be reused with `--resume`.

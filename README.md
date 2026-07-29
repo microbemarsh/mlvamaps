@@ -327,7 +327,7 @@ metadata into the same per-locus builder:
 ```bash
 mlvamaps build-reference \
   --taxid 86661 \
-  --loci mlva_loci.tsv \
+  --loci mlva_loci.csv \
   -o reference_builds \
   -t 16
 ```
@@ -357,7 +357,9 @@ Every row is isolated under
 `mlvamaps prepare-reference --taxid ...` or `--taxids-csv ...` to download and
 normalize the NCBI inputs without running MLVA extraction or tree building.
 Both taxid commands require the NCBI `datasets` and `dataformat` executables,
-provided by the `ncbi-datasets-cli` conda package.
+provided by the `ncbi-datasets-cli` conda package. Rich `--loci` input accepts
+the same CSV or TSV schema as `mlvamaps call`. Interrupted NCBI downloads are
+retried three times by default; configure this with `--download-retries`.
 
 Build a reference sequence database and one maximum-likelihood phylogeny per
 locus from a directory of assemblies. Assembly basenames must match the

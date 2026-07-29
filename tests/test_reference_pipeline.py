@@ -10,6 +10,7 @@ import pytest
 
 import mlvamaps.cli as cli
 import mlvamaps.reference_pipeline as pipeline
+from mlvamaps.io import read_loci
 from mlvamaps.reference_pipeline import (
     TaxonReference,
     build_taxon_references,
@@ -43,6 +44,49 @@ def test_taxid_csv_rejects_duplicate_taxids_and_unsafe_names(tmp_path):
     unsafe.write_text("taxid,name\n1280,../shared\n")
     with pytest.raises(ValueError, match="invalid reference name"):
         read_taxon_references(taxids_csv=unsafe)
+
+
+def test_rich_loci_csv_uses_the_same_schema_as_call(tmp_path):
+    loci_csv = tmp_path / "loci.csv"
+    loci_csv.write_text(
+        "locus_id,forward_primer,reverse_primer,repeat_motif,"
+        "expected_min_repeats,expected_max_repeats\n"
+        "VNTR_1,AAACCC,GGGTTT,AT,2,20\n"
+    )
+
+    loci = read_loci(loci_csv)
+
+    assert len(loci) == 1
+    assert loci[0].locus_id == "VNTR_1"
+    assert loci[0].forward_primer == "AAACCC"
+    assert loci[0].reverse_primer == "GGGTTT"
+    assert loci[0].repeat_motif == "AT"
+    assert loci[0].expected_min_repeats == 2
+    assert loci[0].expected_max_repeats == 20
+
+
+def test_ncbi_download_retries_after_a_partial_stream_failure(tmp_path, monkeypatch):
+    package = tmp_path / "ncbi_dataset.zip"
+    command = ["datasets", "download", "--filename", str(package)]
+    attempts = []
+
+    def fake_run(_command):
+        attempts.append(len(attempts) + 1)
+        if len(attempts) == 1:
+            package.write_bytes(b"partial download")
+            raise RuntimeError("stream error: INTERNAL_ERROR")
+        assert not package.exists()
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("ncbi_dataset/data/README.md", "ok")
+        return subprocess.CompletedProcess(_command, 0, "", "")
+
+    monkeypatch.setattr(pipeline, "_run_command", fake_run)
+    monkeypatch.setattr(pipeline.time, "sleep", lambda _seconds: None)
+
+    pipeline._download_package(command, package, attempts=3)
+
+    assert attempts == [1, 2]
+    assert zipfile.is_zipfile(package)
 
 
 def test_prepare_taxon_reference_downloads_and_normalizes_ncbi_package(
