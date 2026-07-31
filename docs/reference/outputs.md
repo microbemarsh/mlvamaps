@@ -167,6 +167,11 @@ they are independent of locus-wide read mapping.
 | `legacy_predicted_pcr_sizes.csv` | Historical wide product-size layout. |
 | `legacy_primer_mismatches.txt` | Historical primer mismatch summary. |
 
+For a directory input containing assemblies, MLVAMaps also writes
+`MLVA_analysis_<input-directory>.csv` at the top level of the output directory.
+It combines all per-assembly `legacy_mlva_analysis.csv` rows in deterministic
+filename order and assigns the historical zero-padded `key` values.
+
 ## FASTQ call statuses
 
 | Status | Meaning |

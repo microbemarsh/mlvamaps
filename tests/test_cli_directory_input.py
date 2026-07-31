@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 
 import pytest
@@ -77,3 +78,58 @@ def test_empty_input_directory_has_a_clear_error(tmp_path, capsys):
         cli.main(["call", str(panel), str(inputs)])
 
     assert "contains no supported FASTA or FASTQ files" in capsys.readouterr().err
+
+
+def test_combine_legacy_fingerprints_writes_one_mlva_finder_table(tmp_path):
+    first = tmp_path / "first.csv"
+    second = tmp_path / "second.csv"
+    first.write_text(
+        "key,Access_number,vrrA,Bams01\n001,GCF_000001,10,16\n"
+    )
+    second.write_text(
+        "key,Access_number,vrrA,Bams01\n001,GCF_000002,10.5,\n"
+    )
+
+    output = cli._combine_legacy_fingerprints(
+        [first, second], tmp_path / "MLVA_analysis_genomes.csv"
+    )
+
+    with output.open(newline="") as handle:
+        assert list(csv.reader(handle)) == [
+            ["key", "Access_number", "vrrA", "Bams01"],
+            ["001", "GCF_000001", "10", "16"],
+            ["002", "GCF_000002", "10.5", ""],
+        ]
+
+
+def test_call_directory_writes_combined_mlva_finder_analysis(
+    tmp_path, monkeypatch, capsys
+):
+    panel = _write_panel(tmp_path)
+    inputs = tmp_path / "Ba_ref_genomes"
+    inputs.mkdir()
+    (inputs / "GCF_000002.fna").write_text(">contig\nACGT\n")
+    (inputs / "GCF_000001.fna").write_text(">contig\nACGT\n")
+
+    def fake_run(args, input_path, outdir, sample_id):
+        outdir.mkdir(parents=True)
+        fingerprint = outdir / "legacy_mlva_analysis.csv"
+        fingerprint.write_text(
+            "key,Access_number,VNTR_01\n001," + sample_id + ",5\n"
+        )
+        return {"legacy_fingerprint": fingerprint}
+
+    monkeypatch.setattr(cli, "_run_single_input", fake_run)
+    results = tmp_path / "results"
+
+    assert cli.main(
+        ["call", str(panel), str(inputs), "--outdir", str(results)]
+    ) == 0
+    combined = results / "MLVA_analysis_Ba_ref_genomes.csv"
+    with combined.open(newline="") as handle:
+        assert list(csv.reader(handle)) == [
+            ["key", "Access_number", "VNTR_01"],
+            ["001", "GCF_000001", "5"],
+            ["002", "GCF_000002", "5"],
+        ]
+    assert str(combined) in capsys.readouterr().out

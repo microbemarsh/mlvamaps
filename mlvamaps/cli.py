@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
 
 from .assembly_call import ASSEMBLY_ALGORITHMS, run_assembly_call
@@ -679,7 +680,7 @@ def _run_single_input(
     input_path: Path,
     outdir: Path,
     sample_id: str,
-) -> None:
+) -> dict[str, Path]:
     if _input_kind(str(input_path)) == "fastq":
         result = run_call(
             reads_path=str(input_path),
@@ -752,7 +753,7 @@ def _run_single_input(
             print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
             print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
             print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
-        return
+        return result
 
     result = run_assembly_call(
         assembly_path=str(input_path),
@@ -796,6 +797,48 @@ def _run_single_input(
         print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
     if args.reads_path or args.alignments_path:
         print(f"Wrote read-depth support to {result['read_support']}")
+    return result
+
+
+def _combine_legacy_fingerprints(
+    fingerprint_paths: list[Path], output_path: Path
+) -> Path:
+    """Combine single-sample MLVA_finder tables into one compatible CSV.
+
+    Each assembly run writes only one data row, so a streaming CSV pass is
+    faster and substantially lighter than constructing a dataframe for this
+    operation. The panel header must be identical across all runs.
+    """
+    header: list[str] | None = None
+    if not fingerprint_paths:
+        raise ValueError("No MLVA fingerprints were provided for aggregation")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        index = 0
+        for fingerprint_path in fingerprint_paths:
+            with fingerprint_path.open(newline="", encoding="utf-8") as source:
+                reader = csv.reader(source)
+                current_header = next(reader, None)
+                if current_header is None:
+                    raise ValueError(f"Empty MLVA fingerprint: {fingerprint_path}")
+                if header is None:
+                    header = current_header
+                    writer.writerow(header)
+                elif current_header != header:
+                    raise ValueError(
+                        "Cannot combine MLVA fingerprints with different locus "
+                        f"columns: {fingerprint_path}"
+                    )
+                for row in reader:
+                    index += 1
+                    writer.writerow([f"{index:03d}", *row[1:]])
+    return output_path
+
+
+def _batch_analysis_path(input_path: str, outdir: str) -> Path:
+    directory_name = Path(input_path).resolve().name
+    return Path(outdir) / f"MLVA_analysis_{directory_name}.csv"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -823,12 +866,21 @@ def main(argv: list[str] | None = None) -> int:
                 "input filenames produce duplicate sample IDs: "
                 + ", ".join(duplicate_ids)
             )
+        legacy_fingerprints = []
         for input_path, derived_sample_id in zip(input_files, sample_ids):
             sample_id = args.sample_id or derived_sample_id
             outdir = Path(args.outdir) / sample_id if batch else Path(args.outdir)
             if batch:
                 print(f"Processing {input_path} as sample {sample_id}")
-            _run_single_input(args, input_path, outdir, sample_id)
+            result = _run_single_input(args, input_path, outdir, sample_id)
+            if result and "legacy_fingerprint" in result:
+                legacy_fingerprints.append(Path(result["legacy_fingerprint"]))
+        if batch and legacy_fingerprints:
+            analysis_path = _combine_legacy_fingerprints(
+                legacy_fingerprints,
+                _batch_analysis_path(args.input_path, args.outdir),
+            )
+            print(f"Wrote combined MLVA_finder analysis to {analysis_path}")
         return 0
     if args.command == "simulate":
         result = simulate_reads(

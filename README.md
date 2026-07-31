@@ -78,7 +78,9 @@ mlvamaps call primers.tsv sequence_files/ -o results
 
 Directory input is non-recursive and may contain a mixture of FASTA and FASTQ
 files. Each file is treated as one sample and written to
-`results/<filename-stem>/`. Unrelated files are ignored.
+`results/<filename-stem>/`. Unrelated files are ignored. When the directory
+contains assemblies, their MLVA_finder-compatible rows are also combined into
+`results/MLVA_analysis_<input-directory>.csv`.
 
 Analyze an assembly with FASTQ read-depth support:
 
