@@ -1,7 +1,7 @@
 # Example input files
 
 `mlvamaps_primers.example.tsv` is the recommended minimal primer format for
-MLVAMaps. It is a cleaned, headered version of the legacy MLVA_finder primer
+mlvamaps. It is a cleaned, headered version of the legacy MLVA_finder primer
 file and contains one row per VNTR locus.
 
 Required primer columns:
@@ -25,7 +25,7 @@ file. Despite the `.csv` suffix, it is whitespace-delimited:
 locus_id forward_primer reverse_primer
 ```
 
-MLVAMaps can ingest either file.
+mlvamaps can ingest either file.
 
 For assembly calls:
 
@@ -50,5 +50,5 @@ Optional columns:
 - `pool_id`: primer-pool or multiplex identifier.
 
 `amplirust_primers.example.csv` shows the comma-delimited CSV shape that
-MLVAMaps can write for `amplirust`. Users normally provide
+mlvamaps can write for `amplirust`. Users normally provide
 `mlvamaps_primers.example.tsv`, the raw legacy primer file, or `mlva_loci.tsv`.
