@@ -57,8 +57,8 @@ def run_taxon_screen(
     index_path: str | Path,
     outdir: str | Path,
     threads: int,
-    absolute_threshold: int = 2,
-    relative_threshold: float = 0.01,
+    absolute_threshold: int = 1,
+    relative_threshold: float = 0,
     executable: str = "deacon",
     progress: ProgressReporter | None = None,
 ) -> tuple[Path, Path, dict]:
