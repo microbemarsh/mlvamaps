@@ -1084,7 +1084,7 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.outdir == "results"
     assert default_call_args.threads == 32
     assert default_call_args.min_cluster_size == 1
-    assert default_call_args.min_qscore == 17.0
+    assert default_call_args.min_qscore == 15.0
     assert default_call_args.read_calling_convention == "assembly"
     assert default_call_args.sample_mode == "metagenome"
     assert default_call_args.fastq_strategy == "recruit"

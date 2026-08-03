@@ -381,7 +381,7 @@ def run_call(
     recruitment_database_path: str | None = None,
     min_read_length: int = 50,
     max_read_length: int = 100000,
-    min_qscore: float = 17.0,
+    min_qscore: float = 15.0,
     max_primer_mismatches: int = 3,
     min_depth: int = 1,
     min_posterior: float = 0.75,

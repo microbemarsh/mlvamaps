@@ -27,8 +27,8 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--taxon-screen-index DEACON_IDX` | None | Retain only reads matching a supplied target-taxon Deacon pangenome index before loading reads into MLVAMaps. See [bede/deacon-indexes](https://github.com/bede/deacon-indexes) for build information. |
-| `--taxon-screen-abs-threshold` | `2` | Required absolute number of shared minimizers. |
-| `--taxon-screen-rel-threshold` | `0.01` | Required relative proportion of shared minimizers. |
+| `--taxon-screen-abs-threshold` | `1` | Required absolute number of shared minimizers. |
+| `--taxon-screen-rel-threshold` | `0` | Required relative proportion of shared minimizers. |
 | `--deacon-bin PATH` | `deacon` | Deacon executable. |
 
 The taxon screen is opt-in. When enabled, Deacon receives the same `--threads`
@@ -39,7 +39,7 @@ summary under `taxon_screen/`.
 | --- | --- |
 | `--min-read-length` | `50` |
 | `--max-read-length` | `100000` |
-| `--min-qscore` | `17.0` (approximately 98% accuracy) |
+| `--min-qscore` | `15.0` |
 | `--sample-mode` | `metagenome` |
 | `--read-calling-convention` | `assembly` |
 | `--fastq-strategy` | `recruit` |

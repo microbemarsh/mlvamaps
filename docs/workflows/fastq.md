@@ -3,7 +3,7 @@
 The FASTQ path accepts `.fastq`, `.fq`, and gzip-compressed equivalents. It
 is intended for current high-accuracy long-read sequencing. Reads may span a
 complete primer product or cover only part of a locus. The default
-minimum mean Q score is 17, approximately 98% per-base accuracy.
+minimum mean Q score is 15, approximately 97% per-base accuracy.
 
 ```bash
 mlvamaps call primers.tsv sample.fastq.gz -o results

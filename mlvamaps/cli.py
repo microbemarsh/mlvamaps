@@ -237,10 +237,10 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument(
         "--min-qscore",
         type=float,
-        default=17.0,
+        default=15.0,
         help=(
             "Minimum mean read Phred score (default: %(default)s, approximately "
-            "98%% per-base accuracy)"
+            "97%% per-base accuracy)"
         ),
     )
     call.add_argument(
