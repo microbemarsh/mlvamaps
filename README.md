@@ -1,34 +1,26 @@
 # mlvamaps
 
-mlvamaps is a panel-driven toolkit for analyzing microbial MLVA/VNTR typing
-data from accurate amplicon or long reads containing the target products,
-assemblies, and assemblies with supporting accurate reads.
+mlvamaps is a panel-driven toolkit for microbial MLVA/VNTR typing. It accepts
+paired- or single-end Illumina reads, accurate amplicon or long reads containing
+the target products, assemblies, and assemblies with supporting reads. The same
+pipeline can be applied to any microbe with a defined primer panel and enough
+repeat metadata to interpret its products; no species, typing scheme, or profile
+database is hard-coded.
 
-It is designed to be organism-agnostic: the same pipeline can be used for any
-microbe with a defined MLVA primer panel and enough repeat metadata to interpret
-the products. mlvamaps does not hard-code one species, typing scheme, or profile
-database.
+The pipeline returns conventional repeat-copy-number fingerprints while keeping
+the sequence evidence behind every call. Its compute-intensive stages use
+native implementations: Sassy's Rust bindings provide SIMD-accelerated primer
+matching, SKESA performs required local assembly of short-read locus evidence,
+SPOARS builds partial-order consensuses for accurate reads, and minimap2 handles
+competitive and representative mapping. There is no Python short-read assembler
+fallback.
 
-mlvamaps returns conventional repeat-copy-number fingerprints while preserving
-the sequence evidence behind them:
-
-- Primer-supported locus detection in compressed or uncompressed FASTQ.
-- Built-in, SIMD-accelerated in-silico PCR in either orientation, with matching
-  behavior designed for MLVA_finder compatibility.
-- Competitive mapping of long reads to locus and repeat-product classes.
-- Per-read substitution and indel evidence within mapped product groups.
-- SPOARS partial-order assembly of dominant mapped locus products.
-- Emu-inspired expectation-maximization estimates of meaningful variant
-  fractions from mapped-read counts.
-- minimap2 mapping to sample-derived POA amplicons and
-  reference-relative SNP evidence.
-- Optional read-depth support for assembly products.
-- Dedicated individual-locus repeat-count tables and report graphics, separate
-  from the generated gel and SNP evidence.
-- Optional per-locus phylogenetic placement against a sequence database using
-  MAFFT, RAxML-NG, and EPA-ng.
-- Probabilistic locus calls, profile matching, and a
-  self-contained HTML report.
+Alongside the fingerprint, mlvamaps reports locus-level repeat counts, primer
+products, read support, substitutions and indels, meaningful secondary-variant
+fractions, profile matches, and a self-contained HTML report. Optional database
+analysis adds fixed-tree phylogenetic placement with MAFFT, RAxML-NG, and EPA-ng,
+while assembly inputs can be supplemented with read-depth evidence. Generated
+FASTA and FASTQ artifacts are gzip-compressed by default.
 
 ## Install
 
@@ -59,10 +51,17 @@ sequence libraries declared in `environment.yml`.
 
 ## Quick start
 
+Commands that consume a primer panel use `-p/--panel`, and commands that accept
+primary reads or assemblies use `-i/--input`. Short reads select their dedicated
+mode with either `-i sr` for explicit files or `-i INPUT_DIR --short-reads` for
+automatic paired-file discovery.
+
 ### Paired-end Illumina reads
 
 Illumina data use a dedicated evidence model; mates are not treated as two
-short long reads. Provide mates explicitly:
+independent long reads. The C++ SKESA assembler is required for local locus
+assembly, and a missing or failed SKESA executable is reported as an error.
+Provide one sample explicitly with `-i sr`, `--fq1`, and optional `--fq2`:
 
 ```bash
 mlvamaps call -p primers.tsv -i sr \
@@ -78,7 +77,8 @@ mlvamaps call -p primers.tsv -i sr \
 Single-end short-read input uses `-i sr --fq1 reads.fastq.gz` without `--fq2`.
 Accurate long reads and assemblies use `-i PATH`.
 
-For a directory of paired short-read samples named with exact
+For a directory of paired short-read samples, pass the directory to `-i` and
+add `--short-reads`. Files must use the exact, case-sensitive
 `PREFIX_1.fastq.gz` and `PREFIX_2.fastq.gz` suffixes:
 
 ```bash
@@ -86,8 +86,11 @@ mlvamaps call -p primers.tsv -i short_read_directory/ --short-reads \
   -o results -t 16
 ```
 
-The shared prefix becomes the sample ID. Unmatched mate files are reported as
-an error rather than treated as single-end input.
+Pair discovery is non-recursive, unrelated files are ignored, and the shared
+prefix becomes the sample ID. Every discovered prefix must have both mates;
+unmatched files stop the batch with a clear error instead of being treated as
+single-end input. Each sample is processed through the same isolated,
+resume-aware batch path used by manifest input.
 
 An exact short-read repeat count is emitted only when a local contig, merged
 pair, or original read directly resolves both repeat boundaries. Opposite
@@ -199,7 +202,9 @@ reference_sequences/VNTR_02.fasta
 Long-form sequence TSV and combined FASTA databases are also supported; see
 [input formats](docs/reference/input-formats.md#phylogenetic-sequence-database).
 
-Results are written to `results/` by default. Start with:
+Results are written to `results/` by default. Generated sequence artifacts use
+`.fasta.gz` or `.fastq.gz` names and contain real gzip-compressed data. Start
+with:
 
 - `calls.tsv` for compact per-locus calls.
 - `locus_repeat_counts.tsv` for explicit individual-locus repeat counts.
@@ -230,6 +235,8 @@ invoked.
 
 | Input | What mlvamaps assesses |
 | --- | --- |
+| Paired-end Illumina FASTQ.GZ directory (`--short-reads`) | Autodiscovers exact `PREFIX_1.fastq.gz`/`PREFIX_2.fastq.gz` pairs and runs each prefix as an isolated sample. |
+| Explicit paired- or single-end Illumina reads (`-i sr`) | Primer and mapping evidence, SKESA local locus assembly, exact or bounded repeat counts, and partial/presence-only calls when the repeat cannot be resolved. |
 | Directory of FASTA/FASTQ files | Runs each supported top-level file as a separate sample under its own output subdirectory. |
 | High-accuracy long-read FASTQ/FASTQ.GZ | Competitively recruited full and partial locus reads, presence evidence, local products, assembly-equivalent repeat counts, variants, and SNP evidence. |
 | Accurate long-read WGS/metagenomic reads | Complete products are genotyped directly; repeat-spanning partial reads can provide provisional alleles and locus-specific partial reads establish untyped presence. |
@@ -299,7 +306,15 @@ directory.
 
 ## How it works
 
-For FASTQ data, mlvamaps:
+For Illumina data, mlvamaps filters and pairs the reads, assigns evidence to
+loci, and invokes the native SKESA assembler for each locus. Exact repeat counts
+require a SKESA contig, merged pair, or original read that resolves both repeat
+boundaries. Split-flank mate evidence can produce an interval, while internal or
+single-boundary evidence remains partial or presence-only. SKESA is a required
+dependency for this path; assembler failure is retained as an explicit sample
+or locus failure and is never replaced by a Python assembly result.
+
+For accurate amplicon and long-read FASTQ data, mlvamaps:
 
 1. Filters reads by length and quality.
 2. Uses the built-in Sassy-backed engine to pair degenerate primers and orient
@@ -313,9 +328,9 @@ For FASTQ data, mlvamaps:
 7. Maps locus reads back to that POA product for support and SNP evidence.
 8. Uses supporting reads to determine confidence without redefining the
    assembly-derived allele.
-10. Builds the fingerprint, compares profiles, and writes a
+9. Builds the fingerprint, compares profiles, and writes a
     plot-first HTML report.
-11. When `--database` is supplied, separates the tandem-repeat tract from the
+10. When `--database` is supplied, separates the tandem-repeat tract from the
     SNP-bearing sequence, aligns repeat-masked references with MAFFT, infers a
     maximum-likelihood tree with RAxML-NG, and places the masked query with
     EPA-ng. It then combines normalized SNP-tree distance with the separately
