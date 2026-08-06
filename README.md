@@ -12,8 +12,7 @@ the sequence evidence behind every call. Its compute-intensive stages use
 native implementations: Sassy's Rust bindings provide SIMD-accelerated primer
 matching, SKESA performs required local assembly of short-read locus evidence,
 SPOARS builds partial-order consensuses for accurate reads, and minimap2 handles
-competitive and representative mapping. There is no Python short-read assembler
-fallback.
+competitive and representative mapping.
 
 Alongside the fingerprint, mlvamaps reports locus-level repeat counts, primer
 products, read support, substitutions and indels, meaningful secondary-variant
