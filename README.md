@@ -78,6 +78,17 @@ mlvamaps call -p primers.tsv -i sr \
 Single-end short-read input uses `-i sr --fq1 reads.fastq.gz` without `--fq2`.
 Accurate long reads and assemblies use `-i PATH`.
 
+For a directory of paired short-read samples named with exact
+`PREFIX_1.fastq.gz` and `PREFIX_2.fastq.gz` suffixes:
+
+```bash
+mlvamaps call -p primers.tsv -i short_read_directory/ --short-reads \
+  -o results -t 16
+```
+
+The shared prefix becomes the sample ID. Unmatched mate files are reported as
+an error rather than treated as single-end input.
+
 An exact short-read repeat count is emitted only when a local contig, merged
 pair, or original read directly resolves both repeat boundaries. Opposite
 flanks on separate mates yield an interval when possible. Repeat-internal or

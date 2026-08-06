@@ -15,7 +15,17 @@ to contain a valid paired-primer product. Illumina FASTQ instead uses
 read directly. Separate mate files must
 have equal record counts and the same normalized read ID in the same order.
 `/1` and `/2` suffixes and CASAVA mate annotations are recognized. Interleaved
-FASTQ is not currently accepted, and mates are never inferred from filenames.
+FASTQ is not currently accepted. In explicit `-i sr` mode, mates are never
+inferred from filenames. Paired directory mode provides opt-in filename
+discovery:
+
+```bash
+mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads -o results
+```
+
+This mode non-recursively matches exact `PREFIX_1.fastq.gz` and
+`PREFIX_2.fastq.gz` filenames. `PREFIX` becomes the sample ID. Unrelated files
+are ignored, but a matching mate filename without its partner is an error.
 
 ### Illumina manifest
 

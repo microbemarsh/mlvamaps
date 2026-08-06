@@ -23,6 +23,17 @@ Interleaved FASTQ is not supported. Compressed files are read without whole-file
 decompression. Pair files must have equal record counts and matching normalized
 IDs at every record.
 
+For multiple paired samples in one directory, filenames can supply the pairing:
+
+```bash
+mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads \
+  --sample-metadata metadata.tsv -o results -t 32
+```
+
+This recognizes exact `PREFIX_1.fastq.gz` and `PREFIX_2.fastq.gz` suffixes,
+uses `PREFIX` as the sample ID, and fails before analysis if either mate is
+missing. Discovery is non-recursive and ignores unrelated filenames.
+
 ## QC
 
 The defaults require 40 post-trim bases and mean Q15. Three-prime trimming is

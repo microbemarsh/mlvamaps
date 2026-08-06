@@ -30,6 +30,56 @@ def test_input_directory_discovers_supported_files_in_stable_order(tmp_path):
     ]
 
 
+def test_short_read_directory_discovers_exact_pairs_in_prefix_order(tmp_path):
+    inputs = tmp_path / "short_reads"
+    inputs.mkdir()
+    for name in (
+        "b_sample_2.fastq.gz",
+        "A_sample_1.fastq.gz",
+        "b_sample_1.fastq.gz",
+        "A_sample_2.fastq.gz",
+    ):
+        (inputs / name).write_bytes(b"")
+    (inputs / "ignored_R1.fastq.gz").write_bytes(b"")
+    (inputs / "notes.txt").write_text("ignored")
+
+    rows = cli._short_read_directory_rows(inputs)
+
+    assert [row["sample_id"] for row in rows] == ["A_sample", "b_sample"]
+    assert Path(rows[0]["reads1"]).name == "A_sample_1.fastq.gz"
+    assert Path(rows[0]["reads2"]).name == "A_sample_2.fastq.gz"
+
+
+def test_short_read_directory_rejects_orphaned_exact_mates(tmp_path):
+    inputs = tmp_path / "short_reads"
+    inputs.mkdir()
+    (inputs / "sample_1.fastq.gz").write_bytes(b"")
+
+    with pytest.raises(ValueError, match=r"sample \(missing mate 2\)"):
+        cli._short_read_directory_rows(inputs)
+
+
+def test_short_read_directory_cli_routes_pairs_to_batch(tmp_path, monkeypatch):
+    panel = _write_panel(tmp_path)
+    inputs = tmp_path / "short_reads"
+    inputs.mkdir()
+    (inputs / "sample_1.fastq.gz").write_bytes(b"")
+    (inputs / "sample_2.fastq.gz").write_bytes(b"")
+    observed = {}
+
+    def fake_batch(args, parser, rows):
+        observed["rows"] = rows
+        observed["short_read_mode"] = args.short_read_mode
+
+    monkeypatch.setattr(cli, "_run_short_batch", fake_batch)
+
+    assert cli.main(
+        ["call", "-p", str(panel), "-i", str(inputs), "--short-reads"]
+    ) == 0
+    assert observed["short_read_mode"] is True
+    assert [row["sample_id"] for row in observed["rows"]] == ["sample"]
+
+
 def test_call_directory_dispatches_each_file_to_its_sample_outdir(
     tmp_path, monkeypatch
 ):

@@ -127,6 +127,51 @@ def _input_files(path: str) -> list[Path]:
     return files
 
 
+def _short_read_directory_rows(path: str | Path) -> list[dict[str, str]]:
+    """Discover exact PREFIX_1/2.fastq.gz mate pairs in one directory."""
+    input_dir = Path(path)
+    if not input_dir.exists():
+        raise ValueError(f"Input path does not exist: {input_dir}")
+    if not input_dir.is_dir():
+        raise ValueError("--short-reads requires -i to name a directory")
+    suffixes = {"1": "_1.fastq.gz", "2": "_2.fastq.gz"}
+    mates: dict[str, dict[str, Path]] = {}
+    for candidate in input_dir.iterdir():
+        if not candidate.is_file():
+            continue
+        for mate, suffix in suffixes.items():
+            if candidate.name.endswith(suffix):
+                prefix = candidate.name[: -len(suffix)]
+                if prefix in {"", ".", ".."}:
+                    raise ValueError(
+                        f"Invalid short-read sample prefix in {candidate.name!r}"
+                    )
+                mates.setdefault(prefix, {})[mate] = candidate.resolve()
+                break
+    if not mates:
+        raise ValueError(
+            f"Input directory {str(input_dir)!r} contains no "
+            "PREFIX_1.fastq.gz/PREFIX_2.fastq.gz pairs"
+        )
+    incomplete = [
+        prefix for prefix, pair in sorted(mates.items()) if set(pair) != {"1", "2"}
+    ]
+    if incomplete:
+        details = ", ".join(
+            f"{prefix} (missing mate {'2' if '1' in mates[prefix] else '1'})"
+            for prefix in incomplete
+        )
+        raise ValueError(f"Unpaired short-read files: {details}")
+    return [
+        {
+            "sample_id": prefix,
+            "reads1": str(mates[prefix]["1"]),
+            "reads2": str(mates[prefix]["2"]),
+        }
+        for prefix in sorted(mates, key=str.casefold)
+    ]
+
+
 def _looks_like_loci_file(path: str) -> bool:
     with open_text(path, "rt") as handle:
         header = handle.readline().strip().lower().replace(",", "\t").split("\t")
@@ -160,10 +205,15 @@ def _resolve_panel_option(
 
 def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     _resolve_panel_option(parser, args)
-    args.short_read_mode = args.input_path == "sr"
-    if args.short_read_mode:
+    explicit_short_read_mode = args.input_path == "sr"
+    args.short_read_mode = explicit_short_read_mode or args.short_reads
+    if explicit_short_read_mode:
         args.input_path = None
-    elif args.reads1 or args.reads2:
+    if args.short_reads and (args.reads1 or args.reads2 or args.manifest):
+        parser.error("--short-reads directory mode cannot be combined with --fq1, --fq2, or --manifest")
+    if args.short_reads and explicit_short_read_mode:
+        parser.error("--short-reads requires -i DIRECTORY, not -i sr")
+    if not args.short_read_mode and (args.reads1 or args.reads2):
         parser.error("--fq1/--fq2 require the short-read selector: -i sr")
     if not args.loci and not args.primers:
         parser.error("call requires -p PANEL")
@@ -223,6 +273,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--manifest",
         metavar="TSV",
         help="Batch TSV with sample_id, reads1, and optional reads2/metadata_id columns",
+    )
+    call.add_argument(
+        "--short-reads",
+        action="store_true",
+        help=(
+            "Treat -i as a directory and pair exact PREFIX_1.fastq.gz and "
+            "PREFIX_2.fastq.gz filenames"
+        ),
     )
     call.add_argument(
         "--sample-metadata",
@@ -981,9 +1039,12 @@ def _metadata_for_manifest_row(
     )
 
 
-def _run_manifest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+def _run_short_batch(
+    args: argparse.Namespace,
+    parser: argparse.ArgumentParser,
+    rows: list[dict[str, str]],
+) -> None:
     try:
-        manifest_rows = _read_manifest(args.manifest)
         metadata_rows = read_sample_metadata(args.sample_metadata)
     except ValueError as exc:
         parser.error(str(exc))
@@ -992,7 +1053,7 @@ def _run_manifest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     statuses: list[dict[str, str]] = []
     output_root = Path(args.outdir)
     output_root.mkdir(parents=True, exist_ok=True)
-    for row in manifest_rows:
+    for row in rows:
         sample_id = row["sample_id"]
         sample_outdir = output_root / sample_id
         summary_path = sample_outdir / "sample_summary.tsv"
@@ -1046,6 +1107,14 @@ def _run_manifest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     myoga_sample_rows = [row for result in results if "myoga_samples" in result for row in _read_table(result["myoga_samples"], ",")]
     write_csv(myoga_sample_rows, output_root / "myoga_samples.csv", MYOGA_SAMPLE_FIELDS)
     _combine_tables([result["myoga_loci"] for result in results if "myoga_loci" in result], output_root / "myoga_loci.csv", ",")
+
+
+def _run_manifest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    try:
+        manifest_rows = _read_manifest(args.manifest)
+    except ValueError as exc:
+        parser.error(str(exc))
+    _run_short_batch(args, parser, manifest_rows)
 
 
 def _combine_legacy_fingerprints(
@@ -1111,6 +1180,21 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("Illumina input requires -i sr with --fq1 and optional --fq2")
         if args.manifest:
             _run_manifest(args, parser)
+            return 0
+        if args.short_reads:
+            if args.sample_id:
+                parser.error(
+                    "--sample-id cannot be used with --short-reads; sample IDs come from filename prefixes"
+                )
+            if args.reads_path or args.alignments_path:
+                parser.error(
+                    "--reads and --bam/--alignments cannot be combined with --short-reads"
+                )
+            try:
+                directory_rows = _short_read_directory_rows(args.input_path)
+            except ValueError as exc:
+                parser.error(str(exc))
+            _run_short_batch(args, parser, directory_rows)
             return 0
         try:
             metadata_rows = read_sample_metadata(args.sample_metadata)

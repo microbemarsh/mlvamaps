@@ -33,6 +33,7 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `-i sr` | Required | Select the dedicated Illumina short-read workflow. |
 | `--fq1 FASTQ` | None | Mate 1 or single-end Illumina FASTQ. |
 | `--fq2 FASTQ` | None | Mate 2; requires `--fq1`. |
+| `--short-reads` | Off | Treat `-i DIRECTORY` as paired short reads and match exact `PREFIX_1.fastq.gz`/`PREFIX_2.fastq.gz` names. |
 | `--read-technology` | `auto` | Compatibility override; `-i sr` selects Illumina automatically. |
 | `--short-min-read-length` | `40` | Minimum post-trim length. |
 | `--short-min-mean-quality` | `15` | Minimum mean Phred quality. |
@@ -46,6 +47,8 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `--skesa-bin PATH` | `skesa` | Required native assembler executable for Illumina local assembly. |
 
 Separate mates are supported. Interleaved data are not guessed or accepted.
+Directory discovery is non-recursive, uses the shared prefix as `sample_id`,
+and rejects any discovered prefix that is missing mate 1 or mate 2.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
