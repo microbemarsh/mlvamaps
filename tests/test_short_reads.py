@@ -180,6 +180,7 @@ def test_strict_overlap_merge_and_skesa_command(tmp_path):
     )
     assert command[-2:] == ["--reads", f"{tmp_path / 'r1.fastq'},{tmp_path / 'r2.fastq'}"]
     assert command[command.index("--cores") + 1] == "3"
+    assert command[command.index("--vector_percent") + 1] == "1"
 
     minimap2_command = _short_read_minimap2_command(
         "/opt/minimap2",

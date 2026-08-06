@@ -82,12 +82,17 @@ executable with `--skesa-bin PATH`.
 Up to four locus assemblies run concurrently. SKESA cores are divided from the
 global `--threads` budget, so nested jobs do not oversubscribe the requested
 CPU count. The local jobs use a small hash table appropriate for recruited
-locus reads and report contigs as short as 40 bases. Multiple contigs remain
-ambiguous and cannot create an exact call. `short_read_assembly_summary.tsv`
-reports the backend, status, contig count and length, depth estimate, and
-failure reason. `--keep-intermediates` retains each locus FASTQ, contig FASTA,
-and SKESA log under `short_read_assembly_intermediates/`. It also retains the
-native recruitment reference and mapped-read PAF files under
+locus reads and disables SKESA's whole-genome vector detector. That detector is
+not valid after locus enrichment because genuine target 19-mers occur in a
+large fraction of the recruited reads and could otherwise be clipped as vector
+sequence. Local jobs report contigs as short as 40 bases. Multiple contigs
+remain ambiguous and cannot create an exact call.
+
+`short_read_assembly_summary.tsv` reports the backend, status, contig count and
+length, depth estimate, and failure reason. `--keep-intermediates` retains each
+locus FASTQ, contig FASTA, and SKESA log under
+`short_read_assembly_intermediates/`. It also retains the native recruitment
+reference and mapped-read PAF files under
 `short_read_recruitment_intermediates/`.
 
 ## Exact, interval, and presence evidence

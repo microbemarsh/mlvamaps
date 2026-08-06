@@ -673,6 +673,11 @@ def _skesa_command(
         "--skip_bloom_filter",
         "--estimated_kmers",
         "1",
+        # These are already locus-enriched reads. SKESA's default vector
+        # detector would mistake shared target 19-mers for adapter sequence
+        # because they occur in far more than 5% of this small read set.
+        "--vector_percent",
+        "1",
         "--min_contig",
         "40",
         "--contigs_out",
