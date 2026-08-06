@@ -1,6 +1,6 @@
-# Adapting MLVAMaps to a new organism or MLVA scheme
+# Adapting mlvamaps to a new organism or MLVA scheme
 
-MLVAMaps is organism-agnostic. Supporting another bacterium, fungus, parasite,
+mlvamaps is organism-agnostic. Supporting another bacterium, fungus, parasite,
 or other microbe is primarily a panel-definition and validation task rather
 than a code change.
 
@@ -46,7 +46,7 @@ convert representative-mapping positions into genomic coordinates.
 Run representative assemblies whose expected MLVA results are already known:
 
 ```bash
-mlvamaps call new_panel.tsv known_assembly.fasta -o validation/assembly
+mlvamaps call -p new_panel.tsv -i known_assembly.fasta -o validation/assembly
 ```
 
 Check:
@@ -60,7 +60,7 @@ Check:
 ## 5. Validate with amplicon reads
 
 ```bash
-mlvamaps call new_panel.tsv known_amplicons.fastq.gz -o validation/reads
+mlvamaps call -p new_panel.tsv -i known_amplicons.fastq.gz -o validation/reads
 ```
 
 Inspect assignment, repeat features, mapped product groups, SPOARS assemblies,
@@ -93,12 +93,12 @@ Before operational use, define:
 ## 8. Preserve validation evidence
 
 Keep the panel version, source publications, known sample results, command
-lines, MLVAMaps version, and complete output directories. A profile match is
+lines, mlvamaps version, and complete output directories. A profile match is
 only meaningful when the typing scheme and panel version are traceable.
 
 ## Current scope
 
-MLVAMaps can use any microbial MLVA scheme expressible as paired primers plus
+mlvamaps can use any microbial MLVA scheme expressible as paired primers plus
 repeat/product metadata. It does not yet discover VNTR panels automatically,
 translate between incompatible allele-numbering schemes, or validate a new
 scheme without known truth data.

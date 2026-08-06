@@ -17,7 +17,7 @@ setup(
         "Repository": "https://github.com/microbemarsh/mlvamaps",
         "Issues": "https://github.com/microbemarsh/mlvamaps/issues",
     },
-    author="MLVAMaps contributors",
+    author="mlvamaps contributors",
     license="GPL-3.0-only",
     keywords=["mlva", "vntr", "amplicon", "genotyping", "bioinformatics"],
     classifiers=[

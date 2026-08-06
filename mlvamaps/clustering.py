@@ -9,6 +9,7 @@ from pathlib import Path
 
 import parasail
 
+from .io import gzip_output_file
 from .models import Locus, RepeatFeature
 
 
@@ -228,6 +229,8 @@ def _cluster_one_locus(
                 f"VSEARCH cluster at locus {locus_id} could not be expanded to reads"
             )
         expanded.append((centroid, read_ids))
+    gzip_output_file(uniques)
+    gzip_output_file(centroids)
     return expanded
 
 
@@ -392,4 +395,7 @@ def cluster_vntr_asvs(
 
     if alignment_executor is not None:
         alignment_executor.shutdown()
+    for _locus_id, input_path in inputs:
+        if input_path.is_file():
+            gzip_output_file(input_path)
     return table, fasta, memberships

@@ -7,7 +7,7 @@ from pathlib import Path
 from .assembly_call import ASSEMBLY_ALGORITHMS, run_assembly_call
 from .concurrency import DEFAULT_THREADS
 from .in_silico_pcr import run_in_silico_pcr
-from .io import open_text
+from .io import open_text, write_tsv
 from .pipeline import run_call
 from .reference_builder import build_reference_database
 from .reference_pipeline import (
@@ -16,6 +16,9 @@ from .reference_pipeline import (
     read_taxon_references,
 )
 from .simulation import simulate_reads
+from .sample_metadata import MYOGA_SAMPLE_FIELDS, metadata_by_sample, read_sample_metadata, write_csv
+from .short_reads import SAMPLE_SUMMARY_FIELDS, run_short_read_call
+from .validation import run_validation
 
 
 FASTQ_SUFFIXES = (".fastq", ".fq", ".fastq.gz", ".fq.gz")
@@ -142,39 +145,32 @@ def _set_panel_path(args: argparse.Namespace, path: str) -> None:
         args.primers = path
 
 
-def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    paths = list(args.paths)
-    if len(paths) > 2:
-        parser.error(
-            "call accepts at most two positional paths: primers.tsv and a "
-            "FASTQ/FASTA file or input directory"
-        )
-    if len(paths) == 2:
-        if not args.loci and not args.primers:
-            _set_panel_path(args, paths[0])
-        elif not args.input_path:
-            parser.error("call got two positional paths plus --primers/--loci; pass only the sample path positionally")
-        if not args.input_path:
-            args.input_path = paths[1]
-    elif len(paths) == 1:
-        if args.loci or args.primers:
-            if not args.input_path:
-                args.input_path = paths[0]
-        elif args.input_path:
-            _set_panel_path(args, paths[0])
-        else:
-            parser.error("call needs both a primer file and an input file")
+def _resolve_panel_option(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    panel_path = getattr(args, "panel_path", None)
+    if not panel_path:
+        return
+    if getattr(args, "loci", None) or getattr(args, "primers", None):
+        parser.error("provide exactly one panel with -p/--panel")
+    if not Path(panel_path).is_file():
+        parser.error(f"panel does not exist: {panel_path}")
+    _set_panel_path(args, panel_path)
 
-    if not args.input_path and args.reads_path:
-        args.input_path = args.reads_path
-        args.reads_path = None
+
+def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    _resolve_panel_option(parser, args)
+    args.short_read_mode = args.input_path == "sr"
+    if args.short_read_mode:
+        args.input_path = None
+    elif args.reads1 or args.reads2:
+        parser.error("--fq1/--fq2 require the short-read selector: -i sr")
     if not args.loci and not args.primers:
-        parser.error(
-            "call requires a primer file, for example: "
-            "mlvamaps call primers.tsv sample.fastq.gz"
-        )
-    if not args.input_path:
-        parser.error("call requires an input FASTQ/FASTA file or a directory containing them")
+        parser.error("call requires -p PANEL")
+    if not args.input_path and not args.reads1 and not args.manifest:
+        if args.short_read_mode:
+            parser.error("-i sr requires --fq1 FASTQ or --manifest TSV")
+        parser.error("call requires -i INPUT")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -189,30 +185,67 @@ def build_parser() -> argparse.ArgumentParser:
         help="Call VNTRs from primers plus FASTQ/FASTA files or a directory",
         epilog=(
             "Examples:\n"
-            "  mlvamaps call primers.tsv sample.fastq.gz\n"
-            "  mlvamaps call primers.tsv assembly.fasta\n"
-            "  mlvamaps call primers.tsv sequence_files/\n"
-            "  mlvamaps call primers.tsv assembly.fasta --reads sample.fastq.gz\n"
-            "  mlvamaps call primers.tsv assembly.fasta --bam assembly_reads.bam"
+            "  mlvamaps call -p primers.tsv -i sample.fastq.gz\n"
+            "  mlvamaps call -p primers.tsv -i assembly.fasta\n"
+            "  mlvamaps call -p primers.tsv -i sequence_files/\n"
+            "  mlvamaps call -p primers.tsv -i sr --fq1 R1.fastq.gz --fq2 R2.fastq.gz"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     call.add_argument(
-        "paths",
-        nargs="*",
-        metavar="PATH",
-        help="primers.tsv plus a FASTQ/FASTA file or directory",
-    )
-    call.add_argument(
+        "-i",
         "--input",
         dest="input_path",
-        metavar="PATH",
-        help="FASTQ/FASTA file or directory containing supported sequence files",
+        required=True,
+        metavar="INPUT",
+        help="FASTQ/FASTA path or directory; use 'sr' with --fq1/--fq2 for short reads",
     )
     call.add_argument("--reads", dest="reads_path", metavar="FASTQ", help="Reads to map for assembly depth support")
+    call.add_argument(
+        "--fq1",
+        dest="reads1",
+        metavar="FASTQ",
+        help="Mate 1 or single-end Illumina FASTQ (explicit short-read interface)",
+    )
+    call.add_argument(
+        "--fq2",
+        dest="reads2",
+        metavar="FASTQ",
+        help="Mate 2 Illumina FASTQ; records must be in the same order as --fq1",
+    )
+    call.add_argument(
+        "--read-technology",
+        choices=("auto", "illumina", "accurate-long"),
+        default="auto",
+        help="Read evidence model compatibility override (default: %(default)s; -i sr selects Illumina)",
+    )
+    call.add_argument(
+        "--manifest",
+        metavar="TSV",
+        help="Batch TSV with sample_id, reads1, and optional reads2/metadata_id columns",
+    )
+    call.add_argument(
+        "--sample-metadata",
+        metavar="CSV_OR_TSV",
+        help="One-row-per-sample metadata joined by sample_id and exported for MYOGA",
+    )
+    call.add_argument("--force", action="store_true", help="Reprocess successful manifest samples")
+    call.add_argument("--keep-intermediates", action="store_true", help="Retain short-read intermediate files")
+    call.add_argument(
+        "--skesa-bin",
+        default="skesa",
+        metavar="PATH",
+        help="SKESA executable used for required Illumina local assembly (default: %(default)s)",
+    )
     call.add_argument("--bam", "--alignments", dest="alignments_path", metavar="BAM/SAM", help="Assembly-aligned BAM/SAM for assembly depth support")
-    call.add_argument("--loci")
-    call.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
+    call.add_argument(
+        "-p",
+        "--panel",
+        dest="panel_path",
+        required=True,
+        help="Primer list or rich locus panel used by the calling pipeline",
+    )
+    call.set_defaults(loci=None, primers=None)
     call.add_argument("--profiles")
     call.add_argument(
         "--database",
@@ -232,6 +265,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output directory (default: %(default)s)",
     )
     call.add_argument("--sample-id")
+    call.add_argument("--short-min-read-length", type=_positive_int, default=40)
+    call.add_argument("--short-min-mean-quality", type=_nonnegative_float, default=15.0)
+    call.add_argument("--short-trim-quality", type=_nonnegative_int, default=0)
+    call.add_argument("--short-min-pair-retention", type=_fraction, default=0.5)
+    call.add_argument(
+        "--short-min-informative-molecules",
+        type=_positive_int,
+        default=3,
+        help="Informative molecules required to avoid Illumina LOW_DEPTH (default: %(default)s)",
+    )
     call.add_argument("--min-read-length", type=int, default=50)
     call.add_argument("--max-read-length", type=int, default=100000)
     call.add_argument(
@@ -515,7 +558,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     simulate = subparsers.add_parser("simulate", help="Simulate amplicon reads for a VNTR panel")
-    simulate.add_argument("--loci", required=True)
+    simulate.add_argument("-p", "--panel", dest="loci", required=True)
     simulate.add_argument("--profile", dest="profiles")
     simulate.add_argument("--profile-id")
     simulate.add_argument("--sample-id", required=True)
@@ -530,9 +573,15 @@ def build_parser() -> argparse.ArgumentParser:
         "extract-amplicons",
         help="Extract MLVA_finder-compatible amplicons from FASTA with Sassy",
     )
-    extract.add_argument("--input", required=True, help="Input FASTA, optionally gzip-compressed")
-    extract.add_argument("--loci")
-    extract.add_argument("--primers", help="Primer-pair CSV/TSV/whitespace file with locus, forward, reverse columns")
+    extract.add_argument("-i", "--input", required=True, help="Input FASTA, optionally gzip-compressed")
+    extract.add_argument(
+        "-p",
+        "--panel",
+        dest="panel_path",
+        required=True,
+        help="Primer list or rich locus panel",
+    )
+    extract.set_defaults(loci=None, primers=None)
     extract.add_argument(
         "-o",
         "--output",
@@ -600,7 +649,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reference_source = reference.add_mutually_exclusive_group(required=True)
     reference_source.add_argument(
-        "--assemblies", help="Directory containing reference FASTA assemblies"
+        "-i",
+        "--input",
+        dest="assemblies",
+        help="Directory containing reference FASTA assemblies",
     )
     reference_source.add_argument("--taxid", help="Single NCBI taxonomy identifier")
     reference_source.add_argument(
@@ -608,14 +660,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="CSV/TSV with a taxid column and optional name column",
     )
     panel = reference.add_mutually_exclusive_group(required=True)
-    panel.add_argument("--primers", help="Primer-pair CSV/TSV with locus, forward, and reverse columns")
     panel.add_argument(
-        "--loci",
-        help="Rich loci CSV/TSV (recommended when repeat motif/flanks are known)",
+        "-p",
+        "--panel",
+        dest="panel_path",
+        help="Primer list or rich locus panel",
     )
+    reference.set_defaults(loci=None, primers=None)
     reference.add_argument(
         "--metadata",
-        help="Reference metadata CSV/TSV; required with --assemblies",
+        help="Reference metadata CSV/TSV; required with local assembly input via -i",
     )
     reference.add_argument("-o", "--output", "--outdir", dest="outdir", default="reference_build")
     reference.add_argument(
@@ -672,6 +726,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="DNA",
         help="RAxML-NG nucleotide model or model-selection set (default: %(default)s)",
     )
+
+    validate = subparsers.add_parser(
+        "validate",
+        help="Compare assembly-truth calls with long-read and Illumina results",
+    )
+    validate.add_argument("--truth", required=True, help="Assembly-truth calls.tsv")
+    validate.add_argument("--long-read", help="Accurate-long-read calls.tsv")
+    validate.add_argument("--illumina", help="Illumina calls.tsv")
+    validate.add_argument("-o", "--output", "--outdir", dest="outdir", required=True)
     return parser
 
 
@@ -800,6 +863,191 @@ def _run_single_input(
     return result
 
 
+def _run_short_input(
+    args: argparse.Namespace,
+    reads1: Path,
+    reads2: Path | None,
+    outdir: Path,
+    sample_id: str,
+    metadata: dict[str, str] | None = None,
+) -> dict[str, Path]:
+    result = run_short_read_call(
+        reads1_path=str(reads1),
+        reads2_path=None if reads2 is None else str(reads2),
+        loci_path=args.loci,
+        primers_path=args.primers,
+        profiles_path=args.profiles,
+        database_path=args.database or args.recruitment_database,
+        outdir=str(outdir),
+        sample_id=sample_id,
+        sample_metadata=metadata,
+        short_min_read_length=args.short_min_read_length,
+        short_min_mean_quality=args.short_min_mean_quality,
+        short_trim_quality=args.short_trim_quality,
+        short_min_pair_retention=args.short_min_pair_retention,
+        min_depth=args.short_min_informative_molecules,
+        threads=args.threads,
+        keep_intermediates=args.keep_intermediates,
+        sample_mode=args.sample_mode,
+        skesa_bin=args.skesa_bin,
+    )
+    print(f"Wrote conservative Illumina calls to {result['calls']}")
+    print(f"Wrote short-read QC to {result['short_read_qc']}")
+    print(f"Wrote locus recruitment to {result['short_read_recruitment']}")
+    print(f"Wrote local assembly evidence to {result['short_read_assembly']}")
+    print(f"Wrote MYOGA metadata to {result['myoga_samples']}")
+    print(f"Wrote report to {result['report']}")
+    return result
+
+
+def _read_manifest(path: str | Path) -> list[dict[str, str]]:
+    manifest_path = Path(path)
+    with open_text(manifest_path, "rt") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        fields = {str(field).strip().lower() for field in (reader.fieldnames or [])}
+        if not {"sample_id", "reads1"}.issubset(fields):
+            raise ValueError("manifest requires sample_id and reads1 columns")
+        rows = [
+            {
+                str(key).strip().lower(): "" if value is None else str(value).strip()
+                for key, value in row.items()
+                if key is not None
+            }
+            for row in reader
+        ]
+    sample_ids = [row.get("sample_id", "") for row in rows]
+    if any(not sample_id for sample_id in sample_ids):
+        raise ValueError("manifest sample_id values cannot be empty")
+    duplicates = sorted(
+        sample_id for sample_id in set(sample_ids) if sample_ids.count(sample_id) > 1
+    )
+    if duplicates:
+        raise ValueError("manifest sample_id values must be unique: " + ", ".join(duplicates))
+    base = manifest_path.parent
+    for row in rows:
+        for field in ("reads1", "reads2"):
+            value = row.get(field, "")
+            if value in ("", "."):
+                row[field] = ""
+            else:
+                candidate = Path(value)
+                row[field] = str(candidate if candidate.is_absolute() else base / candidate)
+    return rows
+
+
+def _read_table(path: Path, delimiter: str = "\t") -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        return list(csv.DictReader(handle, delimiter=delimiter))
+
+
+def _combine_tables(paths: list[Path], output: Path, delimiter: str = "\t") -> Path:
+    rows: list[dict[str, str]] = []
+    fields: list[str] = []
+    for path in paths:
+        if not path.exists():
+            continue
+        for row in _read_table(path, delimiter):
+            rows.append(row)
+            for field in row:
+                if field not in fields:
+                    fields.append(field)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + ".tmp")
+    with temporary.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, delimiter=delimiter)
+        writer.writeheader()
+        writer.writerows(rows)
+    temporary.replace(output)
+    return output
+
+
+def _metadata_for_manifest_row(
+    row: dict[str, str],
+    by_sample: dict[str, dict[str, str]],
+    metadata_rows: list[dict[str, str]],
+) -> dict[str, str] | None:
+    if row["sample_id"] in by_sample:
+        return by_sample[row["sample_id"]]
+    metadata_id = row.get("metadata_id", "")
+    if not metadata_id:
+        return None
+    return next(
+        (
+            metadata
+            for metadata in metadata_rows
+            if metadata_id in {metadata.get("biosample", ""), metadata.get("run_accession", "")}
+        ),
+        None,
+    )
+
+
+def _run_manifest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    try:
+        manifest_rows = _read_manifest(args.manifest)
+        metadata_rows = read_sample_metadata(args.sample_metadata)
+    except ValueError as exc:
+        parser.error(str(exc))
+    by_sample = metadata_by_sample(metadata_rows)
+    results: list[dict[str, Path]] = []
+    statuses: list[dict[str, str]] = []
+    output_root = Path(args.outdir)
+    output_root.mkdir(parents=True, exist_ok=True)
+    for row in manifest_rows:
+        sample_id = row["sample_id"]
+        sample_outdir = output_root / sample_id
+        summary_path = sample_outdir / "sample_summary.tsv"
+        if summary_path.exists() and not args.force:
+            summary_rows = _read_table(summary_path)
+            if summary_rows and summary_rows[0].get("run_status") == "success":
+                statuses.append({"sample_id": sample_id, "status": "skipped_success", "message": "existing successful result; use --force to rerun"})
+                results.append({
+                    "calls": sample_outdir / "calls.tsv",
+                    "repeat_counts": sample_outdir / "locus_repeat_counts.tsv",
+                    "fingerprint": sample_outdir / "mlva_fingerprint.tsv",
+                    "profile_matches": sample_outdir / "profile_matches.tsv",
+                    "profile_match_loci": sample_outdir / "profile_match_loci.tsv",
+                    "sample_summary": summary_path,
+                    "myoga_samples": sample_outdir / "myoga_samples.csv",
+                    "myoga_loci": sample_outdir / "myoga_loci.csv",
+                })
+                continue
+        reads1 = Path(row["reads1"])
+        reads2 = Path(row["reads2"]) if row.get("reads2") else None
+        try:
+            if not reads1.is_file():
+                raise ValueError(f"reads1 does not exist: {reads1}")
+            if reads2 is not None and not reads2.is_file():
+                raise ValueError(f"reads2 does not exist: {reads2}")
+            print(f"Processing Illumina sample {sample_id}")
+            result = _run_short_input(
+                args,
+                reads1,
+                reads2,
+                sample_outdir,
+                sample_id,
+                _metadata_for_manifest_row(row, by_sample, metadata_rows),
+            )
+            results.append(result)
+            statuses.append({"sample_id": sample_id, "status": "success", "message": ""})
+        except Exception as exc:
+            statuses.append({"sample_id": sample_id, "status": "failed", "message": f"{type(exc).__name__}: {exc}"})
+            print(f"Sample {sample_id} failed: {type(exc).__name__}: {exc}")
+    write_tsv(statuses, output_root / "batch_status.tsv", ["sample_id", "status", "message"])
+    table_keys = {
+        "calls": "calls.tsv",
+        "repeat_counts": "locus_repeat_counts.tsv",
+        "fingerprint": "mlva_fingerprint.tsv",
+        "profile_matches": "profile_matches.tsv",
+        "profile_match_loci": "profile_match_loci.tsv",
+        "sample_summary": "sample_summary.tsv",
+    }
+    for key, filename in table_keys.items():
+        _combine_tables([result[key] for result in results if key in result], output_root / filename)
+    myoga_sample_rows = [row for result in results if "myoga_samples" in result for row in _read_table(result["myoga_samples"], ",")]
+    write_csv(myoga_sample_rows, output_root / "myoga_samples.csv", MYOGA_SAMPLE_FIELDS)
+    _combine_tables([result["myoga_loci"] for result in results if "myoga_loci" in result], output_root / "myoga_loci.csv", ",")
+
+
 def _combine_legacy_fingerprints(
     fingerprint_paths: list[Path], output_path: Path
 ) -> Path:
@@ -846,8 +1094,48 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "call":
         _resolve_call_args(parser, args)
+        if args.reads2 and not args.reads1:
+            parser.error("--fq2 requires --fq1")
+        if args.manifest and not args.short_read_mode:
+            parser.error("--manifest requires the short-read selector: -i sr")
+        explicit_sources = sum(bool(value) for value in (args.input_path, args.reads1, args.manifest))
+        if explicit_sources != 1:
+            parser.error("choose exactly one sample source with -i INPUT or -i sr")
+        if args.manifest and args.sample_id:
+            parser.error("--sample-id cannot be used with --manifest; sample IDs come from the manifest")
+        if args.manifest and args.read_technology == "accurate-long":
+            parser.error("--manifest currently implements the Illumina evidence model only")
+        if args.short_read_mode and args.read_technology == "accurate-long":
+            parser.error("-i sr selects Illumina and cannot use --read-technology accurate-long")
+        if not args.short_read_mode and args.read_technology == "illumina":
+            parser.error("Illumina input requires -i sr with --fq1 and optional --fq2")
+        if args.manifest:
+            _run_manifest(args, parser)
+            return 0
+        try:
+            metadata_rows = read_sample_metadata(args.sample_metadata)
+        except ValueError as exc:
+            parser.error(str(exc))
+        sample_metadata = metadata_by_sample(metadata_rows)
         if args.reads_path and args.alignments_path:
             parser.error("call accepts either --reads or --bam/--alignments for assembly depth support, not both")
+        if args.reads1:
+            reads1 = Path(args.reads1)
+            reads2 = Path(args.reads2) if args.reads2 else None
+            if not reads1.is_file():
+                parser.error(f"--fq1 does not exist: {reads1}")
+            if reads2 is not None and not reads2.is_file():
+                parser.error(f"--fq2 does not exist: {reads2}")
+            technology = "illumina" if args.short_read_mode else args.read_technology
+            if reads2 is not None and technology != "illumina":
+                parser.error("paired --fq1/--fq2 input requires Illumina mode")
+            sample_id = args.sample_id or _sample_id_from_path(str(reads1))
+            metadata = sample_metadata.get(sample_id)
+            if technology == "illumina":
+                _run_short_input(args, reads1, reads2, Path(args.outdir), sample_id, metadata)
+            else:
+                _run_single_input(args, reads1, Path(args.outdir), sample_id)
+            return 0
         try:
             input_files = _input_files(args.input_path)
         except ValueError as exc:
@@ -872,7 +1160,20 @@ def main(argv: list[str] | None = None) -> int:
             outdir = Path(args.outdir) / sample_id if batch else Path(args.outdir)
             if batch:
                 print(f"Processing {input_path} as sample {sample_id}")
-            result = _run_single_input(args, input_path, outdir, sample_id)
+            technology = args.read_technology
+            if technology == "illumina":
+                if _input_kind(str(input_path)) != "fastq":
+                    parser.error("--read-technology illumina requires FASTQ input; assembly plus Illumina support must use a separate call")
+                result = _run_short_input(
+                    args,
+                    input_path,
+                    None,
+                    outdir,
+                    sample_id,
+                    sample_metadata.get(sample_id),
+                )
+            else:
+                result = _run_single_input(args, input_path, outdir, sample_id)
             if result and "legacy_fingerprint" in result:
                 legacy_fingerprints.append(Path(result["legacy_fingerprint"]))
         if batch and legacy_fingerprints:
@@ -896,9 +1197,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote simulated reads to {result['reads']}")
         print(f"Wrote truth profile to {result['truth']}")
         return 0
+    if args.command == "validate":
+        try:
+            result = run_validation(
+                args.truth,
+                args.outdir,
+                long_read_path=args.long_read,
+                illumina_path=args.illumina,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"Wrote locus validation details to {result['details']}")
+        print(f"Wrote validation metrics to {result['summary']}")
+        return 0
     if args.command == "extract-amplicons":
+        _resolve_panel_option(parser, args)
         if not args.loci and not args.primers:
-            parser.error("extract-amplicons requires either --loci or --primers")
+            parser.error("extract-amplicons requires -p PANEL")
         result = run_in_silico_pcr(
             input_path=args.input,
             loci_path=args.loci,
@@ -935,10 +1250,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
     if args.command == "build-reference":
+        _resolve_panel_option(parser, args)
         if args.assemblies and not args.metadata:
-            parser.error("build-reference with --assemblies also requires --metadata")
+            parser.error("build-reference with -i ASSEMBLIES also requires --metadata")
         if not args.assemblies and args.metadata:
-            parser.error("--metadata is only accepted with --assemblies")
+            parser.error("--metadata is only accepted with -i ASSEMBLIES")
         if not args.assemblies:
             references = read_taxon_references(
                 taxid=args.taxid, taxids_csv=args.taxids_csv

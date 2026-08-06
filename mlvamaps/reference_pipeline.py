@@ -1,4 +1,4 @@
-"""Prepare NCBI taxon cohorts and build isolated MLVAMaps references."""
+"""Prepare NCBI taxon cohorts and build isolated mlvamaps references."""
 
 from __future__ import annotations
 
@@ -505,7 +505,7 @@ def build_taxon_references(
     show_progress: bool = False,
     builder: Callable[..., dict[str, Path]] = build_reference_database,
 ) -> dict[str, Any]:
-    """Prepare and build one isolated MLVAMaps database per taxid."""
+    """Prepare and build one isolated mlvamaps database per taxid."""
     output = Path(outdir).resolve()
     output.mkdir(parents=True, exist_ok=True)
     results = []

@@ -1,5 +1,10 @@
 # Example input files
 
+`make_illumina_example.py` creates a tiny offline paired-end dataset, rich
+panel, truth assembly, and SRA-style metadata. See the
+[Illumina workflow](../docs/workflows/illumina.md#synthetic-worked-example) for
+the complete call, validation, and MYOGA commands.
+
 `mlvamaps_primers.example.tsv` is the recommended minimal primer format for
 mlvamaps. It is a cleaned, headered version of the legacy MLVA_finder primer
 file and contains one row per VNTR locus.
@@ -8,7 +13,7 @@ Required primer columns:
 
 - `locus_id`: stable locus name used in all outputs.
 - `forward_primer`: forward primer sequence, 5' to 3'.
-- `reverse_primer`: reverse primer oligo sequence, 5' to 3'. MLVAMaps searches
+- `reverse_primer`: reverse primer oligo sequence, 5' to 3'. mlvamaps searches
   for its reverse complement in oriented reads.
 
 Important VNTR columns:
@@ -30,16 +35,16 @@ mlvamaps can ingest either file.
 For assembly calls:
 
 ```bash
-mlvamaps call examples/seer_lab_Ba/mlvamaps_primers.example.tsv assembly.fasta
+mlvamaps call -p examples/seer_lab_Ba/mlvamaps_primers.example.tsv -i assembly.fasta
 ```
 
 For FASTQ reads:
 
 ```bash
-mlvamaps call examples/seer_lab_Ba/mlvamaps_primers.example.tsv reads.fastq.gz
+mlvamaps call -p examples/seer_lab_Ba/mlvamaps_primers.example.tsv -i reads.fastq.gz
 ```
 
-`mlva_loci.example.tsv` is the richer optional format for MLVAMaps. It includes
+`mlva_loci.example.tsv` is the richer optional format for mlvamaps. It includes
 primer sequences plus repeat motif, flank, coordinate, and amplicon metadata.
 
 Optional columns:

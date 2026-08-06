@@ -562,7 +562,7 @@ def test_legacy_amplirust_primer_export_and_removed_command(tmp_path):
     assert primer_rows[0] == {"name": "VNTR_01", "forward": "ACGTTGCAAC", "reverse": "TGCATGCAAA"}
     assert expected_amplicon_bounds(loci) == (30, 90)
 
-    with pytest.raises(RuntimeError, match="replaced by MLVAMaps"):
+    with pytest.raises(RuntimeError, match="replaced by mlvamaps"):
         build_amplirust_command(
             input_path="assembly.fasta",
             primers_path=primers,
@@ -685,7 +685,7 @@ def test_assembly_call_from_primer_products(tmp_path):
     assert calls["VNTR_01"]["mean_coverage"] == "1.5"
     assert calls["VNTR_02"]["present"] == "no"
     report = result["report"].read_text()
-    assert "MLVAMaps Assembly Report: ASM1" in report
+    assert "mlvamaps Assembly Report: ASM1" in report
     assert "VNTR_01" in report
     assert "Assembly Amplicons" in report
     assert "Generated MLVA assembly gel electrophoresis image" in report
@@ -1047,7 +1047,9 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
     exit_code = main(
         [
             "call",
+            "-p",
             str(loci),
+            "-i",
             str(sim["reads"]),
             "--outdir",
             str(tmp_path / "cli_results"),
@@ -1074,13 +1076,17 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
 
 def test_cli_has_conventional_output_and_thread_options():
     parser = build_parser()
-    call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz", "-o", "run", "-t", "4"])
+    call_args = parser.parse_args(
+        ["call", "-p", "primers.tsv", "-i", "sample.fastq.gz", "-o", "run", "-t", "4"]
+    )
     assert call_args.outdir == "run"
     assert call_args.threads == 4
     assert call_args.min_depth == 1
     assert call_args.repeat_range_tolerance == 1.0
 
-    default_call_args = parser.parse_args(["call", "primers.tsv", "sample.fastq.gz"])
+    default_call_args = parser.parse_args(
+        ["call", "-p", "primers.tsv", "-i", "sample.fastq.gz"]
+    )
     assert default_call_args.outdir == "results"
     assert default_call_args.threads == 32
     assert default_call_args.min_cluster_size == 1
@@ -1111,11 +1117,31 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.raxml_model == "DNA"
 
     novel_call_args = parser.parse_args(
-        ["call", "primers.tsv", "assembly.fasta", "--algorithm", "novel"]
+        ["call", "-p", "primers.tsv", "-i", "assembly.fasta", "--algorithm", "novel"]
     )
     assert novel_call_args.algorithm == "novel"
 
-    extract_args = parser.parse_args(["extract-amplicons", "--input", "assembly.fasta", "--primers", "p.tsv"])
+    short_call_args = parser.parse_args(
+        [
+            "call",
+            "-p",
+            "primers.tsv",
+            "-i",
+            "sr",
+            "--fq1",
+            "reads_1.fastq.gz",
+            "--fq2",
+            "reads_2.fastq.gz",
+        ]
+    )
+    assert short_call_args.panel_path == "primers.tsv"
+    assert short_call_args.input_path == "sr"
+    assert short_call_args.reads1 == "reads_1.fastq.gz"
+    assert short_call_args.reads2 == "reads_2.fastq.gz"
+
+    extract_args = parser.parse_args(
+        ["extract-amplicons", "-i", "assembly.fasta", "-p", "p.tsv"]
+    )
     assert extract_args.threads == 32
 
 

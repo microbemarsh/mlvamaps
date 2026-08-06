@@ -7,6 +7,7 @@ from pathlib import Path
 from .assembly_call import pcr_rows_to_products
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
+from .io import open_text
 from .models import Locus
 from .phylogeny import (
     REFERENCE_ASSEMBLY_FIELDS,
@@ -165,7 +166,7 @@ def _match_assemblies(
 
 def _write_fasta(records: list[tuple[str, str]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as handle:
+    with open_text(path, "wt") as handle:
         for name, sequence in records:
             handle.write(f">{name}\n")
             for offset in range(0, len(sequence), 80):
@@ -351,7 +352,8 @@ def build_reference_database(
 
     for locus in loci:
         records = records_by_locus[locus.locus_id]
-        fasta_path = database_dir / f"{locus.locus_id}.fasta"
+        fasta_path = database_dir / f"{locus.locus_id}.fasta.gz"
+        (database_dir / f"{locus.locus_id}.fasta").unlink(missing_ok=True)
         fasta_path.unlink(missing_ok=True)
         if records:
             _write_fasta(records, fasta_path)

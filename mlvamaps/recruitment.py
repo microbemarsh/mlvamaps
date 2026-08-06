@@ -71,7 +71,11 @@ def _database_root(database_path: str | Path | None, loci: list[Locus]) -> Path 
     path = Path(database_path)
     candidates = [path, path / "database"]
     for candidate in candidates:
-        if any((candidate / f"{locus.locus_id}.fasta").exists() for locus in loci):
+        if any(
+            (candidate / f"{locus.locus_id}.fasta.gz").exists()
+            or (candidate / f"{locus.locus_id}.fasta").exists()
+            for locus in loci
+        ):
             return candidate
     return None
 
@@ -81,7 +85,12 @@ def _canonical_product(
     database_root: Path | None,
 ) -> tuple[str, str]:
     if database_root is not None:
-        path = database_root / f"{locus.locus_id}.fasta"
+        compressed_path = database_root / f"{locus.locus_id}.fasta.gz"
+        path = (
+            compressed_path
+            if compressed_path.exists()
+            else database_root / f"{locus.locus_id}.fasta"
+        )
         if path.exists():
             records = list(read_fasta(path))
             if records:
@@ -725,12 +734,12 @@ def run_read_recruitment(
     outdir = Path(outdir)
     root = outdir / "recruitment"
     root.mkdir(parents=True, exist_ok=True)
-    references_path = root / "locus_recruitment_references.fasta"
-    reads_path = root / "filtered_reads.fastq"
+    references_path = root / "locus_recruitment_references.fasta.gz"
+    reads_path = root / "filtered_reads.fastq.gz"
     sam_path = root / "read_recruitment.sam"
     read_rows_path = outdir / "locus_recruited_reads.tsv"
     summary_path = outdir / "locus_presence.tsv"
-    local_products_path = outdir / "local_locus_products.fasta"
+    local_products_path = outdir / "local_locus_products.fasta.gz"
     references = build_recruitment_references(loci, database_path)
     write_fasta(
         (

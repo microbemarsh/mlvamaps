@@ -2,16 +2,18 @@
 
 This directory is a staging area for the future bioconda recipe. The actual
 recipe should be submitted to the external `bioconda/bioconda-recipes`
-repository after MLVAMaps has a tagged GitHub release.
+repository after mlvamaps has a tagged GitHub release.
 
 Current packaging assumptions:
 
-- MLVAMaps is pure Python, so the recipe should use `noarch: python`.
+- mlvamaps is pure Python, so the recipe should use `noarch: python`.
 - `mlvamaps` is the console script.
 - `minimap2` should be a runtime dependency because FASTQ calls map all
   primer-oriented locus reads to the dominant observed representative amplicon
   and report reference-relative SNP evidence by default. Assembly calls also
   use it to map accurate reads back to extracted products for depth support.
+- `skesa` is a required runtime dependency for native Illumina local assembly;
+  no Python assembler is bundled as a fallback.
 - `sassy-rs>=0.2.6` must be packaged separately for Bioconda. Its Python
   binding powers native in-silico PCR and bounded flank localization.
 - `parasail` supplies exact global tracebacks used to reconstruct per-read

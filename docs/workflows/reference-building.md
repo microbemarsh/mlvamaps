@@ -1,6 +1,6 @@
 # Reference building
 
-MLVAMaps separates reference acquisition from reference construction:
+mlvamaps separates reference acquisition from reference construction:
 
 1. `prepare-reference` downloads a portable NCBI Datasets package, extracts its
    assemblies, normalizes metadata, and records a checksum and tool versions.
@@ -15,7 +15,7 @@ original local-assembly behavior.
 ```bash
 mlvamaps build-reference \
   --taxid 86661 \
-  --loci panels/b_cereus_group.csv \
+  -p panels/b_cereus_group.csv \
   --assembly-source refseq \
   --output references \
   --threads 32
@@ -38,7 +38,7 @@ taxid,name
 ```bash
 mlvamaps build-reference \
   --taxids-csv taxa.csv \
-  --loci panels/mlva_loci.tsv \
+  -p panels/mlva_loci.tsv \
   --output references \
   --threads 32
 ```
@@ -63,13 +63,12 @@ references/
 └── reference_pipeline_manifest.json
 ```
 
-All taxids in one invocation use the same `--primers` or `--loci` panel. Run
+All taxids in one invocation use the same `-p` panel. Run
 separate commands when taxa require different MLVA schemes.
 
-`--loci` accepts the same rich comma- or tab-delimited locus table used by
-`mlvamaps call`. Minimal three-column primer CSV/TSV files can instead be
-passed with `--primers`; they are also accepted through `--loci` for CLI
-compatibility. Header aliases are normalized in both cases, including
+`-p` accepts either the rich comma- or tab-delimited locus table used by
+`mlvamaps call` or a minimal three-column primer CSV/TSV. Header aliases are
+normalized in both cases, including
 `name`/`locus`/`id`, `forward`/`fwd`, and `reverse`/`rev`.
 
 ## Prepare now, build later
@@ -89,9 +88,9 @@ interface:
 
 ```bash
 mlvamaps build-reference \
-  --assemblies references/bacillus_cereus_group/prepared/package \
+  -i references/bacillus_cereus_group/prepared/package \
   --metadata references/bacillus_cereus_group/prepared/metadata.tsv \
-  --loci panels/b_cereus_group.tsv \
+  -p panels/b_cereus_group.tsv \
   --output references/bacillus_cereus_group/reference
 ```
 

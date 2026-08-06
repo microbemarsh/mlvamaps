@@ -9,20 +9,43 @@ Supported read suffixes:
 - `.fastq.gz`
 - `.fq.gz`
 
-FASTQ mode expects individual reads to contain a valid paired-primer product.
-This directly supports amplicon sequencing. Accurate primer-spanning reads from
-other assays can also be used, while non-spanning shotgun reads should be
-supplied as assembly support instead.
+The accurate-long FASTQ workflow uses `-i READS` and expects individual reads
+to contain a valid paired-primer product. Illumina FASTQ instead uses
+`-i sr --fq1 READS_1` and optional `--fq2 READS_2`; gzip and plain text are
+read directly. Separate mate files must
+have equal record counts and the same normalized read ID in the same order.
+`/1` and `/2` suffixes and CASAVA mate annotations are recognized. Interleaved
+FASTQ is not currently accepted, and mates are never inferred from filenames.
+
+### Illumina manifest
+
+Tab-separated manifests require `sample_id` and `reads1`; `reads2` and
+`metadata_id` are optional. A period or empty `reads2` means single-end.
+Relative paths are resolved from the manifest directory.
+
+```text
+sample_id\treads1\treads2\tmetadata_id
+SRR000001\treads/SRR000001_1.fastq.gz\treads/SRR000001_2.fastq.gz\tSAMN000001
+SRR000002\treads/SRR000002.fastq.gz\t.\tSAMN000002
+```
+
+### Sample metadata
+
+CSV and TSV are accepted. One row represents one sample. `sample_id`,
+`run_accession`, `sra_run`, or `accession` can supply the join key. Common
+BioSample, date, latitude/longitude, geographic location, country, host,
+isolation source, and study aliases are normalized while original columns are
+retained in the MYOGA export. Duplicate or empty identifiers are rejected.
 
 ## Input directories
 
 `mlvamaps call` accepts a directory in place of one input file:
 
 ```bash
-mlvamaps call primers.tsv sequence_files/ -o results
+mlvamaps call -p primers.tsv -i sequence_files/ -o results
 ```
 
-MLVAMaps processes supported FASTA and FASTQ files directly inside the
+mlvamaps processes supported FASTA and FASTQ files directly inside the
 directory in filename order. Discovery is non-recursive, unrelated files are
 ignored, and FASTA and FASTQ inputs may be mixed. Each input filename supplies
 the sample ID and gets a separate `results/<sample-id>/` directory. Filenames
@@ -64,7 +87,7 @@ locus_id	forward_primer	reverse_primer	repeat_unit_length_bp	expected_product_si
 vrrA_12bp_314bp_10U	CACAACTACCACCGATGGCACA	GCGCGTTTCGTTTGATTCATAC	12	314	10
 ```
 
-Primer sequences are supplied 5-prime to 3-prime. MLVAMaps searches for the
+Primer sequences are supplied 5-prime to 3-prime. mlvamaps searches for the
 reverse complement of the reverse primer in an oriented product. IUPAC
 degenerate bases are handled by Amplirust.
 
@@ -107,12 +130,12 @@ their locus definitions and repeat-number conventions are compatible.
 
 `--database PATH` enables EPA-ng fixed-tree query placement independently of
 the MLVA profile table. Prefer the top-level directory produced by
-`mlvamaps build-reference` (or its `database/` subdirectory): MLVAMaps then
+`mlvamaps build-reference` (or its `database/` subdirectory): mlvamaps then
 reuses the saved reference alignment, RAxML-NG tree, and selected model for
 each locus. It runs MAFFT only to add the query without changing reference
 coordinates, followed by EPA-ng placement.
 
-Because each locus contains only one short query, MLVAMaps parallelizes EPA-ng
+Because each locus contains only one short query, mlvamaps parallelizes EPA-ng
 across callable loci. The `--threads` CPU budget is divided among the concurrent
 placement processes; with at least as many loci as CPUs, each process gets one
 native thread.
@@ -138,7 +161,7 @@ ranking, preventing incomplete references from receiving artificially small
 totals.
 
 For repeat-aware phylogenetic analysis, rich panels should provide both flank
-sequences and repeat-unit length or motif. MLVAMaps uses the flanks to remove
+sequences and repeat-unit length or motif. mlvamaps uses the flanks to remove
 the tandem-repeat tract from the SNP-tree alignment while retaining its repeat
 count and unit haplotype as explicit marker features. Motif-run detection is a
 fallback when flanks are unavailable; sequences that cannot be bounded remain

@@ -3,14 +3,14 @@
 The assembly path accepts FASTA assemblies and can optionally add read support.
 
 ```bash
-mlvamaps call primers.tsv assembly.fasta -o results
+mlvamaps call -p primers.tsv -i assembly.fasta -o results
 ```
 
 ## 1. Find paired-primer products
 
 Amplirust searches both assembly orientations with degenerate-primer and
 primer-error support. For compatibility, assembly gaps represented by `N`
-bases are permitted inside products; MLVA_finder did not reject them. MLVAMaps
+bases are permitted inside products; MLVA_finder did not reject them. mlvamaps
 filters circular-wrap records and uses the historical raw-allele limit for
 discovery. Novel calling still enforces each locus's configured amplicon range
 before selecting a product.
@@ -19,7 +19,7 @@ This stage returns:
 
 - `assembly_amplicons.tsv`: locus, contig, 1-based coordinates, orientation,
   product size, and primer mismatches.
-- `assembly_amplicons.fasta`: extracted products.
+- `assembly_amplicons.fasta.gz`: extracted products.
 - Native evidence under `amplirust/`.
 
 The default `--algorithm legacy` path reproduces MLVA_finder's decision rule:
@@ -41,7 +41,7 @@ the raw estimate. The default legacy algorithm applies MLVA_finder's strict
 integer tolerance (configured with `--assembly-round-tolerance`) and otherwise
 uses the intervening half allele.
 
-With `--algorithm novel`, MLVAMaps evaluates the raw estimate against explicit
+With `--algorithm novel`, mlvamaps evaluates the raw estimate against explicit
 integer and half-unit allele states. The reported probability reflects distance
 from those states at the locus's repeat-unit resolution. Exact midpoint ties
 remain `AMBIGUOUS` instead of being resolved by an arbitrary rounding rule.
@@ -73,11 +73,11 @@ them.
 ## 3. Add optional FASTQ support
 
 ```bash
-mlvamaps call primers.tsv assembly.fasta --reads sample.fastq.gz
+mlvamaps call -p primers.tsv -i assembly.fasta --reads sample.fastq.gz
 ```
 
-minimap2 uses `assembly_amplicons.fasta` as its reference and maps accurate
-reads back to the extracted products. MLVAMaps counts primary alignments and
+minimap2 uses `assembly_amplicons.fasta.gz` as its reference and maps accurate
+reads back to the extracted products. mlvamaps counts primary alignments and
 aligned reference bases for each product.
 
 This stage returns:
@@ -88,10 +88,10 @@ This stage returns:
 ## 4. Add optional SAM/BAM support
 
 ```bash
-mlvamaps call primers.tsv assembly.fasta --bam assembly_reads.bam
+mlvamaps call -p primers.tsv -i assembly.fasta --bam assembly_reads.bam
 ```
 
-For an existing assembly-aligned SAM or BAM, MLVAMaps measures alignment-block
+For an existing assembly-aligned SAM or BAM, mlvamaps measures alignment-block
 overlap with each extracted product. Secondary, supplementary, and unmapped
 records are ignored.
 

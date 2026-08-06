@@ -50,6 +50,7 @@ The environment includes
 [SPOARS' Python bindings](https://github.com/fg-labs/spoars),
 [Deacon](https://github.com/bede/deacon),
 [minimap2](https://github.com/lh3/minimap2),
+[SKESA](https://github.com/ncbi/SKESA),
 [MAFFT](https://mafft.cbrc.jp/alignment/software/),
 [RAxML-NG](https://github.com/amkozlov/raxml-ng),
 [EPA-ng](https://github.com/pierrebarbera/epa-ng),
@@ -58,22 +59,64 @@ sequence libraries declared in `environment.yml`.
 
 ## Quick start
 
+### Paired-end Illumina reads
+
+Illumina data use a dedicated evidence model; mates are not treated as two
+short long reads. Provide mates explicitly:
+
+```bash
+mlvamaps call -p primers.tsv -i sr \
+  --fq1 SRR000001_1.fastq.gz \
+  --fq2 SRR000001_2.fastq.gz \
+  --profiles profiles.tsv \
+  --database reference_build \
+  --sample-metadata sra_metadata.tsv \
+  --sample-id SRR000001 \
+  -o results/SRR000001 -t 8
+```
+
+Single-end short-read input uses `-i sr --fq1 reads.fastq.gz` without `--fq2`.
+Accurate long reads and assemblies use `-i PATH`.
+
+An exact short-read repeat count is emitted only when a local contig, merged
+pair, or original read directly resolves both repeat boundaries. Opposite
+flanks on separate mates yield an interval when possible. Repeat-internal or
+one-boundary evidence is reported as partial/presence-only and leaves
+`repeat_count` empty.
+
+For SRA-scale batches:
+
+```bash
+mlvamaps call -p primers.tsv -i sr \
+  --manifest samples.tsv \
+  --sample-metadata sra_metadata.tsv \
+  --profiles profiles.tsv \
+  --database reference_build \
+  -o results -t 32
+```
+
+Each sample is isolated under `results/<sample_id>/`; combined tables,
+`batch_status.tsv`, and `myoga_samples.csv` are written at the root. Successful
+samples resume by default and `--force` reruns them. See
+[the Illumina workflow](docs/workflows/illumina.md) for evidence rules,
+metadata aliases, HPC use, and a complete synthetic example.
+
 Analyze amplicon or other primer-spanning reads:
 
 ```bash
-mlvamaps call primers.tsv sample.fastq.gz
+mlvamaps call -p primers.tsv -i sample.fastq.gz
 ```
 
 Analyze an assembly:
 
 ```bash
-mlvamaps call primers.tsv assembly.fasta
+mlvamaps call -p primers.tsv -i assembly.fasta
 ```
 
 Analyze every supported FASTA or FASTQ file in a directory:
 
 ```bash
-mlvamaps call primers.tsv sequence_files/ -o results
+mlvamaps call -p primers.tsv -i sequence_files/ -o results
 ```
 
 Directory input is non-recursive and may contain a mixture of FASTA and FASTQ
@@ -85,25 +128,25 @@ contains assemblies, their MLVA_finder-compatible rows are also combined into
 Analyze an assembly with FASTQ read-depth support:
 
 ```bash
-mlvamaps call primers.tsv assembly.fasta --reads sample.fastq.gz
+mlvamaps call -p primers.tsv -i assembly.fasta --reads sample.fastq.gz
 ```
 
 Use an existing assembly-aligned SAM/BAM for depth support:
 
 ```bash
-mlvamaps call primers.tsv assembly.fasta --bam assembly_reads.bam
+mlvamaps call -p primers.tsv -i assembly.fasta --bam assembly_reads.bam
 ```
 
 Compare the fingerprint with known profiles:
 
 ```bash
-mlvamaps call primers.tsv sample.fastq.gz --profiles profiles.tsv
+mlvamaps call -p primers.tsv -i sample.fastq.gz --profiles profiles.tsv
 ```
 
 Pre-screen a metagenomic FASTQ against a target-taxon Deacon pangenome index:
 
 ```bash
-mlvamaps call primers.tsv metagenome.fastq.gz \
+mlvamaps call -p primers.tsv -i metagenome.fastq.gz \
   --taxon-screen-index target_taxon.idx \
   --profiles profiles.tsv
 ```
@@ -112,7 +155,7 @@ Supply an existing target index to `--taxon-screen-index`. See
 [bede/deacon-indexes](https://github.com/bede/deacon-indexes) for information
 on building indexes.
 
-The screen runs before MLVAMaps loads or quality-filters reads. Deacon receives
+The screen runs before mlvamaps loads or quality-filters reads. Deacon receives
 the shared `--threads` CPU budget and writes the retained reads plus its JSON
 summary under `results/taxon_screen/`. The default Deacon retention thresholds
 are two shared minimizers and a 1% relative match.
@@ -120,13 +163,13 @@ are two shared minimizers and a 1% relative match.
 Place each callable query locus in fixed reference trees:
 
 ```bash
-mlvamaps call primers.tsv sample.fastq.gz \
+mlvamaps call -p primers.tsv -i sample.fastq.gz \
   --database reference_build \
   --profiles profiles.tsv
 ```
 
 The recommended database is the top-level output from `mlvamaps
-build-reference`. MLVAMaps reuses its fixed reference alignments, trees, and
+build-reference`. mlvamaps reuses its fixed reference alignments, trees, and
 selected models, then runs only MAFFT query addition and EPA-ng placement.
 Independent locus placements run concurrently, and the available CPU budget is
 shared between them. This is more efficient than assigning all OpenMP threads
@@ -329,7 +372,7 @@ metadata into the same per-locus builder:
 ```bash
 mlvamaps build-reference \
   --taxid 86661 \
-  --loci mlva_loci.csv \
+  -p mlva_loci.csv \
   -o reference_builds \
   -t 16
 ```
@@ -346,7 +389,7 @@ taxid,name
 ```bash
 mlvamaps build-reference \
   --taxids-csv taxids.csv \
-  --loci mlva_loci.tsv \
+  -p mlva_loci.tsv \
   -o reference_builds \
   -t 16
 ```
@@ -359,7 +402,7 @@ Every row is isolated under
 `mlvamaps prepare-reference --taxid ...` or `--taxids-csv ...` to download and
 normalize the NCBI inputs without running MLVA extraction or tree building.
 Both taxid commands require the NCBI `datasets` and `dataformat` executables,
-provided by the `ncbi-datasets-cli` conda package. Rich `--loci` input accepts
+provided by the `ncbi-datasets-cli` conda package. Rich `-p` input accepts
 the same CSV or TSV schema as `mlvamaps call`. Interrupted NCBI downloads are
 retried three times by default; configure this with `--download-retries`.
 
@@ -370,8 +413,8 @@ metadata identifier unless the metadata has an `assembly_file`, `filename`, or
 
 ```bash
 mlvamaps build-reference \
-  --assemblies reference_assemblies/ \
-  --primers primers.csv \
+  -i reference_assemblies/ \
+  -p primers.csv \
   --metadata metadata.csv \
   -o reference_build \
   -t 16
@@ -380,7 +423,7 @@ mlvamaps build-reference \
 The metadata identifier may be named `reference_id`, `genome_id`, `sample_id`,
 `strain`, `accession`, or `id`. The command writes:
 
-- `reference_build/database/LOCUS.fasta`: raw amplicons, one FASTA record per
+- `reference_build/database/LOCUS.fasta.gz`: compressed raw amplicons, one FASTA record per
   reference, suitable for `mlvamaps call --database`;
 - `reference_build/database/reference_sequence_index.tsv`: canonical sequence
   hashes for the default exact-reference fast path;
@@ -394,7 +437,7 @@ The metadata identifier may be named `reference_id`, `genome_id`, `sample_id`,
 Multiple products at the same locus are excluded by default because an
 unresolved paralog is unsafe as a phylogenetic reference. Review the manifest,
 or use `--multiple-products best` only when choosing the best primer match is
-appropriate. A rich `--loci` TSV containing the repeat motif or bounding flanks
+appropriate. A rich `-p` TSV containing the repeat motif or bounding flanks
 is preferable to a primer-only CSV: it lets the tree builder mask the tandem
 repeat for the SNP tree while retaining the unmasked amplicon in the database.
 
@@ -402,7 +445,7 @@ Simulate amplicon reads for pipeline testing:
 
 ```bash
 mlvamaps simulate \
-  --loci examples/mlva_loci.example.tsv \
+  -p examples/mlva_loci.example.tsv \
   --sample-id SIM1 \
   --depth 500 \
   -o simulated
@@ -412,8 +455,8 @@ Extract MLVA_finder-compatible primer products from an assembly:
 
 ```bash
 mlvamaps extract-amplicons \
-  --input assembly.fasta \
-  --primers examples/seer_lab_Ba/mlvamaps_primers.example.tsv
+  -i assembly.fasta \
+  -p examples/seer_lab_Ba/mlvamaps_primers.example.tsv
 ```
 
 mlvamaps uses 32 threads by default. Pass `-t N` or `--threads N`;

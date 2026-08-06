@@ -10,6 +10,8 @@ files. Directory discovery is non-recursive, and each file is written beneath
 
 | Option | Default | Purpose |
 | --- | --- | --- |
+| `-p`, `--panel` | Required | Primer list or rich locus panel for the selected pipeline. |
+| `-i`, `--input` | Required | Input FASTA/FASTQ path or directory; `sr` selects paired/single Illumina input. |
 | `-o`, `--output`, `--outdir` | `results` | Output directory. |
 | `--sample-id` | Input filename | Sample identifier. |
 | `-t`, `--threads` | `32` | CPU budget shared across concurrent EPA-ng locus workers; `0` uses all CPUs. |
@@ -24,9 +26,30 @@ files. Directory discovery is non-recursive, and each file is written beneath
 
 ## FASTQ filtering
 
+### Illumina input and QC
+
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `--taxon-screen-index DEACON_IDX` | None | Retain only reads matching a supplied target-taxon Deacon pangenome index before loading reads into MLVAMaps. See [bede/deacon-indexes](https://github.com/bede/deacon-indexes) for build information. |
+| `-i sr` | Required | Select the dedicated Illumina short-read workflow. |
+| `--fq1 FASTQ` | None | Mate 1 or single-end Illumina FASTQ. |
+| `--fq2 FASTQ` | None | Mate 2; requires `--fq1`. |
+| `--read-technology` | `auto` | Compatibility override; `-i sr` selects Illumina automatically. |
+| `--short-min-read-length` | `40` | Minimum post-trim length. |
+| `--short-min-mean-quality` | `15` | Minimum mean Phred quality. |
+| `--short-trim-quality` | `0` | Conservative 3-prime trim threshold; zero disables trimming. |
+| `--short-min-pair-retention` | `0.5` | Fraction of a molecule's mates that must pass; a good mate may remain as an explicit orphan. |
+| `--short-min-informative-molecules` | `3` | Boundary-informative molecules required to avoid `LOW_DEPTH`. |
+| `--manifest` | None | Failure-isolated batch TSV. |
+| `--sample-metadata` | None | CSV/TSV joined by sample ID. |
+| `--force` | Off | Rerun already-successful manifest samples. |
+| `--keep-intermediates` | Off | Retain per-locus SKESA FASTQs, contigs, and logs. |
+| `--skesa-bin PATH` | `skesa` | Required native assembler executable for Illumina local assembly. |
+
+Separate mates are supported. Interleaved data are not guessed or accepted.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--taxon-screen-index DEACON_IDX` | None | Retain only reads matching a supplied target-taxon Deacon pangenome index before loading reads into mlvamaps. See [bede/deacon-indexes](https://github.com/bede/deacon-indexes) for build information. |
 | `--taxon-screen-abs-threshold` | `1` | Required absolute number of shared minimizers. |
 | `--taxon-screen-rel-threshold` | `0` | Required relative proportion of shared minimizers. |
 | `--deacon-bin PATH` | `deacon` | Deacon executable. |
@@ -88,6 +111,11 @@ are combined into one trace segment in the report.
 
 ## Allele calling
 
+Illumina mode uses transparent evidence classes rather than the long-read
+posterior as its gate. Exact calls require two directly observed repeat
+boundaries. Insert size may narrow an interval but never supplies an interval
+midpoint as an exact call.
+
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `--min-depth` | `1` | Informative reads required to avoid `LOW_DEPTH`. One repeat-informative read is sufficient for a provisional call. |
@@ -121,9 +149,25 @@ retain the original detection uncertainty.
 
 `--reads` and `--bam` cannot be used together.
 
+## Validation command
+
+```bash
+mlvamaps validate \
+  --truth assembly_results/calls.tsv \
+  --long-read long_results/calls.tsv \
+  --illumina short_results/calls.tsv \
+  -o validation
+```
+
+The detailed table classifies exact matches, covered intervals, incorrect
+calls, unresolved loci, false positives, and false negatives. The summary
+reports exact-call accuracy, callable fraction, interval coverage, profile
+recovery, and the false exact-call rate.
+
 ## External executable overrides
 
 - `--amplirust-bin`
+- `--skesa-bin`
 - `--minimap2-bin`
 - `--mafft-bin`
 - `--raxml-ng-bin`
@@ -134,10 +178,10 @@ executables are not on the default `PATH`.
 
 ## Reference database builder
 
-`mlvamaps build-reference --assemblies DIR --primers PANEL.csv --metadata
+`mlvamaps build-reference -i DIR -p PANEL.csv --metadata
 metadata.csv -o OUT` extracts every locus from each metadata-linked assembly,
-writes the per-locus database, and runs MAFFT plus RAxML-NG. Use `--loci`
-instead of `--primers` when motif or flank definitions are available.
+writes the per-locus database, and runs MAFFT plus RAxML-NG. The `-p` option
+auto-detects minimal primer lists and rich locus panels.
 
 | Option | Default | Purpose |
 | --- | --- | --- |

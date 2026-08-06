@@ -1,17 +1,22 @@
 # FASTQ and amplicon sequencing workflow
 
+This page describes accurate primer-spanning/long-read FASTQ. Paired and
+single-end Illumina data use the separate
+[Illumina short-read workflow](illumina.md), because individual short reads
+must not be assumed to span a complete VNTR product.
+
 The FASTQ path accepts `.fastq`, `.fq`, and gzip-compressed equivalents. It
 is intended for current high-accuracy long-read sequencing. Reads may span a
 complete primer product or cover only part of a locus. The default
 minimum mean Q score is 15, approximately 97% per-base accuracy.
 
 ```bash
-mlvamaps call primers.tsv sample.fastq.gz -o results
+mlvamaps call -p primers.tsv -i sample.fastq.gz -o results
 ```
 
 ## 1. Load the panel
 
-MLVAMaps reads a minimal primer table or a richer locus table. Optional profile
+mlvamaps reads a minimal primer table or a richer locus table. Optional profile
 rows are loaded with `--profiles`.
 
 The panel determines locus names, primer sequences, valid amplicon lengths,
@@ -23,16 +28,16 @@ For metagenomic input, an optional target-taxon screen can run before ordinary
 read QC:
 
 ```bash
-mlvamaps call primers.tsv metagenome.fastq.gz \
+mlvamaps call -p primers.tsv -i metagenome.fastq.gz \
   --taxon-screen-index target_taxon.idx
 ```
 
-The index is supplied rather than built by MLVAMaps. See
+The index is supplied rather than built by mlvamaps. See
 [bede/deacon-indexes](https://github.com/bede/deacon-indexes) for
 index-building information.
 
 Deacon performs native SIMD minimizer matching and retains target-like reads.
-MLVAMaps records the original, retained, and rejected read totals in
+mlvamaps records the original, retained, and rejected read totals in
 `qc_summary.tsv`; the retained FASTQ and full native summary are written under
 `taxon_screen/`. Screening is bypassed when no index is supplied, so pure
 culture FASTQ behavior is unchanged.
@@ -73,7 +78,7 @@ This stage returns:
 
 - `locus_recruited_reads.tsv`
 - `locus_presence.tsv`
-- `local_locus_products.fasta`
+- `local_locus_products.fasta.gz`
 - Native references and alignments under `recruitment/`
 
 Presence statuses are `PRESENT_GENOTYPED`, `PRESENT_PROVISIONAL`,
@@ -82,7 +87,7 @@ from whether a repeat count can be reported.
 
 ## 4. Pair primers and apply the specificity fallback
 
-MLVAMaps creates a lossless FASTA projection of retained reads for Amplirust.
+mlvamaps creates a lossless FASTA projection of retained reads for Amplirust.
 Amplirust handles IUPAC primer bases, both orientations, primer alignment, and
 valid product-length constraints. The original FASTQ qualities remain connected
 to the assigned read. A valid primer-pair assignment takes precedence when it
@@ -91,7 +96,7 @@ fallback when a panel lacks a usable complete recruitment product.
 
 This stage returns:
 
-- `filtered_reads.fasta`
+- `filtered_reads.fasta.gz`
 - `read_locus_assignments.tsv`
 - Native evidence under `amplirust/`
 
@@ -100,7 +105,7 @@ primer-only workflow.
 
 ## 5. Extract repeat evidence and local products
 
-Accepted reads are oriented to the forward-primer direction. MLVAMaps defines
+Accepted reads are oriented to the forward-primer direction. mlvamaps defines
 the inner primer-to-primer region and refines it with optional locus flanks.
 For each usable read it calculates:
 
@@ -114,7 +119,7 @@ This stage returns `read_repeat_features.tsv`.
 
 Complete products in the EM-dominant cluster are globally aligned as a partial
 order alignment with the `spoars` Python bindings. Its consensus is written to
-`local_locus_products.fasta`, then processed by the same Sassy in-silico PCR,
+`local_locus_products.fasta.gz`, then processed by the same Sassy in-silico PCR,
 legacy primer-coordinate product-size calculation, and repeat caller used for
 whole assemblies. This corrects minority read insertions and deletions before
 repeat counting. Repeat-spanning partial reads can produce provisional allele
@@ -138,7 +143,7 @@ so SPOARS—not an individual read measurement—defines the allele.
 This stage returns:
 
 - `mapped_variant_table.tsv`
-- `mapped_variant_representatives.fasta`
+- `mapped_variant_representatives.fasta.gz`
 - `mapped_read_memberships.tsv`
 
 The membership table retains the mapping group plus Parasail-derived
@@ -146,7 +151,7 @@ substitution and indel diagnostics for every complete product.
 
 ## 8. Estimate variant mixture abundance
 
-MLVAMaps fits an Emu-inspired expectation-maximization model to mapped-product
+mlvamaps fits an Emu-inspired expectation-maximization model to mapped-product
 counts. Pairwise group-representative similarity supplies the
 assignment likelihoods, while the abundance estimate from each iteration
 becomes the prior for the next iteration. This separates meaningful secondary
@@ -168,7 +173,7 @@ mixtures but do not replace the primary assembly-derived sequence.
 
 This stage returns:
 
-- `locus_mapping_references.fasta`
+- `locus_mapping_references.fasta.gz`
 - `locus_read_alignments.sam`
 - `locus_mapping_summary.tsv`
 - `locus_snps.tsv`
@@ -232,7 +237,7 @@ organism-specific metagenomic signatures.
 
 ## 12. Fingerprint, profiles, and report
 
-MLVAMaps converts the locus calls to wide and probabilistic fingerprints. If a
+mlvamaps converts the locus calls to wide and probabilistic fingerprints. If a
 profile database is present, conventional repeat-count distance and
 matched-locus count are the primary ranking keys in both FASTQ and assembly
 modes. FASTQ allele probabilities break otherwise equal matches. The output

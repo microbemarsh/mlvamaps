@@ -482,7 +482,7 @@ def test_reference_phylogeny_build_persists_sequence_identity_index(tmp_path):
     assert [
         name
         for name, _sequence in phylogeny_module._read_fasta(
-            result["phylogeny"] / "L1" / "references.fasta"
+            result["phylogeny"] / "L1" / "references.fasta.gz"
         )
     ] == ["R1", "R3"]
     haplotypes = _read_tsv(result["haplotype_groups"])

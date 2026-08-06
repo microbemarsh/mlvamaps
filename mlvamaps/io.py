@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import csv
+import gzip
+import shutil
 from pathlib import Path
+from itertools import zip_longest
 from typing import Iterable, Iterator, Optional
 
 import pysam
 
-from .models import Locus, ReadRecord
+from .models import Locus, ReadPair, ReadRecord
 
 
 def open_text(path: str | Path, mode: str = "rt"):
-    import gzip
-
     path = Path(path)
     if path.suffix == ".gz":
         return gzip.open(path, mode)
@@ -19,11 +20,77 @@ def open_text(path: str | Path, mode: str = "rt"):
 
 
 def read_fastq(path: str | Path) -> Iterator[ReadRecord]:
-    with pysam.FastxFile(str(path), persist=False) as handle:
-        for record in handle:
-            if record.quality is None:
-                raise ValueError(f"Expected FASTQ qualities for record {record.name!r}")
-            yield ReadRecord(record.name, record.sequence.upper(), record.quality)
+    try:
+        with pysam.FastxFile(str(path), persist=False) as handle:
+            for record in handle:
+                if record.quality is None:
+                    raise ValueError(f"Expected FASTQ qualities for record {record.name!r}")
+                if len(record.sequence) != len(record.quality):
+                    raise ValueError(
+                        f"FASTQ sequence and quality lengths differ for {record.name!r}"
+                    )
+                yield ReadRecord(record.name, record.sequence.upper(), record.quality)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Malformed FASTQ {str(path)!r}: {exc}") from exc
+
+
+def normalize_read_id(read_id: str) -> tuple[str, int | None]:
+    """Return a stable molecule ID and an optional mate number.
+
+    Pysam exposes the first whitespace-delimited FASTQ token as ``name``.  The
+    slash convention is normalized here; CASAVA's ``1:N:...``/``2:N:...``
+    annotation is retained when callers pass a complete header.
+    """
+    tokens = read_id.strip().lstrip("@").split()
+    if not tokens:
+        raise ValueError("FASTQ record has an empty read ID")
+    primary = tokens[0]
+    mate: int | None = None
+    if primary.endswith("/1") or primary.endswith("/2"):
+        mate = int(primary[-1])
+        primary = primary[:-2]
+    elif len(tokens) > 1 and len(tokens[1]) >= 2 and tokens[1][0] in "12" and tokens[1][1] == ":":
+        mate = int(tokens[1][0])
+    return primary, mate
+
+
+def read_fastq_pairs(
+    reads1_path: str | Path,
+    reads2_path: str | Path | None = None,
+) -> Iterator[ReadPair]:
+    """Stream separate paired FASTQ files with strict name/count validation."""
+    if reads2_path is None:
+        for read in read_fastq(reads1_path):
+            molecule_id, mate = normalize_read_id(read.read_id)
+            if mate == 2:
+                raise ValueError(
+                    f"Single-end FASTQ record {read.read_id!r} is labelled as mate 2"
+                )
+            yield ReadPair(molecule_id, read, None)
+        return
+
+    for record_number, (read1, read2) in enumerate(
+        zip_longest(read_fastq(reads1_path), read_fastq(reads2_path)), start=1
+    ):
+        if read1 is None or read2 is None:
+            shorter = reads1_path if read1 is None else reads2_path
+            raise ValueError(
+                f"Paired FASTQ files have different record counts; {shorter!s} "
+                f"ended before pair {record_number}"
+            )
+        id1, mate1 = normalize_read_id(read1.read_id)
+        id2, mate2 = normalize_read_id(read2.read_id)
+        if id1 != id2:
+            raise ValueError(
+                f"Paired FASTQ IDs differ at pair {record_number}: "
+                f"{read1.read_id!r} versus {read2.read_id!r}"
+            )
+        if mate1 not in (None, 1) or mate2 not in (None, 2):
+            raise ValueError(
+                f"Invalid mate labels at pair {record_number}: "
+                f"{read1.read_id!r}, {read2.read_id!r}"
+            )
+        yield ReadPair(id1, read1, read2)
 
 
 def read_fasta(path: str | Path) -> Iterator[tuple[str, str]]:
@@ -135,3 +202,17 @@ def write_fasta(records: Iterable[tuple[str, str]], path: str | Path) -> None:
             handle.write(f">{name}\n")
             for idx in range(0, len(sequence), 80):
                 handle.write(sequence[idx : idx + 80] + "\n")
+
+
+def gzip_output_file(path: str | Path) -> Path:
+    """Replace one generated sequence file with a gzip-compressed copy."""
+    source = Path(path)
+    if source.suffix.lower() == ".gz":
+        return source
+    destination = Path(f"{source}.gz")
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    with source.open("rb") as input_handle, gzip.open(temporary, "wb") as output_handle:
+        shutil.copyfileobj(input_handle, output_handle)
+    temporary.replace(destination)
+    source.unlink()
+    return destination

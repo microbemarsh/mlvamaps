@@ -24,6 +24,7 @@ requirements:
   run:
     - python >=3.10
     - minimap2
+    - skesa
     - mafft
     - raxml-ng
     - epa-ng
@@ -47,11 +48,12 @@ about:
   home: https://github.com/microbemarsh/mlvamaps
   summary: MLVA/VNTR genotyping from sequencing reads and assemblies
   description: |
-    MLVAMaps converts VNTR sequencing reads and assemblies into
+    mlvamaps converts VNTR sequencing reads and assemblies into
     interpretable repeat-copy-number calls, sequence-aware VNTR repeat
     variants, probabilistic MLVA fingerprints, and known-profile matches.
-    Assembly and reference in-silico PCR extraction uses the sassy-rs Python
-    binding with MLVA_finder-compatible pairing and selection semantics.
+    Illumina local assembly uses SKESA. Assembly and reference in-silico PCR
+    extraction uses the sassy-rs Python binding with MLVA_finder-compatible
+    pairing and selection semantics.
   license: GPL-3.0-only
   license_file: LICENSE
 

@@ -1,4 +1,4 @@
 include README.md
 recursive-include docs *.md
-recursive-include examples *.md *.csv *.tsv
+recursive-include examples *.md *.csv *.tsv *.py
 recursive-include packaging *.md *.yaml

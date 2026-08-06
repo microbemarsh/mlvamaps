@@ -1,20 +1,20 @@
 # Representative mapping and SNP evidence
 
-MLVAMaps adds mapping without introducing an external species reference.
+mlvamaps adds mapping without introducing an external species reference.
 Instead, each sample supplies its own SPOARS-assembled locus references.
 
 ## Reference selection
 
 Competitive recruitment maps reads to locus and repeat-product classes.
-MLVAMaps selects the dominant mapped product group and builds a SPOARS POA
+mlvamaps selects the dominant mapped product group and builds a SPOARS POA
 consensus. The standard assembly PCR caller must resolve that consensus before
 it becomes the primary mapping reference.
 
 Two representative files serve different purposes:
 
-- `mapped_variant_representatives.fasta` contains diagnostic repeat
+- `mapped_variant_representatives.fasta.gz` contains diagnostic repeat
   representatives for mapped product groups.
-- `locus_mapping_references.fasta` contains the complete primer-oriented
+- `locus_mapping_references.fasta.gz` contains the complete primer-oriented
   assembly-PCR-resolved POA product at each locus.
 
 ## Mapped-group read alignment
@@ -31,7 +31,7 @@ this stage has no local-alignment or soft-clipping path.
 
 All usable reads assigned to a locus are written to the internal mapping FASTQ,
 including low-depth observations. minimap2 maps those reads against the
-collection of assembly-PCR-resolved POA products. MLVAMaps accepts a primary
+collection of assembly-PCR-resolved POA products. mlvamaps accepts a primary
 alignment as evidence only when it maps to that read's assigned locus
 representative and passes the MAPQ threshold.
 
@@ -39,7 +39,7 @@ The SAM is retained as `locus_read_alignments.sam`.
 
 ## Coverage
 
-For accepted alignments, MLVAMaps walks aligned query/reference base pairs.
+For accepted alignments, mlvamaps walks aligned query/reference base pairs.
 Insertions and deletions do not contribute a base at a reference position.
 Bases below `--min-base-quality` and non-ACGT observations are excluded from
 the depth used by the SNP evidence stage.

@@ -13,5 +13,5 @@ python MLVA_finder.py \
 
 The fixture exercises exact products, a one-error primer product, strict
 half-unit rounding, multiple FASTA records, and MLVA_finder's last-matching
-record selection rule. MLVAMaps runs the same fixture with multiple PCR workers
+record selection rule. mlvamaps runs the same fixture with multiple PCR workers
 to ensure parallel discovery does not alter result order.

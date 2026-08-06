@@ -47,7 +47,7 @@ def test_call_directory_dispatches_each_file_to_its_sample_outdir(
     monkeypatch.setattr(cli, "_run_single_input", fake_run)
 
     assert cli.main(
-        ["call", str(panel), str(inputs), "--outdir", str(tmp_path / "results")]
+        ["call", "-p", str(panel), "-i", str(inputs), "--outdir", str(tmp_path / "results")]
     ) == 0
     assert observed == [
         ("assembly.fna", tmp_path / "results" / "assembly", "assembly"),
@@ -66,7 +66,7 @@ def test_call_directory_rejects_duplicate_derived_sample_ids(
     monkeypatch.setattr(cli, "_run_single_input", lambda *args: None)
 
     with pytest.raises(SystemExit, match="2"):
-        cli.main(["call", str(panel), str(inputs)])
+        cli.main(["call", "-p", str(panel), "-i", str(inputs)])
 
 
 def test_empty_input_directory_has_a_clear_error(tmp_path, capsys):
@@ -75,7 +75,7 @@ def test_empty_input_directory_has_a_clear_error(tmp_path, capsys):
     inputs.mkdir()
 
     with pytest.raises(SystemExit, match="2"):
-        cli.main(["call", str(panel), str(inputs)])
+        cli.main(["call", "-p", str(panel), "-i", str(inputs)])
 
     assert "contains no supported FASTA or FASTQ files" in capsys.readouterr().err
 
@@ -123,7 +123,7 @@ def test_call_directory_writes_combined_mlva_finder_analysis(
     results = tmp_path / "results"
 
     assert cli.main(
-        ["call", str(panel), str(inputs), "--outdir", str(results)]
+        ["call", "-p", str(panel), "-i", str(inputs), "--outdir", str(results)]
     ) == 0
     combined = results / "MLVA_analysis_Ba_ref_genomes.csv"
     with combined.open(newline="") as handle:

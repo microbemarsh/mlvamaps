@@ -12,6 +12,15 @@ class ReadRecord:
 
 
 @dataclass(frozen=True)
+class ReadPair:
+    """One sequencing molecule while retaining mate identity and orphans."""
+
+    molecule_id: str
+    read1: ReadRecord
+    read2: Optional[ReadRecord] = None
+
+
+@dataclass(frozen=True)
 class Locus:
     locus_id: str
     chrom_or_contig: str = ""

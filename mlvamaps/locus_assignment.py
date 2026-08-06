@@ -71,7 +71,7 @@ def assignments_from_pcr(
     return results
 
 
-# Source compatibility for the MLVAMaps 0.1 API.
+# Source compatibility for the mlvamaps 0.1 API.
 assignments_from_amplirust = assignments_from_pcr
 
 

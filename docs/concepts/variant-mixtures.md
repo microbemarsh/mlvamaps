@@ -4,9 +4,9 @@ Competitive mapping can assign locus reads to multiple repeat-product classes.
 At deep coverage, these may represent a dominant allele, genuine secondary
 alleles, or small error-compatible groups.
 
-MLVAMaps adds a count-based expectation-maximization layer inspired by
+mlvamaps adds a count-based expectation-maximization layer inspired by
 [Emu](https://github.com/treangenlab/emu), which uses alignment likelihoods and
-an abundance-dependent prior to estimate microbial composition. MLVAMaps does
+an abundance-dependent prior to estimate microbial composition. mlvamaps does
 not run Emu's taxonomic workflow or require a taxonomy database; it adapts the
 same iterative abundance idea to the observed VNTR representatives at one
 locus.
@@ -41,7 +41,7 @@ of retained variants per locus.
 
 ## Floors and meaningful variants
 
-After initial convergence, MLVAMaps applies Emu's depth-adaptive component
+After initial convergence, mlvamaps applies Emu's depth-adaptive component
 floor: `1 / (reads + 1)` through 1,000 retained reads and `10 / reads` above
 1,000 reads. Components below that floor are removed and the model is refit.
 

@@ -197,6 +197,8 @@ def test_build_taxon_references_keeps_each_database_isolated(tmp_path, monkeypat
 
 def test_cli_dispatches_taxid_reference_pipeline(tmp_path, monkeypatch):
     observed = {}
+    panel = tmp_path / "primers.csv"
+    panel.write_text("locus_id,forward_primer,reverse_primer\nL1,AAA,CCC\n")
 
     def fake_build(references, primers_path, outdir, **kwargs):
         observed.update(
@@ -223,8 +225,8 @@ def test_cli_dispatches_taxid_reference_pipeline(tmp_path, monkeypatch):
                 "build-reference",
                 "--taxid",
                 "1280",
-                "--primers",
-                "primers.csv",
+                    "-p",
+                    str(panel),
                 "--output",
                 str(tmp_path / "references"),
                 "--quiet",

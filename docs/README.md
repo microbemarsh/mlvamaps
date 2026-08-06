@@ -1,12 +1,13 @@
-# MLVAMaps documentation
+# mlvamaps documentation
 
-MLVAMaps separates the typing result from the evidence used to make it. The
+mlvamaps separates the typing result from the evidence used to make it. The
 root README provides the quick start; this documentation explains each input
 path, intermediate stage, output, and interpretation boundary.
 
 ## Workflows
 
 - [FASTQ and amplicon sequencing](workflows/fastq.md)
+- [Paired/single-end Illumina sequencing](workflows/illumina.md)
 - [Assemblies and assembly read support](workflows/assembly.md)
 - [Reference building](workflows/reference-building.md)
 
@@ -29,7 +30,7 @@ path, intermediate stage, output, and interpretation boundary.
 
 ## Scope
 
-MLVAMaps is organism-agnostic and panel-driven. It can assess microbial MLVA
+mlvamaps is organism-agnostic and panel-driven. It can assess microbial MLVA
 data when the user supplies the primers and interpretation metadata for that
 scheme. It does not infer an unknown MLVA panel from a genome, and it does not
 claim that profiles from different laboratories or schemes are interchangeable.

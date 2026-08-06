@@ -370,9 +370,9 @@ def run_locus_mapping(
         ]
     else:
         references = _dominant_references(features, asv_rows)
-    public_reference = outdir / "locus_mapping_references.fasta"
-    internal_reference = work_dir / "locus_mapping_references.fasta"
-    reads_path = work_dir / "locus_reads.fastq"
+    public_reference = outdir / "locus_mapping_references.fasta.gz"
+    internal_reference = work_dir / "locus_mapping_references.fasta.gz"
+    reads_path = work_dir / "locus_reads.fastq.gz"
     sam_path = outdir / "locus_read_alignments.sam"
 
     reference_by_name, query_metadata = _write_mapping_inputs(

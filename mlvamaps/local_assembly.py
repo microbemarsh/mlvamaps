@@ -80,7 +80,7 @@ def assemble_dominant_locus_products(
     """Assemble dominant locus clusters and call them through assembly logic."""
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    consensus_path = outdir.parent / "local_locus_products.fasta"
+    consensus_path = outdir.parent / "local_locus_products.fasta.gz"
     dominant_by_locus = _dominant_variants(mixture_rows)
     variant_by_read = {
         (str(row["locus_id"]), str(row["read_id"])): str(row["variant_id"])

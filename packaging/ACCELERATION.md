@@ -1,12 +1,14 @@
 # acceleration backends
 
-MLVAMaps should use biological sequence tooling implemented in Rust or C where
+mlvamaps should use biological sequence tooling implemented in Rust or C where
 possible, and avoid generic fuzzy-string packages for core matching.
 
 Current backend policy:
 
+- `skesa` performs conservative, multithreaded local assembly for recruited
+  Illumina locus reads. There is no Python assembly fallback.
 - `sassy-rs>=0.2.6` is the Rust/SIMD engine for in-silico PCR, paired-primer
-  FASTQ assignment, and bounded flank localization. MLVAMaps owns deterministic
+  FASTQ assignment, and bounded flank localization. mlvamaps owns deterministic
   IUPAC expansion, MLVA_finder-compatible strand fallback and product pairing,
   product-length constraints, and result selection.
 - `parasail` computes exact Needleman-Wunsch global tracebacks between each
@@ -29,8 +31,10 @@ Default threading policy:
 
 - CLI options use 32 threads by default. Users can explicitly pass `--threads 0`
   to use all available CPUs.
-- `0` means auto-detect available CPUs for MLVAMaps workers.
-- Native backends receive the resolved thread count directly. MLVAMaps does
+- `0` means auto-detect available CPUs for mlvamaps workers.
+- Native backends receive the resolved thread count directly. mlvamaps does
   not place a Python thread pool around Sassy's internally threaded batch
   search, which avoids nested parallelism and CPU oversubscription.
 - Native mapping and phylogenetic tools receive the resolved thread count.
+- Up to four independent SKESA locus jobs share the resolved thread budget;
+  each job receives only its assigned share.

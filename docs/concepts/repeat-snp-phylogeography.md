@@ -1,6 +1,6 @@
 # Repeat-aware SNP placement and phylogeography
 
-MLVAMaps treats tandem-repeat evolution and nucleotide substitution as linked
+mlvamaps treats tandem-repeat evolution and nucleotide substitution as linked
 but distinct signals. Standard nucleotide models do not model VNTR copy-number
 changes, and alignment gaps generally do not contribute like substitutions.
 Combining both signals inside one unlabelled tree distance would therefore lose
@@ -20,7 +20,7 @@ distinct haplotypes remain. Placement distances are expanded back to every
 member reference afterward. This removes redundant zero-length tree tips while
 preserving all reference IDs in rankings, metadata joins, and reports.
 
-For loci with defined flanks, MLVAMaps identifies and removes the repeat tract
+For loci with defined flanks, mlvamaps identifies and removes the repeat tract
 before MAFFT reference alignment, RAxML-NG tree inference, and EPA-ng query
 placement. It retains the removed tract as explicit evidence:
 
@@ -58,7 +58,7 @@ If the EPA/tree-only score would rank a complete exact marker match below
 another reference, `combined_marker_matches.tsv` records
 `EXACT_MATCH_OVERRIDES_PLACEMENT` and the HTML report displays a warning. Tied
 exact references are indistinguishable by the marker panel. For assembly
-queries, MLVAMapS first checks a canonical whole-genome SHA-256 that ignores
+queries, mlvamaps first checks a canonical whole-genome SHA-256 that ignores
 FASTA headers, contig order, and contig orientation. Remaining ties are compared
 with MUMmer4 `dnadiff` and ordered by total whole-genome SNPs, indel bases,
 minimum one-to-one aligned fraction, and maximum aligned fraction. The marker

@@ -208,7 +208,7 @@ def pcr_rows_to_products(
     reference_order: dict[str, int] | None = None,
     measure_products: bool = True,
 ) -> list[dict]:
-    """Convert native PCR output into MLVAMaps assembly-product records.
+    """Convert native PCR output into mlvamaps assembly-product records.
 
     ``MLVA_finder`` reports product size using the configured primer lengths,
     even when a fuzzy primer match contains an insertion or deletion.  That is
@@ -319,7 +319,7 @@ def pcr_rows_to_products(
     return products
 
 
-# Source compatibility for the MLVAMaps 0.1 API.
+# Source compatibility for the mlvamaps 0.1 API.
 amplirust_rows_to_products = pcr_rows_to_products
 
 
@@ -1042,7 +1042,7 @@ def run_assembly_call(
     write_tsv(products, outdir_path / "assembly_amplicons.tsv", AMPLICON_FIELDS)
 
     progress.step("Writing assembly amplicon FASTA")
-    product_fasta = outdir_path / "assembly_amplicons.fasta"
+    product_fasta = outdir_path / "assembly_amplicons.fasta.gz"
     write_fasta(((product["product_id"], product["sequence"]) for product in products), product_fasta)
 
     read_support = {}

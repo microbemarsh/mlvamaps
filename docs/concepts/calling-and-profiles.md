@@ -80,7 +80,7 @@ confidence therefore reflects the evidence instead of always being 1.0.
 ## Profile matching
 
 For every profile and every locus with both a called and expected value,
-MLVAMaps calculates the absolute repeat-count difference. Exact values count as
+mlvamaps calculates the absolute repeat-count difference. Exact values count as
 matches; nonzero values contribute to distance and appear in
 `mismatched_loci`. Both workflows rank by this distance and matched-locus count;
 FASTQ probabilities only break otherwise equal matches. Unobserved loci are
@@ -110,7 +110,7 @@ The exact-match confidence reported alongside distance is:
     {|C(q,p)|}.
 ```
 
-When per-locus FASTQ probability distributions are available, MLVAMaps also
+When per-locus FASTQ probability distributions are available, mlvamaps also
 calculates the mean negative log likelihood of the profile:
 
 ```latex

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from mlvamaps.io import read_fasta
 from mlvamaps.reference_builder import build_reference_database
 
 from test_phylogeny import _fake_mafft, _fake_raxml_ng
@@ -66,8 +67,8 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
         raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
     )
 
-    assert (result["database"] / "L1.fasta").read_text().count(">") == 3
-    assert (result["database"] / "L2.fasta").read_text().count(">") == 2
+    assert len(list(read_fasta(result["database"] / "L1.fasta.gz"))) == 3
+    assert len(list(read_fasta(result["database"] / "L2.fasta.gz"))) == 2
     assert (result["phylogeny"] / "L1" / "reference_tree.nwk").exists()
     assert (result["phylogeny"] / "L2" / "reference_tree.nwk").exists()
     assert (result["phylogeny"] / "L1.tree").exists()
@@ -77,6 +78,12 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
     ambiguous = [row for row in manifest if row["reference_id"] == "R3" and row["locus_id"] == "L2"]
     assert ambiguous[0]["status"] == "AMBIGUOUS_EXCLUDED"
     assert ambiguous[0]["best_product_count"] == "2"
+    uncompressed_sequences = [
+        path
+        for path in result["outdir"].rglob("*")
+        if path.is_file() and path.suffix.lower() in {".fasta", ".fa", ".fastq", ".fq"}
+    ]
+    assert uncompressed_sequences == []
     assert _rows(result["metadata"])[0]["reference_id"] == "R1"
     assert _rows(result["myoga_metadata"], ",")[0]["genome_id"] == "R1"
 
@@ -87,9 +94,9 @@ def test_cli_exposes_reference_builder():
     args = build_parser().parse_args(
         [
             "build-reference",
-            "--assemblies",
+            "-i",
             "assemblies",
-            "--primers",
+            "-p",
             "primers.csv",
             "--metadata",
             "metadata.csv",
@@ -128,7 +135,7 @@ def test_reference_extraction_uses_multiple_processes_and_reports_progress(
         show_progress=True,
     )
 
-    assert (result["database"] / "L1.fasta").read_text().count(">") == 2
+    assert len(list(read_fasta(result["database"] / "L1.fasta.gz"))) == 2
     progress = capsys.readouterr().err
     assert "with 2 worker(s)" in progress
     assert "Extracted assemblies: 2/2 (100.0%)" in progress

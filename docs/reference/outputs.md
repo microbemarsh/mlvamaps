@@ -1,5 +1,8 @@
 # Output file reference
 
+All generated FASTA and FASTQ artifacts are gzip-compressed by default and use
+a matching `.gz` suffix. Input files are never modified.
+
 ## Files returned for every call
 
 | File | Meaning |
@@ -13,17 +16,20 @@
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
 
+Illumina calls additionally always write `sample_summary.tsv`,
+`myoga_samples.csv`, and `myoga_loci.csv`.
+
 ## Reference builder outputs
 
 | File | Meaning |
 | --- | --- |
-| `database/LOCUS.fasta` | Unmasked extracted reference amplicons in the format accepted by `--database`. |
+| `database/LOCUS.fasta.gz` | Gzip-compressed unmasked reference amplicons accepted by `--database`. |
 | `database/reference_metadata.tsv` | Metadata normalized to a `reference_id` key. |
 | `database/reference_sequence_index.tsv` | Canonical amplicon, repeat-masked SNP, and complete marker SHA-256 keys used by the default exact-match fast path. |
 | `database/reference_assemblies.tsv` | Reference-ID, source-assembly path, and canonical whole-genome SHA-256 used for assembly-query tie breaking. |
 | `reference_build_manifest.tsv` | Per-reference/locus product counts, selected product, primer errors, and exclusion status. |
 | `phylogeny/LOCUS.tree` | Portable Newick SNP tree for the locus. |
-| `phylogeny/LOCUS/references.aligned.fasta` | Repeat-masked MAFFT alignment used for tree inference. |
+| `phylogeny/LOCUS/references.aligned.fasta.gz` | Repeat-masked MAFFT alignment used for tree inference. |
 | `phylogeny/LOCUS/reference.mlvamaps.raxml.log` | Full RAxML-NG output for every attempted thread count. |
 | `phylogeny/reference_tree_status.tsv` | Tree completion or insufficient-reference status for every panel locus. |
 | `phylogeny/reference_marker_components.tsv` | Retained repeat measurements and the masking method for each reference marker. |
@@ -53,7 +59,7 @@ all candidate placements, weighted by normalized likelihood weight ratios.
 Ranking uses the likelihood-weighted sum and reports its gap to the next
 reference.
 
-Before launching alignment or placement, MLVAMaps checks the persistent sequence
+Before launching alignment or placement, mlvamaps checks the persistent sequence
 index. A query matching the same reference or tied reference group at every
 configured panel locus is reported with zero distance and status
 `EXACT_AMPLICON_MATCH` or `EXACT_MARKER_MATCH`; MAFFT, RAxML-NG, and EPA-ng are
@@ -108,27 +114,46 @@ data are supplied.
 
 ## FASTQ outputs
 
+### Illumina-specific evidence
+
+| File | Meaning |
+| --- | --- |
+| `short_read_qc_summary.tsv` | Input/retained reads and pairs, orphans, and empirical insert-size values when estimable. |
+| `short_read_recruitment_summary.tsv` | Unique, ambiguous, discordant, and orphan pair counts per locus. |
+| `short_read_assembly_summary.tsv` | Per-locus SKESA status, contig sizes, depth, and failure reason. |
+| `sample_summary.tsv` | One normalized sample row for batch aggregation. |
+| `myoga_samples.csv` | MYOGA metadata; `genome_id` equals `sample_id` and generated sample tree-tip IDs. |
+| `myoga_loci.csv` | Long-form exact calls, intervals, evidence, and confidence. |
+| `batch_status.tsv` | Success, failure, or resume status for every manifest sample. |
+
+Illumina `calls.tsv` preserves the compact columns and appends read technology,
+evidence class, boundary support, informative molecules, local assembly,
+repeat interval, confidence explanation, failure/warning, and mixture-support
+fields. Empty `repeat_count` plus populated `repeat_count_min` and
+`repeat_count_max` is an interval. Empty exact and interval fields with
+`PRESENCE_ONLY` means detected but not sized.
+
 | File | Meaning |
 | --- | --- |
 | `qc_summary.tsv` | Input and read-filtering totals. |
 | `taxon_screen/taxon_screened_reads.fastq.gz` | Optional reads retained by the target-taxon Deacon pangenome screen before downstream analysis. |
 | `taxon_screen/taxon_screen_summary.json` | Native Deacon input/output read and base totals, thresholds, and throughput. |
 | `filtered_reads.fastq.gz` | Reads retained after length and quality filtering. |
-| `filtered_reads.fasta` | Lossless sequence projection used by native primer pairing. |
+| `filtered_reads.fasta.gz` | Lossless sequence projection used by native primer pairing. |
 | `locus_recruited_reads.tsv` | Competitive per-read locus mapping, candidate allele, alignment quality, and presence/genotype evidence class. |
 | `locus_presence.tsv` | Per-locus mapped, full-product, and repeat-informative read counts with presence status. |
-| `local_locus_products.fasta` | SPOARS POA consensus contigs reconstructed from the dominant cluster and passed through assembly-mode PCR calling. |
+| `local_locus_products.fasta.gz` | SPOARS POA consensus contigs reconstructed from the dominant cluster and passed through assembly-mode PCR calling. |
 | `local_assembly_concordance.tsv` | Per-locus raw read-length range and mode, POA consensus length, PCR product size, raw/final repeat calls, support, and fallback status. |
 | `local_assembly_pcr/` | Native Sassy primer matches and extracted products from the per-locus POA contigs. |
-| `recruitment/locus_recruitment_references.fasta` | Database-derived or synthetic competitive locus/allele reference bank. |
+| `recruitment/locus_recruitment_references.fasta.gz` | Database-derived or synthetic competitive locus/allele reference bank. |
 | `recruitment/read_recruitment.sam` | Raw competitive long-read mappings used for presence and provisional genotype evidence. |
 | `read_locus_assignments.tsv` | Primer-supported locus, orientation, score, and assignment QC. |
 | `read_repeat_features.tsv` | Repeat coordinates, counts, patterns, motifs, and quality per read. |
 | `mapped_variant_table.tsv` | Competitive mapping-derived repeat-product groups and support statistics. |
 | `mapped_read_memberships.tsv` | Per-read mapping group plus substitution/indel evidence. |
-| `mapped_variant_representatives.fasta` | Diagnostic repeat representatives for mapped product groups. |
+| `mapped_variant_representatives.fasta.gz` | Diagnostic repeat representatives for mapped product groups. |
 | `vntr_mixture_abundance.tsv` | EM abundance, estimated read count, and dominant/confirmed-secondary/candidate/trace evidence tier for every mapped product group. |
-| `locus_mapping_references.fasta` | Dominant SPOARS assembly-PCR products used for read support and SNP mapping. |
+| `locus_mapping_references.fasta.gz` | Dominant SPOARS assembly-PCR products used for read support and SNP mapping. |
 | `locus_read_alignments.sam` | minimap2 locus-relative mappings. |
 | `locus_mapping_summary.tsv` | Mapping rate, depth, coverage, and SNP totals by locus. |
 | `locus_snps.tsv` | Filtered representative-relative SNP evidence. |
@@ -158,7 +183,7 @@ they are independent of locus-wide read mapping.
 | File | Meaning |
 | --- | --- |
 | `assembly_amplicons.tsv` | Accepted product coordinates, orientation, size, and primer mismatches. |
-| `assembly_amplicons.fasta` | Extracted assembly primer products. |
+| `assembly_amplicons.fasta.gz` | Extracted assembly primer products. |
 | `read_support.tsv` | Optional mapped reads and mean coverage per product. |
 | `read_support.sam` | minimap2 alignments when `--reads` is used. |
 | `amplirust/` | Native in-silico PCR evidence. |
@@ -167,7 +192,7 @@ they are independent of locus-wide read mapping.
 | `legacy_predicted_pcr_sizes.csv` | Historical wide product-size layout. |
 | `legacy_primer_mismatches.txt` | Historical primer mismatch summary. |
 
-For a directory input containing assemblies, MLVAMaps also writes
+For a directory input containing assemblies, mlvamaps also writes
 `MLVA_analysis_<input-directory>.csv` at the top level of the output directory.
 It combines all per-assembly `legacy_mlva_analysis.csv` rows in deterministic
 filename order and assigns the historical zero-padded `key` values.

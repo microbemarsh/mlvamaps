@@ -720,6 +720,7 @@ def write_report(
     presence_rows: list[dict] | None = None,
     local_assembly_rows: list[dict] | None = None,
     taxon_screen_summary: dict | None = None,
+    short_read_rows: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -735,6 +736,7 @@ def write_report(
     presence_rows = presence_rows or []
     local_assembly_rows = local_assembly_rows or []
     taxon_screen_summary = taxon_screen_summary or {}
+    short_read_rows = short_read_rows or []
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
@@ -927,6 +929,33 @@ def write_report(
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>Dominant mapped group</th><th>Reads</th><th>Unique products</th><th>Raw bp min / mode / max</th><th>POA bp</th><th>Assembly PCR bp</th><th>Raw repeats</th><th>Final repeats</th><th>Call source</th><th>POA status</th></tr></thead>
           <tbody>{local_assembly_table_rows}</tbody>
+        </table></div>
+      </section>
+"""
+    short_read_table_rows = "\n".join(
+        "<tr>"
+        f"<td>{_safe(row.get('locus_id', ''))}</td>"
+        f"<td><span class=\"status-pill {'status-good' if row.get('repeat_count') not in ('', None) else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
+        f"<td>{_safe(row.get('recruited_read_pairs', ''))}</td>"
+        f"<td>{_safe(row.get('informative_molecule_count', ''))}</td>"
+        f"<td>{_safe(row.get('assembled_contig_length', ''))}</td>"
+        f"<td>{_safe(row.get('assembly_depth', ''))}</td>"
+        f"<td>{_safe(row.get('boundary_1_support', ''))} / {_safe(row.get('boundary_2_support', ''))} / {_safe(row.get('both_boundary_support', ''))}</td>"
+        f"<td>{_safe(row.get('repeat_count', '')) if row.get('repeat_count') not in ('', None) else _safe(str(row.get('repeat_count_min', '')) + '..' + str(row.get('repeat_count_max', ''))) if row.get('repeat_count_min') not in ('', None) else 'unresolved'}</td>"
+        f"<td>{_safe(row.get('allele_confidence', ''))}</td>"
+        f"<td>{_safe(row.get('short_read_warning') or row.get('failure_reason', ''))}</td>"
+        "</tr>"
+        for row in short_read_rows
+    )
+    short_read_section = ""
+    if short_read_rows:
+        short_read_section = f"""
+      <section class="report-section">
+        <h2>Illumina Evidence</h2>
+        <p class="section-intro">Exact values require a locally assembled product or a molecule that directly observes both repeat boundaries. Intervals and presence-only rows are deliberately shown without an exact repeat count.</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Evidence</th><th>Recruited pairs</th><th>Informative molecules</th><th>Longest contig bp</th><th>Assembly depth</th><th>Boundary 1 / 2 / both</th><th>Repeat or interval</th><th>Confidence</th><th>Warning / failure</th></tr></thead>
+          <tbody>{short_read_table_rows}</tbody>
         </table></div>
       </section>
 """
@@ -1126,7 +1155,7 @@ def write_report(
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>MLVAMaps Report - {sample_id}</title>
+  <title>mlvamaps Report - {sample_id}</title>
   <style>
     :root {{
       color-scheme: dark;
@@ -1234,7 +1263,7 @@ def write_report(
 </head>
 <body>
   <main>
-    <h1>MLVAMaps Report: {_safe(sample_id)}</h1>
+    <h1>mlvamaps Report: {_safe(sample_id)}</h1>
     <p class="subhead">VNTR calls, sample quality, mixture evidence, and closest-reference interpretation.</p>
     <p class="generated-at">Generated {_safe(generated_at)} UTC</p>
     <section class="terminal">
@@ -1245,6 +1274,7 @@ def write_report(
       <div class="findings">{findings_html}</div>
       <h2>Individual Locus Repeat Counts</h2>
       <div class="chart-scroll">{repeat_count_plot}</div>
+      {short_read_section}
       {local_assembly_section}
       <h2>Locus Confidence</h2>
       <div class="chart-scroll">{confidence_plot}</div>
@@ -1477,7 +1507,7 @@ def write_assembly_report(
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>MLVAMaps Assembly Report - {_safe(sample_id)}</title>
+  <title>mlvamaps Assembly Report - {_safe(sample_id)}</title>
   <style>
     :root {{
       color-scheme: dark;
@@ -1576,7 +1606,7 @@ def write_assembly_report(
 </head>
 <body>
   <main>
-    <h1>MLVAMaps Assembly Report: {_safe(sample_id)}</h1>
+    <h1>mlvamaps Assembly Report: {_safe(sample_id)}</h1>
     <p class="subhead">Assembly-derived VNTR calls, panel quality, and closest-reference interpretation.</p>
     <section class="terminal">
       <h2>Sample Overview</h2>

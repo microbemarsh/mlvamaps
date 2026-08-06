@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert Geonome reference-build metadata to MLVAMaps metadata TSV."""
+"""Convert Geonome reference-build metadata to mlvamaps metadata TSV."""
 
 from __future__ import annotations
 
@@ -181,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Convert normalized metadata from a Geonome reference build into the "
-            "reference_metadata.tsv format used by MLVAMaps."
+            "reference_metadata.tsv format used by mlvamaps."
         )
     )
     parser.add_argument(
@@ -209,7 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    print(f"Wrote {count} MLVAMaps metadata rows to {args.output}")
+    print(f"Wrote {count} mlvamaps metadata rows to {args.output}")
     return 0
 
 

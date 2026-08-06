@@ -13,6 +13,7 @@ import sassy
 import regex
 
 from .concurrency import DEFAULT_THREADS, resolve_threads
+from .io import open_text
 from .models import Locus
 from .primers import read_loci_or_primers
 
@@ -618,7 +619,7 @@ def run_in_silico_pcr_loci(
     amplicon_bounds: tuple[int, int] | None = None,
     **_compatibility_options,
 ) -> dict[str, Path]:
-    """Run MLVAMaps' Sassy-backed, MLVA_finder-compatible in-silico PCR."""
+    """Run mlvamaps' Sassy-backed, MLVA_finder-compatible in-silico PCR."""
     if not 0 <= max_n_fraction <= 1:
         raise ValueError("max_n_fraction must be between 0 and 1")
     if max_errors < 0:
@@ -634,7 +635,7 @@ def run_in_silico_pcr_loci(
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
     primers_output = write_primer_pairs(loci, outdir_path / "primers.csv")
-    products_path = outdir_path / "products.fasta"
+    products_path = outdir_path / "products.fasta.gz"
     stats_path = outdir_path / "matches.tsv"
     min_len, max_len = amplicon_bounds or expected_amplicon_bounds(loci)
     rows = _product_rows(
@@ -648,7 +649,7 @@ def run_in_silico_pcr_loci(
         max_n_fraction,
         threads,
     )
-    with products_path.open("w") as handle:
+    with open_text(products_path, "wt") as handle:
         for row in rows:
             handle.write(
                 f">{row['amplicon_id']}\tpos={row['original_start']}-{row['original_end']}"
@@ -663,7 +664,7 @@ def run_in_silico_pcr_loci(
 
 def read_pcr_results(stats_path: str | Path, products_path: str | Path) -> list[dict[str, str | int]]:
     coordinates: dict[str, tuple[int, int]] = {}
-    with Path(products_path).open() as handle:
+    with open_text(products_path, "rt") as handle:
         for line in handle:
             if line.startswith(">"):
                 match = _POSITION_RE.search(line)
@@ -680,7 +681,7 @@ def read_pcr_results(stats_path: str | Path, products_path: str | Path) -> list[
     return rows
 
 
-# Temporary source-compatible aliases for callers built against MLVAMaps 0.1.
+# Temporary source-compatible aliases for callers built against mlvamaps 0.1.
 # They no longer invoke or require the Amplirust executable.
 AMPLIRUST_TSV_FIELDS = PCR_TSV_FIELDS
 write_amplirust_primers = write_primer_pairs
@@ -690,4 +691,4 @@ read_amplirust_results = read_pcr_results
 
 
 def build_amplirust_command(*_args, **_kwargs):
-    raise RuntimeError("Amplirust was replaced by MLVAMaps' built-in Sassy-backed PCR engine")
+    raise RuntimeError("Amplirust was replaced by mlvamaps' built-in Sassy-backed PCR engine")

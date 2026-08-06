@@ -17,6 +17,7 @@ import numpy as np
 
 from .calling import estimate_repeat_count_from_product_length, normalize_allele, repeat_unit_length
 from .concurrency import resolve_threads
+from .io import gzip_output_file
 from .models import Locus, RepeatFeature
 from .progress import ProgressReporter
 
@@ -149,7 +150,25 @@ REFERENCE_HAPLOTYPE_FIELDS = [
     "snp_sha256",
 ]
 
-_FASTA_SUFFIXES = {".fa", ".fas", ".fasta", ".fna", ".ffn"}
+_FASTA_SUFFIXES = (".fa", ".fas", ".fasta", ".fna", ".ffn")
+
+
+def _is_fasta_path(path: Path) -> bool:
+    name = path.name.lower()
+    return any(
+        name.endswith(suffix) or name.endswith(f"{suffix}.gz")
+        for suffix in _FASTA_SUFFIXES
+    )
+
+
+def _fasta_stem(path: Path) -> str:
+    name = path.name
+    if name.lower().endswith(".gz"):
+        name = name[:-3]
+    for suffix in _FASTA_SUFFIXES:
+        if name.lower().endswith(suffix):
+            return name[: -len(suffix)]
+    return Path(name).stem
 
 REFERENCE_ASSEMBLY_FIELDS = ["reference_id", "assembly_file", "assembly_sha256"]
 DNADIFF_RESULT_FIELDS = [
@@ -426,7 +445,7 @@ def _database_stat_digest(database_path: str | Path) -> str:
         sorted(
             item
             for item in path.iterdir()
-            if item.is_file() and item.suffix.lower() in _FASTA_SUFFIXES
+            if item.is_file() and _is_fasta_path(item)
         )
         if path.is_dir()
         else [path]
@@ -994,8 +1013,8 @@ def _run_placement_job(
 
 def _read_database_fasta(path: Path, locus_ids: set[str]) -> dict[str, list[tuple[str, str]]]:
     records = _read_fasta(path)
-    if path.parent != path and path.stem in locus_ids:
-        return {path.stem: records}
+    if path.parent != path and _fasta_stem(path) in locus_ids:
+        return {_fasta_stem(path): records}
     by_locus: dict[str, list[tuple[str, str]]] = {}
     for header, sequence in records:
         parts = header.split("|")
@@ -1023,15 +1042,16 @@ def read_sequence_database(
     by_locus: dict[str, list[tuple[str, str]]] = {}
     if path.is_dir():
         fasta_paths = sorted(
-            item for item in path.iterdir() if item.is_file() and item.suffix.lower() in _FASTA_SUFFIXES
+            item for item in path.iterdir() if item.is_file() and _is_fasta_path(item)
         )
         if not fasta_paths:
             raise ValueError(f"Sequence database directory contains no FASTA files: {path}")
         for fasta_path in fasta_paths:
-            if fasta_path.stem not in locus_ids:
+            locus_name = _fasta_stem(fasta_path)
+            if locus_name not in locus_ids:
                 continue
-            by_locus[fasta_path.stem] = _read_fasta(fasta_path)
-    elif path.suffix.lower() in _FASTA_SUFFIXES:
+            by_locus[locus_name] = _read_fasta(fasta_path)
+    elif _is_fasta_path(path):
         by_locus = _read_database_fasta(path, locus_ids)
     else:
         with path.open(newline="") as handle:
@@ -1078,7 +1098,9 @@ def _resolve_reference_database_layout(
 def _copy_reference_artifact(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     if source.resolve() != destination.resolve():
-        shutil.copyfile(source, destination)
+        opener = gzip.open if source.suffix.lower() == ".gz" else open
+        with opener(source, "rb") as input_handle, destination.open("wb") as output_handle:
+            shutil.copyfileobj(input_handle, output_handle)
 
 
 def read_reference_metadata(path: str | Path | None) -> dict[str, dict[str, str]]:
@@ -1892,6 +1914,7 @@ def run_phylogenetic_placement(
     direct_snp_distances_by_locus: dict[str, dict[str, float]] = {}
     placement_members_by_locus: dict[str, dict[str, list[str]]] = {}
     placement_jobs: dict[str, _PlacementJob] = {}
+    sequence_artifacts: list[Path] = []
 
     for locus_id in sorted(references):
         query_sequence = query_sequences.get(locus_id, "")
@@ -1965,11 +1988,22 @@ def run_phylogenetic_placement(
         query_fasta = locus_dir / "query.fasta"
         placed_alignment = locus_dir / "query_placed.aligned.fasta"
         query_alignment = locus_dir / "query.aligned.fasta"
+        sequence_artifacts.extend(
+            [
+                reference_fasta,
+                reference_alignment,
+                query_fasta,
+                placed_alignment,
+                query_alignment,
+            ]
+        )
         epa_outdir = locus_dir / "epa-ng"
         _write_fasta(locus_references, reference_fasta)
         if reusable_phylogeny is not None:
             reusable_locus_dir = reusable_phylogeny / safe_locus
-            reusable_alignment = reusable_locus_dir / "references.aligned.fasta"
+            reusable_alignment = reusable_locus_dir / "references.aligned.fasta.gz"
+            if not reusable_alignment.is_file():
+                reusable_alignment = reusable_locus_dir / "references.aligned.fasta"
             reusable_tree = reusable_locus_dir / "reference_tree.nwk"
             reusable_model = reusable_locus_dir / "reference.raxml.bestModel"
             missing_artifacts = [
@@ -2627,6 +2661,9 @@ def run_phylogenetic_placement(
         progress.step("Finished phylogenetic placement summaries")
     status_path = output / "locus_status.tsv"
     _write_tsv(status_rows, status_path, STATUS_FIELDS)
+    for sequence_path in sequence_artifacts:
+        if sequence_path.is_file():
+            gzip_output_file(sequence_path)
     return {
         "phylogeny": output,
         "phylogenetic_distances": detail_path,
@@ -2680,6 +2717,7 @@ def build_reference_phylogenies(
     status_rows: list[dict] = []
     component_rows: list[dict] = []
     haplotype_rows: list[dict] = []
+    sequence_artifacts: list[Path] = []
 
     sorted_locus_ids = sorted(locus_by_id)
     for locus_number, locus_id in enumerate(sorted_locus_ids, start=1):
@@ -2749,6 +2787,7 @@ def build_reference_phylogenies(
         locus_dir.mkdir(parents=True, exist_ok=True)
         reference_fasta = locus_dir / "references.fasta"
         alignment = locus_dir / "references.aligned.fasta"
+        sequence_artifacts.extend([reference_fasta, alignment])
         tree = locus_dir / "reference_tree.nwk"
         prefix = locus_dir / "reference"
         _write_fasta(masked_records, reference_fasta)
@@ -2789,6 +2828,9 @@ def build_reference_phylogenies(
     )
     _write_tsv(component_rows, components_path, MARKER_COMPONENT_FIELDS)
     _write_tsv(haplotype_rows, haplotypes_path, REFERENCE_HAPLOTYPE_FIELDS)
+    for sequence_path in sequence_artifacts:
+        if sequence_path.is_file():
+            gzip_output_file(sequence_path)
     return {
         "phylogeny": output,
         "tree_status": status_path,

@@ -496,9 +496,9 @@ def run_call(
     recruitment_paths = {
         "recruited_reads": outdir_path / "locus_recruited_reads.tsv",
         "locus_presence": outdir_path / "locus_presence.tsv",
-        "local_products": outdir_path / "local_locus_products.fasta",
+        "local_products": outdir_path / "local_locus_products.fasta.gz",
         "recruitment_references": (
-            outdir_path / "recruitment" / "locus_recruitment_references.fasta"
+            outdir_path / "recruitment" / "locus_recruitment_references.fasta.gz"
         ),
         "recruitment_alignments": (
             outdir_path / "recruitment" / "read_recruitment.sam"
@@ -542,7 +542,7 @@ def run_call(
 
     if filtered_reads:
         progress.step("Assigning reads with MLVA_finder-compatible Sassy primer matching")
-        assignment_fasta = outdir_path / "filtered_reads.fasta"
+        assignment_fasta = outdir_path / "filtered_reads.fasta.gz"
         write_fasta(((read.read_id, read.sequence) for read in filtered_reads), assignment_fasta)
         pcr_paths = run_in_silico_pcr_loci(
             assignment_fasta,
@@ -662,7 +662,7 @@ def run_call(
     mapped_variant_path = outdir_path / "mapped_variant_table.tsv"
     mapped_membership_path = outdir_path / "mapped_read_memberships.tsv"
     mapped_representative_path = (
-        outdir_path / "mapped_variant_representatives.fasta"
+        outdir_path / "mapped_variant_representatives.fasta.gz"
     )
     write_tsv(asv_rows, mapped_variant_path, ASV_FIELDS)
     write_tsv(
@@ -921,7 +921,7 @@ def run_call(
         "mixture_abundance": outdir_path / "vntr_mixture_abundance.tsv",
         "mapping_summary": outdir_path / "locus_mapping_summary.tsv",
         "mapping_snps": outdir_path / "locus_snps.tsv",
-        "mapping_references": outdir_path / "locus_mapping_references.fasta",
+        "mapping_references": outdir_path / "locus_mapping_references.fasta.gz",
         "mapping_alignments": outdir_path / "locus_read_alignments.sam",
         "minimap2": outdir_path / "minimap2",
         "in_silico_pcr": outdir_path / "in_silico_pcr",
