@@ -583,6 +583,63 @@ def test_pipeline_preserves_two_directly_observed_alleles(tmp_path):
     assert row["secondary_alleles"].startswith("5:")
 
 
+def test_illumina_database_matches_are_written_to_report(tmp_path, monkeypatch):
+    from mlvamaps.short_reads import run_short_read_call
+
+    panel = tmp_path / "panel.tsv"
+    reads = tmp_path / "reads.fastq"
+    product = _product(4)
+    _write_panel(panel)
+    _write_fastq(reads, [("sample/1", product)])
+    captured: dict[str, object] = {}
+
+    def fake_placement(query_sequences, database_path, outdir, sample_id, loci, threads, **kwargs):
+        captured["queries"] = query_sequences
+        captured["database"] = database_path
+        phylogeny = Path(outdir) / "phylogeny"
+        phylogeny.mkdir(parents=True, exist_ok=True)
+        combined = phylogeny / "combined_marker_matches.tsv"
+        combined.write_text(
+            "sample_id\treference_id\trank\tcombined_marker_distance\t"
+            "compared_loci\texact_marker_loci\tmatch_status\n"
+            f"{sample_id}\tREF_MATCH\t1\t0\t1\t1\texact_marker_match\n"
+        )
+        bands = phylogeny / "closest_reference_bands.tsv"
+        bands.write_text(
+            "reference_id\tlocus_id\tproduct_size_bp\trepeat_count\n"
+            f"REF_MATCH\tL1\t{len(product)}\t4\n"
+        )
+        return {
+            "phylogeny": phylogeny,
+            "combined_marker_matches": combined,
+            "closest_reference_bands": bands,
+        }
+
+    monkeypatch.setattr(
+        "mlvamaps.short_reads.run_phylogenetic_placement", fake_placement
+    )
+    result = run_short_read_call(
+        str(reads),
+        None,
+        str(panel),
+        str(tmp_path / "out"),
+        "sample",
+        database_path=str(tmp_path / "reference_build"),
+        min_depth=1,
+        skesa_bin=str(_write_fake_skesa(tmp_path / "skesa", contig=product)),
+        minimap2_bin=str(_write_fake_minimap2(tmp_path / "minimap2")),
+        show_progress=False,
+    )
+    assert captured["queries"] == {"L1": product}
+    assert captured["database"] == str(tmp_path / "reference_build")
+    with result["profile_matches"].open() as handle:
+        reference_match = next(csv.DictReader(handle, delimiter="\t"))
+    assert reference_match["match_type"] == "sequence_reference"
+    assert reference_match["reference_id"] == "REF_MATCH"
+    assert "Closest Reference Genomes" in result["report"].read_text()
+    assert "REF_MATCH" in result["report"].read_text()
+
+
 def test_shared_repeat_only_reads_do_not_cross_recruit_similar_loci():
     sequence = "ATGC" * 20
     index = {

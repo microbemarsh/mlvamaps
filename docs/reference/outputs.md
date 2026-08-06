@@ -135,6 +135,11 @@ fields. Empty `repeat_count` plus populated `repeat_count_min` and
 `repeat_count_max` is an interval. Empty exact and interval fields with
 `PRESENCE_ONLY` means detected but not sized.
 
+When Illumina mode receives `--database`, complete primer-bounded locus products
+also produce the standard `phylogeny/` reference-placement outputs. Their
+ranked `sequence_reference` rows are appended to `profile_matches.tsv` and
+rendered in `report.html`. Unresolved loci are omitted from sequence placement.
+
 | File | Meaning |
 | --- | --- |
 | `qc_summary.tsv` | Input and read-filtering totals. |

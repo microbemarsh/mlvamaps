@@ -105,6 +105,13 @@ them. Live stage timings distinguish FASTQ/QC, minimap2 recruitment, and SKESA
 assembly unless `--quiet` is used. Generated sequence files use fast gzip
 compression so compression does not dominate ordinary Illumina runs.
 
+When `--database` is supplied, every primer-bounded Illumina product is passed
+through the same fixed-tree reference placement used by accurate reads and
+assemblies. Ranked sequence-reference matches are added to
+`profile_matches.tsv` and the **Closest Reference Genomes** section of
+`report.html`. Presence-only, interval-only, and partial products are not
+sequence-matched because they do not provide a complete comparable marker.
+
 For SRA-scale batches:
 
 ```bash

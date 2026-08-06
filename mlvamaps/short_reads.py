@@ -34,7 +34,9 @@ from .profile_matching import (
     build_fingerprint,
     match_profiles,
     profile_match_locus_rows,
+    sequence_reference_match_rows,
 )
+from .phylogeny import run_phylogenetic_placement
 from .pipeline import (
     ALLELE_DISTRIBUTION_FIELDS,
     MATCH_FIELDS,
@@ -1109,6 +1111,12 @@ def _call_locus(
         "estimated_secondary_fraction": secondary_fraction,
         "mixture_status": "mixed" if mixed else "single" if primary is not None else "unavailable",
         "evidence_sources": ",".join(sorted(sources_by_allele.get(primary, set()))) if primary is not None else "paired_end_span" if paired_boundaries else "recruitment",
+        # Internal-only sequence used for reference placement. TSV writers
+        # ignore this key because it is intentionally absent from public call
+        # schemas; only a primer-bounded product is eligible.
+        "query_sequence": ""
+        if product_measurement is None
+        else product_measurement.product_sequence,
     }
 
 
@@ -1197,6 +1205,13 @@ def run_short_read_call(
     sample_mode: str = "isolate",
     skesa_bin: str = "skesa",
     minimap2_bin: str = "minimap2",
+    mafft_bin: str = "mafft",
+    raxml_ng_bin: str = "raxml-ng",
+    epa_ng_bin: str = "epa-ng",
+    raxml_model: str = "DNA",
+    phylogeny_snp_weight: float = 1.0,
+    phylogeny_repeat_weight: float = 1.0,
+    reference_metadata_path: str | None = None,
     show_progress: bool = True,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
@@ -1437,12 +1452,48 @@ def run_short_read_call(
     write_tsv(fingerprint_rows, outdir_path / "mlva_fingerprint.tsv", ["sample_id"] + [locus.locus_id for locus in loci])
     write_tsv(probabilistic_rows, outdir_path / "mlva_fingerprint_probabilistic.tsv", ["sample_id", "locus_id", "repeat_count", "posterior_probability"])
     matches = match_profiles(sample_id, fingerprint_rows[0], profiles, allele_rows=allele_rows)
-    write_tsv(matches, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
     write_tsv(
         profile_match_locus_rows(sample_id, fingerprint_rows[0], profiles, matches, allele_rows),
         outdir_path / "profile_match_loci.tsv",
         PROFILE_MATCH_LOCUS_FIELDS,
     )
+    phylogeny_paths: dict[str, Path] = {}
+    phylogenetic_rows: list[dict] = []
+    closest_reference_bands: list[dict] = []
+    query_sequences = {
+        str(row["locus_id"]): str(row["query_sequence"])
+        for row in call_rows
+        if row.get("query_sequence")
+    }
+    if database_path and query_sequences:
+        if show_progress:
+            print(
+                f"[{sample_id}] Matching {len(query_sequences):,} complete "
+                "Illumina locus products against the reference database"
+            )
+        phylogeny_paths = run_phylogenetic_placement(
+            query_sequences,
+            database_path,
+            outdir_path,
+            sample_id,
+            loci,
+            resolve_threads(threads),
+            mafft_bin=mafft_bin,
+            raxml_ng_bin=raxml_ng_bin,
+            epa_ng_bin=epa_ng_bin,
+            raxml_model=raxml_model,
+            snp_weight=phylogeny_snp_weight,
+            repeat_weight=phylogeny_repeat_weight,
+            reference_metadata_path=reference_metadata_path,
+        )
+        phylogenetic_rows = read_profiles(
+            phylogeny_paths["combined_marker_matches"]
+        )
+        closest_reference_bands = read_profiles(
+            phylogeny_paths["closest_reference_bands"]
+        )
+    output_matches = matches + sequence_reference_match_rows(phylogenetic_rows)
+    write_tsv(output_matches, outdir_path / "profile_matches.tsv", MATCH_FIELDS)
     best = matches[0] if matches else {}
     complete_classes = {"COMPLETE_ASSEMBLED_PRODUCT", "BOUNDARY_SPANNING_READ_PAIR", "BOUNDARY_SPANNING_SINGLE_READ", "MULTIPLE_ALLELES", "LOW_DEPTH"}
     summary = {
@@ -1497,6 +1548,8 @@ def run_short_read_call(
         presence_rows=recruitment_rows,
         local_assembly_rows=[],
         short_read_rows=call_rows,
+        phylogenetic_rows=phylogenetic_rows,
+        closest_reference_bands=closest_reference_bands,
     )
     return {
         "outdir": outdir_path,
@@ -1513,4 +1566,5 @@ def run_short_read_call(
         "short_read_qc": outdir_path / "short_read_qc_summary.tsv",
         "short_read_recruitment": outdir_path / "short_read_recruitment_summary.tsv",
         "short_read_assembly": outdir_path / "short_read_assembly_summary.tsv",
+        **phylogeny_paths,
     }

@@ -949,6 +949,13 @@ def _run_short_input(
         sample_mode=args.sample_mode,
         skesa_bin=args.skesa_bin,
         minimap2_bin=args.minimap2_bin,
+        mafft_bin=args.mafft_bin,
+        raxml_ng_bin=args.raxml_ng_bin,
+        epa_ng_bin=args.epa_ng_bin,
+        raxml_model=args.raxml_model,
+        phylogeny_snp_weight=args.phylogeny_snp_weight,
+        phylogeny_repeat_weight=args.phylogeny_repeat_weight,
+        reference_metadata_path=args.reference_metadata,
         show_progress=not args.quiet,
     )
     print(f"Wrote conservative Illumina calls to {result['calls']}")

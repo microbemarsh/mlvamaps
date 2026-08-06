@@ -97,6 +97,14 @@ reference and mapped-read PAF files under
 
 ## Exact, interval, and presence evidence
 
+With `--database`, primer-bounded products from a successful local assembly,
+merged pair, or boundary-spanning read are eligible for fixed-tree reference
+placement. The resulting sequence-reference rankings are written under
+`phylogeny/`, appended to `profile_matches.tsv`, and shown as **Closest
+Reference Genomes** in `report.html`. Partial and presence-only evidence is not
+placed: mapping to a recruitment target establishes locus evidence but is not a
+substitute for a complete query marker.
+
 Each contig, merged pair, and original read is evaluated with the same panel
 anchors and assembly-calibrated repeat convention used elsewhere in mlvamaps.
 Evidence is classified as:
