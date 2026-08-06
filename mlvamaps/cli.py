@@ -518,7 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--minimap2-bin",
         default="minimap2",
         metavar="PATH",
-        help="minimap2 executable for representative and assembly-support mapping (default: %(default)s)",
+        help="minimap2 executable for short-read recruitment, representative mapping, and assembly support (default: %(default)s)",
     )
     call.add_argument(
         "--mafft-bin",
@@ -948,6 +948,8 @@ def _run_short_input(
         keep_intermediates=args.keep_intermediates,
         sample_mode=args.sample_mode,
         skesa_bin=args.skesa_bin,
+        minimap2_bin=args.minimap2_bin,
+        show_progress=not args.quiet,
     )
     print(f"Wrote conservative Illumina calls to {result['calls']}")
     print(f"Wrote short-read QC to {result['short_read_qc']}")

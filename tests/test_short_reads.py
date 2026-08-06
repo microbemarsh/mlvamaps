@@ -14,6 +14,9 @@ from mlvamaps.short_reads import (
     _assemble_one_locus,
     _call_locus,
     _skesa_command,
+    _short_read_minimap2_command,
+    _parse_short_read_paf,
+    _short_read_recruitment_decisions,
     check_skesa,
     estimate_insert_size_distribution,
     merge_read_pair,
@@ -45,6 +48,33 @@ def _write_fake_skesa(
         "output = pathlib.Path(sys.argv[sys.argv.index('--contigs_out') + 1])\n"
         f"output.write_text({output_text!r})\n"
         f"raise SystemExit({assembly_exit_code})\n"
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _write_fake_minimap2(path: Path) -> Path:
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import gzip, pathlib, sys\n"
+        "if '--version' in sys.argv:\n"
+        "    print('2.test')\n"
+        "    raise SystemExit(0)\n"
+        "reference_index = sys.argv.index('--secondary=yes') + 1\n"
+        "reference = pathlib.Path(sys.argv[reference_index])\n"
+        "target = next(line[1:].strip().split()[0] for line in reference.read_text().splitlines() if line.startswith('>'))\n"
+        "for value in sys.argv[reference_index + 1:]:\n"
+        "    reads = pathlib.Path(value)\n"
+        "    opener = gzip.open if reads.suffix == '.gz' else open\n"
+        "    with opener(reads, 'rt') as handle:\n"
+        "        while True:\n"
+        "            name = handle.readline().strip()\n"
+        "            if not name:\n"
+        "                break\n"
+        "            sequence = handle.readline().strip()\n"
+        "            handle.readline(); handle.readline()\n"
+        "            length = len(sequence)\n"
+        "            print(f'{name[1:]}\\t{length}\\t0\\t{length}\\t+\\t{target}\\t1000\\t0\\t{length}\\t{length}\\t{length}\\t60\\ttp:A:P\\tAS:i:{length}')\n"
     )
     path.chmod(0o755)
     return path
@@ -151,10 +181,58 @@ def test_strict_overlap_merge_and_skesa_command(tmp_path):
     assert command[-2:] == ["--reads", f"{tmp_path / 'r1.fastq'},{tmp_path / 'r2.fastq'}"]
     assert command[command.index("--cores") + 1] == "3"
 
+    minimap2_command = _short_read_minimap2_command(
+        "/opt/minimap2",
+        tmp_path / "references.fasta",
+        tmp_path / "r1.fastq.gz",
+        tmp_path / "r2.fastq.gz",
+        7,
+    )
+    assert minimap2_command == [
+        "/opt/minimap2",
+        "-x",
+        "sr",
+        "-t",
+        "7",
+        "-k",
+        "15",
+        "-w",
+        "5",
+        "--secondary=yes",
+        str(tmp_path / "references.fasta"),
+        str(tmp_path / "r1.fastq.gz"),
+        str(tmp_path / "r2.fastq.gz"),
+    ]
+
 
 def test_missing_skesa_is_an_explicit_error():
     with pytest.raises(RuntimeError, match="SKESA executable"):
         check_skesa("definitely-not-an-installed-skesa")
+
+
+def test_native_recruitment_resolves_unique_ambiguous_and_discordant_pairs(tmp_path):
+    paf = tmp_path / "recruitment.paf"
+
+    def row(name: str, target: str, score: int) -> str:
+        return (
+            f"{name}\t60\t0\t60\t+\t{target}\t200\t0\t60\t"
+            f"{score}\t60\t60\ttp:A:P\tAS:i:{score}\n"
+        )
+
+    paf.write_text(
+        row("unique/1", "ref1", 60)
+        + row("unique/1", "ref2", 30)
+        + row("unique/2", "ref1", 55)
+        + row("ambiguous/1", "ref1", 40)
+        + row("ambiguous/1", "ref2", 40)
+        + row("discordant/1", "ref1", 60)
+        + row("discordant/2", "ref2", 60)
+    )
+    hits = _parse_short_read_paf(paf, {"ref1": "L1", "ref2": "L2"})
+    decisions = _short_read_recruitment_decisions(hits)
+    assert decisions["unique"][:2] == ("unique", "L1")
+    assert decisions["ambiguous"][0] == "ambiguous"
+    assert decisions["discordant"][0] == "discordant"
 
 
 def test_skesa_contigs_are_used_and_failure_has_no_fallback(tmp_path):
@@ -321,6 +399,7 @@ def test_short_read_pipeline_agrees_with_assembly_truth_when_product_is_recovera
         sample_metadata=metadata,
         min_depth=1,
         skesa_bin=str(_write_fake_skesa(tmp_path / "skesa")),
+        minimap2_bin=str(_write_fake_minimap2(tmp_path / "minimap2")),
     )
     with assembly_result["calls"].open() as handle:
         assembly_call = next(csv.DictReader(handle, delimiter="\t"))
@@ -370,6 +449,8 @@ def test_manifest_isolates_failure_and_writes_combined_tables(tmp_path):
             "1",
             "--skesa-bin",
             str(_write_fake_skesa(tmp_path / "skesa")),
+            "--minimap2-bin",
+            str(_write_fake_minimap2(tmp_path / "minimap2")),
             "-o",
             str(outdir),
         ]
@@ -420,6 +501,7 @@ def test_nonoverlapping_opposite_boundaries_report_interval_not_midpoint(tmp_pat
         "s",
         min_depth=1,
         skesa_bin=str(_write_fake_skesa(tmp_path / "skesa")),
+        minimap2_bin=str(_write_fake_minimap2(tmp_path / "minimap2")),
     )
     row = _read_first_call(result["calls"])
     assert row["repeat_count"] == ""
@@ -437,6 +519,7 @@ def test_one_boundary_and_low_depth_are_reported_honestly(tmp_path):
     partial = tmp_path / "partial.fastq"
     _write_fastq(partial, [("p/1", long_product[:60])])
     skesa = _write_fake_skesa(tmp_path / "skesa")
+    minimap2 = _write_fake_minimap2(tmp_path / "minimap2")
     partial_result = run_short_read_call(
         str(partial),
         None,
@@ -445,6 +528,7 @@ def test_one_boundary_and_low_depth_are_reported_honestly(tmp_path):
         "partial",
         min_depth=1,
         skesa_bin=str(skesa),
+        minimap2_bin=str(minimap2),
     )
     partial_row = _read_first_call(partial_result["calls"])
     assert partial_row["repeat_count"] == ""
@@ -462,6 +546,7 @@ def test_one_boundary_and_low_depth_are_reported_honestly(tmp_path):
         "low",
         min_depth=3,
         skesa_bin=str(skesa),
+        minimap2_bin=str(minimap2),
     )
     low_row = _read_first_call(low_result["calls"])
     assert low_row["repeat_count"] == "4"
@@ -489,6 +574,7 @@ def test_pipeline_preserves_two_directly_observed_alleles(tmp_path):
         "mixed",
         min_depth=1,
         skesa_bin=str(_write_fake_skesa(tmp_path / "skesa")),
+        minimap2_bin=str(_write_fake_minimap2(tmp_path / "minimap2")),
     )
     row = _read_first_call(result["calls"])
     assert row["evidence_class"] == "MULTIPLE_ALLELES"

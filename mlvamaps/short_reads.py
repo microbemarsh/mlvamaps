@@ -5,6 +5,7 @@ import shutil
 import statistics
 import subprocess
 import tempfile
+import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -17,6 +18,7 @@ from .concurrency import DEFAULT_THREADS, resolve_threads
 from .io import (
     open_text,
     gzip_output_file,
+    normalize_read_id,
     read_fasta,
     read_fastq_pairs,
     read_profiles,
@@ -24,6 +26,7 @@ from .io import (
     write_fastq,
     write_tsv,
 )
+from .mapping import check_minimap2
 from .locus_measurement import find_anchor, measure_locus_product
 from .models import Locus, LocusMeasurement, ReadPair, ReadRecord
 from .profile_matching import (
@@ -223,13 +226,45 @@ def _kmers(sequence: str, k: int) -> set[str]:
     }
 
 
-def build_short_read_reference_index(
-    loci: list[Locus], database_path: str | Path | None, k: int = 15
-) -> tuple[dict[str, set[str]], dict[str, str]]:
+def _short_read_reference_sequences(
+    loci: list[Locus], database_path: str | Path | None
+) -> dict[str, list[str]]:
     references = build_recruitment_references(loci, database_path)
     by_locus: dict[str, list[str]] = defaultdict(list)
     for reference in references:
         by_locus[str(reference["locus_id"])].append(str(reference["sequence"]))
+    return dict(by_locus)
+
+
+def build_short_read_references(
+    loci: list[Locus], database_path: str | Path | None
+) -> dict[str, str]:
+    by_locus = _short_read_reference_sequences(loci, database_path)
+    representative = {
+        locus_id: min(sequences, key=lambda value: (abs(len(value) - statistics.median(map(len, sequences))), value))
+        for locus_id, sequences in by_locus.items()
+    }
+    # Primer-only panels do not have a synthesizable complete product. Keep
+    # their two primer targets separated by Ns so native recruitment retains
+    # the former locus-specific primer-seed behavior without inventing a
+    # primer-junction sequence.
+    for locus in loci:
+        if locus.locus_id in representative:
+            continue
+        primer_targets = [
+            sequence
+            for sequence in (locus.forward_primer, revcomp(locus.reverse_primer))
+            if sequence and set(sequence) <= set("ACGT")
+        ]
+        if primer_targets:
+            representative[locus.locus_id] = ("N" * 32).join(primer_targets)
+    return representative
+
+
+def build_short_read_reference_index(
+    loci: list[Locus], database_path: str | Path | None, k: int = 15
+) -> tuple[dict[str, set[str]], dict[str, str]]:
+    by_locus = _short_read_reference_sequences(loci, database_path)
     representative = {
         locus_id: min(sequences, key=lambda value: (abs(len(value) - statistics.median(map(len, sequences))), value))
         for locus_id, sequences in by_locus.items()
@@ -328,6 +363,214 @@ def recruit_read_pairs(
             identity = min(1.0, score / max(possible, 1))
         recruited.append(RecruitedPair(pair, "unique", locus_id, score, identity))
     return recruited
+
+
+def _short_read_minimap2_command(
+    executable: str,
+    reference_path: Path,
+    reads1_path: Path,
+    reads2_path: Path | None,
+    threads: int,
+) -> list[str]:
+    """Build the native competitive-recruitment command.
+
+    PAF is intentional: unlike SAM, it emits only mapped queries by default,
+    which avoids serializing every unassigned WGS read back through Python.
+    """
+    command = [
+        executable,
+        "-x",
+        "sr",
+        "-t",
+        str(resolve_threads(threads)),
+        "-k",
+        "15",
+        "-w",
+        "5",
+        "--secondary=yes",
+        str(reference_path),
+        str(reads1_path),
+    ]
+    if reads2_path is not None:
+        command.append(str(reads2_path))
+    return command
+
+
+def _run_short_read_minimap2(command: list[str], output_path: Path) -> None:
+    with output_path.open("w") as output:
+        completed = subprocess.run(
+            command,
+            stdout=output,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+    if completed.returncode:
+        detail = (completed.stderr or "").strip()
+        raise RuntimeError(
+            f"minimap2 short-read recruitment failed with exit code "
+            f"{completed.returncode}" + (f": {detail}" if detail else "")
+        )
+
+
+def _parse_short_read_paf(
+    path: Path,
+    reference_loci: dict[str, str],
+) -> dict[str, dict[int, dict[str, tuple[int, float, int]]]]:
+    """Collect the best native alignment per molecule, mate, and locus."""
+    hits: dict[str, dict[int, dict[str, tuple[int, float, int]]]] = defaultdict(
+        lambda: defaultdict(dict)
+    )
+    with path.open() as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < 12:
+                raise RuntimeError(
+                    f"Malformed minimap2 PAF at {path}:{line_number}: expected at least 12 fields"
+                )
+            reference_name = fields[5]
+            locus_id = reference_loci.get(reference_name)
+            if locus_id is None:
+                raise RuntimeError(
+                    f"minimap2 returned unknown recruitment reference {reference_name!r}"
+                )
+            molecule_id, mate = normalize_read_id(fields[0])
+            # In paired mode minimap2 appends /1 or /2. If the FASTQ name
+            # already carried that suffix, PAF contains name/1/1; peel the
+            # duplicated mate suffix while preserving the molecule ID.
+            nested_molecule_id, nested_mate = normalize_read_id(molecule_id)
+            if mate is not None and nested_mate == mate:
+                molecule_id = nested_molecule_id
+            mate_number = mate or 1
+            matches = int(fields[9])
+            aligned = max(1, int(fields[10]))
+            mapq = int(fields[11])
+            alignment_score = matches
+            for tag in fields[12:]:
+                if tag.startswith("AS:i:"):
+                    alignment_score = int(tag[5:])
+                    break
+            candidate = (alignment_score, matches / aligned, mapq)
+            current = hits[molecule_id][mate_number].get(locus_id)
+            if current is None or candidate > current:
+                hits[molecule_id][mate_number][locus_id] = candidate
+    return hits
+
+
+def _short_read_recruitment_decisions(
+    hits: dict[str, dict[int, dict[str, tuple[int, float, int]]]],
+) -> dict[str, tuple[str, str, int, float]]:
+    """Resolve mate-level native mappings into conservative molecule calls."""
+    decisions: dict[str, tuple[str, str, int, float]] = {}
+    for molecule_id, mate_hits in hits.items():
+        confident_mates: list[str] = []
+        for locus_hits in mate_hits.values():
+            ranked = sorted(
+                locus_hits.items(), key=lambda item: (-item[1][0], item[0])
+            )
+            if ranked and (
+                len(ranked) == 1 or ranked[0][1][0] > ranked[1][1][0]
+            ):
+                confident_mates.append(ranked[0][0])
+        if len(set(confident_mates)) > 1:
+            decisions[molecule_id] = ("discordant", "", 0, 0.0)
+            continue
+
+        combined_scores: Counter[str] = Counter()
+        identities: dict[str, list[float]] = defaultdict(list)
+        for locus_hits in mate_hits.values():
+            for locus_id, (score, identity, _mapq) in locus_hits.items():
+                combined_scores[locus_id] += score
+                identities[locus_id].append(identity)
+        ranked = sorted(combined_scores.items(), key=lambda item: (-item[1], item[0]))
+        if not ranked or (len(ranked) > 1 and ranked[0][1] == ranked[1][1]):
+            decisions[molecule_id] = ("ambiguous", "", 0, 0.0)
+            continue
+        locus_id, score = ranked[0]
+        identity = statistics.mean(identities[locus_id])
+        decisions[molecule_id] = ("unique", locus_id, score, identity)
+    return decisions
+
+
+def _collect_native_recruits(
+    paired_reads: tuple[Path, Path] | None,
+    single_reads: Path | None,
+    decisions: dict[str, tuple[str, str, int, float]],
+) -> tuple[list[RecruitedPair], Counter[str]]:
+    recruited: list[RecruitedPair] = []
+    outcomes: Counter[str] = Counter()
+
+    def collect(pairs) -> None:
+        for pair in pairs:
+            outcome, locus_id, score, identity = decisions.get(
+                pair.molecule_id, ("unassigned", "", 0, 0.0)
+            )
+            outcomes[outcome] += 1
+            if outcome == "unique":
+                recruited.append(
+                    RecruitedPair(pair, outcome, locus_id, score, identity)
+                )
+
+    if paired_reads is not None:
+        collect(read_fastq_pairs(*paired_reads))
+    if single_reads is not None:
+        collect(read_fastq_pairs(single_reads))
+    return recruited, outcomes
+
+
+def recruit_filtered_short_reads_native(
+    references: dict[str, str],
+    paired_reads: tuple[Path, Path] | None,
+    single_reads: Path | None,
+    workdir: Path,
+    threads: int,
+    minimap2_bin: str = "minimap2",
+) -> tuple[list[RecruitedPair], Counter[str]]:
+    """Recruit filtered Illumina reads with native, multithreaded minimap2."""
+    workdir.mkdir(parents=True, exist_ok=True)
+    reference_path = workdir / "references.fasta"
+    reference_loci = {
+        f"mlva_ref_{index + 1:04d}": locus_id
+        for index, locus_id in enumerate(sorted(references))
+        if references[locus_id]
+    }
+    write_fasta(
+        (
+            (reference_name, references[locus_id])
+            for reference_name, locus_id in reference_loci.items()
+        ),
+        reference_path,
+    )
+    if not reference_loci:
+        return _collect_native_recruits(paired_reads, single_reads, {})
+
+    executable = check_minimap2(minimap2_bin)
+    all_hits: dict[str, dict[int, dict[str, tuple[int, float, int]]]] = {}
+    inputs = []
+    if paired_reads is not None:
+        inputs.append((paired_reads[0], paired_reads[1], workdir / "paired.paf"))
+    if single_reads is not None:
+        inputs.append((single_reads, None, workdir / "single.paf"))
+    for reads1_path, reads2_path, paf_path in inputs:
+        _run_short_read_minimap2(
+            _short_read_minimap2_command(
+                executable,
+                reference_path,
+                reads1_path,
+                reads2_path,
+                threads,
+            ),
+            paf_path,
+        )
+        parsed = _parse_short_read_paf(paf_path, reference_loci)
+        for molecule_id, mate_hits in parsed.items():
+            all_hits[molecule_id] = mate_hits
+    decisions = _short_read_recruitment_decisions(all_hits)
+    return _collect_native_recruits(
+        paired_reads, single_reads, decisions
+    )
 
 
 def merge_read_pair(
@@ -923,7 +1166,7 @@ def recruitment_summary(
                 "full_product_reads": 0,
                 "genotype_informative_reads": 0,
                 "candidate_alleles": "",
-                "reference_source": "short_read_competitive_kmer",
+                "reference_source": "short_read_minimap2_sr",
             }
         )
     return rows
@@ -948,24 +1191,31 @@ def run_short_read_call(
     keep_intermediates: bool = False,
     sample_mode: str = "isolate",
     skesa_bin: str = "skesa",
+    minimap2_bin: str = "minimap2",
+    show_progress: bool = True,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
     resolved_skesa = check_skesa(skesa_bin)
+    resolved_minimap2 = check_minimap2(minimap2_bin)
     loci = read_loci_or_primers(loci_path, primers_path)
     profiles = read_profiles(profiles_path)
-    index, references = build_short_read_reference_index(loci, database_path)
+    references = build_short_read_references(loci, database_path)
     qc_counter: Counter[str] = Counter()
-    outcome_counts: Counter[str] = Counter()
-    recruited: list[RecruitedPair] = []
     filtered1_path = outdir_path / "filtered_reads_1.fastq.gz"
     filtered2_path = outdir_path / "filtered_reads_2.fastq.gz"
+    filtered_orphans_path = outdir_path / "filtered_orphan_reads.fastq.gz"
 
     def write_record(handle, read: ReadRecord) -> None:
         quality = read.quality or "I" * len(read.sequence)
         handle.write(f"@{read.read_id}\n{read.sequence}\n+\n{quality}\n")
 
-    def process_chunk(chunk: list[ReadPair], handle1, handle2) -> None:
+    def process_chunk(
+        chunk: list[ReadPair],
+        handle1,
+        handle2,
+        orphan_handle,
+    ) -> tuple[int, int]:
         retained, metrics = qc_read_pairs(
             chunk,
             short_min_read_length,
@@ -975,32 +1225,109 @@ def run_short_read_call(
         )
         qc_counter.update(metrics)
         for pair in retained:
-            write_record(handle1, pair.read1)
-            if handle2 is not None and pair.read2 is not None:
-                write_record(handle2, pair.read2)
-        outcomes = recruit_read_pairs(
-            retained, index, references=references
+            if reads2_path and pair.read2 is None:
+                write_record(
+                    orphan_handle,
+                    ReadRecord(
+                        pair.molecule_id,
+                        pair.read1.sequence,
+                        pair.read1.quality,
+                    ),
+                )
+            else:
+                write_record(handle1, pair.read1)
+                if handle2 is not None and pair.read2 is not None:
+                    write_record(handle2, pair.read2)
+        return (
+            sum(pair.read2 is not None for pair in retained),
+            sum(pair.read2 is None for pair in retained),
         )
-        outcome_counts.update(item.outcome for item in outcomes)
-        # Only uniquely assigned molecules carry sequences into local assembly;
-        # unassigned/ambiguous/discordant counts remain in the summary.
-        recruited.extend(item for item in outcomes if item.outcome == "unique")
 
-    with ExitStack() as stack:
-        handle1 = stack.enter_context(open_text(filtered1_path, "wt"))
-        handle2 = (
-            stack.enter_context(open_text(filtered2_path, "wt"))
-            if reads2_path
-            else None
+    def filter_and_recruit(recruitment_workdir: Path):
+        filter_started = time.perf_counter()
+        if show_progress:
+            print(f"[{sample_id}] Filtering and validating Illumina read pairs")
+        recruitment_workdir.mkdir(parents=True, exist_ok=True)
+        paired_count = 0
+        single_count = 0
+        with ExitStack() as stack:
+            handle1 = stack.enter_context(open_text(filtered1_path, "wt"))
+            handle2 = (
+                stack.enter_context(open_text(filtered2_path, "wt"))
+                if reads2_path
+                else None
+            )
+            orphan_handle = stack.enter_context(
+                open_text(filtered_orphans_path, "wt")
+            )
+            chunk: list[ReadPair] = []
+            for pair in read_fastq_pairs(reads1_path, reads2_path):
+                chunk.append(pair)
+                if len(chunk) >= 5000:
+                    new_paired, new_single = process_chunk(
+                        chunk,
+                        handle1,
+                        handle2,
+                        orphan_handle,
+                    )
+                    paired_count += new_paired
+                    single_count += new_single
+                    chunk.clear()
+            if chunk:
+                new_paired, new_single = process_chunk(
+                    chunk,
+                    handle1,
+                    handle2,
+                    orphan_handle,
+                )
+                paired_count += new_paired
+                single_count += new_single
+        if show_progress:
+            elapsed = time.perf_counter() - filter_started
+            print(
+                f"[{sample_id}] QC retained {paired_count:,} pairs and "
+                f"{single_count:,} single/orphan reads in {elapsed:.1f}s"
+            )
+            print(
+                f"[{sample_id}] Recruiting reads with minimap2 "
+                f"({resolve_threads(threads)} threads)"
+            )
+        recruitment_started = time.perf_counter()
+        result = recruit_filtered_short_reads_native(
+            references,
+            (filtered1_path, filtered2_path) if reads2_path and paired_count else None,
+            (
+                filtered_orphans_path
+                if reads2_path and single_count
+                else filtered1_path
+                if not reads2_path and single_count
+                else None
+            ),
+            recruitment_workdir,
+            threads,
+            resolved_minimap2,
         )
-        chunk: list[ReadPair] = []
-        for pair in read_fastq_pairs(reads1_path, reads2_path):
-            chunk.append(pair)
-            if len(chunk) >= 5000:
-                process_chunk(chunk, handle1, handle2)
-                chunk.clear()
-        if chunk:
-            process_chunk(chunk, handle1, handle2)
+        if show_progress:
+            elapsed = time.perf_counter() - recruitment_started
+            print(
+                f"[{sample_id}] minimap2 recruited {len(result[0]):,} "
+                f"molecules in {elapsed:.1f}s"
+            )
+        return result
+
+    if keep_intermediates:
+        recruitment_workdir = outdir_path / "short_read_recruitment_intermediates"
+        recruited, outcome_counts = filter_and_recruit(recruitment_workdir)
+        reference_file = recruitment_workdir / "references.fasta"
+        if reference_file.exists():
+            gzip_output_file(reference_file)
+    else:
+        with tempfile.TemporaryDirectory(
+            prefix=".mlvamaps-recruitment-", dir=outdir_path
+        ) as temporary_recruitment:
+            recruited, outcome_counts = filter_and_recruit(
+                Path(temporary_recruitment)
+            )
     qc = dict(qc_counter)
     qc_rows = [{"sample_id": sample_id, "metric": metric, "value": value} for metric, value in sorted(qc.items())]
     write_tsv(qc_rows, outdir_path / "short_read_qc_summary.tsv", SHORT_QC_FIELDS)
@@ -1014,6 +1341,13 @@ def run_short_read_call(
     )
     write_tsv(recruitment_rows, outdir_path / "short_read_recruitment_summary.tsv", SHORT_RECRUITMENT_FIELDS)
     write_tsv(recruitment_rows, outdir_path / "locus_presence.tsv", SHORT_RECRUITMENT_FIELDS)
+    if show_progress:
+        loci_with_reads = len({item.locus_id for item in recruited})
+        print(
+            f"[{sample_id}] Assembling {loci_with_reads:,} recruited loci "
+            f"with parallel SKESA"
+        )
+    assembly_started = time.perf_counter()
     if keep_intermediates:
         assembly_workdir = outdir_path / "short_read_assembly_intermediates"
         assembly_workdir.mkdir(parents=True, exist_ok=True)
@@ -1037,6 +1371,11 @@ def run_short_read_call(
                 Path(temporary_workdir),
                 resolved_skesa,
             )
+    if show_progress:
+        print(
+            f"[{sample_id}] SKESA assembly finished in "
+            f"{time.perf_counter() - assembly_started:.1f}s"
+        )
     insert_size = estimate_insert_size_distribution(recruited, references)
     if insert_size[0] is not None:
         qc_rows.extend(

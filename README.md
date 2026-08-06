@@ -97,6 +97,14 @@ flanks on separate mates yield an interval when possible. Repeat-internal or
 one-boundary evidence is reported as partial/presence-only and leaves
 `repeat_count` empty.
 
+The full filtered sample is recruited competitively with native minimap2 using
+the `sr` preset and the global `-t/--threads` budget. Only mapped records return
+to Python for evidence bookkeeping. Recruited loci are then assembled in up to
+four concurrent SKESA processes, with the same thread budget divided among
+them. Live stage timings distinguish FASTQ/QC, minimap2 recruitment, and SKESA
+assembly unless `--quiet` is used. Generated sequence files use fast gzip
+compression so compression does not dominate ordinary Illumina runs.
+
 For SRA-scale batches:
 
 ```bash
@@ -305,13 +313,14 @@ directory.
 
 ## How it works
 
-For Illumina data, mlvamaps filters and pairs the reads, assigns evidence to
-loci, and invokes the native SKESA assembler for each locus. Exact repeat counts
-require a SKESA contig, merged pair, or original read that resolves both repeat
-boundaries. Split-flank mate evidence can produce an interval, while internal or
-single-boundary evidence remains partial or presence-only. SKESA is a required
-dependency for this path; assembler failure is retained as an explicit sample
-or locus failure and is never replaced by a Python assembly result.
+For Illumina data, mlvamaps filters and pairs the reads, recruits them to loci
+with multithreaded native minimap2, and invokes the native SKESA assembler for
+each recruited locus. Exact repeat counts require a SKESA contig, merged pair,
+or original read that resolves both repeat boundaries. Split-flank mate evidence
+can produce an interval, while internal or single-boundary evidence remains
+partial or presence-only. SKESA is a required dependency for this path;
+assembler failure is retained as an explicit sample or locus failure and is
+never replaced by a Python assembly result.
 
 For accurate amplicon and long-read FASTQ data, mlvamaps:
 

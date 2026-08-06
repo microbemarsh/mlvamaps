@@ -15,6 +15,8 @@ from .models import Locus, ReadPair, ReadRecord
 def open_text(path: str | Path, mode: str = "rt"):
     path = Path(path)
     if path.suffix == ".gz":
+        if any(operation in mode for operation in ("w", "a", "x")):
+            return gzip.open(path, mode, compresslevel=1)
         return gzip.open(path, mode)
     return path.open(mode, newline="")
 
@@ -211,7 +213,9 @@ def gzip_output_file(path: str | Path) -> Path:
         return source
     destination = Path(f"{source}.gz")
     temporary = destination.with_name(f".{destination.name}.tmp")
-    with source.open("rb") as input_handle, gzip.open(temporary, "wb") as output_handle:
+    with source.open("rb") as input_handle, gzip.open(
+        temporary, "wb", compresslevel=1
+    ) as output_handle:
         shutil.copyfileobj(input_handle, output_handle)
     temporary.replace(destination)
     source.unlink()

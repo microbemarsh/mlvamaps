@@ -52,13 +52,21 @@ Recruitment references follow this order:
 1. per-locus products from `--database`;
 2. rich panel products synthesized from primers, flanks, motif, and expected
    repeat range;
-3. unique primer seeds when a complete template is unavailable.
+3. separated forward/reverse primer targets when a complete template is
+   unavailable.
 
-Canonical locus-specific k-mers recruit all loci competitively. A confident
-mate can rescue its unseeded mate. Equal-scoring assignments are ambiguous;
-confident mates assigned to different loci are discordant. Neither category is
-counted as unique support for multiple loci. This conservative seed model is
-deterministic and prevents shared repeat-motif k-mers from driving assignment.
+Filtered reads are mapped against the complete competitive reference bank by
+native minimap2 with its `sr` preset. Minimap2 receives the complete
+`-t/--threads` budget because this stage finishes before local assembly begins,
+and PAF output keeps unassigned WGS reads out of Python. Only the small mapped
+subset is parsed for locus evidence and retained for SKESA.
+
+Mate scores are resolved together. A confident mate can rescue its unaligned
+mate, equal best scores across loci are ambiguous, and confident mates assigned
+to different loci are discordant. Neither category is counted as unique support
+for multiple loci. Primer-only panels use separated primer targets when no
+complete product can be synthesized. Use `--minimap2-bin PATH` to select a
+compatible executable.
 
 ## Read merging and local assembly
 
@@ -78,7 +86,9 @@ locus reads and report contigs as short as 40 bases. Multiple contigs remain
 ambiguous and cannot create an exact call. `short_read_assembly_summary.tsv`
 reports the backend, status, contig count and length, depth estimate, and
 failure reason. `--keep-intermediates` retains each locus FASTQ, contig FASTA,
-and SKESA log under `short_read_assembly_intermediates/`.
+and SKESA log under `short_read_assembly_intermediates/`. It also retains the
+native recruitment reference and mapped-read PAF files under
+`short_read_recruitment_intermediates/`.
 
 ## Exact, interval, and presence evidence
 
@@ -155,8 +165,10 @@ missing sample is recorded in `batch_status.tsv` without stopping the rest.
 Successful sample directories resume by default; use `--force` to recompute.
 Combined standard, sample-summary, and MYOGA tables are written at the batch
 root. Samples are processed sequentially so a process never retains all batch
-FASTQs together. Within a sample, FASTQ/QC/recruitment run in bounded chunks;
-only uniquely locus-recruited molecules are retained for assembly.
+FASTQs together. Within a sample, FASTQ/QC streams in bounded chunks, minimap2
+performs multithreaded native recruitment, and only uniquely locus-recruited
+molecules are retained for assembly. Live timing messages report the QC,
+minimap2, and SKESA stages unless `--quiet` is selected.
 
 For Slurm arrays, split the manifest by row while preserving its header and run
 one manifest shard per task into separate output roots. Merge the resulting TSV

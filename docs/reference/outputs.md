@@ -121,6 +121,8 @@ data are supplied.
 | `short_read_qc_summary.tsv` | Input/retained reads and pairs, orphans, and empirical insert-size values when estimable. |
 | `short_read_recruitment_summary.tsv` | Unique, ambiguous, discordant, and orphan pair counts per locus. |
 | `short_read_assembly_summary.tsv` | Per-locus SKESA status, contig sizes, depth, and failure reason. |
+| `filtered_reads_1.fastq.gz`, `filtered_reads_2.fastq.gz` | Quality-filtered mates, written with fast gzip compression for downstream native recruitment. |
+| `filtered_orphan_reads.fastq.gz` | Retained single mates whose partner failed QC; empty when no orphans are present. |
 | `sample_summary.tsv` | One normalized sample row for batch aggregation. |
 | `myoga_samples.csv` | MYOGA metadata; `genome_id` equals `sample_id` and generated sample tree-tip IDs. |
 | `myoga_loci.csv` | Long-form exact calls, intervals, evidence, and confidence. |
