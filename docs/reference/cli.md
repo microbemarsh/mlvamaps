@@ -2,6 +2,39 @@
 
 Run `mlvamaps call --help` for the complete parser-generated reference.
 
+## Completed-results MYOGA export
+
+```bash
+mlvamaps export-myoga --results results/ --metadata metadata.tsv \
+  --metadata-id shared_identifier -o global_mlva/
+```
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--results DIR` | required | Recursively searched completed MLVAmaps result root. |
+| `--metadata CSV_OR_TSV` | required | Metadata joined to recorded sample IDs. |
+| `--metadata-id COLUMN` | `shared_identifier` | Metadata join column. |
+| `--latitude COLUMN` | `latitude` | Latitude column; standard aliases are recognized for the default. |
+| `--longitude COLUMN` | `longitude` | Longitude column; standard aliases are recognized for the default. |
+| `--min-callable-fraction FRACTION` | `0.8` | Required fraction of panel loci with exact numeric repeat counts. |
+| `--min-callable-loci COUNT` | `0` | Additional exact-call count; both callable thresholds apply. |
+| `--min-pairwise-loci COUNT` | `1` | Required shared exact-call count for a supported pair. |
+| `--min-pairwise-fraction FRACTION` | `0.5` | Required panel fraction callable in both samples. |
+| `--distance {repeat,categorical}` | `repeat` | Metric used for the square matrix and relatedness tree; both remain in the pairwise table. |
+| `--combined-markers` | off | Also recover accepted amplicons, infer per-locus repeat-masked SNP trees, and write a combined SNP/repeat tree. |
+| `--loci TSV` | unset | Original rich locus panel used to mask retained amplicons when precomputed masked queries are absent. |
+| `--phylogeny-snp-weight FLOAT` | `1.0` | Weight of normalized per-locus SNP-tree distance in the combined marker distance. |
+| `--phylogeny-repeat-weight FLOAT` | `1.0` | Weight of normalized per-locus repeat distance in the combined marker distance. |
+| `-t`, `--threads` | `32` | MAFFT/RAxML-NG CPU budget for combined-marker inference; `0` uses all CPUs. |
+| `--mafft-bin` | `mafft` | MAFFT executable used for retrospective locus alignments. |
+| `--raxml-ng-bin` | `raxml-ng` | RAxML-NG executable used when a locus has at least three SNP haplotypes. |
+| `--raxml-model` | `DNA` | RAxML-NG model or model-selection set. |
+| `-o`, `--output DIR` | required | Export directory. |
+| `--force` | off | Replace existing export files. |
+
+See [dataset aggregation and MYOGA export](../workflows/myoga-export.md) for
+discovery rules, exact formulas, overlap pruning, and scientific caveats.
+
 The primary input may be one supported FASTA/FASTQ file or a directory of such
 files. Directory discovery is non-recursive, and each file is written beneath
 `OUTDIR/<sample-id>/`; see [input formats](input-formats.md#input-directories).

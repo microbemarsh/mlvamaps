@@ -1320,7 +1320,9 @@ def _tip_patristic_distances(root: _Node) -> dict[tuple[str, str], float]:
 
 
 def _newick_label(label: str) -> str:
-    return "'" + str(label).replace("'", "_") + "'"
+    # Newick escapes a quote inside a quoted label by doubling it. Preserve
+    # sample IDs exactly instead of silently rewriting meaningful characters.
+    return "'" + str(label).replace("'", "''") + "'"
 
 
 def neighbor_joining_tree(
@@ -1343,6 +1345,13 @@ def neighbor_joining_tree(
             matrix[left_index, right_index] = value
             matrix[right_index, left_index] = value
     return _neighbor_joining_tree_from_matrix(labels, matrix)
+
+
+def neighbor_joining_tree_from_matrix(
+    labels: list[str], distances: np.ndarray
+) -> str:
+    """Build deterministic Newick directly from a finite dense distance matrix."""
+    return _neighbor_joining_tree_from_matrix(labels, distances)
 
 
 def _neighbor_joining_tree_from_matrix(

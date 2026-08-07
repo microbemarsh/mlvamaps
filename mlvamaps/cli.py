@@ -8,6 +8,7 @@ from .assembly_call import ASSEMBLY_ALGORITHMS, run_assembly_call
 from .concurrency import DEFAULT_THREADS
 from .in_silico_pcr import run_in_silico_pcr
 from .io import open_text, write_tsv
+from .myoga_export import export_myoga
 from .pipeline import run_call
 from .reference_builder import build_reference_database
 from .reference_pipeline import (
@@ -615,6 +616,147 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write read- and locus-level mapping versus measurement audit TSVs",
     )
 
+    export = subparsers.add_parser(
+        "export-myoga",
+        help="Aggregate completed MLVA results into a MYOGA-ready relatedness dataset",
+        description=(
+            "Discover completed MLVAmaps samples, filter exact repeat-count profiles, "
+            "join metadata, calculate shared-locus distances, and write a deterministic "
+            "neighbor-joining MLVA relatedness tree without rerunning calling. An "
+            "optional combined-marker mode reuses accepted amplicons to add per-locus "
+            "repeat-masked SNP trees."
+        ),
+    )
+    export.add_argument(
+        "--results",
+        required=True,
+        metavar="DIR",
+        help="Root containing completed per-sample MLVAmaps result directories",
+    )
+    export.add_argument(
+        "--metadata",
+        required=True,
+        metavar="CSV_OR_TSV",
+        help="Sample metadata table to join to recorded MLVAmaps sample IDs",
+    )
+    export.add_argument(
+        "--metadata-id",
+        default="shared_identifier",
+        metavar="COLUMN",
+        help="Metadata identifier column matched to sample_id (default: %(default)s)",
+    )
+    export.add_argument(
+        "--latitude",
+        default="latitude",
+        metavar="COLUMN",
+        help="Latitude column (default: %(default)s; standard aliases are recognized)",
+    )
+    export.add_argument(
+        "--longitude",
+        default="longitude",
+        metavar="COLUMN",
+        help="Longitude column (default: %(default)s; standard aliases are recognized)",
+    )
+    export.add_argument(
+        "--min-callable-fraction",
+        type=_fraction,
+        default=0.8,
+        metavar="FRACTION",
+        help="Minimum exact-call fraction per sample (default: %(default)s)",
+    )
+    export.add_argument(
+        "--min-callable-loci",
+        type=_nonnegative_int,
+        default=0,
+        metavar="COUNT",
+        help="Additional minimum exact-call count; both sample thresholds must pass (default: %(default)s)",
+    )
+    export.add_argument(
+        "--min-pairwise-loci",
+        type=_positive_int,
+        default=1,
+        metavar="COUNT",
+        help="Minimum shared exact loci per supported pair (default: %(default)s)",
+    )
+    export.add_argument(
+        "--min-pairwise-fraction",
+        type=_fraction,
+        default=0.5,
+        metavar="FRACTION",
+        help="Minimum panel fraction callable in both samples (default: %(default)s)",
+    )
+    export.add_argument(
+        "--distance",
+        choices=("repeat", "categorical"),
+        default="repeat",
+        help="Distance used for the matrix and tree (default: %(default)s)",
+    )
+    export.add_argument(
+        "--combined-markers",
+        action="store_true",
+        help=(
+            "Also recover accepted amplicons, build repeat-masked per-locus SNP "
+            "trees, and write a combined SNP/repeat neighbor-joining tree"
+        ),
+    )
+    export.add_argument(
+        "--loci",
+        dest="export_loci",
+        metavar="TSV",
+        help=(
+            "Rich locus panel used to mask retained amplicons when reusable "
+            "phylogeny/query.fasta files are unavailable"
+        ),
+    )
+    export.add_argument(
+        "--phylogeny-snp-weight",
+        type=_nonnegative_float,
+        default=1.0,
+        help="Weight of normalized SNP-tree distance (default: %(default)s)",
+    )
+    export.add_argument(
+        "--phylogeny-repeat-weight",
+        type=_nonnegative_float,
+        default=1.0,
+        help="Weight of normalized repeat-count distance (default: %(default)s)",
+    )
+    export.add_argument(
+        "-t",
+        "--threads",
+        type=_nonnegative_int,
+        default=DEFAULT_THREADS,
+        help="MAFFT/RAxML-NG thread budget; 0 uses all CPUs (default: %(default)s)",
+    )
+    export.add_argument(
+        "--mafft-bin",
+        default="mafft",
+        help="MAFFT executable for combined-marker alignments (default: %(default)s)",
+    )
+    export.add_argument(
+        "--raxml-ng-bin",
+        default="raxml-ng",
+        help="RAxML-NG executable for combined-marker locus trees (default: %(default)s)",
+    )
+    export.add_argument(
+        "--raxml-model",
+        default="DNA",
+        help="RAxML-NG model or model-selection set (default: %(default)s)",
+    )
+    export.add_argument(
+        "-o",
+        "--output",
+        "--outdir",
+        dest="outdir",
+        required=True,
+        metavar="DIR",
+        help="Output directory for the export",
+    )
+    export.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing export in the output directory",
+    )
+
     simulate = subparsers.add_parser("simulate", help="Simulate amplicon reads for a VNTR panel")
     simulate.add_argument("-p", "--panel", dest="loci", required=True)
     simulate.add_argument("--profile", dest="profiles")
@@ -1170,6 +1312,48 @@ def _batch_analysis_path(input_path: str, outdir: str) -> Path:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "export-myoga":
+        try:
+            result = export_myoga(
+                args.results,
+                args.metadata,
+                args.outdir,
+                metadata_id=args.metadata_id,
+                latitude=args.latitude,
+                longitude=args.longitude,
+                min_callable_fraction=args.min_callable_fraction,
+                min_callable_loci=args.min_callable_loci,
+                min_pairwise_loci=args.min_pairwise_loci,
+                min_pairwise_fraction=args.min_pairwise_fraction,
+                distance=args.distance,
+                combined_markers=args.combined_markers,
+                loci_path=args.export_loci,
+                snp_weight=args.phylogeny_snp_weight,
+                repeat_weight=args.phylogeny_repeat_weight,
+                threads=args.threads,
+                mafft_bin=args.mafft_bin,
+                raxml_ng_bin=args.raxml_ng_bin,
+                raxml_model=args.raxml_model,
+                force=args.force,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"Wrote MYOGA metadata to {result['metadata']}")
+        print(f"Wrote MLVA distance matrix to {result['distance_matrix']}")
+        if result["tree"]:
+            print(f"Wrote MLVA relatedness tree to {result['tree']}")
+        else:
+            print("No MLVA relatedness tree was written because no samples passed filtering")
+        if args.combined_markers:
+            if result["combined_marker_tree"]:
+                print(
+                    "Wrote combined SNP/repeat relatedness tree to "
+                    f"{result['combined_marker_tree']}"
+                )
+            else:
+                print("No combined SNP/repeat tree was written")
+        print(f"Wrote export summary to {result['summary']}")
+        return 0
     if args.command == "call":
         _resolve_call_args(parser, args)
         if args.reads2 and not args.reads1:

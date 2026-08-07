@@ -19,6 +19,39 @@ a matching `.gz` suffix. Input files are never modified.
 Illumina calls additionally always write `sample_summary.tsv`,
 `myoga_samples.csv`, and `myoga_loci.csv`.
 
+## Dataset-level MYOGA export outputs
+
+`mlvamaps export-myoga` reads completed calls and writes the following without
+rerunning sample analysis:
+
+| File | Meaning |
+| --- | --- |
+| `myoga_metadata.tsv` | Original metadata restricted/padded to final tree samples, with canonical `sample_id`, validated `latitude`, and validated `longitude`. |
+| `mlva_profiles.tsv` | Final sample-by-locus exact repeat-count matrix; unresolved loci are empty. |
+| `mlva_calls_long.tsv` | Auditable final sample-by-locus calls retaining available `calls.tsv` evidence fields. |
+| `mlva_pairwise_distances.tsv` | Both categorical and repeat-count distance components over shared exact calls, including unsupported pre-tree pairs. |
+| `mlva_distance_matrix.tsv` | Symmetric selected-distance matrix for final tree samples, with a zero diagonal. |
+| `mlva_nj.tree` | Deterministic neighbor-joining MLVA relatedness tree; absent when no sample passes filtering. |
+| `samples_used.tsv` | Final tree sample paths, callability, metadata, and coordinate status. |
+| `samples_excluded.tsv` | Tree exclusions and non-fatal geography exclusions with reason codes and details. |
+| `export_summary.tsv`, `export_summary.txt` | Machine- and human-readable discovery, filtering, overlap, and output totals. |
+
+With `export-myoga --combined-markers`, the export additionally writes:
+
+| File | Meaning |
+| --- | --- |
+| `combined_marker_sequence_status.tsv` | Per-sample/locus recovery source, masking method, and explicit reason when no safe sequence was usable. |
+| `locus_tree_status.tsv` | Per-locus sample and SNP-haplotype counts, inference method, scale, alignment, and tree path. |
+| `locus_trees/LOCUS/samples.tree` | Sample-tip locus tree derived from the repeat-masked SNP tree distance; identical SNP haplotypes are restored as zero-distance tips. |
+| `locus_snp_distances.tsv` | Per-locus pairwise patristic SNP and repeat distances, locus scales, normalized components, and weighted locus distance. |
+| `combined_marker_pairwise_distances.tsv` | Component means, shared-locus counts, weights, combined distances, and overlap status for each sample pair. |
+| `combined_marker_distance_matrix.tsv` | Complete combined-marker matrix after deterministic overlap pruning. |
+| `combined_marker_nj.tree` | Neighbor-joining tree from the combined marker matrix. |
+| `combined_marker_metadata.tsv` | Metadata restricted to exactly the combined-tree tips. |
+
+See the [MYOGA export workflow](../workflows/myoga-export.md) for formulas and
+filter behavior.
+
 ## Reference builder outputs
 
 | File | Meaning |

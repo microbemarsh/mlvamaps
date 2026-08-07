@@ -10,6 +10,7 @@ path, intermediate stage, output, and interpretation boundary.
 - [Paired/single-end Illumina sequencing](workflows/illumina.md)
 - [Assemblies and assembly read support](workflows/assembly.md)
 - [Reference building](workflows/reference-building.md)
+- [Dataset aggregation and MYOGA export](workflows/myoga-export.md)
 
 ## Concepts
 

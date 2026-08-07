@@ -129,6 +129,34 @@ samples resume by default and `--force` reruns them. See
 [the Illumina workflow](docs/workflows/illumina.md) for evidence rules,
 metadata aliases, HPC use, and a complete synthetic example.
 
+### Export a completed dataset to MYOGA
+
+Completed sample directories can be aggregated retrospectively without
+rerunning MLVA calling:
+
+```bash
+mlvamaps export-myoga \
+  --results results/ \
+  --metadata sramic_curated_metadata.tsv \
+  --metadata-id shared_identifier \
+  --latitude latitude --longitude longitude \
+  --min-callable-fraction 0.8 \
+  -o global_mlva/
+```
+
+The export keeps exact numeric calls, preserves missing loci, calculates
+categorical and mean absolute repeat-count distances over shared callable loci,
+filters weak pairwise overlap, and writes `mlva_nj.tree` plus
+`myoga_metadata.tsv`. The Newick tips and metadata `sample_id` values match
+exactly. This is an MLVA relatedness tree, not a whole-genome phylogeny. See the
+[dataset aggregation and MYOGA export guide](docs/workflows/myoga-export.md)
+for filtering defaults, formulas, output files, and interpretation caveats.
+
+Add `--combined-markers` to reuse retained accepted amplicons for per-locus
+repeat-masked SNP trees and a combined SNP/repeat relatedness tree. Runs that
+already contain `phylogeny/LOCUS/query.fasta.gz` need no panel; otherwise pass
+the original rich panel with `--loci panel.tsv`.
+
 Analyze amplicon or other primer-spanning reads:
 
 ```bash

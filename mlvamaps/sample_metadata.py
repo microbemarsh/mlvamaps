@@ -45,8 +45,6 @@ MYOGA_SAMPLE_FIELDS = [
 
 
 def _delimiter(path: Path, sample: str) -> str:
-    if path.suffix.lower() == ".csv":
-        return ","
     first = sample.splitlines()[0] if sample.splitlines() else ""
     if "\t" in first:
         return "\t"
