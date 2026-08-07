@@ -945,6 +945,8 @@ def export_myoga(
         ("samples_with_coordinates", sum(row["coordinates_valid"] == "yes" for row in used_rows)),
         ("samples_without_coordinates", sum(row["coordinates_valid"] == "no" for row in used_rows)),
         ("total_mlva_loci", total_loci),
+        ("callable_fraction_denominator", "sample_assayed_loci"),
+        ("pairwise_fraction_denominator", "shared_assayed_loci"),
         ("samples_passing_callable_threshold", len(threshold_samples)),
         ("samples_excluded_from_tree", len(tree_excluded_ids)),
         ("final_tree_samples", len(final_ids)),

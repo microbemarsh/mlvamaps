@@ -473,6 +473,53 @@ def test_batch_root_combined_calls_are_a_fallback_when_leaf_files_are_absent(tmp
     }
 
 
+def test_batch_root_combined_calls_allow_uneven_locus_rows(tmp_path):
+    staging = tmp_path / "staging"
+    first = _write_calls(staging, "S1", {"L1": 1, "L2": 2, "L3": 3})
+    second = _write_calls(staging, "S2", {"L1": 1, "L2": 4})
+    first_lines = first.read_text().splitlines()
+    second_lines = second.read_text().splitlines()
+    results = tmp_path / "results"
+    results.mkdir()
+    (results / "calls.tsv").write_text(
+        "\n".join([*first_lines, *second_lines[1:]]) + "\n"
+    )
+    (results / "batch_status.tsv").write_text(
+        "sample_id\tstatus\tmessage\nS1\tsuccess\t\nS2\tsuccess\t\n"
+    )
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\nS1\t1\t2\nS2\t3\t4\n"
+    )
+    output = tmp_path / "export"
+
+    export_myoga(
+        results,
+        metadata,
+        output,
+        min_callable_fraction=1,
+        min_pairwise_fraction=1,
+    )
+
+    used = {row["sample_id"]: row for row in _read_tsv(output / "samples_used.tsv")}
+    assert used["S1"]["total_loci"] == "3"
+    assert used["S2"]["total_loci"] == "2"
+    assert used["S2"]["callable_fraction"] == "1.000000"
+    assert _read_tsv(output / "mlva_profiles.tsv")[1] == {
+        "sample_id": "S2",
+        "L1": "1",
+        "L2": "4",
+        "L3": "",
+    }
+    pair = _read_tsv(output / "mlva_pairwise_distances.tsv")[0]
+    assert pair["loci_compared"] == "2"
+    assert pair["fraction_loci_compared"] == "1.00000000"
+    assert pair["comparison_status"] == "sufficient"
+    summary = {row["metric"]: row["value"] for row in _read_tsv(output / "export_summary.tsv")}
+    assert summary["callable_fraction_denominator"] == "sample_assayed_loci"
+    assert summary["pairwise_fraction_denominator"] == "shared_assayed_loci"
+
+
 def test_outputs_are_deterministic_and_force_is_required_for_overwrite(tmp_path):
     results, metadata = _basic_results(tmp_path)
     first = tmp_path / "first"

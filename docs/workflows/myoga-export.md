@@ -45,8 +45,11 @@ must satisfy both criteria, equivalently the larger of the two required counts.
 
 Panel order is recovered from the sample with the most locus rows, with a
 deterministic sample-ID tie break. Loci found only in other results are appended
-in natural alphanumeric order. Sample IDs are naturally sorted. Identical MLVA
-profiles are retained as independent observations.
+in natural alphanumeric order. This also applies when a batch-level `calls.tsv`
+contains a different number of locus rows for each sample. The wide profile uses
+the union of loci and leaves loci absent from a sample's input rows empty. Sample
+IDs are naturally sorted. Identical MLVA profiles are retained as independent
+observations.
 
 ## Pairwise MLVA distances
 
