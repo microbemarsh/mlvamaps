@@ -274,6 +274,28 @@ def test_default_callable_threshold_retains_any_sample_with_an_exact_vntr_call(t
     )
 
 
+def test_default_pairwise_threshold_retains_sparse_shared_calls(tmp_path):
+    results = tmp_path / "results"
+    _write_calls(results, "A", {"L1": 1, "L2": None, "L3": None, "L4": None})
+    _write_calls(results, "B", {"L1": 2, "L2": None, "L3": None, "L4": None})
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\nA\t1\t2\nB\t3\t4\n"
+    )
+    output = tmp_path / "export"
+
+    export_myoga(results, metadata, output)
+
+    pair = _read_tsv(output / "mlva_pairwise_distances.tsv")[0]
+    assert pair["loci_compared"] == "1"
+    assert pair["fraction_loci_compared"] == "0.25000000"
+    assert pair["comparison_status"] == "sufficient"
+    assert {row["sample_id"] for row in _read_tsv(output / "samples_used.tsv")} == {
+        "A",
+        "B",
+    }
+
+
 def test_mixed_panels_use_each_samples_assayed_loci_for_thresholds_and_overlap(tmp_path):
     results = tmp_path / "results"
     panel_14 = {f"L{index}": index for index in range(1, 15)}
@@ -649,6 +671,25 @@ def test_export_myoga_cli_routes_all_options(monkeypatch, capsys):
     stream = capsys.readouterr().out
     assert "Wrote MLVA relatedness tree" in stream
     assert "Wrote combined SNP/repeat relatedness tree" in stream
+
+
+def test_export_myoga_cli_defaults_to_relaxed_completeness_thresholds():
+    args = cli.build_parser().parse_args(
+        [
+            "export-myoga",
+            "--results",
+            "results",
+            "--metadata",
+            "metadata.tsv",
+            "-o",
+            "export",
+        ]
+    )
+
+    assert args.min_callable_fraction == 0
+    assert args.min_callable_loci == 0
+    assert args.min_pairwise_loci == 1
+    assert args.min_pairwise_fraction == 0
 
 
 def _write_gzip_fasta(path: Path, name: str, sequence: str) -> None:

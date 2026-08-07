@@ -364,7 +364,7 @@ def export_combined_markers(
     *,
     loci: list[Locus] | None = None,
     min_pairwise_loci: int = 1,
-    min_pairwise_fraction: float = 0.5,
+    min_pairwise_fraction: float = 0.0,
     snp_weight: float = 1.0,
     repeat_weight: float = 1.0,
     threads: int = 1,

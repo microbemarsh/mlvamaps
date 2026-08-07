@@ -684,7 +684,7 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument(
         "--min-pairwise-fraction",
         type=_fraction,
-        default=0.5,
+        default=0.0,
         metavar="FRACTION",
         help="Minimum panel fraction callable in both samples (default: %(default)s)",
     )

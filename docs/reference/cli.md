@@ -16,10 +16,10 @@ mlvamaps export-myoga --results results/ --metadata metadata.tsv \
 | `--metadata-id COLUMN` | `shared_identifier` | Metadata join column. |
 | `--latitude COLUMN` | `latitude` | Latitude column; standard aliases are recognized for the default. |
 | `--longitude COLUMN` | `longitude` | Longitude column; standard aliases are recognized for the default. |
-| `--min-callable-fraction FRACTION` | `0.8` | Required fraction of panel loci with exact numeric repeat counts. |
+| `--min-callable-fraction FRACTION` | `0` | Retain samples with any exact numeric repeat count; positive values require that fraction of assayed loci. |
 | `--min-callable-loci COUNT` | `0` | Additional exact-call count; both callable thresholds apply. |
 | `--min-pairwise-loci COUNT` | `1` | Required shared exact-call count for a supported pair. |
-| `--min-pairwise-fraction FRACTION` | `0.5` | Required panel fraction callable in both samples. |
+| `--min-pairwise-fraction FRACTION` | `0` | No fractional completeness requirement; pairs must still share at least `--min-pairwise-loci` exact calls. |
 | `--distance {repeat,categorical}` | `repeat` | Metric used for the square matrix and relatedness tree; both remain in the pairwise table. |
 | `--combined-markers` | off | Also recover accepted amplicons, infer per-locus repeat-masked SNP trees, and write a combined SNP/repeat tree. |
 | `--loci TSV` | unset | Original rich locus panel used to mask retained amplicons when precomputed masked queries are absent. |

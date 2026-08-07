@@ -78,10 +78,12 @@ export does not invent or silently reuse a dataset-derived replacement in its
 default repeat-only mode. The explicitly requested combined-marker mode below
 uses a documented dataset-derived scale.
 
-A pair is supported only when it meets both `--min-pairwise-loci 1` and
-`--min-pairwise-fraction 0.5` by default. The fractional denominator is the
-intersection of the two samples' assayed loci, so mixing compatible panels
-does not count loci absent from one panel as failed calls. Unsupported pairs remain in
+A pair is supported by default when it shares at least one exact call
+(`--min-pairwise-loci 1`); the default `--min-pairwise-fraction 0` adds no
+fractional completeness requirement. The fractional denominator, when a
+positive threshold is requested, is the intersection of the two samples'
+assayed loci, so mixing compatible panels does not count loci absent from one
+panel as failed calls. Unsupported pairs remain in
 `mlva_pairwise_distances.tsv` with `comparison_status=insufficient_overlap` and
 empty normalized distances. The exporter never substitutes zero or a maximum
 distance. Before tree construction it repeatedly removes the sample with the

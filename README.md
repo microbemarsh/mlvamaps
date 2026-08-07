@@ -140,13 +140,12 @@ mlvamaps export-myoga \
   --metadata sramic_curated_metadata.tsv \
   --metadata-id shared_identifier \
   --latitude latitude --longitude longitude \
-  --min-callable-fraction 0.8 \
   -o global_mlva/
 ```
 
 The export keeps exact numeric calls, preserves missing loci, calculates
 categorical and mean absolute repeat-count distances over shared callable loci,
-filters weak pairwise overlap, and writes `mlva_nj.tree` plus
+requires at least one shared exact call per pair, and writes `mlva_nj.tree` plus
 `myoga_metadata.tsv`. The Newick tips and metadata `sample_id` values match
 exactly. This is an MLVA relatedness tree, not a whole-genome phylogeny. See the
 [dataset aggregation and MYOGA export guide](docs/workflows/myoga-export.md)
