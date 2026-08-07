@@ -660,9 +660,12 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument(
         "--min-callable-fraction",
         type=_fraction,
-        default=0.8,
+        default=0.0,
         metavar="FRACTION",
-        help="Minimum exact-call fraction per sample (default: %(default)s)",
+        help=(
+            "Minimum exact VNTR-call fraction per sample; by default, retain any "
+            "sample with at least one finite repeat_count (default: %(default)s)"
+        ),
     )
     export.add_argument(
         "--min-callable-loci",

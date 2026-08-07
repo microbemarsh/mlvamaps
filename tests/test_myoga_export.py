@@ -253,6 +253,27 @@ def test_callable_threshold_uses_exact_numeric_repeat_not_presence(tmp_path):
     assert row["callable_loci"] == "2"
 
 
+def test_default_callable_threshold_retains_any_sample_with_an_exact_vntr_call(tmp_path):
+    results = tmp_path / "results"
+    _write_calls(results, "PARTIAL", {"L1": 1, "L2": None, "L3": None, "L4": None})
+    _write_calls(results, "NO_EXACT", {"L1": None, "L2": None, "L3": None, "L4": None})
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\nPARTIAL\t1\t2\nNO_EXACT\t3\t4\n"
+    )
+    output = tmp_path / "export"
+
+    export_myoga(results, metadata, output)
+
+    used = _read_tsv(output / "samples_used.tsv")
+    assert [(row["sample_id"], row["callable_loci"]) for row in used] == [("PARTIAL", "1")]
+    excluded = _read_tsv(output / "samples_excluded.tsv")
+    assert any(
+        row["sample_id"] == "NO_EXACT" and row["reason"] == "NO_CALLABLE_LOCI"
+        for row in excluded
+    )
+
+
 def test_mixed_panels_use_each_samples_assayed_loci_for_thresholds_and_overlap(tmp_path):
     results = tmp_path / "results"
     panel_14 = {f"L{index}": index for index in range(1, 15)}

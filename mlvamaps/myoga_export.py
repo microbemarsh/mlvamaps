@@ -650,7 +650,7 @@ def export_myoga(
     metadata_id: str = "shared_identifier",
     latitude: str = "latitude",
     longitude: str = "longitude",
-    min_callable_fraction: float = 0.8,
+    min_callable_fraction: float = 0.0,
     min_callable_loci: int = 0,
     min_pairwise_loci: int = 1,
     min_pairwise_fraction: float = 0.5,

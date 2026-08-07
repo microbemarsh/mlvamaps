@@ -12,7 +12,7 @@ mlvamaps export-myoga \
   --metadata-id shared_identifier \
   --latitude latitude \
   --longitude longitude \
-  --min-callable-fraction 0.8 \
+  --min-callable-fraction 0 \
   -o global_mlva/
 ```
 
@@ -36,12 +36,17 @@ finite numeric value. `present=yes`, a repeat interval, partial repeat evidence,
 or presence-only evidence does not create an exact allele. Missing calls remain
 empty in `mlva_profiles.tsv`; they are never converted to zero.
 
-The default sample threshold is `--min-callable-fraction 0.8`. The denominator
-is the number of loci actually assayed for that sample, as recorded by its
-`calls.tsv`; it is not the union of loci from unrelated panels in the same
-export. For 25 assayed loci this requires 20 exact calls, while for 14 assayed
-loci it requires 12. `--min-callable-loci` defaults to zero; when set, a sample
-must satisfy both criteria, equivalently the larger of the two required counts.
+By default, the exporter retains any sample with at least one finite numeric
+VNTR `repeat_count`; this is equivalent to `--min-callable-fraction 0` and
+`--min-callable-loci 0`. Samples with no exact VNTR calls are still excluded
+because no repeat-count distance can be calculated for them.
+
+Use a positive `--min-callable-fraction` when a completeness filter is desired.
+Its denominator is the number of loci actually assayed for that sample, as
+recorded by its `calls.tsv`; it is not the union of loci from unrelated panels
+in the same export. For example, a threshold of `0.8` requires 20 of 25 assayed
+loci or 12 of 14 assayed loci. When `--min-callable-loci` is also set, a sample
+must satisfy both criteria, equivalently the larger required locus count.
 
 Panel order is recovered from the sample with the most locus rows, with a
 deterministic sample-ID tie break. Loci found only in other results are appended
