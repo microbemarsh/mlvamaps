@@ -738,7 +738,7 @@ def test_combined_marker_export_reuses_precomputed_masked_queries(tmp_path):
     } == {"S1", "S2", "S3"}
 
 
-def test_combined_marker_export_runs_raxml_for_three_snp_haplotypes(tmp_path):
+def test_combined_marker_export_uses_distances_for_three_snp_haplotypes(tmp_path):
     results = tmp_path / "results"
     metadata = tmp_path / "metadata.tsv"
     metadata.write_text(
@@ -760,15 +760,61 @@ def test_combined_marker_export_runs_raxml_for_three_snp_haplotypes(tmp_path):
         output,
         combined_markers=True,
         mafft_bin=str(_fake_export_mafft(tmp_path)),
+        raxml_ng_bin="missing-raxml-ng",
+    )
+
+    status = _read_tsv(output / "locus_tree_status.tsv")[0]
+    assert status["status"] == "THREE_HAPLOTYPE_DISTANCE"
+    assert status["snp_haplotypes"] == "3"
+    assert not (output / "locus_trees" / "L1" / "haplotypes.raxml.tree").exists()
+    distances = {
+        (row["sample_1"], row["sample_2"]): row["snp_patristic_distance"]
+        for row in _read_tsv(output / "locus_snp_distances.tsv")
+    }
+    assert distances == {
+        ("S1", "S2"): "0.25000000",
+        ("S1", "S3"): "0.50000000",
+        ("S2", "S3"): "0.25000000",
+    }
+    tree = (output / "locus_trees" / "L1" / "samples.tree").read_text()
+    tips = set(re.findall(r"'([^']+)'", tree))
+    assert tips == {"S1", "S2", "S3"}
+
+
+def test_combined_marker_export_runs_raxml_for_four_snp_haplotypes(tmp_path):
+    results = tmp_path / "results"
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\n"
+        "S1\t1\t2\nS2\t3\t4\nS3\t5\t6\nS4\t7\t8\n"
+    )
+    for sample_id, sequence in (
+        ("S1", "AAAA"),
+        ("S2", "AAAT"),
+        ("S3", "AATT"),
+        ("S4", "ATTT"),
+    ):
+        path = _write_calls(results, sample_id, {"L1": 1})
+        _write_gzip_fasta(
+            path.parent / "phylogeny" / "L1" / "query.fasta.gz",
+            f"QUERY__{sample_id}",
+            sequence,
+        )
+    output = tmp_path / "export"
+
+    export_myoga(
+        results,
+        metadata,
+        output,
+        combined_markers=True,
+        mafft_bin=str(_fake_export_mafft(tmp_path)),
         raxml_ng_bin=str(_fake_export_raxml(tmp_path)),
     )
 
     status = _read_tsv(output / "locus_tree_status.tsv")[0]
     assert status["status"] == "RAXML_NG"
-    assert status["snp_haplotypes"] == "3"
+    assert status["snp_haplotypes"] == "4"
     assert (output / "locus_trees" / "L1" / "haplotypes.raxml.tree").is_file()
-    tips = set(re.findall(r"'([^']+)'", (output / "locus_trees" / "L1" / "samples.tree").read_text()))
-    assert tips == {"S1", "S2", "S3"}
 
 
 def test_retained_assembly_evidence_is_masked_with_rich_panel(tmp_path):

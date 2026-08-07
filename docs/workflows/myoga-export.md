@@ -118,11 +118,11 @@ allowing repeat-length gaps into the SNP model. Every decision is recorded in
 `combined_marker_sequence_status.tsv`.
 
 Exact duplicate SNP sequences are collapsed before inference. A locus with at
-least three SNP haplotypes is aligned with MAFFT and inferred with RAxML-NG;
-two haplotypes use their aligned SNP distance, and an invariant locus has SNP
-distance zero. The resulting haplotype distance is expanded back to all sample
-tips, so duplicate samples remain present at zero SNP distance in
-`locus_trees/LOCUS/samples.tree`.
+least four SNP haplotypes is aligned with MAFFT and inferred with RAxML-NG;
+two or three haplotypes use their aligned pairwise SNP distances, and an
+invariant locus has SNP distance zero. The resulting haplotype distance is
+expanded back to all sample tips, so duplicate samples remain present at zero
+SNP distance in `locus_trees/LOCUS/samples.tree`.
 
 For locus `l`, the retrospective export uses:
 

@@ -453,10 +453,20 @@ def export_combined_markers(
                     f"retrospective sample alignment for {locus_id}",
                 )
                 aligned = dict(_read_fasta(alignment_path))
-                if len(haplotypes) == 2:
-                    distance = _aligned_snp_distance(aligned["H000001"], aligned["H000002"])
-                    haplotype_matrix[0, 1] = haplotype_matrix[1, 0] = distance
-                    inference_status = "TWO_HAPLOTYPE_DISTANCE"
+                if len(haplotypes) < 4:
+                    for left in range(len(haplotypes)):
+                        for right in range(left + 1, len(haplotypes)):
+                            distance = _aligned_snp_distance(
+                                aligned[haplotype_records[left][0]],
+                                aligned[haplotype_records[right][0]],
+                            )
+                            haplotype_matrix[left, right] = distance
+                            haplotype_matrix[right, left] = distance
+                    inference_status = (
+                        "TWO_HAPLOTYPE_DISTANCE"
+                        if len(haplotypes) == 2
+                        else "THREE_HAPLOTYPE_DISTANCE"
+                    )
                 else:
                     if raxml_ng is None:
                         raxml_ng = check_raxml_ng(raxml_ng_bin)

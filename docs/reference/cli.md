@@ -27,7 +27,7 @@ mlvamaps export-myoga --results results/ --metadata metadata.tsv \
 | `--phylogeny-repeat-weight FLOAT` | `1.0` | Weight of normalized per-locus repeat distance in the combined marker distance. |
 | `-t`, `--threads` | `32` | MAFFT/RAxML-NG CPU budget for combined-marker inference; `0` uses all CPUs. |
 | `--mafft-bin` | `mafft` | MAFFT executable used for retrospective locus alignments. |
-| `--raxml-ng-bin` | `raxml-ng` | RAxML-NG executable used when a locus has at least three SNP haplotypes. |
+| `--raxml-ng-bin` | `raxml-ng` | RAxML-NG executable used when a locus has at least four SNP haplotypes. |
 | `--raxml-model` | `DNA` | RAxML-NG model or model-selection set. |
 | `-o`, `--output DIR` | required | Export directory. |
 | `--force` | off | Replace existing export files. |
