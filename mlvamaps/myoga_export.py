@@ -174,6 +174,10 @@ def _excluded(
     callable_fraction: float | str = "",
     details: str = "",
 ) -> dict:
+    # csv permits embedded newlines, but these audit files are routinely read by
+    # line-oriented TSV tools (awk, cut, R read.delim).  Batch failures can carry
+    # multi-line exception messages, so keep every exclusion to exactly one row.
+    details = re.sub(r"\s+", " ", str(details)).strip()
     fraction = (
         callable_fraction
         if callable_fraction == ""
@@ -455,6 +459,7 @@ def calculate_pairwise_distances(
     min_pairwise_loci: int = 1,
     min_pairwise_fraction: float = 0.5,
     *,
+    applicable: np.ndarray | None = None,
     row_sink: Callable[[dict], object] | None = None,
     retain: str = "both",
 ) -> tuple[list[dict], np.ndarray, np.ndarray, np.ndarray]:
@@ -462,6 +467,12 @@ def calculate_pairwise_distances(
     if retain not in {"both", "categorical", "repeat"}:
         raise ValueError("retain must be 'both', 'categorical', or 'repeat'")
     sample_count, locus_count = calls.shape
+    if applicable is None:
+        applicable = np.ones(calls.shape, dtype=bool)
+    else:
+        applicable = np.asarray(applicable, dtype=bool)
+        if applicable.shape != calls.shape:
+            raise ValueError("applicable must have the same shape as calls")
     categorical = (
         np.full((sample_count, sample_count), np.nan, dtype=np.float64)
         if retain in {"both", "categorical"}
@@ -477,7 +488,7 @@ def calculate_pairwise_distances(
         np.fill_diagonal(categorical, 0.0)
     if repeat.size:
         np.fill_diagonal(repeat, 0.0)
-    np.fill_diagonal(overlap, locus_count)
+    np.fill_diagonal(overlap, applicable.sum(axis=1))
     rows: list[dict] = []
     for left in range(sample_count):
         if left + 1 >= sample_count:
@@ -485,10 +496,18 @@ def calculate_pairwise_distances(
         right_calls = calls[left + 1 :]
         valid = np.isfinite(right_calls) & np.isfinite(calls[left])[None, :]
         compared = valid.sum(axis=1)
+        shared_applicable = (
+            applicable[left + 1 :] & applicable[left][None, :]
+        ).sum(axis=1)
         differences = np.abs(right_calls - calls[left][None, :])
         categorical_raw = ((differences > 1e-12) & valid).sum(axis=1)
         repeat_raw = np.where(valid, differences, 0.0).sum(axis=1)
-        fractions = compared / locus_count if locus_count else np.zeros_like(compared, dtype=float)
+        fractions = np.divide(
+            compared,
+            shared_applicable,
+            out=np.zeros_like(compared, dtype=float),
+            where=shared_applicable > 0,
+        )
         supported = (compared >= min_pairwise_loci) & (fractions >= min_pairwise_fraction)
         categorical_values = np.divide(
             categorical_raw,
@@ -675,13 +694,29 @@ def export_myoga(
     locus_order = _ordered_loci(samples)
     total_loci = len(locus_order)
     matrix, rows_by_sample = build_call_matrix(samples, locus_order)
+    locus_index = {locus: index for index, locus in enumerate(locus_order)}
+    applicable_matrix = np.zeros((len(samples), total_loci), dtype=bool)
+    for sample_index, sample in enumerate(samples):
+        for locus in sample.locus_order:
+            applicable_matrix[sample_index, locus_index[locus]] = True
+    assayed_counts = applicable_matrix.sum(axis=1)
     callable_counts = np.isfinite(matrix).sum(axis=1) if total_loci else np.zeros(len(samples), dtype=int)
-    callable_fractions = callable_counts / total_loci if total_loci else np.zeros(len(samples))
-    required_loci = max(min_callable_loci, math.ceil(min_callable_fraction * total_loci))
+    callable_fractions = np.divide(
+        callable_counts,
+        assayed_counts,
+        out=np.zeros(len(samples), dtype=float),
+        where=assayed_counts > 0,
+    )
+    required_counts = np.maximum(
+        min_callable_loci,
+        np.ceil(min_callable_fraction * assayed_counts).astype(int),
+    )
 
     threshold_indices: list[int] = []
     for index, sample in enumerate(samples):
         callable_loci = int(callable_counts[index])
+        assayed_loci = int(assayed_counts[index])
+        required_loci = int(required_counts[index])
         fraction = float(callable_fractions[index])
         if callable_loci == 0:
             reason = "NO_CALLABLE_LOCI"
@@ -697,7 +732,7 @@ def export_myoga(
                 "tree",
                 sample.path.parent,
                 callable_loci,
-                total_loci,
+                assayed_loci,
                 fraction,
                 details=f"requires at least {required_loci} callable loci",
             )
@@ -705,6 +740,11 @@ def export_myoga(
 
     threshold_samples = [samples[index] for index in threshold_indices]
     threshold_matrix = matrix[threshold_indices, :] if threshold_indices else np.empty((0, total_loci))
+    threshold_applicable = (
+        applicable_matrix[threshold_indices, :]
+        if threshold_indices
+        else np.empty((0, total_loci), dtype=bool)
+    )
     threshold_counts = callable_counts[threshold_indices] if threshold_indices else np.empty(0, dtype=int)
     threshold_ids = [sample.sample_id for sample in threshold_samples]
     pairwise_path = output / "mlva_pairwise_distances.tsv"
@@ -719,6 +759,7 @@ def export_myoga(
             threshold_matrix,
             min_pairwise_loci=min_pairwise_loci,
             min_pairwise_fraction=min_pairwise_fraction,
+            applicable=threshold_applicable,
             row_sink=pairwise_writer.writerow,
             retain=distance,
         )
@@ -736,8 +777,8 @@ def export_myoga(
                 "tree",
                 sample.path.parent,
                 int(threshold_counts[local_index]),
-                total_loci,
-                float(threshold_counts[local_index] / total_loci) if total_loci else 0.0,
+                int(assayed_counts[threshold_indices[local_index]]),
+                float(callable_fractions[threshold_indices[local_index]]),
                 details="removed deterministically so every retained pair meets overlap thresholds",
             )
         )
@@ -761,7 +802,7 @@ def export_myoga(
             {
                 "path": str(final_sample_by_id[str(issue["sample_id"])].path.parent),
                 "callable_loci": int(callable_counts[source_index]),
-                "total_loci": total_loci,
+                "total_loci": int(assayed_counts[source_index]),
                 "callable_fraction": _format_number(
                     float(callable_fractions[source_index]), 6
                 ),
@@ -866,7 +907,7 @@ def export_myoga(
                 "sample_id": sample.sample_id,
                 "path": str(sample.path.parent),
                 "callable_loci": int(callable_counts[source_index]),
-                "total_loci": total_loci,
+                "total_loci": int(assayed_counts[source_index]),
                 "callable_fraction": _format_number(float(callable_fractions[source_index]), 6),
                 "metadata_found": "yes" if metadata_found else "no",
                 "coordinates_valid": "yes" if coordinate_status == "VALID" else "no",
@@ -879,17 +920,33 @@ def export_myoga(
 
     upper = overlap_matrix[np.triu_indices(len(threshold_ids), k=1)]
     callable_values = [int(value) for value in callable_counts]
+    assayed_values = [int(value) for value in assayed_counts]
+    effective_values = [int(value) for value in required_counts]
+    discovery_failure_reasons = {
+        "FAILED_BATCH_SAMPLE",
+        "MISSING_CALLS_FILE",
+        "MALFORMED_RESULTS",
+        "DUPLICATE_SAMPLE_ID",
+    }
+    failed_discovery_ids = {
+        str(row["sample_id"])
+        for row in exclusions
+        if row["scope"] == "tree" and row["reason"] in discovery_failure_reasons
+    }
+    tree_excluded_ids = {
+        str(row["sample_id"]) for row in exclusions if row["scope"] == "tree"
+    }
     summary_values: list[tuple[str, object]] = [
         ("result_directories_discovered", discovered),
         ("successful_mlvamaps_samples", len(samples)),
-        ("failed_or_incomplete_samples", sum(row["scope"] == "tree" for row in exclusions)),
+        ("failed_or_incomplete_samples", len(failed_discovery_ids)),
         ("samples_with_metadata", sum(row["metadata_found"] == "yes" for row in used_rows)),
         ("samples_without_metadata", sum(row["metadata_found"] == "no" for row in used_rows)),
         ("samples_with_coordinates", sum(row["coordinates_valid"] == "yes" for row in used_rows)),
         ("samples_without_coordinates", sum(row["coordinates_valid"] == "no" for row in used_rows)),
         ("total_mlva_loci", total_loci),
         ("samples_passing_callable_threshold", len(threshold_samples)),
-        ("samples_excluded_from_tree", sum(row["scope"] == "tree" for row in exclusions)),
+        ("samples_excluded_from_tree", len(tree_excluded_ids)),
         ("final_tree_samples", len(final_ids)),
         ("pairwise_comparisons", len(threshold_ids) * (len(threshold_ids) - 1) // 2),
         ("supported_pairwise_comparisons", int(np.isfinite(selected_matrix[np.triu_indices(len(threshold_ids), k=1)]).sum())),
@@ -899,12 +956,22 @@ def export_myoga(
         ("combined_marker_tree_samples", combined_result.get("tree_samples", 0)),
         ("minimum_callable_fraction", min_callable_fraction),
         ("minimum_callable_loci", min_callable_loci),
-        ("effective_minimum_callable_loci", required_loci),
+        (
+            "effective_minimum_callable_loci",
+            effective_values[0]
+            if effective_values and len(set(effective_values)) == 1
+            else "sample-specific",
+        ),
+        ("minimum_effective_callable_loci", min(effective_values, default=0)),
+        ("maximum_effective_callable_loci", max(effective_values, default=0)),
         ("minimum_pairwise_loci", min_pairwise_loci),
         ("minimum_pairwise_fraction", min_pairwise_fraction),
         ("minimum_callable_loci_observed", min(callable_values, default=0)),
         ("median_callable_loci_observed", statistics.median(callable_values) if callable_values else 0),
         ("maximum_callable_loci_observed", max(callable_values, default=0)),
+        ("minimum_assayed_loci_observed", min(assayed_values, default=0)),
+        ("median_assayed_loci_observed", statistics.median(assayed_values) if assayed_values else 0),
+        ("maximum_assayed_loci_observed", max(assayed_values, default=0)),
         ("minimum_pairwise_loci_observed", int(upper.min()) if upper.size else 0),
         ("median_pairwise_loci_observed", float(np.median(upper)) if upper.size else 0),
         ("maximum_pairwise_loci_observed", int(upper.max()) if upper.size else 0),

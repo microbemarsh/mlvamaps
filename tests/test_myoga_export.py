@@ -253,6 +253,65 @@ def test_callable_threshold_uses_exact_numeric_repeat_not_presence(tmp_path):
     assert row["callable_loci"] == "2"
 
 
+def test_mixed_panels_use_each_samples_assayed_loci_for_thresholds_and_overlap(tmp_path):
+    results = tmp_path / "results"
+    panel_14 = {f"L{index}": index for index in range(1, 15)}
+    panel_25 = {f"L{index}": index for index in range(1, 26)}
+    _write_calls(results, "PANEL14_A", panel_14)
+    _write_calls(results, "PANEL14_B", panel_14)
+    _write_calls(results, "PANEL25", panel_25)
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\n"
+        "PANEL14_A\t1\t2\nPANEL14_B\t3\t4\nPANEL25\t5\t6\n"
+    )
+    output = tmp_path / "export"
+
+    export_myoga(
+        results,
+        metadata,
+        output,
+        min_callable_fraction=0.8,
+        min_pairwise_fraction=0.8,
+    )
+
+    used = {row["sample_id"]: row for row in _read_tsv(output / "samples_used.tsv")}
+    assert set(used) == {"PANEL14_A", "PANEL14_B", "PANEL25"}
+    assert used["PANEL14_A"]["total_loci"] == "14"
+    assert used["PANEL14_A"]["callable_fraction"] == "1.000000"
+    pairs = _read_tsv(output / "mlva_pairwise_distances.tsv")
+    mixed = next(
+        row
+        for row in pairs
+        if {row["sample_1"], row["sample_2"]} == {"PANEL14_A", "PANEL25"}
+    )
+    assert mixed["loci_compared"] == "14"
+    assert mixed["fraction_loci_compared"] == "1.00000000"
+    assert mixed["comparison_status"] == "sufficient"
+    summary = {row["metric"]: row["value"] for row in _read_tsv(output / "export_summary.tsv")}
+    assert summary["samples_passing_callable_threshold"] == "3"
+    assert summary["effective_minimum_callable_loci"] == "sample-specific"
+    assert summary["minimum_effective_callable_loci"] == "12"
+    assert summary["maximum_effective_callable_loci"] == "20"
+
+
+def test_exclusion_details_are_single_line_tsv_records(tmp_path):
+    results = tmp_path / "results"
+    (results / "batch_status.tsv").parent.mkdir(parents=True)
+    (results / "batch_status.tsv").write_text(
+        'sample_id\tstatus\tmessage\nFAILED\tfailed\t"first line\nsecond line"\n'
+    )
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text("shared_identifier\tlatitude\tlongitude\nFAILED\t1\t2\n")
+    output = tmp_path / "export"
+
+    export_myoga(results, metadata, output)
+
+    lines = (output / "samples_excluded.tsv").read_text().splitlines()
+    assert len(lines) == 2
+    assert _read_tsv(output / "samples_excluded.tsv")[0]["details"] == "first line second line"
+
+
 def test_min_callable_loci_and_fraction_both_apply(tmp_path):
     results = tmp_path / "results"
     _write_calls(results, "S1", {"L1": 1, "L2": 2, "L3": None, "L4": None})

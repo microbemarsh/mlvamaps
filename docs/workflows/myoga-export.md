@@ -36,10 +36,12 @@ finite numeric value. `present=yes`, a repeat interval, partial repeat evidence,
 or presence-only evidence does not create an exact allele. Missing calls remain
 empty in `mlva_profiles.tsv`; they are never converted to zero.
 
-The default sample threshold is `--min-callable-fraction 0.8`. For 25 panel
-loci this requires 20 exact calls. `--min-callable-loci` defaults to zero; when
-set, a sample must satisfy both criteria, equivalently the larger of the two
-required locus counts.
+The default sample threshold is `--min-callable-fraction 0.8`. The denominator
+is the number of loci actually assayed for that sample, as recorded by its
+`calls.tsv`; it is not the union of loci from unrelated panels in the same
+export. For 25 assayed loci this requires 20 exact calls, while for 14 assayed
+loci it requires 12. `--min-callable-loci` defaults to zero; when set, a sample
+must satisfy both criteria, equivalently the larger of the two required counts.
 
 Panel order is recovered from the sample with the most locus rows, with a
 deterministic sample-ID tie break. Loci found only in other results are appended
@@ -69,7 +71,9 @@ default repeat-only mode. The explicitly requested combined-marker mode below
 uses a documented dataset-derived scale.
 
 A pair is supported only when it meets both `--min-pairwise-loci 1` and
-`--min-pairwise-fraction 0.5` by default. Unsupported pairs remain in
+`--min-pairwise-fraction 0.5` by default. The fractional denominator is the
+intersection of the two samples' assayed loci, so mixing compatible panels
+does not count loci absent from one panel as failed calls. Unsupported pairs remain in
 `mlva_pairwise_distances.tsv` with `comparison_status=insufficient_overlap` and
 empty normalized distances. The exporter never substitutes zero or a maximum
 distance. Before tree construction it repeatedly removes the sample with the

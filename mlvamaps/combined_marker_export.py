@@ -384,6 +384,12 @@ def export_combined_markers(
     tree_dir.mkdir(parents=True, exist_ok=True)
     sample_ids = [str(getattr(sample, "sample_id")) for sample in samples]
     sample_count = len(sample_ids)
+    applicable = np.zeros((sample_count, len(locus_order)), dtype=bool)
+    locus_indexes = {locus_id: index for index, locus_id in enumerate(locus_order)}
+    for sample_index, sample in enumerate(samples):
+        for locus_id in getattr(sample, "locus_order", locus_order):
+            if locus_id in locus_indexes:
+                applicable[sample_index, locus_indexes[locus_id]] = True
     loci_by_id = {locus.locus_id: locus for locus in (loci or [])}
     recovered, sequence_status = recover_masked_sequences(
         samples, locus_order, loci_by_id
@@ -567,7 +573,10 @@ def export_combined_markers(
     for left in range(sample_count):
         for right in range(left + 1, sample_count):
             compared = int(loci_compared[left, right])
-            fraction = compared / len(locus_order) if locus_order else 0.0
+            shared_applicable = int(
+                np.count_nonzero(applicable[left] & applicable[right])
+            )
+            fraction = compared / shared_applicable if shared_applicable else 0.0
             supported = (
                 compared >= min_pairwise_loci and fraction >= min_pairwise_fraction
             )
