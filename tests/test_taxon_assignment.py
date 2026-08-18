@@ -7,11 +7,55 @@ import pytest
 from mlvamaps.phylogeny import _add_taxon_assignment_outputs
 from mlvamaps.taxon_assignment import (
     TaxonCalibration,
+    _aggregate_bootstrap_joint_distances,
+    _aggregate_taxon_distances,
     assign_target_taxon,
     build_taxon_calibration,
     conformal_p_value,
     run_taxon_calibration,
 )
+
+
+def test_bootstrap_joint_aggregation_matches_full_aggregation():
+    taxa = ["target", "neighbor"]
+    locus_values = {
+        "L1": {
+            "target": {
+                "repeat": {"T1": 0.1, "T2": 0.2},
+                "snp": {"T1": 0.3, "T2": 0.4},
+                "joint": {"T1": 0.4, "T2": 0.6},
+            },
+            "neighbor": {
+                "repeat": {"N1": 0.8, "N2": 0.9},
+                "snp": {"N1": 1.0, "N2": 1.1},
+                "joint": {"N1": 1.8, "N2": 2.0},
+            },
+        },
+        "L2": {
+            "target": {
+                "repeat": {"T1": 0.2, "T2": 0.3},
+                "snp": {"T1": 0.4, "T2": 0.5},
+                "joint": {"T1": 0.6, "T2": 0.8},
+            },
+            "neighbor": {
+                "repeat": {"N1": 0.7},
+                "snp": {"N1": 0.9},
+                "joint": {"N1": 1.6},
+            },
+        },
+    }
+    selected_loci = ["L2", "L1", "L2"]
+
+    full, _nearest = _aggregate_taxon_distances(
+        locus_values, selected_loci, taxa, k=2
+    )
+    bootstrap = _aggregate_bootstrap_joint_distances(
+        locus_values, selected_loci, taxa, k=2
+    )
+
+    assert bootstrap == {
+        taxon_id: full[taxon_id]["joint"] for taxon_id in taxa
+    }
 
 
 def _calibration(minimum_loci: int = 3) -> TaxonCalibration:

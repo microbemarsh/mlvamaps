@@ -518,16 +518,31 @@ def test_phylogenetic_placement_parallelizes_across_loci(tmp_path, monkeypatch):
     database.mkdir()
     (database / "L1.fasta").write_text(">R1\nAAAA\n>R2\nTTTT\n")
     (database / "L2.fasta").write_text(">R1\nCCCC\n>R2\nGGGG\n")
-    barrier = Barrier(2)
-    observed: list[tuple[str, int]] = []
-    original = phylogeny_module._run_placement_job
+    tree_barrier = Barrier(2)
+    placement_barrier = Barrier(2)
+    observed_trees: list[tuple[str, int]] = []
+    observed_placements: list[tuple[str, int]] = []
+    original_tree = phylogeny_module._run_reference_tree_job
+    original_placement = phylogeny_module._run_placement_job
 
-    def synchronized_job(job, mafft, epa_ng, native_threads=1):
-        observed.append((job.locus_id, native_threads))
-        barrier.wait(timeout=2)
-        return original(job, mafft, epa_ng, native_threads)
+    def synchronized_tree(job, mafft, raxml_ng, raxml_model, native_threads):
+        observed_trees.append((job.locus_id, native_threads))
+        tree_barrier.wait(timeout=2)
+        return original_tree(
+            job, mafft, raxml_ng, raxml_model, native_threads
+        )
 
-    monkeypatch.setattr(phylogeny_module, "_run_placement_job", synchronized_job)
+    def synchronized_placement(job, mafft, epa_ng, native_threads=1):
+        observed_placements.append((job.locus_id, native_threads))
+        placement_barrier.wait(timeout=2)
+        return original_placement(job, mafft, epa_ng, native_threads)
+
+    monkeypatch.setattr(
+        phylogeny_module, "_run_reference_tree_job", synchronized_tree
+    )
+    monkeypatch.setattr(
+        phylogeny_module, "_run_placement_job", synchronized_placement
+    )
     stream = io.StringIO()
     result = run_phylogenetic_placement(
         {"L1": "AAAA", "L2": "CCCC"},
@@ -542,9 +557,11 @@ def test_phylogenetic_placement_parallelizes_across_loci(tmp_path, monkeypatch):
         progress=ProgressReporter(stream=stream),
     )
 
-    assert sorted(observed) == [("L1", 1), ("L2", 1)]
+    assert sorted(observed_trees) == [("L1", 1), ("L2", 1)]
+    assert sorted(observed_placements) == [("L1", 1), ("L2", 1)]
     assert _read_tsv(result["phylogenetic_status"])[0]["status"] == "PLACED"
-    assert "with 2 worker(s)" in stream.getvalue()
+    assert "Building 2 independent reference locus trees" in stream.getvalue()
+    assert stream.getvalue().count("with 2 worker(s)") == 2
     assert "Completed EPA-ng loci: 2/2 (100.0%)" in stream.getvalue()
     assert "Computing reference-tip distances" in stream.getvalue()
     assert "Building combined neighbor-joining tree" in stream.getvalue()

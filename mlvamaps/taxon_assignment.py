@@ -352,6 +352,44 @@ def _aggregate_taxon_distances(
     return distances, nearest
 
 
+def _aggregate_bootstrap_joint_distances(
+    locus_values: Mapping[
+        str, Mapping[str, Mapping[str, Mapping[str, float]]]
+    ],
+    selected_loci: Sequence[str],
+    taxa: Sequence[str],
+    k: int,
+) -> dict[str, float | None]:
+    """Aggregate only joint distances for a bootstrap replicate.
+
+    Bootstrap decisions do not use channel-specific distances or nearest-reference
+    identities. Keeping this hot path separate avoids rebuilding those unused
+    structures for every replicate while retaining reference-across-loci averaging.
+    """
+    distances: dict[str, float | None] = {}
+    locus_count = len(selected_loci)
+    for taxon_id in taxa:
+        by_reference: dict[str, list[float]] = {}
+        for locus_id in selected_loci:
+            reference_values = (
+                locus_values.get(locus_id, {})
+                .get(taxon_id, {})
+                .get("joint", {})
+            )
+            for reference_id, value in reference_values.items():
+                by_reference.setdefault(reference_id, []).append(value)
+        complete = sorted(
+            sum(values) / locus_count
+            for values in by_reference.values()
+            if len(values) == locus_count
+        )
+        selected = complete[: min(k, len(complete))]
+        distances[taxon_id] = (
+            sum(selected) / len(selected) if selected else None
+        )
+    return distances
+
+
 def _nonconformity(
     distances: Mapping[str, Mapping[str, float | None]],
     taxon_id: str,
@@ -807,20 +845,20 @@ def assign_target_taxon(
     if callable_loci and bootstrap_replicates:
         for _replicate in range(bootstrap_replicates):
             selected = [rng.choice(callable_loci) for _ in callable_loci]
-            replicate_distances, _replicate_nearest = _aggregate_taxon_distances(
+            replicate_distances = _aggregate_bootstrap_joint_distances(
                 locus_values, selected, taxa, calibration.k
             )
             ordered = sorted(
                 (
-                    (float(values["joint"]), taxon_id)
-                    for taxon_id, values in replicate_distances.items()
-                    if values["joint"] is not None
+                    (float(distance), taxon_id)
+                    for taxon_id, distance in replicate_distances.items()
+                    if distance is not None
                 ),
                 key=lambda item: (item[0], item[1]),
             )
             if len(ordered) < 2:
                 continue
-            target_distance = float(replicate_distances[target_taxon_id]["joint"])
+            target_distance = float(replicate_distances[target_taxon_id])
             alternative_distance = min(
                 distance for distance, taxon_id in ordered if taxon_id != target_taxon_id
             )

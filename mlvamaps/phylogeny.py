@@ -966,6 +966,50 @@ def _run_epa_ng(command: list[str], outdir: Path, stage: str) -> Path:
 
 
 @dataclass(frozen=True)
+class _ReferenceTreeJob:
+    locus_id: str
+    reference_fasta: Path
+    reference_alignment: Path
+    reference_prefix: Path
+    reference_tree: Path
+    reference_model: Path
+
+
+def _run_reference_tree_job(
+    job: _ReferenceTreeJob,
+    mafft: str,
+    raxml_ng: str,
+    raxml_model: str,
+    native_threads: int,
+) -> None:
+    """Build one locus tree; callers parallelize independent loci."""
+    _run_mafft(
+        build_mafft_reference_command(
+            job.reference_fasta, native_threads, mafft
+        ),
+        job.reference_alignment,
+        f"reference alignment for {job.locus_id}",
+    )
+    _run_raxml_ng(
+        build_raxml_ng_command(
+            job.reference_alignment,
+            job.reference_prefix,
+            native_threads,
+            raxml_ng,
+            raxml_model,
+        ),
+        job.reference_prefix,
+        job.reference_tree,
+        f"reference tree search for {job.locus_id}",
+    )
+    if not job.reference_model.exists():
+        raise RuntimeError(
+            "RAxML-NG reference search did not produce model file "
+            f"{job.reference_model}"
+        )
+
+
+@dataclass(frozen=True)
 class _PlacementJob:
     locus_id: str
     query_name: str
@@ -2030,6 +2074,7 @@ def run_phylogenetic_placement(
     reference_distance_matrices: dict[str, tuple[list[str], np.ndarray]] = {}
     direct_snp_distances_by_locus: dict[str, dict[str, float]] = {}
     placement_members_by_locus: dict[str, dict[str, list[str]]] = {}
+    reference_tree_jobs: dict[str, _ReferenceTreeJob] = {}
     placement_jobs: dict[str, _PlacementJob] = {}
     sequence_artifacts: list[Path] = []
 
@@ -2155,28 +2200,15 @@ def run_phylogenetic_placement(
                     "that do not match either the raw references or collapsed SNP haplotypes"
                 )
         else:
-            _run_mafft(
-                build_mafft_reference_command(reference_fasta, threads, mafft),
-                reference_alignment,
-                f"reference alignment for {locus_id}",
-            )
             if raxml_ng is None:
                 raxml_ng = check_raxml_ng(raxml_ng_bin)
-            _run_raxml_ng(
-                build_raxml_ng_command(
-                    reference_alignment,
-                    reference_prefix,
-                    threads,
-                    raxml_ng,
-                    raxml_model,
-                ),
-                reference_prefix,
-                reference_tree,
-                f"reference tree search for {locus_id}",
-            )
-        if not reference_model.exists():
-            raise RuntimeError(
-                f"RAxML-NG reference search did not produce model file {reference_model}"
+            reference_tree_jobs[locus_id] = _ReferenceTreeJob(
+                locus_id=locus_id,
+                reference_fasta=reference_fasta,
+                reference_alignment=reference_alignment,
+                reference_prefix=reference_prefix,
+                reference_tree=reference_tree,
+                reference_model=reference_model,
             )
         if not query_sequence:
             status_rows.append(
@@ -2200,6 +2232,44 @@ def run_phylogenetic_placement(
             query_alignment=query_alignment,
             epa_outdir=epa_outdir,
         )
+
+    if reference_tree_jobs:
+        cpu_budget = resolve_threads(threads)
+        worker_count = min(cpu_budget, len(reference_tree_jobs))
+        native_threads = max(1, cpu_budget // worker_count)
+        if progress is not None:
+            progress.step(
+                f"Building {len(reference_tree_jobs):,} independent reference "
+                f"locus trees with {worker_count} worker(s) and "
+                f"{native_threads} native thread(s) per worker"
+            )
+        if worker_count == 1:
+            for locus_id, job in reference_tree_jobs.items():
+                _run_reference_tree_job(
+                    job, mafft, str(raxml_ng), raxml_model, native_threads
+                )
+        else:
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(
+                        _run_reference_tree_job,
+                        job,
+                        mafft,
+                        str(raxml_ng),
+                        raxml_model,
+                        native_threads,
+                    ): locus_id
+                    for locus_id, job in reference_tree_jobs.items()
+                }
+                for future in as_completed(futures):
+                    locus_id = futures[future]
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        raise RuntimeError(
+                            f"Reference tree construction failed for locus "
+                            f"{locus_id!r}"
+                        ) from exc
 
     placement_results: dict[str, Path] = {}
     if placement_jobs:
