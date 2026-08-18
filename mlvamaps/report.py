@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import html
 import math
 from datetime import datetime, timezone
@@ -26,6 +27,43 @@ def _finding(kind: str, title: str, detail: str) -> str:
         f'<div class="finding {kind}"><strong>{_safe(title)}</strong>'
         f'<span>{_safe(detail)}</span></div>'
     )
+
+
+def _taxon_assignment_section(outdir: Path) -> str:
+    path = outdir / "phylogeny" / "taxon_assignment.tsv"
+    if not path.is_file():
+        return ""
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    if not rows:
+        return ""
+    row = rows[0]
+    decision = str(row.get("decision", "INDETERMINATE"))
+    tone = (
+        "good"
+        if decision == "POSITIVE"
+        else "warn"
+        if decision == "INDETERMINATE"
+        else ""
+    )
+    target = row.get("target_taxon_name") or row.get("target_taxon_id", "")
+    alternative = (
+        row.get("best_alternative_taxon_name")
+        or row.get("best_alternative_taxon_id", "")
+    )
+    return f"""
+      <section class="report-section">
+        <h2>Calibrated Target-Taxon Assignment</h2>
+        <p class="section-intro">This decision uses only MLVA repeat counts and repeat-masked marker phylogenetic placement. Conformal p-values measure compatibility with the labeled reference cohort; they are not posterior probabilities that the taxon is present.</p>
+        <div class="summary">
+          {_metric_card("Decision", decision, row.get("decision_reason", ""), tone)}
+          {_metric_card("Target", target, f"joint compatibility p={row.get('target_joint_p_value', '')}")}
+          {_metric_card("Best alternative", alternative, f"joint compatibility p={row.get('best_alternative_joint_p_value', '')}")}
+          {_metric_card("Locus bootstrap", row.get("target_bootstrap_support", ""), f"{row.get('callable_loci', '')} callable loci")}
+        </div>
+        {_finding("warn" if row.get("qc_status") != "PASS" else "info", "Assignment QC", row.get("qc_flags") or "PASS")}
+      </section>
+"""
 
 
 def _closest_reference_detail(row: dict) -> str:
@@ -1085,10 +1123,10 @@ def write_report(
         "</tr>"
         for row in phylogenetic_rows[:10]
     )
-    phylogenetic_section = ""
+    phylogenetic_section = _taxon_assignment_section(outdir)
     if phylogenetic_rows:
         phylogenetic_warning = _phylogenetic_warning_html(phylogenetic_rows)
-        phylogenetic_section = f"""
+        phylogenetic_section += f"""
       <section class="report-section">
         <h2>Closest Reference Genomes</h2>
         {phylogenetic_warning}
@@ -1480,10 +1518,10 @@ def write_assembly_report(
         "</tr>"
         for row in phylogenetic_rows[:10]
     )
-    phylogenetic_section = ""
+    phylogenetic_section = _taxon_assignment_section(outdir)
     if phylogenetic_rows:
         phylogenetic_warning = _phylogenetic_warning_html(phylogenetic_rows)
-        phylogenetic_section = f"""
+        phylogenetic_section += f"""
       <section class="report-section">
         <h2>Closest Reference Genomes</h2>
         {phylogenetic_warning}

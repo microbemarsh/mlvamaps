@@ -20,6 +20,13 @@ from .concurrency import resolve_threads
 from .io import gzip_output_file
 from .models import Locus, RepeatFeature
 from .progress import ProgressReporter
+from .taxon_assignment import (
+    TAXON_ASSIGNMENT_FIELDS,
+    TAXON_CANDIDATE_FIELDS,
+    TAXON_LOCUS_FIELDS,
+    TaxonCalibration,
+    assign_target_taxon,
+)
 
 
 PLACEMENT_FIELDS = [
@@ -1790,6 +1797,81 @@ def _write_exact_match_outputs(
     return paths
 
 
+def _add_taxon_assignment_outputs(
+    paths: dict[str, Path],
+    *,
+    sample_id: str,
+    target_taxon_id: str | None,
+    calibration_path: str | Path | None,
+    reference_metadata: dict[str, dict[str, str]],
+    panel_sha256: str,
+    database_signature: str,
+    expected_loci: int,
+    alpha: float | None,
+    min_loci: int | None,
+    min_locus_fraction: float,
+    bootstrap_replicates: int,
+    min_bootstrap_support: float,
+    max_mean_placement_entropy: float | None,
+    min_median_placement_lwr: float | None,
+) -> dict[str, Path]:
+    if target_taxon_id is None and calibration_path is None:
+        return paths
+    if not target_taxon_id or calibration_path is None:
+        raise ValueError(
+            "Taxon assignment requires both target_taxon_id and taxon_calibration_path"
+        )
+    calibration = TaxonCalibration.read(calibration_path)
+    if calibration.panel_sha256 and calibration.panel_sha256 != panel_sha256:
+        raise ValueError(
+            "Taxon calibration panel signature does not match the active MLVA panel"
+        )
+    if (
+        calibration.database_signature
+        and calibration.database_signature != database_signature
+    ):
+        raise ValueError(
+            "Taxon calibration database signature does not match the active "
+            "reference sequence database"
+        )
+    marker_rows = _read_tsv_dicts(paths["locus_marker_distances"])
+    placement_rows = _read_tsv_dicts(paths["phylogenetic_distances"])
+    assignment = assign_target_taxon(
+        sample_id=sample_id,
+        target_taxon_id=str(target_taxon_id),
+        locus_marker_rows=marker_rows,
+        placement_rows=placement_rows,
+        reference_metadata=reference_metadata,
+        calibration=calibration,
+        alpha=alpha,
+        min_loci=min_loci,
+        min_locus_fraction=min_locus_fraction,
+        bootstrap_replicates=bootstrap_replicates,
+        min_bootstrap_support=min_bootstrap_support,
+        max_mean_placement_entropy=max_mean_placement_entropy,
+        min_median_placement_lwr=min_median_placement_lwr,
+        expected_loci=expected_loci,
+    )
+    output = paths["phylogeny"]
+    summary_path = output / "taxon_assignment.tsv"
+    candidates_path = output / "taxon_assignment_candidates.tsv"
+    loci_path = output / "taxon_assignment_loci.tsv"
+    _write_tsv([assignment.summary], summary_path, TAXON_ASSIGNMENT_FIELDS)
+    _write_tsv(list(assignment.candidates), candidates_path, TAXON_CANDIDATE_FIELDS)
+    _write_tsv(list(assignment.loci), loci_path, TAXON_LOCUS_FIELDS)
+    return {
+        **paths,
+        "taxon_assignment": summary_path,
+        "taxon_assignment_candidates": candidates_path,
+        "taxon_assignment_loci": loci_path,
+    }
+
+
+def _read_tsv_dicts(path: str | Path) -> list[dict[str, str]]:
+    with Path(path).open(newline="") as handle:
+        return list(csv.DictReader(handle, delimiter="\t"))
+
+
 def run_phylogenetic_placement(
     query_sequences: dict[str, str],
     database_path: str | Path,
@@ -1808,6 +1890,15 @@ def run_phylogenetic_placement(
     exact_match_fast_path: bool = True,
     query_assembly_path: str | Path | None = None,
     dnadiff_bin: str = "dnadiff",
+    target_taxon_id: str | None = None,
+    taxon_calibration_path: str | Path | None = None,
+    taxon_alpha: float | None = None,
+    taxon_min_loci: int | None = None,
+    taxon_min_locus_fraction: float = 0.8,
+    taxon_bootstrap_replicates: int = 2000,
+    taxon_min_bootstrap_support: float = 0.95,
+    taxon_max_mean_placement_entropy: float | None = None,
+    taxon_min_median_placement_lwr: float | None = None,
 ) -> dict[str, Path]:
     if snp_weight < 0 or repeat_weight < 0 or snp_weight + repeat_weight <= 0:
         raise ValueError("SNP and repeat weights must be non-negative with a positive total")
@@ -1826,7 +1917,7 @@ def run_phylogenetic_placement(
         if automatic_metadata.exists():
             reference_metadata_path = automatic_metadata
     reference_metadata = read_reference_metadata(reference_metadata_path)
-    if locus_by_id and exact_match_fast_path:
+    if locus_by_id and exact_match_fast_path and target_taxon_id is None:
         sequence_index_path: Path | None = (
             sequence_database_path / "reference_sequence_index.tsv"
             if sequence_database_path.is_dir()
@@ -1886,7 +1977,7 @@ def run_phylogenetic_placement(
                         threads,
                         dnadiff_bin,
                     )
-            return _write_exact_match_outputs(
+            exact_paths = _write_exact_match_outputs(
                 outdir,
                 sample_id,
                 match_type,
@@ -1903,6 +1994,23 @@ def run_phylogenetic_placement(
                 dnadiff_result_path,
                 dnadiff_available,
                 query_assembly_path is not None,
+            )
+            return _add_taxon_assignment_outputs(
+                exact_paths,
+                sample_id=sample_id,
+                target_taxon_id=target_taxon_id,
+                calibration_path=taxon_calibration_path,
+                reference_metadata=reference_metadata,
+                panel_sha256=_panel_digest(list(locus_by_id.values())),
+                database_signature=_database_stat_digest(sequence_database_path),
+                expected_loci=len(requested_locus_ids),
+                alpha=taxon_alpha,
+                min_loci=taxon_min_loci,
+                min_locus_fraction=taxon_min_locus_fraction,
+                bootstrap_replicates=taxon_bootstrap_replicates,
+                min_bootstrap_support=taxon_min_bootstrap_support,
+                max_mean_placement_entropy=taxon_max_mean_placement_entropy,
+                min_median_placement_lwr=taxon_min_median_placement_lwr,
             )
     if references is None:
         references = read_sequence_database(sequence_database_path, requested_locus_ids)
@@ -2673,7 +2781,7 @@ def run_phylogenetic_placement(
     for sequence_path in sequence_artifacts:
         if sequence_path.is_file():
             gzip_output_file(sequence_path)
-    return {
+    paths = {
         "phylogeny": output,
         "phylogenetic_distances": detail_path,
         "phylogenetic_matches": summary_path,
@@ -2684,6 +2792,25 @@ def run_phylogenetic_placement(
         "combined_marker_tree": combined_tree_path,
         "closest_reference_bands": closest_reference_bands_path,
     }
+    return _add_taxon_assignment_outputs(
+        paths,
+        sample_id=sample_id,
+        target_taxon_id=target_taxon_id,
+        calibration_path=taxon_calibration_path,
+        reference_metadata=reference_metadata,
+        panel_sha256=(
+            _panel_digest(list(locus_by_id.values())) if locus_by_id else ""
+        ),
+        database_signature=_database_stat_digest(sequence_database_path),
+        expected_loci=len(requested_locus_ids),
+        alpha=taxon_alpha,
+        min_loci=taxon_min_loci,
+        min_locus_fraction=taxon_min_locus_fraction,
+        bootstrap_replicates=taxon_bootstrap_replicates,
+        min_bootstrap_support=taxon_min_bootstrap_support,
+        max_mean_placement_entropy=taxon_max_mean_placement_entropy,
+        min_median_placement_lwr=taxon_min_median_placement_lwr,
+    )
 
 
 def build_reference_phylogenies(

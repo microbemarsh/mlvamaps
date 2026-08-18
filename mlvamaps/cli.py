@@ -19,6 +19,7 @@ from .reference_pipeline import (
 from .simulation import simulate_reads
 from .sample_metadata import MYOGA_SAMPLE_FIELDS, metadata_by_sample, read_sample_metadata, write_csv
 from .short_reads import SAMPLE_SUMMARY_FIELDS, run_short_read_call
+from .taxon_assignment import run_taxon_calibration
 from .validation import run_validation
 
 
@@ -216,6 +217,12 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         parser.error("--short-reads requires -i DIRECTORY, not -i sr")
     if not args.short_read_mode and (args.reads1 or args.reads2):
         parser.error("--fq1/--fq2 require the short-read selector: -i sr")
+    if bool(args.target_taxon_id) != bool(args.taxon_calibration):
+        parser.error(
+            "--target-taxon-id and --taxon-calibration must be provided together"
+        )
+    if args.target_taxon_id and not args.database:
+        parser.error("--target-taxon-id requires --database")
     if not args.loci and not args.primers:
         parser.error("call requires -p PANEL")
     if not args.input_path and not args.reads1 and not args.manifest:
@@ -562,6 +569,57 @@ def build_parser() -> argparse.ArgumentParser:
         type=_nonnegative_float,
         default=1.0,
         help="Weight for normalized tandem-repeat distance in combined marker ranking (default: %(default)s)",
+    )
+    call.add_argument(
+        "--target-taxon-id",
+        help="Reference-metadata taxon_id to test using calibrated MLVA marker placement",
+    )
+    call.add_argument(
+        "--taxon-calibration",
+        metavar="JSON",
+        help="Versioned conformal calibration artifact for --target-taxon-id",
+    )
+    call.add_argument(
+        "--taxon-alpha",
+        type=_fraction,
+        default=None,
+        help="Override the calibration prediction-set alpha (default: artifact value)",
+    )
+    call.add_argument(
+        "--taxon-min-loci",
+        type=_positive_int,
+        default=None,
+        help="Override the minimum callable MLVA loci (default: artifact value)",
+    )
+    call.add_argument(
+        "--taxon-min-locus-fraction",
+        type=_fraction,
+        default=0.8,
+        help="Minimum panel fraction callable across all candidate taxa (default: %(default)s)",
+    )
+    call.add_argument(
+        "--taxon-bootstrap-replicates",
+        type=_positive_int,
+        default=2000,
+        help="Deterministic locus-bootstrap replicates (default: %(default)s)",
+    )
+    call.add_argument(
+        "--taxon-min-bootstrap-support",
+        type=_fraction,
+        default=0.95,
+        help="Target-favoring bootstrap fraction required for POSITIVE (default: %(default)s)",
+    )
+    call.add_argument(
+        "--taxon-max-placement-entropy",
+        type=_nonnegative_float,
+        default=None,
+        help="Optional maximum mean EPA-ng placement entropy",
+    )
+    call.add_argument(
+        "--taxon-min-placement-lwr",
+        type=_fraction,
+        default=None,
+        help="Optional minimum median best EPA-ng likelihood weight ratio",
     )
     call.add_argument(
         "--no-locus-mapping",
@@ -930,6 +988,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="RAxML-NG nucleotide model or model-selection set (default: %(default)s)",
     )
 
+    calibrate = subparsers.add_parser(
+        "calibrate-taxa",
+        help="Build an MLVA-only conformal taxon calibration artifact",
+    )
+    calibrate.add_argument(
+        "--reference-distances",
+        required=True,
+        metavar="TSV",
+        help="Audited leave-one-reference-out per-locus marker distances",
+    )
+    calibrate.add_argument(
+        "--reference-metadata",
+        required=True,
+        metavar="TSV",
+        help="Reference metadata containing reference_id and taxon_id",
+    )
+    calibrate.add_argument(
+        "--sequence-index",
+        required=True,
+        metavar="TSV",
+        help="reference_sequence_index.tsv from the matching reference build",
+    )
+    calibrate.add_argument("--k", type=_positive_int, default=3)
+    calibrate.add_argument("--alpha", type=_fraction, default=0.05)
+    calibrate.add_argument("--snp-weight", type=_nonnegative_float, default=1.0)
+    calibrate.add_argument("--repeat-weight", type=_nonnegative_float, default=1.0)
+    calibrate.add_argument("--minimum-loci", type=_positive_int, default=3)
+    calibrate.add_argument(
+        "-o", "--output", "--outdir", dest="outdir", required=True
+    )
+
     validate = subparsers.add_parser(
         "validate",
         help="Compare assembly-truth calls with long-read and Illumina results",
@@ -978,6 +1067,15 @@ def _run_single_input(
             phylogeny_snp_weight=args.phylogeny_snp_weight,
             phylogeny_repeat_weight=args.phylogeny_repeat_weight,
             reference_metadata_path=args.reference_metadata,
+            target_taxon_id=args.target_taxon_id,
+            taxon_calibration_path=args.taxon_calibration,
+            taxon_alpha=args.taxon_alpha,
+            taxon_min_loci=args.taxon_min_loci,
+            taxon_min_locus_fraction=args.taxon_min_locus_fraction,
+            taxon_bootstrap_replicates=args.taxon_bootstrap_replicates,
+            taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
+            taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
+            taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
             locus_mapping=not args.no_locus_mapping,
             min_mapping_quality=args.min_mapping_quality,
             min_base_quality=args.min_base_quality,
@@ -1019,6 +1117,8 @@ def _run_single_input(
             print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
             print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
             print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
+            if "taxon_assignment" in result:
+                print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
         return result
 
     result = run_assembly_call(
@@ -1047,6 +1147,15 @@ def _run_single_input(
         phylogeny_snp_weight=args.phylogeny_snp_weight,
         phylogeny_repeat_weight=args.phylogeny_repeat_weight,
         reference_metadata_path=args.reference_metadata,
+        target_taxon_id=args.target_taxon_id,
+        taxon_calibration_path=args.taxon_calibration,
+        taxon_alpha=args.taxon_alpha,
+        taxon_min_loci=args.taxon_min_loci,
+        taxon_min_locus_fraction=args.taxon_min_locus_fraction,
+        taxon_bootstrap_replicates=args.taxon_bootstrap_replicates,
+        taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
+        taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
+        taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
         show_progress=not args.quiet,
     )
     print(f"Wrote easy MLVA calls to {result['calls']}")
@@ -1061,6 +1170,8 @@ def _run_single_input(
         print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
         print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
         print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
+        if "taxon_assignment" in result:
+            print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
     if args.reads_path or args.alignments_path:
         print(f"Wrote read-depth support to {result['read_support']}")
     return result
@@ -1101,6 +1212,15 @@ def _run_short_input(
         phylogeny_snp_weight=args.phylogeny_snp_weight,
         phylogeny_repeat_weight=args.phylogeny_repeat_weight,
         reference_metadata_path=args.reference_metadata,
+        target_taxon_id=args.target_taxon_id,
+        taxon_calibration_path=args.taxon_calibration,
+        taxon_alpha=args.taxon_alpha,
+        taxon_min_loci=args.taxon_min_loci,
+        taxon_min_locus_fraction=args.taxon_min_locus_fraction,
+        taxon_bootstrap_replicates=args.taxon_bootstrap_replicates,
+        taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
+        taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
+        taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
         show_progress=not args.quiet,
     )
     print(f"Wrote conservative Illumina calls to {result['calls']}")
@@ -1108,6 +1228,8 @@ def _run_short_input(
     print(f"Wrote locus recruitment to {result['short_read_recruitment']}")
     print(f"Wrote local assembly evidence to {result['short_read_assembly']}")
     print(f"Wrote MYOGA metadata to {result['myoga_samples']}")
+    if "taxon_assignment" in result:
+        print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
     print(f"Wrote report to {result['report']}")
     return result
 
@@ -1255,6 +1377,9 @@ def _run_short_batch(
         "profile_matches": "profile_matches.tsv",
         "profile_match_loci": "profile_match_loci.tsv",
         "sample_summary": "sample_summary.tsv",
+        "taxon_assignment": "taxon_assignment.tsv",
+        "taxon_assignment_candidates": "taxon_assignment_candidates.tsv",
+        "taxon_assignment_loci": "taxon_assignment_loci.tsv",
     }
     for key, filename in table_keys.items():
         _combine_tables([result[key] for result in results if key in result], output_root / filename)
@@ -1476,6 +1601,24 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Wrote simulated reads to {result['reads']}")
         print(f"Wrote truth profile to {result['truth']}")
+        return 0
+    if args.command == "calibrate-taxa":
+        try:
+            result = run_taxon_calibration(
+                reference_distances_path=args.reference_distances,
+                reference_metadata_path=args.reference_metadata,
+                sequence_index_path=args.sequence_index,
+                outdir=args.outdir,
+                k=args.k,
+                alpha=args.alpha,
+                snp_weight=args.snp_weight,
+                repeat_weight=args.repeat_weight,
+                minimum_loci=args.minimum_loci,
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"Wrote taxon calibration to {result['calibration']}")
+        print(f"Wrote leave-one-out scores to {result['scores']}")
         return 0
     if args.command == "validate":
         try:

@@ -1212,6 +1212,15 @@ def run_short_read_call(
     phylogeny_snp_weight: float = 1.0,
     phylogeny_repeat_weight: float = 1.0,
     reference_metadata_path: str | None = None,
+    target_taxon_id: str | None = None,
+    taxon_calibration_path: str | None = None,
+    taxon_alpha: float | None = None,
+    taxon_min_loci: int | None = None,
+    taxon_min_locus_fraction: float = 0.8,
+    taxon_bootstrap_replicates: int = 2000,
+    taxon_min_bootstrap_support: float = 0.95,
+    taxon_max_mean_placement_entropy: float | None = None,
+    taxon_min_median_placement_lwr: float | None = None,
     show_progress: bool = True,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
@@ -1485,6 +1494,15 @@ def run_short_read_call(
             snp_weight=phylogeny_snp_weight,
             repeat_weight=phylogeny_repeat_weight,
             reference_metadata_path=reference_metadata_path,
+            target_taxon_id=target_taxon_id,
+            taxon_calibration_path=taxon_calibration_path,
+            taxon_alpha=taxon_alpha,
+            taxon_min_loci=taxon_min_loci,
+            taxon_min_locus_fraction=taxon_min_locus_fraction,
+            taxon_bootstrap_replicates=taxon_bootstrap_replicates,
+            taxon_min_bootstrap_support=taxon_min_bootstrap_support,
+            taxon_max_mean_placement_entropy=taxon_max_mean_placement_entropy,
+            taxon_min_median_placement_lwr=taxon_min_median_placement_lwr,
         )
         phylogenetic_rows = read_profiles(
             phylogeny_paths["combined_marker_matches"]

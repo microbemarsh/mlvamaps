@@ -57,6 +57,29 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `--phylogeny-snp-weight` | `1.0` | Weight of normalized SNP-tree distance in combined marker ranking. |
 | `--phylogeny-repeat-weight` | `1.0` | Weight of normalized tandem-repeat distance in combined marker ranking. |
 
+## MLVA-only target-taxon assignment
+
+Target assignment requires `--database`, `--target-taxon-id`, and
+`--taxon-calibration`. The reference metadata must label both target and
+near-neighbor references with `taxon_id`.
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `--target-taxon-id ID` | None | Taxon label to test. |
+| `--taxon-calibration JSON` | None | Signed, versioned conformal calibration artifact. |
+| `--taxon-alpha` | Artifact value | Prediction-set significance level. |
+| `--taxon-min-loci` | Artifact value | Minimum callable loci. |
+| `--taxon-min-locus-fraction` | `0.8` | Minimum panel fraction callable against every candidate taxon. |
+| `--taxon-bootstrap-replicates` | `2000` | Deterministic locus bootstrap replicates. |
+| `--taxon-min-bootstrap-support` | `0.95` | Target-favoring fraction required for `POSITIVE`. |
+| `--taxon-max-placement-entropy` | None | Optional maximum mean EPA-ng placement entropy. |
+| `--taxon-min-placement-lwr` | None | Optional minimum median best-placement LWR. |
+
+Build an artifact from audited leave-one-reference-out marker distances with
+`mlvamaps calibrate-taxa`. See
+[MLVA-only target-taxon assignment](../concepts/taxon-assignment.md) for the
+input contract, decision semantics, and validation requirements.
+
 ## FASTQ filtering
 
 ### Illumina input and QC

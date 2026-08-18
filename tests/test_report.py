@@ -3,9 +3,53 @@ from mlvamaps.report import (
     _assembly_gel_svg,
     _gel_svg,
     _phylogenetic_warning_html,
+    _taxon_assignment_section,
     write_assembly_report,
     write_report,
 )
+
+
+def test_taxon_assignment_section_labels_p_values_as_compatibility(tmp_path):
+    phylogeny = tmp_path / "phylogeny"
+    phylogeny.mkdir()
+    fields = [
+        "decision",
+        "decision_reason",
+        "target_taxon_id",
+        "target_taxon_name",
+        "target_joint_p_value",
+        "best_alternative_taxon_id",
+        "best_alternative_taxon_name",
+        "best_alternative_joint_p_value",
+        "target_bootstrap_support",
+        "callable_loci",
+        "qc_status",
+        "qc_flags",
+    ]
+    values = [
+        "POSITIVE",
+        "TARGET_UNIQUELY_SUPPORTED",
+        "1392",
+        "Bacillus anthracis",
+        "0.95",
+        "1396",
+        "Bacillus cereus",
+        "0.01",
+        "0.98",
+        "6",
+        "PASS",
+        "",
+    ]
+    (phylogeny / "taxon_assignment.tsv").write_text(
+        "\t".join(fields) + "\n" + "\t".join(values) + "\n"
+    )
+
+    section = _taxon_assignment_section(tmp_path)
+
+    assert "Calibrated Target-Taxon Assignment" in section
+    assert "POSITIVE" in section
+    assert "compatibility p=0.95" in section
+    assert "not posterior probabilities" in section
 
 
 def test_gels_prefer_exact_phylogenetic_reference_amplicon_sizes():

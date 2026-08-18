@@ -111,6 +111,9 @@ fast path, and the query continues through the alignment and EPA-ng workflow.
 | `phylogeny/whole_genome_dnadiff.tsv` | Interpreted whole-genome identity, SNP, indel, and alignment-coverage results for tied exact references. Individual MUMmer reports are retained under `phylogeny/dnadiff/`. |
 | `phylogeny/closest_reference_bands.tsv` | Exact per-locus amplicon sizes and repeat calls for the top combined-marker reference (or top SNP-tree match when repeat-aware ranking is unavailable), used for the reference lane in the generated gel. |
 | `phylogeny/combined_markers.tree` | MYOGA-compatible Newick neighbor-joining tree inferred from the combined normalized SNP-plus-repeat distance matrix. Tip labels are reference IDs plus the query sample ID. |
+| `phylogeny/taxon_assignment.tsv` | Optional calibrated `POSITIVE`, `NEGATIVE`, or `INDETERMINATE` target-taxon result, prediction set, compatibility p-values, bootstrap support, and QC. Written when `--target-taxon-id` and `--taxon-calibration` are supplied. |
+| `phylogeny/taxon_assignment_candidates.tsv` | Repeat, SNP, and joint distances, conformal nonconformity/p-values, acceptance state, and nearest references for every labeled taxon. |
+| `phylogeny/taxon_assignment_loci.tsv` | Per-locus target-versus-best-alternative marker distances, margin, placement uncertainty, and favored state. |
 
 ## Compact call columns
 

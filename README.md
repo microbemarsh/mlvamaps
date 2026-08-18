@@ -17,9 +17,11 @@ competitive and representative mapping.
 Alongside the fingerprint, mlvamaps reports locus-level repeat counts, primer
 products, read support, substitutions and indels, meaningful secondary-variant
 fractions, profile matches, and a self-contained HTML report. Optional database
-analysis adds fixed-tree phylogenetic placement with MAFFT, RAxML-NG, and EPA-ng,
-while assembly inputs can be supplemented with read-depth evidence. Generated
-FASTA and FASTQ artifacts are gzip-compressed by default.
+analysis adds fixed-tree phylogenetic placement with MAFFT, RAxML-NG, and EPA-ng.
+A calibrated MLVA-only assignment can then classify a requested target taxon as
+`POSITIVE`, `NEGATIVE`, or `INDETERMINATE` from repeat and repeat-masked marker
+evidence. Assembly inputs can also be supplemented with read-depth evidence.
+Generated FASTA and FASTQ artifacts are gzip-compressed by default.
 
 ## Install
 
@@ -243,6 +245,55 @@ reference_sequences/VNTR_02.fasta
 Long-form sequence TSV and combined FASTA databases are also supported; see
 [input formats](docs/reference/input-formats.md#phylogenetic-sequence-database).
 
+### Calibrated target-taxon assignment
+
+To test whether the observed MLVA markers are compatible with a requested
+target taxon, use a labeled reference database containing both the target and
+relevant near neighbors. Each reference needs a stable `taxon_id` in
+`reference_metadata.tsv`. First build a label-conditional calibration artifact
+from audited leave-one-reference-out distances:
+
+```bash
+mlvamaps calibrate-taxa \
+  --reference-distances reference_leave_one_out_distances.tsv \
+  --reference-metadata reference_build/database/reference_metadata.tsv \
+  --sequence-index reference_build/database/reference_sequence_index.tsv \
+  --k 3 \
+  --alpha 0.05 \
+  --minimum-loci 3 \
+  --output reference_build/database/taxon_calibration
+```
+
+Then request assignment during a normal call:
+
+```bash
+mlvamaps call -p panel.tsv -i sample.fastq.gz \
+  --database reference_build \
+  --target-taxon-id 1392 \
+  --taxon-calibration \
+    reference_build/database/taxon_calibration/taxon_calibration.json \
+  -o results
+```
+
+The same assignment options work for Illumina, accurate long-read, and assembly
+inputs. The method combines independent repeat and SNP/phylogenetic
+compatibility channels, evaluates stability by resampling loci, and uses EPA-ng
+placement uncertainty as QC. A `POSITIVE` result requires the target to be the
+sole compatible joint class, agreement between the repeat and SNP channels,
+adequate locus-bootstrap support, and passing QC. Alternatives, conflicting
+evidence, insufficient loci, or poor placement produce either `NEGATIVE` or a
+conservative `INDETERMINATE` result.
+
+Conformal p-values in these outputs measure compatibility with the labeled
+reference cohort. They are not posterior probabilities that the target organism
+is present, and EPA-ng likelihood weight ratios are not species probabilities.
+A target-only database cannot establish specificity. Freeze and independently
+validate the panel, target and near-neighbor cohort, and calibration artifact
+before operational use. See
+[MLVA-only target-taxon assignment](docs/concepts/taxon-assignment.md) for the
+metadata contract, statistical interpretation, controls, and validation
+requirements.
+
 Results are written to `results/` by default. Generated sequence artifacts use
 `.fasta.gz` or `.fastq.gz` names and contain real gzip-compressed data. Start
 with:
@@ -252,6 +303,9 @@ with:
 - `mlva_fingerprint.tsv` for the conventional wide fingerprint.
 - `profile_matches.tsv` for ranked, metadata-rich profile comparisons.
 - `profile_match_loci.tsv` for one machine-readable row per profile and locus.
+- `phylogeny/taxon_assignment.tsv` for the optional calibrated target decision.
+- `phylogeny/taxon_assignment_candidates.tsv` for per-taxon compatibility.
+- `phylogeny/taxon_assignment_loci.tsv` for locus-level assignment evidence.
 - `report.html` for the visual summary.
 
 With `--database`, `phylogeny/phylogenetic_matches.tsv` ranks complete
@@ -286,6 +340,7 @@ invoked.
 | Assembly plus SAM/BAM | Assembly calls plus overlap-based read support from existing alignments. |
 | Known profile TSV | Closest MLVA profiles, mismatched loci, distance, and comparison confidence. |
 | Per-locus sequence database | Fixed-tree phylogenetic placement and a closest-reference ranking across callable loci. |
+| Labeled target and near-neighbor database plus calibration artifact | MLVA-only `POSITIVE`, `NEGATIVE`, or `INDETERMINATE` target-taxon assignment with conformal compatibility, locus-bootstrap support, and placement QC. |
 
 FASTQ mode competitively recruits reads to complete locus products before
 primer pairing. Database products are preferred; rich panels can synthesize
@@ -379,6 +434,9 @@ For accurate amplicon and long-read FASTQ data, mlvamaps:
     retained repeat-count distance. Only references present at every placed
     locus are ranked, so missing loci cannot produce an artificially small
     total.
+11. When a target and matching calibration artifact are supplied, computes
+    label-conditional repeat, SNP, and joint conformal compatibility; bootstraps
+    loci; applies placement QC; and reports a conservative taxon assignment.
 
 For assemblies, mlvamaps:
 
@@ -428,6 +486,7 @@ recommended metadata, validation, and profile-table setup.
 - [Representative mapping and SNP evidence](docs/concepts/representative-mapping.md)
 - [Variant mixture abundance](docs/concepts/variant-mixtures.md)
 - [Repeat-aware SNP placement and phylogeography](docs/concepts/repeat-snp-phylogeography.md)
+- [MLVA-only target-taxon assignment](docs/concepts/taxon-assignment.md)
 - [Allele calling and profiles](docs/concepts/calling-and-profiles.md)
 - [Adding a new organism or MLVA scheme](docs/guides/new-organism-panel.md)
 
@@ -499,7 +558,9 @@ The metadata identifier may be named `reference_id`, `genome_id`, `sample_id`,
   whole-genome assembly path, and canonical assembly SHA-256;
 - `reference_build/phylogeny/LOCUS.tree`: a portable Newick tree for each locus;
 - `reference_build/reference_build_manifest.tsv`: extraction and ambiguity QC;
-- `reference_build/database/reference_metadata.tsv`: normalized placement metadata;
+- `reference_build/database/reference_metadata.tsv`: normalized placement
+  metadata; calibrated taxon assignment additionally requires `taxon_id` and
+  may use `taxon_name`;
 - `reference_build/myoga_metadata.csv`: metadata whose `genome_id` matches tree tips.
 
 Multiple products at the same locus are excluded by default because an
