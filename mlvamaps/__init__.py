@@ -1,6 +1,6 @@
 """MLVA/VNTR genotyping from sequencing reads and assemblies."""
 
-__version__ = "0.1.0"
+from ._version import __version__
 
 from .locus_measurement import (
     extract_reference_interval_from_original_read,

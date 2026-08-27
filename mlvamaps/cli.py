@@ -4,6 +4,7 @@ import argparse
 import csv
 from pathlib import Path
 
+from . import __version__
 from .assembly_call import ASSEMBLY_ALGORITHMS, run_assembly_call
 from .concurrency import DEFAULT_THREADS
 from .in_silico_pcr import run_in_silico_pcr
@@ -236,6 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="mlvamaps",
         description="Simple MLVA/VNTR calling from primers plus FASTQ, FASTA, or an input directory",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     call = subparsers.add_parser(
@@ -1703,12 +1705,10 @@ def main(argv: list[str] | None = None) -> int:
                 raxml_model=args.raxml_model,
                 show_progress=not args.quiet,
             )
-            for reference in result["references"]:
-                print(
-                    f"Built taxid {reference['taxid']} ({reference['name']}) "
-                    f"database at {reference['database']}"
-                )
-            print(f"Wrote taxid pipeline manifest to {result['manifest']}")
+            if not args.quiet:
+                print(f"Wrote taxon summary to {result['taxon_summary']}")
+                print(f"Wrote taxon/locus summary to {result['locus_amplifiability']}")
+                print(f"Wrote taxid pipeline manifest to {result['manifest']}")
             return 0
         result = build_reference_database(
             assemblies_dir=args.assemblies,
@@ -1728,7 +1728,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Wrote per-locus reference database to {result['database']}")
         print(f"Wrote reference build QC to {result['manifest']}")
-        print(f"Wrote per-locus reference trees to {result['phylogeny']}")
+        if result.get("phylogeny"):
+            print(f"Wrote per-locus reference trees to {result['phylogeny']}")
+        else:
+            print(f"Reference build completed with status {result['status']}; no trees were written")
         print(f"Wrote MYOGA metadata to {result['myoga_metadata']}")
         return 0
     parser.error("unknown command")

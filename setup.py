@@ -6,9 +6,15 @@ from setuptools import find_packages, setup
 ROOT = Path(__file__).parent
 
 
+def _version() -> str:
+    namespace = {}
+    exec((ROOT / "mlvamaps" / "_version.py").read_text(encoding="utf-8"), namespace)
+    return namespace["__version__"]
+
+
 setup(
     name="mlvamaps",
-    version="0.1.0",
+    version=_version(),
     description="MLVA/VNTR genotyping from sequencing reads and assemblies",
     long_description=(ROOT / "README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",

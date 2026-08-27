@@ -193,6 +193,167 @@ def test_build_taxon_references_keeps_each_database_isolated(tmp_path, monkeypat
         tmp_path / "references" / "staph" / "prepared" / "metadata.tsv"
     )
     assert len(json.loads(result["manifest"].read_text())["references"]) == 2
+    assert [entry["status"] for entry in result["references"]] == ["BUILT", "BUILT"]
+
+
+def test_multi_taxon_build_continues_after_no_usable_loci(tmp_path, monkeypatch):
+    references = [
+        TaxonReference("1", "taxon_a"),
+        TaxonReference("2", "taxon_b"),
+        TaxonReference("3", "taxon_c"),
+    ]
+
+    def fake_prepare(reference, output, **kwargs):
+        output = Path(output)
+        genomes = output / "package"
+        genomes.mkdir(parents=True)
+        metadata = output / "metadata.tsv"
+        metadata.write_text("accession\tassembly_file\n")
+        return {"outdir": output, "genomes": genomes, "metadata": metadata}
+
+    built_names = []
+
+    def fake_builder(**kwargs):
+        output = Path(kwargs["outdir"])
+        name = output.parent.name
+        built_names.append(name)
+        return {
+            "status": "NO_USABLE_LOCI" if name == "taxon_b" else "BUILT",
+            "outdir": output,
+            "database": output / "database",
+            "manifest": output / "reference_build_manifest.tsv",
+        }
+
+    monkeypatch.setattr(pipeline, "prepare_taxon_reference", fake_prepare)
+    result = build_taxon_references(
+        references,
+        "primers.csv",
+        tmp_path / "references",
+        builder=fake_builder,
+    )
+
+    assert built_names == ["taxon_a", "taxon_b", "taxon_c"]
+    assert [entry["status"] for entry in result["references"]] == [
+        "BUILT",
+        "NO_USABLE_LOCI",
+        "BUILT",
+    ]
+    manifest = json.loads(result["manifest"].read_text())
+    assert manifest["references"][1]["name"] == "taxon_b"
+    assert manifest["references"][1]["status"] == "NO_USABLE_LOCI"
+
+
+def test_multi_taxon_amplifiability_summaries_and_console(tmp_path, monkeypatch, capsys):
+    references = [TaxonReference("1", "taxon_a"), TaxonReference("2", "taxon_b")]
+
+    def fake_prepare(reference, output, **kwargs):
+        output = Path(output)
+        genomes = output / "package"
+        genomes.mkdir(parents=True)
+        metadata = output / "metadata.tsv"
+        metadata.write_text("accession\tassembly_file\n")
+        return {"outdir": output, "genomes": genomes, "metadata": metadata}
+
+    def fake_builder(**kwargs):
+        output = Path(kwargs["outdir"])
+        rows = {
+            "taxon_a": [
+                {"locus_id": "L1", "genomes_examined": 10, "genomes_with_valid_amplicon": 10,
+                 "valid_amplicons": 10, "percent_genomes_amplifiable": 100.0,
+                 "amplifiable": "TRUE", "tree_status": "BUILT"},
+                {"locus_id": "L2", "genomes_examined": 10, "genomes_with_valid_amplicon": 8,
+                 "valid_amplicons": 8, "percent_genomes_amplifiable": 80.0,
+                 "amplifiable": "TRUE", "tree_status": "BUILT"},
+            ],
+            "taxon_b": [
+                {"locus_id": "L1", "genomes_examined": 4, "genomes_with_valid_amplicon": 2,
+                 "valid_amplicons": 2, "percent_genomes_amplifiable": 50.0,
+                 "amplifiable": "TRUE", "tree_status": "INSUFFICIENT_REFERENCES"},
+                {"locus_id": "L2", "genomes_examined": 4, "genomes_with_valid_amplicon": 0,
+                 "valid_amplicons": 0, "percent_genomes_amplifiable": 0.0,
+                 "amplifiable": "FALSE", "tree_status": "NO_AMPLICONS"},
+            ],
+        }[output.parent.name]
+        return {
+            "outdir": output,
+            "database": output / "database",
+            "manifest": output / "reference_build_manifest.tsv",
+            "locus_summary_rows": rows,
+        }
+
+    monkeypatch.setattr(pipeline, "prepare_taxon_reference", fake_prepare)
+    result = build_taxon_references(
+        references, "primers.csv", tmp_path / "references", builder=fake_builder,
+        show_progress=True,
+    )
+
+    taxon_rows = list(csv.DictReader(result["taxon_summary"].open(), delimiter="\t"))
+    locus_rows = list(csv.DictReader(result["locus_amplifiability"].open(), delimiter="\t"))
+    assert list(taxon_rows[0]) == pipeline.TAXON_REFERENCE_SUMMARY_FIELDS
+    assert list(locus_rows[0]) == pipeline.TAXON_LOCUS_AMPLIFIABILITY_FIELDS
+    assert [(row["taxon"], row["loci_amplifiable"], row["status"]) for row in taxon_rows] == [
+        ("taxon_a", "2", "BUILT"),
+        ("taxon_b", "1", "PARTIAL"),
+    ]
+    assert taxon_rows[1]["percent_loci_amplifiable"] == "50.0"
+    assert taxon_rows[1]["total_valid_amplicons"] == "2"
+    assert len(locus_rows) == 4
+    output = capsys.readouterr().out
+    assert "taxon_b [taxid 2]" in output
+    assert "Amplifiable loci: 1 / 2 (50.0%)" in output
+    assert "Non-amplifiable loci: L2" in output
+
+
+def test_quiet_taxon_build_suppresses_console_summary(tmp_path, monkeypatch, capsys):
+    def fake_prepare(reference, output, **kwargs):
+        output = Path(output)
+        output.mkdir(parents=True)
+        return {"outdir": output, "genomes": output, "metadata": output / "metadata.tsv"}
+
+    def fake_builder(**kwargs):
+        output = Path(kwargs["outdir"])
+        return {
+            "outdir": output,
+            "database": output / "database",
+            "manifest": output / "manifest.tsv",
+            "locus_summary_rows": [
+                {"locus_id": "L1", "genomes_examined": 1, "genomes_with_valid_amplicon": 1,
+                 "valid_amplicons": 1, "percent_genomes_amplifiable": 100.0,
+                 "amplifiable": "TRUE", "tree_status": "INSUFFICIENT_REFERENCES"}
+            ],
+        }
+
+    monkeypatch.setattr(pipeline, "prepare_taxon_reference", fake_prepare)
+    build_taxon_references(
+        [TaxonReference("1", "taxon_a")], "primers.csv", tmp_path / "references",
+        builder=fake_builder, show_progress=False,
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_multi_taxon_build_does_not_swallow_unexpected_builder_failure(
+    tmp_path, monkeypatch
+):
+    def fake_prepare(reference, output, **kwargs):
+        output = Path(output)
+        output.mkdir(parents=True)
+        return {
+            "outdir": output,
+            "genomes": output / "package",
+            "metadata": output / "metadata.tsv",
+        }
+
+    def fail_builder(**kwargs):
+        raise RuntimeError("programming error")
+
+    monkeypatch.setattr(pipeline, "prepare_taxon_reference", fake_prepare)
+    with pytest.raises(RuntimeError, match="programming error"):
+        build_taxon_references(
+            [TaxonReference("1", "taxon_a")],
+            "primers.csv",
+            tmp_path / "references",
+            builder=fail_builder,
+        )
 
 
 def test_cli_dispatches_taxid_reference_pipeline(tmp_path, monkeypatch):

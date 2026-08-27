@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+from typing import Any
 
 from .assembly_call import pcr_rows_to_products
 from .concurrency import DEFAULT_THREADS, resolve_threads
@@ -52,6 +53,21 @@ REFERENCE_BUILD_FIELDS = [
     "product_size_bp",
     "forward_mismatches",
     "reverse_mismatches",
+]
+
+REFERENCE_BUILD_STATUS_BUILT = "BUILT"
+REFERENCE_BUILD_STATUS_PARTIAL = "PARTIAL"
+REFERENCE_BUILD_STATUS_NO_USABLE_LOCI = "NO_USABLE_LOCI"
+REFERENCE_BUILD_STATUS_INSUFFICIENT_REFERENCES = "INSUFFICIENT_REFERENCES"
+
+REFERENCE_LOCUS_AMPLIFIABILITY_FIELDS = [
+    "locus_id",
+    "genomes_examined",
+    "genomes_with_valid_amplicon",
+    "valid_amplicons",
+    "percent_genomes_amplifiable",
+    "amplifiable",
+    "tree_status",
 ]
 
 
@@ -181,6 +197,42 @@ def _write_tsv(rows: list[dict], path: Path, fields: list[str]) -> None:
         writer.writerows(rows)
 
 
+def _locus_amplifiability_rows(
+    loci: list[Locus],
+    records_by_locus: dict[str, list[tuple[str, str]]],
+    genomes_examined: int,
+    min_references_per_tree: int,
+) -> list[dict[str, Any]]:
+    """Summarize products retained by the existing extraction/QC policy."""
+    rows = []
+    for locus in loci:
+        records = records_by_locus[locus.locus_id]
+        genomes_with_amplicon = len({reference_id for reference_id, _sequence in records})
+        valid_amplicons = len(records)
+        if valid_amplicons == 0:
+            tree_status = "NO_AMPLICONS"
+        elif valid_amplicons < min_references_per_tree:
+            tree_status = REFERENCE_BUILD_STATUS_INSUFFICIENT_REFERENCES
+        else:
+            tree_status = REFERENCE_BUILD_STATUS_BUILT
+        rows.append(
+            {
+                "locus_id": locus.locus_id,
+                "genomes_examined": genomes_examined,
+                "genomes_with_valid_amplicon": genomes_with_amplicon,
+                "valid_amplicons": valid_amplicons,
+                "percent_genomes_amplifiable": (
+                    round(100.0 * genomes_with_amplicon / genomes_examined, 1)
+                    if genomes_examined
+                    else 0.0
+                ),
+                "amplifiable": "TRUE" if valid_amplicons else "FALSE",
+                "tree_status": tree_status,
+            }
+        )
+    return rows
+
+
 def _product_rank(product: dict) -> tuple:
     return (
         int(product["primer_error_round"]),
@@ -234,7 +286,7 @@ def build_reference_database(
     raxml_ng_bin: str = "raxml-ng",
     raxml_model: str = "DNA",
     show_progress: bool = False,
-) -> dict[str, Path]:
+) -> dict[str, Any]:
     """Extract reference amplicons and infer a SNP tree for every usable locus."""
     if multiple_products not in {"exclude", "best", "error"}:
         raise ValueError("multiple_products must be exclude, best, or error")
@@ -350,6 +402,7 @@ def build_reference_database(
                 }
             )
 
+    locus_fasta_paths: list[Path] = []
     for locus in loci:
         records = records_by_locus[locus.locus_id]
         fasta_path = database_dir / f"{locus.locus_id}.fasta.gz"
@@ -357,6 +410,7 @@ def build_reference_database(
         fasta_path.unlink(missing_ok=True)
         if records:
             _write_fasta(records, fasta_path)
+            locus_fasta_paths.append(fasta_path)
 
     normalized_metadata = []
     myoga_metadata = []
@@ -384,31 +438,56 @@ def build_reference_database(
         REFERENCE_ASSEMBLY_FIELDS,
     )
     _write_tsv(manifest_rows, output / "reference_build_manifest.tsv", REFERENCE_BUILD_FIELDS)
+    locus_summary_rows = _locus_amplifiability_rows(
+        loci, records_by_locus, len(matched), min_references_per_tree
+    )
+    locus_summary_path = output / "reference_locus_amplifiability.tsv"
+    _write_tsv(
+        locus_summary_rows,
+        locus_summary_path,
+        REFERENCE_LOCUS_AMPLIFIABILITY_FIELDS,
+    )
     with (output / "myoga_metadata.csv").open("w", newline="") as handle:
         myoga_fields = ["genome_id", *[field for field in metadata_fields if field != id_field]]
         writer = csv.DictWriter(handle, fieldnames=myoga_fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(myoga_metadata)
 
-    progress.step("Building per-locus reference alignments and trees")
-    tree_paths = build_reference_phylogenies(
-        database_dir,
-        output / "phylogeny",
-        loci,
-        thread_count,
-        min_references=min_references_per_tree,
-        mafft_bin=mafft_bin,
-        raxml_ng_bin=raxml_ng_bin,
-        raxml_model=raxml_model,
-        progress=progress,
-    )
+    tree_paths: dict[str, Path | None] = {}
+    if locus_fasta_paths:
+        progress.step("Building per-locus reference alignments and trees")
+        tree_paths = build_reference_phylogenies(
+            database_dir,
+            output / "phylogeny",
+            loci,
+            thread_count,
+            min_references=min_references_per_tree,
+            mafft_bin=mafft_bin,
+            raxml_ng_bin=raxml_ng_bin,
+            raxml_model=raxml_model,
+            progress=progress,
+        )
+        build_status = (
+            REFERENCE_BUILD_STATUS_BUILT
+            if all(row["tree_status"] == REFERENCE_BUILD_STATUS_BUILT for row in locus_summary_rows)
+            else REFERENCE_BUILD_STATUS_PARTIAL
+        )
+    else:
+        build_status = REFERENCE_BUILD_STATUS_NO_USABLE_LOCI
+        tree_paths = {"phylogeny": None}
+        progress.step(
+            "No usable reference amplicons were recovered; skipping phylogeny construction."
+        )
     progress.step(f"Done. Reference database: {database_dir}")
     return {
+        "status": build_status,
         "outdir": output,
         "database": database_dir,
         "metadata": reference_metadata_path,
         "myoga_metadata": output / "myoga_metadata.csv",
         "manifest": output / "reference_build_manifest.tsv",
+        "locus_amplifiability": locus_summary_path,
+        "locus_summary_rows": locus_summary_rows,
         "reference_assemblies": reference_assemblies_path,
         **tree_paths,
     }

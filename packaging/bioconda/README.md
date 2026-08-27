@@ -1,50 +1,65 @@
-# bioconda packaging notes
+# Bioconda release checklist
 
-This directory is a staging area for the future bioconda recipe. The actual
-recipe should be submitted to the external `bioconda/bioconda-recipes`
-repository after mlvamaps has a tagged GitHub release.
+This directory stages the recipe that will be copied to
+`bioconda/bioconda-recipes/recipes/mlvamaps/meta.yaml`. It is not an installable
+channel by itself.
 
-Current packaging assumptions:
+## Current blocker
 
-- mlvamaps is pure Python, so the recipe should use `noarch: python`.
-- `mlvamaps` is the console script.
-- `minimap2` should be a runtime dependency because FASTQ calls map all
-  primer-oriented locus reads to the dominant observed representative amplicon
-  and report reference-relative SNP evidence by default. Assembly calls also
-  use it to map accurate reads back to extracted products for depth support.
-- `skesa` is a required runtime dependency for native Illumina local assembly;
-  no Python assembler is bundled as a fallback.
-- `sassy-rs>=0.2.6` must be packaged separately for Bioconda. Its Python
-  binding powers native in-silico PCR and bounded flank localization.
-- `parasail` supplies exact global tracebacks used to reconstruct per-read
-  substitutions and indels against each observed cluster representative.
-- `mummer4` supplies `dnadiff` whole-genome SNP, indel, and one-to-one aligned
-  fraction comparisons for exact marker ties.
-- `pysam`/htslib handles FASTA, FASTQ, SAM, and BAM parsing, while NumPy moves
-  quality, motif, and repeat-likelihood reductions out of Python loops.
-- Release source should use a stable GitHub archive URL for a tag, with a
-  `sha256` checksum filled in before submission.
-- bioconda tests should avoid requiring local data. Import checks and CLI help
-  checks are enough for package installation validation.
+`mlvamaps` imports `sassy` from the PyPI distribution `sassy-rs>=0.2.6` for its
+core primer search. As of 2026-08-27, `sassy-rs` is not available from Bioconda
+or conda-forge. Bioconda recipes cannot satisfy runtime dependencies with pip,
+so package `sassy-rs` first and have that recipe accepted before submitting
+`mlvamaps`.
 
-Before submitting to bioconda:
+`spoars`, the other native Python extension imported by the calling pipeline,
+is already available from Bioconda. The remaining declared Python packages and
+external executables are also available from Bioconda/conda-forge.
 
-1. Create a GitHub release tag, for example `v0.1.0`.
-2. Download the release tarball and calculate its `sha256`.
-3. Copy `meta.yaml` into `bioconda-recipes/recipes/mlvamaps/meta.yaml`.
-4. Replace the placeholder checksum.
-5. Run the local bioconda recipe tests from the `bioconda-recipes` checkout.
+## Prepare a release
 
-## Release checklist moved from the main README
+1. Ensure the version in `mlvamaps/_version.py` matches the version in
+   `meta.yaml`; `setup.py` reads the Python version file automatically.
+2. Run the test and package checks from the repository root:
 
-The recipe in this directory is not meant to be consumed directly from this
-repository. bioconda recipes are submitted to the external
-`bioconda/bioconda-recipes` repository after a tagged release is available.
+   ```bash
+   pytest -q
+   python -m build
+   python -m twine check dist/*
+   ```
 
-Before submission we will need to:
+3. Commit the release, create an annotated tag, and push it:
 
-1. Publish a stable GitHub release tag.
-2. Replace the recipe URL/checksum placeholders with the release tarball and
-   `sha256`.
-3. Confirm the package name is not already present in upstream conda channels.
-4. Run the bioconda recipe tests.
+   ```bash
+   git tag -a v0.1.0 -m "mlvamaps 0.1.0"
+   git push origin main v0.1.0
+   ```
+
+4. Download the immutable tag archive and calculate its checksum:
+
+   ```bash
+   curl -L -o mlvamaps-0.1.0.tar.gz \
+     https://github.com/microbemarsh/mlvamaps/archive/refs/tags/v0.1.0.tar.gz
+   shasum -a 256 mlvamaps-0.1.0.tar.gz
+   ```
+
+5. Replace `REPLACE_WITH_RELEASE_TARBALL_SHA256` in `meta.yaml` with that hash.
+   The placeholder is intentional until the tag exists; a checksum made from a
+   mutable branch archive is not release-safe.
+
+## Submit and validate
+
+1. Fork and clone `bioconda/bioconda-recipes`.
+2. Create `recipes/mlvamaps/` and copy in `meta.yaml`.
+3. Confirm no package named `mlvamaps` already exists in Bioconda or
+   conda-forge.
+4. Run the current `bioconda-utils` lint/build workflow from the recipes
+   checkout, following the
+   [Bioconda contributor documentation](https://bioconda.github.io/contributor/).
+5. Open a pull request and disclose that `sassy-rs` is a required native
+   dependency with its own prerequisite recipe.
+
+The recipe is `noarch: python` because the `mlvamaps` distribution itself is
+pure Python. Platform-specific code is supplied through conda dependencies.
+Tests intentionally use imports and CLI help/version commands so they validate
+installation without downloading genomes or running expensive analyses.

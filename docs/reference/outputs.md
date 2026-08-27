@@ -61,6 +61,7 @@ filter behavior.
 | `database/reference_sequence_index.tsv` | Canonical amplicon, repeat-masked SNP, and complete marker SHA-256 keys used by the default exact-match fast path. |
 | `database/reference_assemblies.tsv` | Reference-ID, source-assembly path, and canonical whole-genome SHA-256 used for assembly-query tie breaking. |
 | `reference_build_manifest.tsv` | Per-reference/locus product counts, selected product, primer errors, and exclusion status. |
+| `reference_locus_amplifiability.tsv` | Per-locus retained amplicon and genome counts, amplifiable percentage, and `NO_AMPLICONS`, `INSUFFICIENT_REFERENCES`, or `BUILT` tree status. |
 | `phylogeny/LOCUS.tree` | Portable Newick SNP tree for the locus. |
 | `phylogeny/LOCUS/references.aligned.fasta.gz` | Repeat-masked MAFFT alignment used for tree inference. |
 | `phylogeny/LOCUS/reference.mlvamaps.raxml.log` | Full RAxML-NG output for every attempted thread count. |

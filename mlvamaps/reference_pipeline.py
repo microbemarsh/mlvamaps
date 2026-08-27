@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .concurrency import DEFAULT_THREADS
-from .reference_builder import build_reference_database
+from .reference_builder import (
+    REFERENCE_BUILD_STATUS_BUILT,
+    REFERENCE_BUILD_STATUS_NO_USABLE_LOCI,
+    REFERENCE_BUILD_STATUS_PARTIAL,
+    build_reference_database,
+)
 
 
 NCBI_METADATA_FIELDS = (
@@ -43,6 +48,29 @@ PREPARED_METADATA_FIELDS = (
     "isolation_source",
     "host",
 )
+TAXON_REFERENCE_SUMMARY_FIELDS = [
+    "taxid",
+    "taxon",
+    "genomes_examined",
+    "loci_total",
+    "loci_amplifiable",
+    "loci_not_amplifiable",
+    "percent_loci_amplifiable",
+    "total_valid_amplicons",
+    "trees_built",
+    "status",
+]
+TAXON_LOCUS_AMPLIFIABILITY_FIELDS = [
+    "taxid",
+    "taxon",
+    "locus_id",
+    "genomes_examined",
+    "genomes_with_valid_amplicon",
+    "valid_amplicons",
+    "percent_genomes_amplifiable",
+    "amplifiable",
+    "tree_status",
+]
 _ACCESSION_PATTERN = re.compile(r"(GC[AF]_\d+\.\d+)", re.IGNORECASE)
 _SAFE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 _MISSING_VALUES = {
@@ -482,6 +510,29 @@ def prepare_taxon_references(
     ]
 
 
+def _write_tsv(rows: list[dict[str, Any]], path: Path, fields: list[str]) -> None:
+    with path.open("w", newline="") as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=fields, delimiter="\t", extrasaction="ignore", lineterminator="\n"
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _print_taxon_summary(summary: dict[str, Any], non_amplifiable: list[str]) -> None:
+    print(f"{summary['taxon']} [taxid {summary['taxid']}]")
+    print(f"  Genomes examined: {summary['genomes_examined']:,}")
+    print(
+        f"  Amplifiable loci: {summary['loci_amplifiable']} / {summary['loci_total']} "
+        f"({summary['percent_loci_amplifiable']:.1f}%)"
+    )
+    print(f"  Valid amplicons: {summary['total_valid_amplicons']:,}")
+    print(f"  Trees built: {summary['trees_built']:,}")
+    print(f"  Status: {summary['status']}")
+    if non_amplifiable:
+        print(f"  Non-amplifiable loci: {', '.join(non_amplifiable)}")
+
+
 def build_taxon_references(
     references: list[TaxonReference],
     primers_path: str | Path,
@@ -503,12 +554,14 @@ def build_taxon_references(
     raxml_ng_bin: str = "raxml-ng",
     raxml_model: str = "DNA",
     show_progress: bool = False,
-    builder: Callable[..., dict[str, Path]] = build_reference_database,
+    builder: Callable[..., dict[str, Any]] = build_reference_database,
 ) -> dict[str, Any]:
     """Prepare and build one isolated mlvamaps database per taxid."""
     output = Path(outdir).resolve()
     output.mkdir(parents=True, exist_ok=True)
     results = []
+    taxon_summary_rows: list[dict[str, Any]] = []
+    locus_summary_rows: list[dict[str, Any]] = []
     for reference in references:
         prepared = prepare_taxon_reference(
             reference,
@@ -537,22 +590,71 @@ def build_taxon_references(
             raxml_model=raxml_model,
             show_progress=show_progress,
         )
+        taxon_locus_rows = [
+            {"taxid": reference.taxid, "taxon": reference.name, **row}
+            for row in built.get("locus_summary_rows", [])
+        ]
+        locus_summary_rows.extend(taxon_locus_rows)
+        loci_total = len(taxon_locus_rows)
+        loci_amplifiable = sum(row["amplifiable"] == "TRUE" for row in taxon_locus_rows)
+        trees_built = sum(row["tree_status"] == REFERENCE_BUILD_STATUS_BUILT for row in taxon_locus_rows)
+        if loci_amplifiable == 0:
+            status = REFERENCE_BUILD_STATUS_NO_USABLE_LOCI
+        elif loci_amplifiable == loci_total and trees_built == loci_total:
+            status = REFERENCE_BUILD_STATUS_BUILT
+        else:
+            status = REFERENCE_BUILD_STATUS_PARTIAL
+        # Preserve compatibility with injected/custom builders without summary data.
+        if not taxon_locus_rows:
+            status = str(built.get("status", REFERENCE_BUILD_STATUS_BUILT))
+        taxon_summary = {
+            "taxid": reference.taxid,
+            "taxon": reference.name,
+            "genomes_examined": (
+                taxon_locus_rows[0]["genomes_examined"] if taxon_locus_rows else 0
+            ),
+            "loci_total": loci_total,
+            "loci_amplifiable": loci_amplifiable,
+            "loci_not_amplifiable": loci_total - loci_amplifiable,
+            "percent_loci_amplifiable": (
+                round(100.0 * loci_amplifiable / loci_total, 1) if loci_total else 0.0
+            ),
+            "total_valid_amplicons": sum(
+                int(row["valid_amplicons"]) for row in taxon_locus_rows
+            ),
+            "trees_built": trees_built,
+            "status": status,
+        }
+        taxon_summary_rows.append(taxon_summary)
+        if show_progress and taxon_locus_rows:
+            _print_taxon_summary(
+                taxon_summary,
+                [row["locus_id"] for row in taxon_locus_rows if row["amplifiable"] == "FALSE"],
+            )
         results.append(
             {
                 "taxid": reference.taxid,
                 "name": reference.name,
+                "status": status,
                 "prepared": str(prepared["outdir"]),
                 "reference": str(built["outdir"]),
                 "database": str(built["database"]),
                 "manifest": str(built["manifest"]),
+                "locus_amplifiability": str(built.get("locus_amplifiability", "")),
             }
         )
+    taxon_summary_path = output / "taxon_reference_summary.tsv"
+    locus_summary_path = output / "taxon_locus_amplifiability.tsv"
+    _write_tsv(taxon_summary_rows, taxon_summary_path, TAXON_REFERENCE_SUMMARY_FIELDS)
+    _write_tsv(locus_summary_rows, locus_summary_path, TAXON_LOCUS_AMPLIFIABILITY_FIELDS)
     pipeline_manifest = output / "reference_pipeline_manifest.json"
     pipeline_manifest.write_text(
         json.dumps(
             {
                 "schema_version": "1.0",
                 "created_at": datetime.now(timezone.utc).isoformat(),
+                "taxon_summary": taxon_summary_path.name,
+                "locus_amplifiability": locus_summary_path.name,
                 "references": results,
             },
             indent=2,
@@ -564,5 +666,7 @@ def build_taxon_references(
     return {
         "outdir": output,
         "manifest": pipeline_manifest,
+        "taxon_summary": taxon_summary_path,
+        "locus_amplifiability": locus_summary_path,
         "references": results,
     }

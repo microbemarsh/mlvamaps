@@ -199,6 +199,13 @@ def test_sequence_database_directory_uses_locus_filenames(tmp_path):
     }
 
 
+def test_empty_sequence_database_remains_an_error(tmp_path):
+    database = tmp_path / "database"
+    database.mkdir()
+    with pytest.raises(ValueError, match="contains no FASTA files"):
+        read_sequence_database(database, {"L1"})
+
+
 def test_mafft_commands_keep_reference_coordinates():
     assert build_mafft_reference_command("refs.fa", 4, "mafft-x") == [
         "mafft-x", "--auto", "--thread", "4", "refs.fa"
