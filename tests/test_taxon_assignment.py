@@ -10,6 +10,7 @@ from mlvamaps.taxon_assignment import (
     _aggregate_bootstrap_joint_distances,
     _aggregate_taxon_distances,
     assign_target_taxon,
+    assign_best_taxon,
     build_taxon_calibration,
     conformal_p_value,
     run_taxon_calibration,
@@ -145,6 +146,59 @@ def _assign(rows: list[dict], **kwargs):
 
 def test_conformal_p_value_has_finite_sample_correction():
     assert conformal_p_value(0.5, [0.1, 0.2, 0.6, 0.7]) == pytest.approx(0.6)
+
+
+def test_automatic_identification_selects_correct_taxon():
+    result = assign_best_taxon(
+        sample_id="sample", locus_marker_rows=_rows(0.1, 0.1, 1.0, 1.0),
+        reference_metadata=_metadata(), expected_loci=3, k=2,
+        minimum_locus_fraction=1.0,
+    )
+    assert result.summary["best_taxon"] == "target"
+    assert result.summary["best_species"] == "Target taxon"
+    assert result.summary["taxonomic_status"] == "SUPPORTED"
+    assert [row["taxon_id"] for row in result.evidence] == ["target", "neighbor"]
+
+
+def test_automatic_identification_tie_is_ambiguous():
+    result = assign_best_taxon(
+        sample_id="sample", locus_marker_rows=_rows(0.1, 0.1, 0.1, 0.1),
+        reference_metadata=_metadata(), expected_loci=3,
+    )
+    assert result.summary["taxonomic_status"] == "AMBIGUOUS"
+
+
+def test_automatic_identification_too_few_loci():
+    result = assign_best_taxon(
+        sample_id="sample", locus_marker_rows=_rows(0.1, 0.1, 1.0, 1.0, loci=2),
+        reference_metadata=_metadata(), expected_loci=4,
+    )
+    assert result.summary["taxonomic_status"] == "INSUFFICIENT_EVIDENCE"
+    assert result.summary["informative_loci"] == 2
+
+
+def test_automatic_identification_single_taxon_is_not_species_supported():
+    metadata = {key: value for key, value in _metadata().items() if key.startswith("T")}
+    rows = [row for row in _rows(0.1, 0.1, 1.0, 1.0) if row["reference_id"].startswith("T")]
+    result = assign_best_taxon(
+        sample_id="sample", locus_marker_rows=rows,
+        reference_metadata=metadata, expected_loci=3,
+    )
+    assert result.summary["best_taxon"] == "target"
+    assert result.summary["taxonomic_status"] == "AMBIGUOUS"
+    assert result.summary["status_reason"] == "NO_ALTERNATIVE_TAXON_IN_REFERENCE_PANEL"
+
+
+def test_automatic_identification_accepts_legacy_taxonomy_aliases():
+    metadata = {
+        key: {"taxid": value["taxon_id"], "species": value["taxon_name"]}
+        for key, value in _metadata().items()
+    }
+    result = assign_best_taxon(
+        sample_id="sample", locus_marker_rows=_rows(0.1, 0.1, 1.0, 1.0),
+        reference_metadata=metadata, expected_loci=3,
+    )
+    assert result.summary["best_species"] == "Target taxon"
 
 
 def test_unique_target_support_is_positive_and_reproducible():
@@ -384,6 +438,11 @@ def test_phylogeny_integration_writes_assignment_tables_and_checks_signatures(
     assert result["taxon_assignment_candidates"].is_file()
     assert result["taxon_assignment_loci"].is_file()
     assert "\tPOSITIVE\t" in result["taxon_assignment"].read_text()
+    assert result["taxonomic_identification"].is_file()
+    with result["taxonomic_identification"].open() as handle:
+        automatic = next(csv.DictReader(handle, delimiter="\t"))
+    assert automatic["best_taxon"] == "target"
+    assert automatic["taxonomic_status"] == "SUPPORTED"
 
     with pytest.raises(ValueError, match="panel signature"):
         _add_taxon_assignment_outputs(
@@ -403,6 +462,53 @@ def test_phylogeny_integration_writes_assignment_tables_and_checks_signatures(
             max_mean_placement_entropy=None,
             min_median_placement_lwr=None,
         )
+
+
+def test_phylogeny_integration_identifies_taxon_without_calibration(tmp_path):
+    phylogeny = tmp_path / "phylogeny"
+    phylogeny.mkdir()
+    marker_path = phylogeny / "locus_marker_distances.tsv"
+    with marker_path.open("w", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=["locus_id", "reference_id", "normalized_repeat_distance", "normalized_snp_distance"],
+            delimiter="\t",
+        )
+        writer.writeheader()
+        writer.writerows(_rows(0.1, 0.1, 1.0, 1.0))
+    combined_path = phylogeny / "combined_marker_matches.tsv"
+    combined_path.write_text("snp_weight\trepeat_weight\n1\t1\n")
+    placement_path = phylogeny / "locus_phylogenetic_distances.tsv"
+    placement_path.write_text("locus_id\treference_id\n")
+
+    result = _add_taxon_assignment_outputs(
+        {
+            "phylogeny": phylogeny,
+            "locus_marker_distances": marker_path,
+            "combined_marker_matches": combined_path,
+            "phylogenetic_distances": placement_path,
+        },
+        sample_id="sample",
+        target_taxon_id=None,
+        calibration_path=None,
+        reference_metadata=_metadata(),
+        panel_sha256="panel",
+        database_signature="database",
+        expected_loci=3,
+        alpha=None,
+        min_loci=None,
+        min_locus_fraction=1.0,
+        bootstrap_replicates=0,
+        min_bootstrap_support=0.95,
+        max_mean_placement_entropy=None,
+        min_median_placement_lwr=None,
+    )
+
+    assert "taxon_assignment" not in result
+    with result["taxonomic_identification"].open() as handle:
+        summary = next(csv.DictReader(handle, delimiter="\t"))
+    assert summary["best_taxon"] == "target"
+    assert summary["taxonomic_status"] == "SUPPORTED"
 
 
 def test_target_must_be_present_in_labeled_metadata():

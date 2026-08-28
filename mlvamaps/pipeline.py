@@ -409,6 +409,9 @@ def run_call(
     taxon_min_bootstrap_support: float = 0.95,
     taxon_max_mean_placement_entropy: float | None = None,
     taxon_min_median_placement_lwr: float | None = None,
+    taxon_identification: bool | None = None,
+    taxon_k: int = 3,
+    taxon_minimum_margin: float = 0.1,
     locus_mapping: bool = True,
     min_mapping_quality: int = 0,
     min_base_quality: int = 20,
@@ -894,6 +897,9 @@ def run_call(
             taxon_min_bootstrap_support=taxon_min_bootstrap_support,
             taxon_max_mean_placement_entropy=taxon_max_mean_placement_entropy,
             taxon_min_median_placement_lwr=taxon_min_median_placement_lwr,
+            taxon_identification=taxon_identification,
+            taxon_k=taxon_k,
+            taxon_minimum_margin=taxon_minimum_margin,
         )
         phylogenetic_rows = read_profiles(phylogeny_paths["combined_marker_matches"])
         closest_reference_bands = read_profiles(

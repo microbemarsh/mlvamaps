@@ -224,8 +224,16 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         )
     if args.target_taxon_id and not args.database:
         parser.error("--target-taxon-id requires --database")
+    if args.taxon_identification is True and not args.database:
+        parser.error("--taxon-identification requires --database")
+    if not args.loci and not args.primers and args.database:
+        database = Path(args.database)
+        for candidate in (database / "database" / "reference_panel.tsv", database / "reference_panel.tsv"):
+            if candidate.is_file():
+                args.loci = str(candidate)
+                break
     if not args.loci and not args.primers:
-        parser.error("call requires -p PANEL")
+        parser.error("call requires -p PANEL unless --database contains reference_panel.tsv")
     if not args.input_path and not args.reads1 and not args.manifest:
         if args.short_read_mode:
             parser.error("-i sr requires --fq1 FASTQ or --manifest TSV")
@@ -256,7 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-i",
         "--input",
         dest="input_path",
-        required=True,
+        required=False,
         metavar="INPUT",
         help="FASTQ/FASTA path or directory; use 'sr' with --fq1/--fq2 for short reads",
     )
@@ -319,6 +327,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--database",
         help="Reference-build directory or per-locus sequence database for phylogenetic placement",
     )
+    taxon_toggle = call.add_mutually_exclusive_group()
+    taxon_toggle.add_argument(
+        "--taxon-identification",
+        dest="taxon_identification",
+        action="store_true",
+        help="Require automatic nearest-taxon identification from database metadata",
+    )
+    taxon_toggle.add_argument(
+        "--no-taxon-identification",
+        dest="taxon_identification",
+        action="store_false",
+        help="Disable automatic nearest-taxon identification",
+    )
+    call.set_defaults(taxon_identification=None)
+    call.add_argument("--taxon-k", type=_positive_int, default=3, help="Nearest references averaged per taxon (default: %(default)s)")
+    call.add_argument("--taxon-minimum-margin", type=_fraction, default=0.1, help="Minimum relative best/second taxon distance margin (default: %(default)s)")
     call.add_argument(
         "--reference-metadata",
         help="TSV/CSV with reference_id and optional date, coordinates, location, and source",
@@ -1078,6 +1102,9 @@ def _run_single_input(
             taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
             taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
             taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
+            taxon_identification=args.taxon_identification,
+            taxon_k=args.taxon_k,
+            taxon_minimum_margin=args.taxon_minimum_margin,
             locus_mapping=not args.no_locus_mapping,
             min_mapping_quality=args.min_mapping_quality,
             min_base_quality=args.min_base_quality,
@@ -1121,6 +1148,8 @@ def _run_single_input(
             print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
             if "taxon_assignment" in result:
                 print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
+            if "taxonomic_identification" in result:
+                print(f"Wrote automatic taxonomic identification to {result['taxonomic_identification']}")
         return result
 
     result = run_assembly_call(
@@ -1158,6 +1187,9 @@ def _run_single_input(
         taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
         taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
         taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
+        taxon_identification=args.taxon_identification,
+        taxon_k=args.taxon_k,
+        taxon_minimum_margin=args.taxon_minimum_margin,
         show_progress=not args.quiet,
     )
     print(f"Wrote easy MLVA calls to {result['calls']}")
@@ -1174,6 +1206,8 @@ def _run_single_input(
         print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
         if "taxon_assignment" in result:
             print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
+        if "taxonomic_identification" in result:
+            print(f"Wrote automatic taxonomic identification to {result['taxonomic_identification']}")
     if args.reads_path or args.alignments_path:
         print(f"Wrote read-depth support to {result['read_support']}")
     return result
@@ -1223,6 +1257,9 @@ def _run_short_input(
         taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
         taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
         taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
+        taxon_identification=args.taxon_identification,
+        taxon_k=args.taxon_k,
+        taxon_minimum_margin=args.taxon_minimum_margin,
         show_progress=not args.quiet,
     )
     print(f"Wrote conservative Illumina calls to {result['calls']}")
@@ -1232,6 +1269,8 @@ def _run_short_input(
     print(f"Wrote MYOGA metadata to {result['myoga_samples']}")
     if "taxon_assignment" in result:
         print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
+    if "taxonomic_identification" in result:
+        print(f"Wrote automatic taxonomic identification to {result['taxonomic_identification']}")
     print(f"Wrote report to {result['report']}")
     return result
 

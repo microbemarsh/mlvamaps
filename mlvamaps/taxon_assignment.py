@@ -92,6 +92,34 @@ TAXON_LOCUS_FIELDS = [
     "interpretation",
 ]
 
+TAXONOMIC_SUMMARY_FIELDS = [
+    "sample_id",
+    "best_taxon",
+    "best_species",
+    "taxon_score",
+    "second_best_taxon",
+    "second_best_score",
+    "score_margin",
+    "informative_loci",
+    "expected_loci",
+    "locus_recovery_fraction",
+    "taxonomic_status",
+    "status_reason",
+]
+
+TAXONOMIC_EVIDENCE_FIELDS = [
+    "sample_id",
+    "taxon_id",
+    "species",
+    "rank",
+    "score",
+    "distance",
+    "references_compared",
+    "informative_loci",
+    "locus_recovery_fraction",
+    "is_best_taxon",
+]
+
 
 @dataclass(frozen=True)
 class TaxonCalibration:
@@ -213,6 +241,12 @@ class TaxonAssignment:
     loci: tuple[dict, ...]
 
 
+@dataclass(frozen=True)
+class AutomaticTaxonAssignment:
+    summary: dict
+    evidence: tuple[dict, ...]
+
+
 def _finite(value: object) -> float | None:
     try:
         result = float(value)
@@ -260,11 +294,19 @@ def _reference_taxa(
     reference_taxon: dict[str, str] = {}
     taxon_names: dict[str, str] = {}
     for reference_id, row in metadata.items():
-        taxon_id = str(row.get("taxon_id", "")).strip()
+        taxon_id = str(
+            row.get("taxon_id") or row.get("taxid") or row.get("ncbi_taxid") or ""
+        ).strip()
         if not taxon_id:
             continue
         reference_taxon[str(reference_id)] = taxon_id
-        name = str(row.get("taxon_name") or row.get("organism_name") or "").strip()
+        name = str(
+            row.get("taxon_name")
+            or row.get("species")
+            or row.get("organism_name")
+            or row.get("scientific_name")
+            or ""
+        ).strip()
         if name:
             previous = taxon_names.get(taxon_id)
             if previous is not None and previous != name:
@@ -350,6 +392,137 @@ def _aggregate_taxon_distances(
                     reference_id for _value, reference_id in selected
                 )
     return distances, nearest
+
+
+def assign_best_taxon(
+    *,
+    sample_id: str,
+    locus_marker_rows: Iterable[Mapping],
+    reference_metadata: Mapping[str, Mapping[str, str]],
+    expected_loci: int,
+    snp_weight: float = 1.0,
+    repeat_weight: float = 1.0,
+    k: int = 3,
+    minimum_loci: int = 3,
+    minimum_locus_fraction: float = 0.8,
+    minimum_relative_margin: float = 0.1,
+) -> AutomaticTaxonAssignment:
+    """Select the nearest annotated taxon using existing MLVA marker distances.
+
+    For every query locus represented in every candidate taxon, the existing
+    normalized marker distance is ``snp_weight * SNP + repeat_weight * repeat``.
+    Each reference distance is the mean over those loci, and a taxon's distance
+    is the mean of its nearest ``k`` complete references.  The reported score is
+    ``locus_recovery_fraction / (1 + taxon_distance)``.  Missing query loci are
+    therefore a confidence penalty and never evidence that a taxon is absent.
+    A multi-taxon result is SUPPORTED only when locus thresholds pass and
+    ``(second_distance - best_distance) / max(second_distance, 1e-12)`` meets
+    ``minimum_relative_margin``.
+    """
+    if expected_loci < 1:
+        raise ValueError("expected_loci must be at least 1")
+    if k < 1 or minimum_loci < 1:
+        raise ValueError("k and minimum_loci must be at least 1")
+    if not 0 <= minimum_locus_fraction <= 1:
+        raise ValueError("minimum_locus_fraction must be between 0 and 1")
+    if not 0 <= minimum_relative_margin <= 1:
+        raise ValueError("minimum_relative_margin must be between 0 and 1")
+    if snp_weight < 0 or repeat_weight < 0 or snp_weight + repeat_weight <= 0:
+        raise ValueError("SNP and repeat weights must be non-negative with a positive total")
+
+    reference_taxon, taxon_names = _reference_taxa(reference_metadata)
+    taxa = sorted(set(reference_taxon.values()))
+    if not taxa:
+        raise ValueError("Reference metadata contains no taxon_id values")
+    marker_rows = [dict(row) for row in locus_marker_rows]
+    compared_reference_ids = {
+        str(row.get("reference_id", "")).strip()
+        for row in marker_rows
+        if str(row.get("reference_id", "")).strip()
+    }
+    missing_metadata = sorted(compared_reference_ids - set(reference_taxon))
+    if missing_metadata:
+        raise ValueError(
+            "Taxonomic metadata is missing for compared references: "
+            + ", ".join(missing_metadata[:10])
+        )
+    values = _locus_reference_values(
+        marker_rows, reference_taxon, snp_weight, repeat_weight
+    )
+    informative = sorted(
+        locus_id
+        for locus_id, by_taxon in values.items()
+        if all(bool(by_taxon.get(taxon_id, {}).get("joint")) for taxon_id in taxa)
+    )
+    recovery = min(1.0, len(informative) / expected_loci)
+    distances, nearest = _aggregate_taxon_distances(values, informative, taxa, k)
+    ranked = sorted(
+        (
+            (float(channels["joint"]), taxon_id)
+            for taxon_id, channels in distances.items()
+            if channels["joint"] is not None
+        ),
+        key=lambda item: (item[0], item[1]),
+    )
+    evidence = []
+    for rank, (distance, taxon_id) in enumerate(ranked, start=1):
+        evidence.append(
+            {
+                "sample_id": sample_id,
+                "taxon_id": taxon_id,
+                "species": taxon_names.get(taxon_id, ""),
+                "rank": rank,
+                "score": recovery / (1.0 + distance),
+                "distance": distance,
+                "references_compared": len(nearest[taxon_id]),
+                "informative_loci": len(informative),
+                "locus_recovery_fraction": recovery,
+                "is_best_taxon": "yes" if rank == 1 else "no",
+            }
+        )
+
+    required_loci = min(expected_loci, minimum_loci)
+    if len(informative) < required_loci or recovery < minimum_locus_fraction:
+        status = "INSUFFICIENT_EVIDENCE"
+        reason = "INSUFFICIENT_INFORMATIVE_LOCI"
+    elif len(taxa) == 1:
+        status = "AMBIGUOUS"
+        reason = "NO_ALTERNATIVE_TAXON_IN_REFERENCE_PANEL"
+    elif len(ranked) < 2:
+        status = "INSUFFICIENT_EVIDENCE"
+        reason = "FEWER_THAN_TWO_COMPARABLE_TAXA"
+    else:
+        best_distance, _best_taxon = ranked[0]
+        second_distance, _second_taxon = ranked[1]
+        relative_margin = (second_distance - best_distance) / max(second_distance, 1e-12)
+        if relative_margin + 1e-12 < minimum_relative_margin:
+            status = "AMBIGUOUS"
+            reason = "TAXON_DISTANCE_MARGIN_BELOW_THRESHOLD"
+        else:
+            status = "SUPPORTED"
+            reason = "NEAREST_TAXON_SEPARATED"
+
+    best = evidence[0] if evidence else {}
+    second = evidence[1] if len(evidence) > 1 else {}
+    best_score = _finite(best.get("score"))
+    second_score = _finite(second.get("score"))
+    summary = {
+        "sample_id": sample_id,
+        "best_taxon": best.get("taxon_id", ""),
+        "best_species": best.get("species", ""),
+        "taxon_score": "" if best_score is None else best_score,
+        "second_best_taxon": second.get("taxon_id", ""),
+        "second_best_score": "" if second_score is None else second_score,
+        "score_margin": ""
+        if best_score is None or second_score is None
+        else best_score - second_score,
+        "informative_loci": len(informative),
+        "expected_loci": expected_loci,
+        "locus_recovery_fraction": recovery,
+        "taxonomic_status": status,
+        "status_reason": reason,
+    }
+    return AutomaticTaxonAssignment(summary, tuple(evidence))
 
 
 def _aggregate_bootstrap_joint_distances(

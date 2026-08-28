@@ -259,6 +259,25 @@ def test_cli_exposes_reference_builder():
     assert args.quiet is False
 
 
+def test_reference_builder_normalizes_and_validates_taxonomy(tmp_path, monkeypatch):
+    assemblies, primers, metadata = _reference_inputs(tmp_path)
+    metadata.write_text("reference_id,taxid,organism_name\nR1,123,Species one\n")
+    _mock_empty_extraction(monkeypatch)
+    result = build_reference_database(
+        assemblies, primers, metadata, tmp_path / "reference", threads=1
+    )
+    rows = _rows(result["metadata"])
+    assert rows[0]["taxon_id"] == "123"
+    assert rows[0]["taxon_name"] == "Species one"
+    assert (result["database"] / "reference_panel.tsv").is_file()
+
+    metadata.write_text("reference_id,taxid\nR1,\n")
+    with pytest.raises(ValueError, match="blank taxon identifiers"):
+        build_reference_database(
+            assemblies, primers, metadata, tmp_path / "invalid", threads=1
+        )
+
+
 def test_cli_exposes_package_version(capsys):
     from mlvamaps import __version__
     from mlvamaps.cli import build_parser

@@ -7,6 +7,13 @@ mlvamaps separates reference acquisition from reference construction:
 2. `build-reference` extracts each MLVA locus and builds its fixed reference
    alignment and phylogeny.
 
+The build also writes `database/reference_panel.tsv`, allowing subsequent calls
+to omit `-p`, and normalizes `taxid`/`ncbi_taxid` plus
+`organism_name`/`species` to `taxon_id` and `taxon_name`. If a taxonomy column
+is supplied, blank taxon identifiers are rejected. Local multi-taxon builds
+should provide one stable `taxon_id` per reference; names must be consistent
+within each identifier.
+
 `build-reference` can run both stages as one pipeline, or it can retain its
 original local-assembly behavior.
 

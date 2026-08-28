@@ -1,4 +1,30 @@
-# MLVA-only target-taxon assignment
+# Automatic MLVA taxonomic identification
+
+When `mlvamaps call` receives a reference database whose
+`reference_metadata.tsv` contains `taxon_id`, it automatically ranks all
+annotated taxa. No calibration artifact or requested target is needed. Use
+`--no-taxon-identification` to disable this behavior, or
+`--taxon-identification` to require metadata and fail clearly when it is absent.
+
+For loci recovered in the query and represented in every candidate taxon,
+mlvamaps reuses `locus_marker_distances.tsv`: normalized SNP distance plus
+normalized VNTR distance, with the existing `--phylogeny-*-weight` values. It
+averages this distance across informative loci for each reference, then averages
+the nearest `--taxon-k` references (default 3) in each taxon. The transparent
+display score is:
+
+```text
+taxon_score = locus_recovery_fraction / (1 + taxon_distance)
+```
+
+Missing loci reduce recovery but are never interpreted as taxon absence. A call
+is `INSUFFICIENT_EVIDENCE` below the locus count/fraction thresholds,
+`AMBIGUOUS` for a single-taxon panel or a best/second relative distance margin
+below `--taxon-minimum-margin` (default 0.1), and otherwise `SUPPORTED`.
+Outputs are `phylogeny/taxonomic_identification.tsv` and
+`phylogeny/taxonomic_identification_evidence.tsv`.
+
+## Optional calibrated target validation
 
 `mlvamaps` can test whether a sample's MLVA repeat counts and repeat-masked
 marker sequences are compatible with a requested target taxon. The method uses
@@ -97,8 +123,10 @@ mlvamaps call \
 ```
 
 The same options work for long-read FASTQ, Illumina, and assembly workflows.
-Assignment is disabled unless both `--target-taxon-id` and
-`--taxon-calibration` are supplied.
+The older target-specific conformal assignment remains available as an optional
+advanced validation workflow and is disabled unless both `--target-taxon-id`
+and `--taxon-calibration` are supplied. `calibrate-taxa` is retained for this
+purpose; it is not required for normal automatic identification.
 
 Important optional controls:
 

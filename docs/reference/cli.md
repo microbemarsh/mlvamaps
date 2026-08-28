@@ -43,7 +43,7 @@ files. Directory discovery is non-recursive, and each file is written beneath
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `-p`, `--panel` | Required | Primer list or rich locus panel for the selected pipeline. |
+| `-p`, `--panel` | Database default | Primer list or rich locus panel; may be omitted when a new reference build contains `database/reference_panel.tsv`. |
 | `-i`, `--input` | Required | Input FASTA/FASTQ path or directory; `sr` selects paired/single Illumina input. |
 | `-o`, `--output`, `--outdir` | `results` | Output directory. |
 | `--sample-id` | Input filename | Sample identifier. |
@@ -58,6 +58,15 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `--phylogeny-repeat-weight` | `1.0` | Weight of normalized tandem-repeat distance in combined marker ranking. |
 
 ## MLVA-only target-taxon assignment
+
+Taxonomic identification runs automatically when `--database` resolves to
+metadata containing `taxon_id`. `--taxon-k` (default 3) controls the nearest
+references averaged per taxon, `--taxon-minimum-margin` (default 0.1) controls
+best/second separation, and `--no-taxon-identification` disables it. The
+existing locus count and fraction options gate insufficient evidence.
+
+The following target-specific conformal mode is retained as an advanced,
+backward-compatible validation utility:
 
 Target assignment requires `--database`, `--target-taxon-id`, and
 `--taxon-calibration`. The reference metadata must label both target and

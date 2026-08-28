@@ -21,10 +21,15 @@ from .io import gzip_output_file
 from .models import Locus, RepeatFeature
 from .progress import ProgressReporter
 from .taxon_assignment import (
+    TAXONOMIC_EVIDENCE_FIELDS,
+    TAXONOMIC_SUMMARY_FIELDS,
     TAXON_ASSIGNMENT_FIELDS,
     TAXON_CANDIDATE_FIELDS,
     TAXON_LOCUS_FIELDS,
     TaxonCalibration,
+    _finite,
+    _reference_taxa,
+    assign_best_taxon,
     assign_target_taxon,
 )
 
@@ -1858,7 +1863,35 @@ def _add_taxon_assignment_outputs(
     min_bootstrap_support: float,
     max_mean_placement_entropy: float | None,
     min_median_placement_lwr: float | None,
+    taxon_identification: bool | None = None,
+    identification_k: int = 3,
+    identification_minimum_margin: float = 0.1,
 ) -> dict[str, Path]:
+    reference_taxa, _taxon_names = _reference_taxa(reference_metadata)
+    automatic_enabled = taxon_identification is not False and bool(reference_taxa)
+    if automatic_enabled:
+        assignment = assign_best_taxon(
+            sample_id=sample_id,
+            locus_marker_rows=_read_tsv_dicts(paths["locus_marker_distances"]),
+            reference_metadata=reference_metadata,
+            expected_loci=expected_loci,
+            snp_weight=_read_marker_weight(paths.get("combined_marker_matches"), "snp_weight"),
+            repeat_weight=_read_marker_weight(paths.get("combined_marker_matches"), "repeat_weight"),
+            k=identification_k,
+            minimum_loci=min_loci or 3,
+            minimum_locus_fraction=min_locus_fraction,
+            minimum_relative_margin=identification_minimum_margin,
+        )
+        output = paths["phylogeny"]
+        summary_path = output / "taxonomic_identification.tsv"
+        evidence_path = output / "taxonomic_identification_evidence.tsv"
+        _write_tsv([assignment.summary], summary_path, TAXONOMIC_SUMMARY_FIELDS)
+        _write_tsv(list(assignment.evidence), evidence_path, TAXONOMIC_EVIDENCE_FIELDS)
+        paths = {
+            **paths,
+            "taxonomic_identification": summary_path,
+            "taxonomic_identification_evidence": evidence_path,
+        }
     if target_taxon_id is None and calibration_path is None:
         return paths
     if not target_taxon_id or calibration_path is None:
@@ -1911,6 +1944,14 @@ def _add_taxon_assignment_outputs(
     }
 
 
+def _read_marker_weight(path: str | Path | None, field: str) -> float:
+    if path is None:
+        return 1.0
+    rows = _read_tsv_dicts(path)
+    value = _finite(rows[0].get(field)) if rows else None
+    return 1.0 if value is None else value
+
+
 def _read_tsv_dicts(path: str | Path) -> list[dict[str, str]]:
     with Path(path).open(newline="") as handle:
         return list(csv.DictReader(handle, delimiter="\t"))
@@ -1943,6 +1984,9 @@ def run_phylogenetic_placement(
     taxon_min_bootstrap_support: float = 0.95,
     taxon_max_mean_placement_entropy: float | None = None,
     taxon_min_median_placement_lwr: float | None = None,
+    taxon_identification: bool | None = None,
+    taxon_k: int = 3,
+    taxon_minimum_margin: float = 0.1,
 ) -> dict[str, Path]:
     if snp_weight < 0 or repeat_weight < 0 or snp_weight + repeat_weight <= 0:
         raise ValueError("SNP and repeat weights must be non-negative with a positive total")
@@ -1961,7 +2005,20 @@ def run_phylogenetic_placement(
         if automatic_metadata.exists():
             reference_metadata_path = automatic_metadata
     reference_metadata = read_reference_metadata(reference_metadata_path)
-    if locus_by_id and exact_match_fast_path and target_taxon_id is None:
+    if taxon_identification is True and not _reference_taxa(reference_metadata)[0]:
+        raise ValueError(
+            "--taxon-identification requires reference metadata with taxon_id "
+            "(taxid is normalized during reference construction)"
+        )
+    automatic_taxon_identification = (
+        taxon_identification is not False and bool(_reference_taxa(reference_metadata)[0])
+    )
+    if (
+        locus_by_id
+        and exact_match_fast_path
+        and target_taxon_id is None
+        and not automatic_taxon_identification
+    ):
         sequence_index_path: Path | None = (
             sequence_database_path / "reference_sequence_index.tsv"
             if sequence_database_path.is_dir()
@@ -2055,6 +2112,9 @@ def run_phylogenetic_placement(
                 min_bootstrap_support=taxon_min_bootstrap_support,
                 max_mean_placement_entropy=taxon_max_mean_placement_entropy,
                 min_median_placement_lwr=taxon_min_median_placement_lwr,
+                taxon_identification=taxon_identification,
+                identification_k=taxon_k,
+                identification_minimum_margin=taxon_minimum_margin,
             )
     if references is None:
         references = read_sequence_database(sequence_database_path, requested_locus_ids)
@@ -2880,6 +2940,9 @@ def run_phylogenetic_placement(
         min_bootstrap_support=taxon_min_bootstrap_support,
         max_mean_placement_entropy=taxon_max_mean_placement_entropy,
         min_median_placement_lwr=taxon_min_median_placement_lwr,
+        taxon_identification=taxon_identification,
+        identification_k=taxon_k,
+        identification_minimum_margin=taxon_minimum_margin,
     )
 
 

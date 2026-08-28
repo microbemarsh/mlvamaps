@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import asdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -300,6 +301,22 @@ def build_reference_database(
         raise ValueError(f"Locus identifiers cannot contain path separators: {unsafe_loci}")
 
     metadata_fields, metadata_rows, id_field, assembly_field = _read_metadata(metadata_path)
+    metadata_lookup = {field.lower(): field for field in metadata_fields}
+    taxon_source = next(
+        (metadata_lookup[name] for name in ("taxon_id", "taxid", "ncbi_taxid") if name in metadata_lookup),
+        None,
+    )
+    name_source = next(
+        (metadata_lookup[name] for name in ("taxon_name", "species", "organism_name", "scientific_name") if name in metadata_lookup),
+        None,
+    )
+    if taxon_source:
+        missing_taxa = [str(row.get(id_field, "")) for row in metadata_rows if not str(row.get(taxon_source, "")).strip()]
+        if missing_taxa:
+            raise ValueError(
+                "Taxonomic metadata is incomplete; blank taxon identifiers for: "
+                + ", ".join(missing_taxa[:10])
+            )
     matched = _match_assemblies(assemblies_dir, metadata_rows, id_field, assembly_field)
     thread_count = resolve_threads(threads)
     progress = ProgressReporter(enabled=show_progress)
@@ -412,17 +429,28 @@ def build_reference_database(
             _write_fasta(records, fasta_path)
             locus_fasta_paths.append(fasta_path)
 
+    panel_path = database_dir / "reference_panel.tsv"
+    panel_fields = list(asdict(loci[0]))
+    _write_tsv([asdict(locus) for locus in loci], panel_path, panel_fields)
+
     normalized_metadata = []
     myoga_metadata = []
     for reference_id, _assembly, row in matched:
         normalized = {"reference_id": reference_id}
         normalized.update({field: row.get(field, "") for field in metadata_fields if field != id_field})
+        if taxon_source:
+            normalized["taxon_id"] = str(row.get(taxon_source, "")).strip()
+        if name_source:
+            normalized["taxon_name"] = str(row.get(name_source, "")).strip()
         normalized_metadata.append(normalized)
         myoga = {"genome_id": reference_id}
         myoga.update({field: row.get(field, "") for field in metadata_fields if field != id_field})
         myoga_metadata.append(myoga)
     reference_metadata_path = database_dir / "reference_metadata.tsv"
     normalized_fields = ["reference_id", *[field for field in metadata_fields if field != id_field]]
+    for field in ("taxon_id", "taxon_name"):
+        if field in normalized_metadata[0] and field not in normalized_fields:
+            normalized_fields.append(field)
     _write_tsv(normalized_metadata, reference_metadata_path, normalized_fields)
     reference_assemblies_path = database_dir / "reference_assemblies.tsv"
     _write_tsv(
