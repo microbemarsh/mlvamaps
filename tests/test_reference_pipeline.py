@@ -13,10 +13,161 @@ import mlvamaps.reference_pipeline as pipeline
 from mlvamaps.io import read_loci
 from mlvamaps.reference_pipeline import (
     TaxonReference,
+    build_combined_taxon_database,
     build_taxon_references,
+    ensure_combined_taxon_database,
     prepare_taxon_reference,
     read_taxon_references,
 )
+
+
+def _write_taxon_database(root, reference_id, sequence, taxid, taxon_name):
+    database = root / "database"
+    database.mkdir(parents=True)
+    (database / "L1.fasta").write_text(f">{reference_id}\n{sequence}\n")
+    (database / "reference_metadata.tsv").write_text(
+        "reference_id\ttaxid\torganism_name\n"
+        f"{reference_id}\t{taxid}\t{taxon_name}\n"
+    )
+    (database / "reference_assemblies.tsv").write_text(
+        "reference_id\tassembly_file\tassembly_sha256\n"
+        f"{reference_id}\t/{reference_id}.fna\tdigest-{reference_id}\n"
+    )
+    return {"database": str(database)}
+
+
+def test_combined_taxon_database_is_ready_for_default_call(tmp_path, monkeypatch):
+    panel = tmp_path / "panel.csv"
+    panel.write_text("name,forward,reverse\nL1,AAA,CCC\n")
+    results = [
+        _write_taxon_database(tmp_path / "a", "R1", "AAATTTCCC", "1", "Species one"),
+        _write_taxon_database(tmp_path / "b", "R2", "AAAGGGCCC", "2", "Species two"),
+    ]
+    observed = {}
+
+    def fake_phylogeny(database, phylogeny, loci, threads, **kwargs):
+        observed.update(database=database, phylogeny=phylogeny, loci=loci, threads=threads)
+        Path(phylogeny).mkdir(parents=True)
+        return {"phylogeny": Path(phylogeny)}
+
+    monkeypatch.setattr(pipeline, "build_reference_phylogenies", fake_phylogeny)
+    output = tmp_path / "combined"
+    combined = build_combined_taxon_database(
+        [TaxonReference("1", "taxon_one"), TaxonReference("2", "taxon_two")],
+        results,
+        panel,
+        output,
+        threads=2,
+    )
+
+    with (combined["database"] / "reference_metadata.tsv").open() as handle:
+        metadata = list(csv.DictReader(handle, delimiter="\t"))
+    assert [(row["reference_id"], row["taxon_id"], row["taxon_name"]) for row in metadata] == [
+        ("R1", "1", "taxon_one"),
+        ("R2", "2", "taxon_two"),
+    ]
+    assert (combined["database"] / "reference_panel.tsv").is_file()
+    records = pipeline.read_fasta(combined["database"] / "L1.fasta.gz")
+    assert [name for name, _sequence in records] == [
+        "R1",
+        "R2",
+    ]
+    assert observed["database"] == combined["database"]
+
+    args = cli.build_parser().parse_args(
+        ["call", "-i", "sample.fasta", "--database", str(output)]
+    )
+    cli._resolve_call_args(cli.build_parser(), args)
+    assert args.loci == str(combined["database"] / "reference_panel.tsv")
+    assert args.taxon_identification is None
+
+
+def test_combined_taxon_database_rejects_cross_taxon_reference_collisions(
+    tmp_path, monkeypatch
+):
+    panel = tmp_path / "panel.csv"
+    panel.write_text("name,forward,reverse\nL1,AAA,CCC\n")
+    results = [
+        _write_taxon_database(tmp_path / "a", "R1", "AAATTTCCC", "1", "Species one"),
+        _write_taxon_database(tmp_path / "b", "R1", "AAAGGGCCC", "2", "Species two"),
+    ]
+    monkeypatch.setattr(pipeline, "build_reference_phylogenies", lambda *args, **kwargs: {})
+
+    with pytest.raises(ValueError, match="occurs in both taxon"):
+        build_combined_taxon_database(
+            [TaxonReference("1", "taxon_one"), TaxonReference("2", "taxon_two")],
+            results,
+            panel,
+            tmp_path / "combined",
+        )
+
+
+def test_combined_taxon_database_excludes_metadata_without_usable_loci(
+    tmp_path, monkeypatch
+):
+    panel = tmp_path / "panel.csv"
+    panel.write_text("name,forward,reverse\nL1,AAA,CCC\n")
+    usable = _write_taxon_database(
+        tmp_path / "a", "R1", "AAATTTCCC", "1", "Species one"
+    )
+    unusable = _write_taxon_database(
+        tmp_path / "b", "R2", "AAAGGGCCC", "2", "Species two"
+    )
+    Path(unusable["database"], "L1.fasta").unlink()
+    monkeypatch.setattr(
+        pipeline,
+        "build_reference_phylogenies",
+        lambda database, phylogeny, *args, **kwargs: {"phylogeny": Path(phylogeny)},
+    )
+
+    combined = build_combined_taxon_database(
+        [TaxonReference("1", "taxon_one"), TaxonReference("2", "taxon_two")],
+        [usable, unusable],
+        panel,
+        tmp_path / "combined",
+    )
+    with (combined["database"] / "reference_metadata.tsv").open() as handle:
+        metadata = list(csv.DictReader(handle, delimiter="\t"))
+    assert [row["reference_id"] for row in metadata] == ["R1"]
+
+
+def test_existing_multi_taxid_build_is_upgraded_for_call(tmp_path, monkeypatch):
+    root = tmp_path / "references"
+    panel = root / "taxon_one" / "reference" / "database" / "reference_panel.tsv"
+    results = [
+        _write_taxon_database(root / "taxon_one" / "reference", "R1", "AAATTTCCC", "1", "one"),
+        _write_taxon_database(root / "taxon_two" / "reference", "R2", "AAAGGGCCC", "2", "two"),
+    ]
+    panel.write_text("name,forward,reverse\nL1,AAA,CCC\n")
+    (root / "reference_pipeline_manifest.json").write_text(
+        json.dumps(
+            {
+                "references": [
+                    {"taxid": "1", "name": "taxon_one", "database": results[0]["database"]},
+                    {"taxid": "2", "name": "taxon_two", "database": results[1]["database"]},
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "build_reference_phylogenies",
+        lambda database, phylogeny, *args, **kwargs: {"phylogeny": Path(phylogeny)},
+    )
+
+    assert ensure_combined_taxon_database(root) == root.resolve()
+    assert (root / "database" / "reference_panel.tsv").is_file()
+    assert ensure_combined_taxon_database(root) == root.resolve()
+
+
+def test_call_help_keeps_automatic_taxon_workflow_simple(capsys):
+    with pytest.raises(SystemExit, match="0"):
+        cli.build_parser().parse_args(["call", "--help"])
+    help_text = capsys.readouterr().out
+    assert "--database DATABASE" in help_text
+    assert "--taxon-identification" not in help_text
+    assert "--target-taxon-id" not in help_text
+    assert "--taxon-calibration" not in help_text
 
 
 def test_read_taxon_references_from_csv_with_optional_names(tmp_path):

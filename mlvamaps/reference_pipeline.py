@@ -10,12 +10,15 @@ import shutil
 import subprocess
 import time
 import zipfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from .concurrency import DEFAULT_THREADS
+from .io import read_fasta, write_fasta
+from .phylogeny import REFERENCE_ASSEMBLY_FIELDS, build_reference_phylogenies
+from .primers import read_loci_or_primers
 from .reference_builder import (
     REFERENCE_BUILD_STATUS_BUILT,
     REFERENCE_BUILD_STATUS_NO_USABLE_LOCI,
@@ -533,6 +536,190 @@ def _print_taxon_summary(summary: dict[str, Any], non_amplifiable: list[str]) ->
         print(f"  Non-amplifiable loci: {', '.join(non_amplifiable)}")
 
 
+def _read_tsv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
+    with path.open(newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        return list(reader.fieldnames or []), list(reader)
+
+
+def build_combined_taxon_database(
+    references: list[TaxonReference],
+    results: list[dict[str, Any]],
+    primers_path: str | Path,
+    output: str | Path,
+    *,
+    loci_path: str | Path | None = None,
+    min_references_per_tree: int = 3,
+    threads: int = DEFAULT_THREADS,
+    mafft_bin: str = "mafft",
+    raxml_ng_bin: str = "raxml-ng",
+    raxml_model: str = "DNA",
+) -> dict[str, Path]:
+    """Merge taxon cohorts into the default database used for identification."""
+    if len(references) != len(results):
+        raise ValueError("Cannot combine taxon databases: reference/result counts differ")
+
+    root = Path(output).resolve()
+    database = root / "database"
+    phylogeny = root / "phylogeny"
+    database.mkdir(parents=True, exist_ok=True)
+    loci = read_loci_or_primers(loci_path, None if loci_path else primers_path)
+
+    records_by_locus: dict[str, list[tuple[str, str]]] = {
+        locus.locus_id: [] for locus in loci
+    }
+    metadata_rows: list[dict[str, str]] = []
+    metadata_fields = ["reference_id"]
+    assembly_rows: list[dict[str, str]] = []
+    seen_reference_taxa: dict[str, str] = {}
+
+    for taxon, result in zip(references, results):
+        source_database = Path(str(result["database"]))
+        metadata_path = source_database / "reference_metadata.tsv"
+        if not metadata_path.is_file():
+            raise ValueError(
+                f"Cannot combine taxon {taxon.name!r}: missing {metadata_path}"
+            )
+        source_fields, source_rows = _read_tsv(metadata_path)
+        for field in source_fields:
+            if field not in metadata_fields:
+                metadata_fields.append(field)
+        for row in source_rows:
+            reference_id = str(row.get("reference_id", "")).strip()
+            previous_taxon = seen_reference_taxa.get(reference_id)
+            if previous_taxon is not None:
+                raise ValueError(
+                    f"Reference {reference_id!r} occurs in both taxon {previous_taxon!r} "
+                    f"and {taxon.taxid!r}; taxon cohorts must not overlap"
+                )
+            seen_reference_taxa[reference_id] = taxon.taxid
+            metadata_rows.append(
+                {
+                    **row,
+                    "reference_id": reference_id,
+                    "taxon_id": taxon.taxid,
+                    "taxon_name": taxon.name,
+                }
+            )
+
+        for locus in loci:
+            candidates = (
+                source_database / f"{locus.locus_id}.fasta.gz",
+                source_database / f"{locus.locus_id}.fasta",
+                source_database / f"{locus.locus_id}.fa.gz",
+                source_database / f"{locus.locus_id}.fa",
+            )
+            source_fasta = next((path for path in candidates if path.is_file()), None)
+            if source_fasta is not None:
+                records_by_locus[locus.locus_id].extend(read_fasta(source_fasta))
+
+        assemblies_path = source_database / "reference_assemblies.tsv"
+        if assemblies_path.is_file():
+            _fields, rows = _read_tsv(assemblies_path)
+            assembly_rows.extend(rows)
+
+    usable_reference_ids = {
+        reference_id
+        for records in records_by_locus.values()
+        for reference_id, _sequence in records
+    }
+    metadata_rows = [
+        row for row in metadata_rows if row["reference_id"] in usable_reference_ids
+    ]
+    assembly_rows = [
+        row
+        for row in assembly_rows
+        if str(row.get("reference_id", "")) in usable_reference_ids
+    ]
+    if not metadata_rows:
+        raise ValueError(
+            "Cannot combine taxon databases: no references with usable locus sequences were found"
+        )
+    for field in ("taxon_id", "taxon_name"):
+        if field not in metadata_fields:
+            metadata_fields.append(field)
+    _write_tsv(metadata_rows, database / "reference_metadata.tsv", metadata_fields)
+    _write_tsv(
+        [asdict(locus) for locus in loci],
+        database / "reference_panel.tsv",
+        list(asdict(loci[0])),
+    )
+    if assembly_rows:
+        _write_tsv(
+            assembly_rows,
+            database / "reference_assemblies.tsv",
+            REFERENCE_ASSEMBLY_FIELDS,
+        )
+    for locus in loci:
+        records = records_by_locus[locus.locus_id]
+        if records:
+            write_fasta(records, database / f"{locus.locus_id}.fasta.gz")
+    paths = build_reference_phylogenies(
+        database,
+        phylogeny,
+        loci,
+        threads,
+        min_references=min_references_per_tree,
+        mafft_bin=mafft_bin,
+        raxml_ng_bin=raxml_ng_bin,
+        raxml_model=raxml_model,
+    )
+    return {"database": database, "phylogeny": phylogeny, **paths}
+
+
+def ensure_combined_taxon_database(
+    reference_build: str | Path,
+    *,
+    threads: int = DEFAULT_THREADS,
+    mafft_bin: str = "mafft",
+    raxml_ng_bin: str = "raxml-ng",
+    raxml_model: str = "DNA",
+) -> Path:
+    """Return a combined database, upgrading an older multi-taxid build in place."""
+    root = Path(reference_build).resolve()
+    if (root / "database" / "reference_panel.tsv").is_file():
+        return root
+    manifest_path = root / "reference_pipeline_manifest.json"
+    if not manifest_path.is_file():
+        return root
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not read reference pipeline manifest: {manifest_path}") from exc
+    entries = manifest.get("references")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"Reference pipeline manifest contains no references: {manifest_path}")
+
+    references: list[TaxonReference] = []
+    results: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"Invalid reference entry in {manifest_path}")
+        taxid = _clean_taxid(entry.get("taxid"))
+        name = _clean_name(entry.get("name"), taxid)
+        database = Path(str(entry.get("database", "")))
+        portable_database = root / name / "reference" / "database"
+        if not database.is_dir() and portable_database.is_dir():
+            database = portable_database
+        references.append(TaxonReference(taxid, name))
+        results.append({"database": database})
+
+    panel_path = Path(str(results[0]["database"])) / "reference_panel.tsv"
+    if not panel_path.is_file():
+        raise ValueError(f"Multi-taxid reference build has no saved panel: {panel_path}")
+    build_combined_taxon_database(
+        references,
+        results,
+        panel_path,
+        root,
+        threads=threads,
+        mafft_bin=mafft_bin,
+        raxml_ng_bin=raxml_ng_bin,
+        raxml_model=raxml_model,
+    )
+    return root
+
+
 def build_taxon_references(
     references: list[TaxonReference],
     primers_path: str | Path,
@@ -588,7 +775,6 @@ def build_taxon_references(
             mafft_bin=mafft_bin,
             raxml_ng_bin=raxml_ng_bin,
             raxml_model=raxml_model,
-            show_progress=show_progress,
         )
         taxon_locus_rows = [
             {"taxid": reference.taxid, "taxon": reference.name, **row}
@@ -643,6 +829,24 @@ def build_taxon_references(
                 "locus_amplifiability": str(built.get("locus_amplifiability", "")),
             }
         )
+    # Custom builders are supported for programmatic use and tests, but only the
+    # native builder guarantees the artifacts required for a combined database.
+    combined = (
+        build_combined_taxon_database(
+            references,
+            results,
+            primers_path,
+            output,
+            loci_path=loci_path,
+            min_references_per_tree=min_references_per_tree,
+            threads=threads,
+            mafft_bin=mafft_bin,
+            raxml_ng_bin=raxml_ng_bin,
+            raxml_model=raxml_model,
+        )
+        if builder is build_reference_database
+        else {"database": output, "phylogeny": output / "phylogeny"}
+    )
     taxon_summary_path = output / "taxon_reference_summary.tsv"
     locus_summary_path = output / "taxon_locus_amplifiability.tsv"
     _write_tsv(taxon_summary_rows, taxon_summary_path, TAXON_REFERENCE_SUMMARY_FIELDS)
@@ -655,6 +859,7 @@ def build_taxon_references(
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "taxon_summary": taxon_summary_path.name,
                 "locus_amplifiability": locus_summary_path.name,
+                "default_database": ".",
                 "references": results,
             },
             indent=2,
@@ -668,5 +873,8 @@ def build_taxon_references(
         "manifest": pipeline_manifest,
         "taxon_summary": taxon_summary_path,
         "locus_amplifiability": locus_summary_path,
+        "database": output,
+        "combined_database": combined["database"],
+        "combined_phylogeny": combined["phylogeny"],
         "references": results,
     }

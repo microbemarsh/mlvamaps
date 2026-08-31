@@ -137,8 +137,10 @@ Multi-taxon builds write:
 
 - `taxon_reference_summary.tsv`: one row per taxon;
 - `taxon_locus_amplifiability.tsv`: one row per taxon and locus, suitable for
-  compatibility heatmaps; and
-- one isolated reference database per taxon.
+  compatibility heatmaps;
+- one isolated reference database per taxon; and
+- a combined top-level database containing all taxa for automatic taxon
+  identification.
 
 A locus is amplifiable when at least one examined genome produces an amplicon
 retained by the normal primer-matching and filtering rules. Valid amplicons that
@@ -150,11 +152,16 @@ Use a built database during calling:
 
 ```bash
 mlvamaps call \
-  -p panel.tsv \
   -i sample.fasta \
-  --database references/taxid_86661/reference \
+  --database references \
   -o results/sample
 ```
+
+For a multi-taxid build, that command automatically loads the saved panel and
+taxon metadata, then writes the taxonomic identification. No separate panel,
+target taxid, calibration artifact, or taxon-identification flag is required.
+Passing an older multi-taxid build directory upgrades it in place by creating
+the same combined top-level database.
 
 See the [reference-building guide](docs/workflows/reference-building.md) for
 local assemblies, metadata, resuming downloads, and output interpretation.

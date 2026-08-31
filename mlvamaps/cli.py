@@ -14,6 +14,7 @@ from .pipeline import run_call
 from .reference_builder import build_reference_database
 from .reference_pipeline import (
     build_taxon_references,
+    ensure_combined_taxon_database,
     prepare_taxon_references,
     read_taxon_references,
 )
@@ -208,6 +209,25 @@ def _resolve_panel_option(
 
 def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     _resolve_panel_option(parser, args)
+    database = Path(args.database).resolve() if args.database else None
+    legacy_multi_taxon_build = bool(
+        database
+        and (database / "reference_pipeline_manifest.json").is_file()
+        and not (database / "database" / "reference_panel.tsv").is_file()
+    )
+    if legacy_multi_taxon_build:
+        try:
+            args.database = str(
+                ensure_combined_taxon_database(
+                    database,
+                    threads=args.threads,
+                    mafft_bin=args.mafft_bin,
+                    raxml_ng_bin=args.raxml_ng_bin,
+                    raxml_model=args.raxml_model,
+                )
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
     explicit_short_read_mode = args.input_path == "sr"
     args.short_read_mode = explicit_short_read_mode or args.short_reads
     if explicit_short_read_mode:
@@ -318,8 +338,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-p",
         "--panel",
         dest="panel_path",
-        required=True,
-        help="Primer list or rich locus panel used by the calling pipeline",
+        required=False,
+        help="Primer/locus panel (optional when --database is a reference build)",
     )
     call.set_defaults(loci=None, primers=None)
     call.add_argument("--profiles")
@@ -332,17 +352,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--taxon-identification",
         dest="taxon_identification",
         action="store_true",
-        help="Require automatic nearest-taxon identification from database metadata",
+        help=argparse.SUPPRESS,
     )
     taxon_toggle.add_argument(
         "--no-taxon-identification",
         dest="taxon_identification",
         action="store_false",
-        help="Disable automatic nearest-taxon identification",
+        help=argparse.SUPPRESS,
     )
     call.set_defaults(taxon_identification=None)
-    call.add_argument("--taxon-k", type=_positive_int, default=3, help="Nearest references averaged per taxon (default: %(default)s)")
-    call.add_argument("--taxon-minimum-margin", type=_fraction, default=0.1, help="Minimum relative best/second taxon distance margin (default: %(default)s)")
+    call.add_argument("--taxon-k", type=_positive_int, default=3, help=argparse.SUPPRESS)
+    call.add_argument("--taxon-minimum-margin", type=_fraction, default=0.1, help=argparse.SUPPRESS)
     call.add_argument(
         "--reference-metadata",
         help="TSV/CSV with reference_id and optional date, coordinates, location, and source",
@@ -598,54 +618,54 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--target-taxon-id",
-        help="Reference-metadata taxon_id to test using calibrated MLVA marker placement",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--taxon-calibration",
         metavar="JSON",
-        help="Versioned conformal calibration artifact for --target-taxon-id",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--taxon-alpha",
         type=_fraction,
         default=None,
-        help="Override the calibration prediction-set alpha (default: artifact value)",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--taxon-min-loci",
         type=_positive_int,
         default=None,
-        help="Override the minimum callable MLVA loci (default: artifact value)",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--taxon-min-locus-fraction",
         type=_fraction,
         default=0.8,
-        help="Minimum panel fraction callable across all candidate taxa (default: %(default)s)",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--taxon-bootstrap-replicates",
         type=_positive_int,
         default=2000,
-        help="Deterministic locus-bootstrap replicates (default: %(default)s)",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--taxon-min-bootstrap-support",
         type=_fraction,
         default=0.95,
-        help="Target-favoring bootstrap fraction required for POSITIVE (default: %(default)s)",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--taxon-max-placement-entropy",
         type=_nonnegative_float,
         default=None,
-        help="Optional maximum mean EPA-ng placement entropy",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--taxon-min-placement-lwr",
         type=_fraction,
         default=None,
-        help="Optional minimum median best EPA-ng likelihood weight ratio",
+        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--no-locus-mapping",
@@ -1747,6 +1767,7 @@ def main(argv: list[str] | None = None) -> int:
             if not args.quiet:
                 print(f"Wrote taxon summary to {result['taxon_summary']}")
                 print(f"Wrote taxon/locus summary to {result['locus_amplifiability']}")
+                print(f"Wrote combined taxon-identification database to {result['database']}")
                 print(f"Wrote taxid pipeline manifest to {result['manifest']}")
             return 0
         result = build_reference_database(

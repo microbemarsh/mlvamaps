@@ -54,6 +54,8 @@ This creates independent databases:
 
 ```text
 references/
+├── database/                  # combined database used by `mlvamaps call`
+├── phylogeny/                 # combined fixed trees
 ├── taxon_reference_summary.tsv
 ├── taxon_locus_amplifiability.tsv
 ├── bacillus_cereus_group/
@@ -72,6 +74,23 @@ references/
 │   └── reference/
 └── reference_pipeline_manifest.json
 ```
+
+The top-level database combines all non-overlapping reference accessions and
+labels each reference with the taxid/name of the cohort requested in the input
+CSV. Original NCBI organism metadata is retained. A reference accession found
+in more than one cohort is rejected rather than assigned conflicting labels.
+
+Use the build output directly; the panel and taxon metadata are defaults:
+
+```bash
+mlvamaps call -i sample.fasta --database references -o results/sample
+```
+
+Automatic taxon identification is enabled whenever this database contains
+taxon metadata. No `-p`, target-taxon, calibration, or taxon-identification
+option is needed. If `references` was produced by an older mlvamaps version,
+the first call builds the combined top-level database from its pipeline
+manifest and existing per-taxon databases.
 
 All taxids in one invocation use the same `-p` panel. Run
 separate commands when taxa require different MLVA schemes.
