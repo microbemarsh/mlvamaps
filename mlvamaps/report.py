@@ -29,14 +29,61 @@ def _finding(kind: str, title: str, detail: str) -> str:
     )
 
 
-def _taxon_assignment_section(outdir: Path) -> str:
-    path = outdir / "phylogeny" / "taxon_assignment.tsv"
+def _automatic_taxon_identification_section(outdir: Path) -> str:
+    path = outdir / "phylogeny" / "taxonomic_identification.tsv"
     if not path.is_file():
         return ""
     with path.open(newline="") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
     if not rows:
         return ""
+    row = rows[0]
+    status = str(row.get("taxonomic_status", "INSUFFICIENT_EVIDENCE"))
+    tone = "good" if status == "SUPPORTED" else "warn"
+    best_taxon = row.get("best_species") or row.get("best_taxon", "")
+
+    second_taxon = row.get("second_best_taxon", "")
+    evidence_path = outdir / "phylogeny" / "taxonomic_identification_evidence.tsv"
+    if evidence_path.is_file():
+        with evidence_path.open(newline="") as handle:
+            evidence_rows = list(csv.DictReader(handle, delimiter="\t"))
+        second = next(
+            (candidate for candidate in evidence_rows if candidate.get("rank") == "2"),
+            None,
+        )
+        if second:
+            second_taxon = second.get("species") or second.get("taxon_id", second_taxon)
+
+    finding_kind = "info" if status == "SUPPORTED" else "warn"
+    finding_title = (
+        "Taxon assignment supported"
+        if status == "SUPPORTED"
+        else "Taxon assignment is not definitive"
+    )
+    return f"""
+      <section class="report-section">
+        <h2>Automatic Taxonomic Identification</h2>
+        <p class="section-intro">The best-matching taxon is selected from the taxa represented in the reference database using combined repeat and repeat-masked sequence distances. The score is a similarity-and-locus-recovery measure, not a posterior probability or proof that the sample belongs to a represented taxon.</p>
+        <div class="summary">
+          {_metric_card("Best-matching taxon", best_taxon or "Not resolved", f"taxon ID {row.get('best_taxon', '')}", tone)}
+          {_metric_card("Status", status, row.get("status_reason", ""), tone)}
+          {_metric_card("Taxon score", row.get("taxon_score", ""), f"runner-up: {second_taxon or 'not available'}")}
+          {_metric_card("Informative loci", row.get("informative_loci", ""), f"of {row.get('expected_loci', '')} expected; recovery {row.get('locus_recovery_fraction', '')}")}
+        </div>
+        {_finding(finding_kind, finding_title, row.get("status_reason", ""))}
+      </section>
+"""
+
+
+def _taxon_assignment_section(outdir: Path) -> str:
+    automatic_section = _automatic_taxon_identification_section(outdir)
+    path = outdir / "phylogeny" / "taxon_assignment.tsv"
+    if not path.is_file():
+        return automatic_section
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    if not rows:
+        return automatic_section
     row = rows[0]
     decision = str(row.get("decision", "INDETERMINATE"))
     tone = (
@@ -51,7 +98,7 @@ def _taxon_assignment_section(outdir: Path) -> str:
         row.get("best_alternative_taxon_name")
         or row.get("best_alternative_taxon_id", "")
     )
-    return f"""
+    calibrated_section = f"""
       <section class="report-section">
         <h2>Calibrated Target-Taxon Assignment</h2>
         <p class="section-intro">This decision uses only MLVA repeat counts and repeat-masked marker phylogenetic placement. Conformal p-values measure compatibility with the labeled reference cohort; they are not posterior probabilities that the taxon is present.</p>
@@ -64,6 +111,7 @@ def _taxon_assignment_section(outdir: Path) -> str:
         {_finding("warn" if row.get("qc_status") != "PASS" else "info", "Assignment QC", row.get("qc_flags") or "PASS")}
       </section>
 """
+    return automatic_section + calibrated_section
 
 
 def _closest_reference_detail(row: dict) -> str:

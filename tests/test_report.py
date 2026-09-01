@@ -1,5 +1,6 @@
 from mlvamaps.models import Locus
 from mlvamaps.report import (
+    _automatic_taxon_identification_section,
     _assembly_gel_svg,
     _gel_svg,
     _phylogenetic_warning_html,
@@ -7,6 +8,50 @@ from mlvamaps.report import (
     write_assembly_report,
     write_report,
 )
+
+
+def test_automatic_taxon_identification_is_reported(tmp_path):
+    phylogeny = tmp_path / "phylogeny"
+    phylogeny.mkdir()
+    (phylogeny / "taxonomic_identification.tsv").write_text(
+        "sample_id\tbest_taxon\tbest_species\ttaxon_score\tsecond_best_taxon\t"
+        "second_best_score\tscore_margin\tinformative_loci\texpected_loci\t"
+        "locus_recovery_fraction\ttaxonomic_status\tstatus_reason\n"
+        "sample\t1392\tBacillus anthracis\t0.9\t1396\t0.7\t0.2\t6\t6\t1.0\t"
+        "SUPPORTED\tNEAREST_TAXON_SEPARATED\n"
+    )
+    (phylogeny / "taxonomic_identification_evidence.tsv").write_text(
+        "sample_id\ttaxon_id\tspecies\trank\tscore\tdistance\treferences_compared\t"
+        "informative_loci\tlocus_recovery_fraction\tis_best_taxon\n"
+        "sample\t1392\tBacillus anthracis\t1\t0.9\t0.1\t3\t6\t1.0\tyes\n"
+        "sample\t1396\tBacillus cereus\t2\t0.7\t0.4\t3\t6\t1.0\tno\n"
+    )
+
+    section = _automatic_taxon_identification_section(tmp_path)
+
+    assert "Automatic Taxonomic Identification" in section
+    assert "Bacillus anthracis" in section
+    assert "SUPPORTED" in section
+    assert "Bacillus cereus" in section
+    assert "not a posterior probability" in section
+
+
+def test_taxon_assignment_section_includes_automatic_result_without_calibration(tmp_path):
+    phylogeny = tmp_path / "phylogeny"
+    phylogeny.mkdir()
+    (phylogeny / "taxonomic_identification.tsv").write_text(
+        "sample_id\tbest_taxon\tbest_species\ttaxon_score\tsecond_best_taxon\t"
+        "second_best_score\tscore_margin\tinformative_loci\texpected_loci\t"
+        "locus_recovery_fraction\ttaxonomic_status\tstatus_reason\n"
+        "sample\t1\tTaxon one\t0.8\t2\t0.75\t0.05\t4\t5\t0.8\tAMBIGUOUS\t"
+        "TAXON_DISTANCE_MARGIN_BELOW_THRESHOLD\n"
+    )
+
+    section = _taxon_assignment_section(tmp_path)
+
+    assert "Taxon one" in section
+    assert "AMBIGUOUS" in section
+    assert "Calibrated Target-Taxon Assignment" not in section
 
 
 def test_taxon_assignment_section_labels_p_values_as_compatibility(tmp_path):
