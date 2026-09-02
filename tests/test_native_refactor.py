@@ -24,7 +24,6 @@ def test_mlva_finder_oracle_matches_with_parallel_pcr(tmp_path):
         primers_path=str(ORACLE_DIR / "primers.tsv"),
         outdir=str(tmp_path / "result"),
         sample_id="oracle",
-        algorithm="legacy",
         threads=4,
     )
     with result["calls"].open(newline="") as handle:

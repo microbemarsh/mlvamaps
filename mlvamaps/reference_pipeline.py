@@ -654,6 +654,36 @@ def build_combined_taxon_database(
         records = records_by_locus[locus.locus_id]
         if records:
             write_fasta(records, database / f"{locus.locus_id}.fasta.gz")
+    # Build one authoritative context bank for the combined multi-taxon
+    # database. Reference IDs are unique across cohorts by the check above.
+    from .short_read_mapping import CONTEXT_FIELDS, LocusContext, _repeat_interval
+    from .calling import assembly_equivalent_product_allele, repeat_unit_length
+
+    metadata_by_reference = {row["reference_id"]: row for row in metadata_rows}
+    context_rows: list[dict[str, Any]] = []
+    context_records: list[tuple[str, str]] = []
+    for locus in loci:
+        for index, (reference_id, sequence) in enumerate(records_by_locus[locus.locus_id], 1):
+            repeat_start, repeat_end = _repeat_interval(sequence, locus)
+            context_id = f"{locus.locus_id}|{reference_id}|{index}"
+            metadata = metadata_by_reference[reference_id]
+            context = LocusContext(
+                context_id=context_id, locus_id=locus.locus_id, sequence=sequence,
+                reference_id=reference_id, taxon_id=metadata.get("taxon_id", ""),
+                taxon_name=metadata.get("taxon_name", ""),
+                expected_product_size_bp=len(sequence), repeat_motif=locus.repeat_motif,
+                repeat_unit_length_bp=repeat_unit_length(locus),
+                expected_repeat_count=assembly_equivalent_product_allele(locus, len(sequence))[1],
+                repeat_start=repeat_start, repeat_end=repeat_end,
+                upstream_flank_bp=repeat_start,
+                downstream_flank_bp=len(sequence) - repeat_end,
+                source="combined_reference_amplicon",
+            )
+            context_rows.append(context.row())
+            context_records.append((context_id, sequence))
+    if context_records:
+        write_fasta(context_records, database / "mlva_contexts.fasta.gz")
+        _write_tsv(context_rows, database / "mlva_contexts.tsv", CONTEXT_FIELDS)
     paths = build_reference_phylogenies(
         database,
         phylogeny,
@@ -675,9 +705,13 @@ def ensure_combined_taxon_database(
     raxml_ng_bin: str = "raxml-ng",
     raxml_model: str = "DNA",
 ) -> Path:
-    """Return a combined database, upgrading an older multi-taxid build in place."""
+    """Return a complete current combined database or rebuild an old combined view."""
     root = Path(reference_build).resolve()
-    if (root / "database" / "reference_panel.tsv").is_file():
+    if (
+        (root / "database" / "reference_panel.tsv").is_file()
+        and (root / "database" / "mlva_contexts.tsv").is_file()
+        and (root / "database" / "mlva_contexts.fasta.gz").is_file()
+    ):
         return root
     manifest_path = root / "reference_pipeline_manifest.json"
     if not manifest_path.is_file():

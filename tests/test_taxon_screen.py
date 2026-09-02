@@ -1,6 +1,9 @@
 import json
 import csv
+import shutil
 from pathlib import Path
+
+import pytest
 
 from mlvamaps.pipeline import run_call
 from mlvamaps.sequence import revcomp
@@ -77,6 +80,7 @@ summary.write_text(json.dumps({
     assert summary["seqs_out"] == 1
 
 
+@pytest.mark.skipif(shutil.which("minimap2") is None, reason="minimap2 unavailable")
 def test_pipeline_screens_metagenome_before_mlva_and_reports_counts(tmp_path):
     loci = tmp_path / "loci.tsv"
     loci.write_text(
@@ -128,7 +132,6 @@ summary.write_text(json.dumps({
         sample_id="META",
         min_read_length=20,
         min_depth=1,
-        fastq_strategy="primer",
         locus_mapping=False,
         threads=1,
         taxon_screen_index=str(index),

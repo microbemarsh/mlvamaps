@@ -113,6 +113,10 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
     assert uncompressed_sequences == []
     assert _rows(result["metadata"])[0]["reference_id"] == "R1"
     assert _rows(result["myoga_metadata"], ",")[0]["genome_id"] == "R1"
+    assert (result["database"] / "mlva_contexts.tsv").is_file()
+    assert (result["database"] / "mlva_contexts.fasta.gz").is_file()
+    context_rows = _rows(result["database"] / "mlva_contexts.tsv")
+    assert context_rows and {row["schema_version"] for row in context_rows} == {"1.0"}
     assert result["status"] == "BUILT"
     locus_summary = _rows(result["locus_amplifiability"])
     assert list(locus_summary[0]) == reference_builder.REFERENCE_LOCUS_AMPLIFIABILITY_FIELDS

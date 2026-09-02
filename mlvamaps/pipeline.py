@@ -418,10 +418,8 @@ def run_call(
     threads: int = DEFAULT_THREADS,
     show_progress: bool = False,
     sample_mode: str = "metagenome",
-    assembly_equivalent_reads: bool = True,
     assembly_round_tolerance: float = 0.25,
     max_confidence_depth: float = 25.0,
-    fastq_strategy: str = "recruit",
     recruitment_preset: str | None = None,
     recruitment_min_identity: float = 0.9,
     recruitment_min_aligned_bp: int = 100,
@@ -432,8 +430,6 @@ def run_call(
     taxon_screen_rel_threshold: float = 0.01,
     deacon_bin: str = "deacon",
 ) -> dict[str, Path]:
-    if fastq_strategy not in {"recruit", "primer"}:
-        raise ValueError("fastq_strategy must be 'recruit' or 'primer'")
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
     progress = ProgressReporter(enabled=show_progress)
@@ -515,39 +511,26 @@ def run_call(
     }
     recruited_assignments = []
     recruited_rows: list[dict] = []
-    if fastq_strategy == "recruit":
-        progress.step("Recruiting reads competitively to locus product references")
-        (
-            recruited_rows,
-            _presence_rows,
-            recruited_assignments,
-            recruitment_paths,
-        ) = run_read_recruitment(
-            filtered_reads,
-            loci,
-            outdir_path,
-            sample_id,
-            recruitment_database_path or database_path,
-            thread_count,
-            executable=minimap2_bin,
-            preset=recruitment_preset,
-            min_mapping_quality=min_mapping_quality,
-            min_alignment_identity=recruitment_min_identity,
-            min_aligned_bp=recruitment_min_aligned_bp,
-            min_locus_score_margin=recruitment_min_locus_margin,
-        )
-    else:
-        write_tsv(
-            [],
-            recruitment_paths["recruited_reads"],
-            RECRUITMENT_READ_FIELDS,
-        )
-        write_tsv(
-            [],
-            recruitment_paths["locus_presence"],
-            RECRUITMENT_SUMMARY_FIELDS,
-        )
-        recruitment_paths["local_products"].write_text("")
+    progress.step("Recruiting reads competitively to locus product references")
+    (
+        recruited_rows,
+        _presence_rows,
+        recruited_assignments,
+        recruitment_paths,
+    ) = run_read_recruitment(
+        filtered_reads,
+        loci,
+        outdir_path,
+        sample_id,
+        recruitment_database_path or database_path,
+        thread_count,
+        executable=minimap2_bin,
+        preset=recruitment_preset,
+        min_mapping_quality=min_mapping_quality,
+        min_alignment_identity=recruitment_min_identity,
+        min_aligned_bp=recruitment_min_aligned_bp,
+        min_locus_score_margin=recruitment_min_locus_margin,
+    )
 
     if filtered_reads:
         progress.step("Assigning reads with MLVA_finder-compatible Sassy primer matching")
@@ -756,7 +739,7 @@ def run_call(
         features,
         loci,
         asv_memberships,
-        assembly_equivalent=assembly_equivalent_reads,
+        assembly_equivalent=True,
         assembly_round_tolerance=assembly_round_tolerance,
     )
     predictions.extend(fallback_predictions)
@@ -771,14 +754,10 @@ def run_call(
         min_posterior,
         mixture_rows=mixture_rows,
         sample_mode=sample_mode,
-        calling_convention=(
-            "assembly" if assembly_equivalent_reads else "probabilistic"
-        ),
+        calling_convention="assembly",
         max_confidence_depth=max_confidence_depth,
         repeat_range_tolerance=repeat_range_tolerance,
-        primary_product_measurements=(
-            primary_product_measurements if assembly_equivalent_reads else None
-        ),
+        primary_product_measurements=primary_product_measurements,
         read_evidence_rows=recruited_rows,
     )
     for row in allele_rows:

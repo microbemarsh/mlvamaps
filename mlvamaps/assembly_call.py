@@ -6,10 +6,8 @@ import re
 from pathlib import Path
 
 from .calling import (
-    allele_grid,
     assembly_equivalent_product_allele,
     estimate_repeat_count_from_product_length,
-    gaussian_allele_probabilities,
     legacy_round_repeat_count,
     repeat_unit_length,
 )
@@ -61,8 +59,6 @@ AMPLICON_FIELDS = [
 ]
 
 READ_SUPPORT_FIELDS = ["product_id", "locus_id", "mapped_reads", "mean_coverage"]
-
-ASSEMBLY_ALGORITHMS = ("legacy", "novel")
 
 LEGACY_DETAIL_FIELDS = [
     "strain",
@@ -661,175 +657,18 @@ def legacy_assembly_call_rows(
     return rows
 
 
-def novel_assembly_call_rows(
-    loci: list[Locus],
-    products: list[dict],
-    sample_id: str,
-    read_support: dict[str, dict[str, float]] | None = None,
-    min_posterior: float = 0.75,
-) -> list[dict]:
-    if not 0 <= min_posterior <= 1:
-        raise ValueError("minimum allele posterior must be between 0 and 1")
-    read_support = read_support or {}
-    products_by_locus: dict[str, list[dict]] = {}
-    for product in products:
-        products_by_locus.setdefault(product["locus_id"], []).append(product)
-
-    rows = []
-    for locus in loci:
-        locus_products = [
-            product
-            for product in products_by_locus.get(locus.locus_id, [])
-            if _product_in_locus_bounds(product, locus)
-        ]
-        if not locus_products:
-            rows.append(_not_found_row(sample_id, locus.locus_id))
-            continue
-
-        legacy_ranked = sorted(
-            locus_products,
-            key=lambda item: (
-                item["primer_error_round"],
-                float(item["size_derived_repeat_count"] or "inf"),
-                item["forward_mismatches"] + item["reverse_mismatches"],
-                item["product_size_bp"],
-                item["product_id"],
-            ),
-        )
-        product = legacy_ranked[0]
-        raw_by_product = {
-            item["product_id"]: estimate_repeat_count_from_product_length(
-                locus, int(item["product_size_bp"])
-            )
-            for item in locus_products
-        }
-        count_known_products = [
-            item
-            for item in locus_products
-            if raw_by_product[item["product_id"]] is not None
-        ]
-        candidates = allele_grid(
-            locus,
-            step=0.5,
-            observed_values=raw_by_product.values(),
-        )
-        has_depth_support = any(
-            int(read_support.get(item["product_id"], {}).get("mapped_reads", 0)) > 0
-            for item in count_known_products
-        )
-        observations = count_known_products if has_depth_support else (
-            [product] if raw_by_product[product["product_id"]] is not None else []
-        )
-        weights = {
-            item["product_id"]: (
-                float(read_support.get(item["product_id"], {}).get("mapped_reads", 0))
-                + 0.5
-                * math.exp(
-                    -(item["forward_mismatches"] + item["reverse_mismatches"])
-                )
-            )
-            if has_depth_support
-            else 1.0
-            for item in observations
-        }
-        allele_weights = {candidate: 0.0 for candidate in candidates}
-        sigma = max(0.08, 0.5 / max(repeat_unit_length(locus), 1))
-        for item in observations:
-            raw = raw_by_product[item["product_id"]]
-            probabilities = gaussian_allele_probabilities(raw, candidates, sigma)
-            for candidate, probability in zip(candidates, probabilities):
-                allele_weights[candidate] += probability * weights[item["product_id"]]
-        allele_total = sum(allele_weights.values())
-        allele_ranking = sorted(
-            (
-                (candidate, weight / allele_total)
-                for candidate, weight in allele_weights.items()
-            ),
-            key=lambda item: (-item[1], float(item[0])),
-        ) if allele_total else []
-        if allele_ranking:
-            called_count, allele_confidence = allele_ranking[0]
-            second_count, second_probability = (
-                allele_ranking[1] if len(allele_ranking) > 1 else ("", 0.0)
-            )
-            product = min(
-                observations,
-                key=lambda item: (
-                    -weights[item["product_id"]],
-                    abs(float(raw_by_product[item["product_id"]]) - float(called_count)),
-                    item["primer_error_round"],
-                    item["product_id"],
-                ),
-            )
-        else:
-            called_count = ""
-            allele_confidence = 0.0
-            second_count = ""
-            second_probability = 0.0
-        raw_count = estimate_repeat_count_from_product_length(locus, int(product["product_size_bp"]))
-        support = read_support.get(product["product_id"], {})
-        mapped_reads = int(support.get("mapped_reads", 0))
-        mean_coverage = support.get("mean_coverage")
-        status = "PASS" if raw_count is not None else "PRESENT_COUNT_UNKNOWN"
-        if raw_count is not None and (
-            allele_confidence < min_posterior
-            or allele_confidence - second_probability < 0.2
-        ):
-            status = "AMBIGUOUS"
-        inference_method = (
-            "depth_weighted_product_distribution"
-            if has_depth_support
-            else "assembly_product_length"
-        )
-        rows.append(
-            {
-                "sample_id": sample_id,
-                "locus_id": locus.locus_id,
-                "present": "yes",
-                "repeat_count": called_count,
-                "repeat_count_raw": _format_float(raw_count),
-                "product_size_bp": product["product_size_bp"],
-                "read_depth": mapped_reads,
-                "mean_coverage": _format_float(mean_coverage),
-                "allele_confidence": round(allele_confidence, 6),
-                "second_best_repeat_count": second_count,
-                "second_best_probability": round(second_probability, 6),
-                "inference_method": inference_method,
-                "allele_distribution": ";".join(
-                    f"{candidate}:{probability:.6f}"
-                    for candidate, probability in allele_ranking
-                ),
-                "status": status,
-                "evidence": product["product_id"],
-            }
-        )
-    return rows
-
-
 def assembly_call_rows(
     loci: list[Locus],
     products: list[dict],
     sample_id: str,
     read_support: dict[str, dict[str, float]] | None = None,
-    min_posterior: float = 0.75,
-    algorithm: str = "legacy",
     round_tolerance: float = 0.25,
 ) -> list[dict]:
-    """Dispatch to the selected assembly allele-calling algorithm."""
-    if algorithm == "legacy":
-        return legacy_assembly_call_rows(
-            loci,
-            products,
-            sample_id,
-            round_tolerance=round_tolerance,
-            read_support=read_support,
-        )
-    if algorithm == "novel":
-        return novel_assembly_call_rows(
-            loci, products, sample_id, read_support, min_posterior
-        )
-    choices = ", ".join(ASSEMBLY_ALGORITHMS)
-    raise ValueError(f"unknown assembly algorithm {algorithm!r}; choose one of: {choices}")
+    """Call assembly alleles with the sole historical length-based algorithm."""
+    return legacy_assembly_call_rows(
+        loci, products, sample_id, round_tolerance=round_tolerance,
+        read_support=read_support,
+    )
 
 
 def legacy_detail_rows(
@@ -985,8 +824,6 @@ def run_assembly_call(
     database_path: str | None = None,
     max_primer_mismatches: int = 2,
     assembly_round_tolerance: float = 0.25,
-    algorithm: str = "legacy",
-    min_posterior: float = 0.75,
     threads: int = DEFAULT_THREADS,
     minimap2_preset: str | None = None,
     minimap2_bin: str = "minimap2",
@@ -1045,10 +882,9 @@ def run_assembly_call(
         sample_id,
         enforce_locus_bounds=False,
         reference_order=reference_order,
-        # The historical caller derives its allele exclusively from the
-        # calibrated product length. Avoid a second anchor search whose result
-        # cannot affect the legacy call.
-        measure_products=algorithm != "legacy",
+        # The assembly caller derives its allele exclusively from calibrated
+        # product length; a second anchor search cannot affect the call.
+        measure_products=False,
     )
     progress.step(f"Found {len(products):,} primer product(s)")
     write_tsv(products, outdir_path / "assembly_amplicons.tsv", AMPLICON_FIELDS)
@@ -1094,8 +930,6 @@ def run_assembly_call(
         products,
         sample_id,
         read_support,
-        min_posterior,
-        algorithm,
         assembly_round_tolerance,
     )
     write_tsv(call_rows, calls_path, SIMPLE_CALL_FIELDS)

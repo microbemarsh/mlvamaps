@@ -109,8 +109,12 @@ input contract, decision semantics, and validation requirements.
 | `--manifest` | None | Failure-isolated batch TSV. |
 | `--sample-metadata` | None | CSV/TSV joined by sample ID. |
 | `--force` | Off | Rerun already-successful manifest samples. |
-| `--keep-intermediates` | Off | Retain per-locus SKESA FASTQs, contigs, and logs. |
-| `--skesa-bin PATH` | `skesa` | Required native assembler executable for Illumina local assembly. |
+| `--keep-intermediates` | Off | Retain Bowtie2 mapping intermediates. |
+| `--bowtie2-bin PATH` | `bowtie2` | Bowtie2 used by the Illumina caller. |
+| `--bowtie2-build-bin PATH` | `bowtie2-build` | Context-index builder. |
+| `--short-min-mapq` | `0` | Minimum MAPQ; ambiguity is retained and scored across contexts by default. |
+| `--short-min-spanning-pairs` | `2` | Opposite-flank pairs required as decisive geometry evidence. |
+| `--short-confidence-threshold` | `0.8` | Minimum normalized candidate score for a call. |
 
 Separate mates are supported. Interleaved data are not guessed or accepted.
 Directory discovery is non-recursive, uses the shared prefix as `sample_id`,
@@ -133,18 +137,15 @@ summary under `taxon_screen/`.
 | `--max-read-length` | `100000` |
 | `--min-qscore` | `15.0` |
 | `--sample-mode` | `metagenome` |
-| `--read-calling-convention` | `assembly` |
-| `--fastq-strategy` | `recruit` |
 | `--recruitment-preset` | None |
 | `--recruitment-min-identity` | `0.9` |
 | `--recruitment-min-aligned-bp` | `100` |
 | `--recruitment-min-locus-margin` | `10` |
 | `--recruitment-database` | None; falls back to `--database` |
 
-`--fastq-strategy recruit` competitively maps retained reads to database or
+Accurate long-read input competitively maps retained reads to database or
 synthetic locus products, records presence independently from genotype, and
-uses primer pairing as a specificity fallback. Use `primer` for the historical
-complete-primer-product workflow. `--recruitment-database` uses canonical
+uses primer pairing as a specificity fallback. `--recruitment-database` uses canonical
 products from a reference build without also requesting phylogenetic
 placement.
 
@@ -171,7 +172,7 @@ are combined into one trace segment in the report.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `--minimap2-bin` | `minimap2` | Executable or path override. |
-| `--no-locus-mapping` | Off | Skip downstream dominant-representative mapping and SNP evidence; default locus recruitment still runs unless `--fastq-strategy primer` is selected. |
+| `--no-locus-mapping` | Off | Skip downstream dominant-representative mapping and SNP evidence; competitive locus recruitment still runs. |
 | `--min-mapping-quality` | `0` | Minimum accepted primary-alignment MAPQ. |
 | `--min-base-quality` | `20` | Minimum base quality used in depth and SNP evidence. |
 | `--min-snp-depth` | `3` | Minimum quality-filtered depth at a position. |
@@ -193,10 +194,9 @@ midpoint as an exact call.
 | `--max-confidence-depth` | `25` | Maximum effective dominant-cluster evidence used to sharpen FASTQ allele confidence. |
 | `--debug-disagreements` | Off | Write read-level mapping-versus-anchor-measurement evidence and a locus-level disagreement summary. |
 
-`--read-calling-convention assembly` makes primer-spanning reads use the same
-product-size calibration and rounding as assembly products. The alternative
-`probabilistic` convention evaluates the unrounded read measurement directly
-on the half-unit grid.
+Primer-spanning reads use the same product-size calibration and rounding as
+assembly products. Read-level probabilities quantify support around that fixed
+assembly-equivalent convention.
 
 The default `--sample-mode metagenome` flags any meaningful secondary allele
 as `MULTIPLE_VARIANTS`; candidates below `--min-secondary-reads` remain visible
@@ -210,8 +210,7 @@ retain the original detection uncertainty.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--algorithm {legacy,novel}` | `legacy` | Assembly allele caller. `legacy` reproduces MLVA_finder product selection and rounding; `novel` uses the depth-aware probabilistic half-unit model. |
-| `--assembly-round-tolerance FRACTION` | `0.25` | Integer tolerance for the legacy algorithm and compatibility CSVs. |
+| `--assembly-round-tolerance FRACTION` | `0.25` | Integer tolerance for MLVA_finder-compatible assembly calls and compatibility CSVs. |
 | `--reads FASTQ` | None | Map reads to extracted products with minimap2. |
 | `--bam BAM_OR_SAM` | None | Measure support from existing assembly alignments. |
 | `--alignments BAM_OR_SAM` | None | Alias for `--bam`. |
@@ -236,7 +235,6 @@ recovery, and the false exact-call rate.
 ## External executable overrides
 
 - `--amplirust-bin`
-- `--skesa-bin`
 - `--minimap2-bin`
 - `--mafft-bin`
 - `--raxml-ng-bin`

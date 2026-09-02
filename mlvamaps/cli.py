@@ -5,7 +5,7 @@ import csv
 from pathlib import Path
 
 from . import __version__
-from .assembly_call import ASSEMBLY_ALGORITHMS, run_assembly_call
+from .assembly_call import run_assembly_call
 from .concurrency import DEFAULT_THREADS
 from .in_silico_pcr import run_in_silico_pcr
 from .io import open_text, write_tsv
@@ -22,7 +22,7 @@ from .simulation import simulate_reads
 from .sample_metadata import MYOGA_SAMPLE_FIELDS, metadata_by_sample, read_sample_metadata, write_csv
 from .short_reads import SAMPLE_SUMMARY_FIELDS, run_short_read_call
 from .taxon_assignment import run_taxon_calibration
-from .validation import run_validation
+from .validation import run_fastq_assembly_concordance, run_validation
 
 
 FASTQ_SUFFIXES = (".fastq", ".fq", ".fastq.gz", ".fq.gz")
@@ -351,12 +351,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.add_argument("--force", action="store_true", help="Reprocess successful manifest samples")
     call.add_argument("--keep-intermediates", action="store_true", help="Retain short-read intermediate files")
-    call.add_argument(
-        "--skesa-bin",
-        default="skesa",
-        metavar="PATH",
-        help="SKESA executable used for required Illumina local assembly (default: %(default)s)",
-    )
+    call.add_argument("--bowtie2-bin", default="bowtie2", metavar="PATH")
+    call.add_argument("--bowtie2-build-bin", default="bowtie2-build", metavar="PATH")
     call.add_argument("--bam", "--alignments", dest="alignments_path", metavar="BAM/SAM", help="Assembly-aligned BAM/SAM for assembly depth support")
     call.add_argument(
         "-p",
@@ -410,6 +406,14 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--short-min-mean-quality", type=_nonnegative_float, default=15.0)
     call.add_argument("--short-trim-quality", type=_nonnegative_int, default=0)
     call.add_argument("--short-min-pair-retention", type=_fraction, default=0.5)
+    call.add_argument("--short-min-mapq", type=_nonnegative_int, default=0)
+    call.add_argument("--short-min-spanning-pairs", type=_nonnegative_int, default=2)
+    call.add_argument("--short-confidence-threshold", type=_fraction, default=0.8)
+    call.add_argument("--short-max-candidate-repeat-count", type=_positive_int, default=100)
+    call.add_argument(
+        "--no-short-secondary-alignments", action="store_true",
+        help="Ignore Bowtie2 secondary alignments (not recommended for homologous contexts)",
+    )
     call.add_argument(
         "--short-min-informative-molecules",
         type=_positive_int,
@@ -436,16 +440,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.add_argument("--max-primer-mismatches", type=int, default=2)
     call.add_argument(
-        "--algorithm",
-        "--assembly-algorithm",
-        choices=ASSEMBLY_ALGORITHMS,
-        default="legacy",
-        help=(
-            "FASTA allele caller: exact historical MLVA_finder rules or the "
-            "depth-aware probabilistic caller (default: %(default)s)"
-        ),
-    )
-    call.add_argument(
         "--assembly-round-tolerance",
         type=_round_tolerance,
         default=0.25,
@@ -453,30 +447,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Legacy integer-rounding tolerance (default: %(default)s)",
     )
     call.add_argument(
-        "--read-calling-convention",
-        choices=("assembly", "probabilistic"),
-        default="assembly",
-        help=(
-            "FASTQ allele convention: assembly uses the same calibrated "
-            "product-length rounding as FASTA calls; probabilistic retains "
-            "raw half-unit inference (default: %(default)s)"
-        ),
-    )
-    call.add_argument(
         "--sample-mode",
         choices=("isolate", "metagenome"),
         default="metagenome",
         help="Interpret FASTQ evidence as an isolate or metagenome (default: %(default)s)",
-    )
-    call.add_argument(
-        "--fastq-strategy",
-        choices=("recruit", "primer"),
-        default="recruit",
-        help=(
-            "FASTQ discovery strategy: competitive locus recruitment with "
-            "primer fallback, or legacy primer-only assignment "
-            "(default: %(default)s)"
-        ),
     )
     call.add_argument(
         "--recruitment-preset",
@@ -1102,6 +1076,13 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--long-read", help="Accurate-long-read calls.tsv")
     validate.add_argument("--illumina", help="Illumina calls.tsv")
     validate.add_argument("-o", "--output", "--outdir", dest="outdir", required=True)
+    concordance = subparsers.add_parser(
+        "benchmark-fastq-assembly",
+        help="Report direct FASTQ versus assembly-derived MLVA concordance",
+    )
+    concordance.add_argument("--fastq", required=True, help="Mapping-method calls.tsv")
+    concordance.add_argument("--assembly", required=True, help="Assembly calls.tsv")
+    concordance.add_argument("-o", "--output", "--outdir", dest="outdir", required=True)
     return parser
 
 
@@ -1160,10 +1141,8 @@ def _run_single_input(
             threads=args.threads,
             show_progress=not args.quiet,
             sample_mode=args.sample_mode,
-            assembly_equivalent_reads=args.read_calling_convention == "assembly",
             assembly_round_tolerance=args.assembly_round_tolerance,
             max_confidence_depth=args.max_confidence_depth,
-            fastq_strategy=args.fastq_strategy,
             recruitment_preset=args.recruitment_preset,
             recruitment_min_identity=args.recruitment_min_identity,
             recruitment_min_aligned_bp=args.recruitment_min_aligned_bp,
@@ -1210,8 +1189,6 @@ def _run_single_input(
         database_path=args.database,
         max_primer_mismatches=args.max_primer_mismatches,
         assembly_round_tolerance=args.assembly_round_tolerance,
-        algorithm=args.algorithm,
-        min_posterior=args.min_posterior,
         threads=args.threads,
         minimap2_preset=args.minimap2_preset,
         minimap2_bin=args.minimap2_bin,
@@ -1285,33 +1262,19 @@ def _run_short_input(
         threads=args.threads,
         keep_intermediates=args.keep_intermediates,
         sample_mode=args.sample_mode,
-        skesa_bin=args.skesa_bin,
-        minimap2_bin=args.minimap2_bin,
-        mafft_bin=args.mafft_bin,
-        raxml_ng_bin=args.raxml_ng_bin,
-        epa_ng_bin=args.epa_ng_bin,
-        raxml_model=args.raxml_model,
-        phylogeny_snp_weight=args.phylogeny_snp_weight,
-        phylogeny_repeat_weight=args.phylogeny_repeat_weight,
-        reference_metadata_path=args.reference_metadata,
-        target_taxon_id=args.target_taxon_id,
-        taxon_calibration_path=args.taxon_calibration,
-        taxon_alpha=args.taxon_alpha,
-        taxon_min_loci=args.taxon_min_loci,
-        taxon_min_locus_fraction=args.taxon_min_locus_fraction,
-        taxon_bootstrap_replicates=args.taxon_bootstrap_replicates,
-        taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
-        taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
-        taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
-        taxon_identification=args.taxon_identification,
-        taxon_k=args.taxon_k,
-        taxon_minimum_margin=args.taxon_minimum_margin,
+        bowtie2_bin=args.bowtie2_bin,
+        bowtie2_build_bin=args.bowtie2_build_bin,
+        short_min_mapping_quality=args.short_min_mapq,
+        short_min_spanning_pairs=args.short_min_spanning_pairs,
+        short_confidence_threshold=args.short_confidence_threshold,
+        short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
+        short_consider_secondary=not args.no_short_secondary_alignments,
         show_progress=not args.quiet,
     )
     print(f"Wrote conservative Illumina calls to {result['calls']}")
     print(f"Wrote short-read QC to {result['short_read_qc']}")
     print(f"Wrote locus recruitment to {result['short_read_recruitment']}")
-    print(f"Wrote local assembly evidence to {result['short_read_assembly']}")
+    print(f"Wrote Bowtie2 mapping evidence to {result['short_read_mapping']}")
     print(f"Wrote MYOGA metadata to {result['myoga_samples']}")
     if "taxon_assignment" in result:
         print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
@@ -1745,6 +1708,16 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
         print(f"Wrote locus validation details to {result['details']}")
         print(f"Wrote validation metrics to {result['summary']}")
+        return 0
+    if args.command == "benchmark-fastq-assembly":
+        try:
+            result = run_fastq_assembly_concordance(
+                args.fastq, args.assembly, args.outdir
+            )
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        print(f"Wrote FASTQ-versus-assembly concordance to {result['details']}")
+        print(f"Wrote concordance summary to {result['summary']}")
         return 0
     if args.command == "extract-amplicons":
         _resolve_panel_option(parser, args)

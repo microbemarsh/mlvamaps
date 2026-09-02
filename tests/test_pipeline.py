@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import inspect
+import shutil
 from pathlib import Path
 
 import pytest
@@ -314,6 +315,7 @@ def test_native_repeat_motif_statistics_preserve_patterns_and_partials():
     assert sequence.mean_qscore("IIII") == 40.0
 
 
+@pytest.mark.skipif(shutil.which("minimap2") is None, reason="minimap2 unavailable")
 def test_simulate_and_call_pipeline(tmp_path):
     loci, profiles = write_panel(tmp_path)
     sim = simulate_reads(
@@ -336,7 +338,6 @@ def test_simulate_and_call_pipeline(tmp_path):
         min_depth=5,
         amplirust_bin=str(amplirust),
         locus_mapping=False,
-        fastq_strategy="primer",
     )
 
     calls = {row["locus_id"]: row for row in read_tsv(result["allele_calls"])}
@@ -429,6 +430,7 @@ def test_legacy_amplirust_primer_export_and_removed_command(tmp_path):
         )
 
 
+@pytest.mark.skipif(shutil.which("minimap2") is None, reason="minimap2 unavailable")
 def test_fastq_poa_and_assembly_produce_same_gold_standard_fingerprint(tmp_path):
     loci_path, profiles = write_panel(tmp_path)
     loci = read_loci(loci_path)
@@ -461,7 +463,6 @@ def test_fastq_poa_and_assembly_produce_same_gold_standard_fingerprint(tmp_path)
         min_read_length=20,
         min_depth=5,
         locus_mapping=False,
-        fastq_strategy="primer",
         threads=1,
     )
     assembly_result = run_assembly_call(
@@ -604,11 +605,11 @@ def test_legacy_rounding_and_mismatch_round_product_selection():
             "product_size_bp": 45,
         },
     ]
-    row = assembly_call_rows([locus], products, "S1", algorithm="novel")[0]
+    row = assembly_call_rows([locus], products, "S1")[0]
     assert row["evidence"] == "perfect-large-allele"
     assert row["repeat_count_raw"] == "6.25"
-    assert row["repeat_count"] == 6
-    assert row["status"] == "AMBIGUOUS"
+    assert row["repeat_count"] == 6.5
+    assert row["status"] == "PASS"
 
 
 def test_amplirust_products_use_mlva_finder_size_formula_for_primer_indels():
@@ -703,7 +704,7 @@ def test_assembly_call_allows_n_bases_inside_legacy_product(tmp_path):
     assert call["present"] == "yes"
 
 
-def test_depth_distribution_selects_supported_assembly_allele():
+def test_depth_support_does_not_change_historical_assembly_selection():
     locus = Locus(
         locus_id="VNTR",
         forward_primer="AAAA",
@@ -731,11 +732,10 @@ def test_depth_distribution_selects_supported_assembly_allele():
         "allele5": {"mapped_reads": 2, "mean_coverage": 2.0},
         "allele6": {"mapped_reads": 18, "mean_coverage": 18.0},
     }
-    row = assembly_call_rows([locus], products, "S1", support, algorithm="novel")[0]
-    assert row["repeat_count"] == 6
-    assert row["evidence"] == "allele6"
-    assert row["inference_method"] == "depth_weighted_product_distribution"
-    assert row["allele_confidence"] > 0.85
+    row = assembly_call_rows([locus], products, "S1", support)[0]
+    assert row["repeat_count"] == 5
+    assert row["evidence"] == "allele5"
+    assert row["inference_method"] == "legacy_minimum_allele"
 
 
 def test_legacy_algorithm_is_default_and_uses_upstream_selection_order():
@@ -884,6 +884,7 @@ def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
     assert 'opacity="0.740"' in report
 
 
+@pytest.mark.skipif(shutil.which("minimap2") is None, reason="minimap2 unavailable")
 def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
     loci, profiles = write_panel(tmp_path)
     amplirust = write_fake_amplirust(tmp_path)
@@ -914,8 +915,6 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
             "--amplirust-bin",
             str(amplirust),
             "--no-locus-mapping",
-            "--fastq-strategy",
-            "primer",
         ]
     )
     assert exit_code == 0
@@ -941,9 +940,7 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.threads == 32
     assert default_call_args.min_cluster_size == 1
     assert default_call_args.min_qscore == 15.0
-    assert default_call_args.read_calling_convention == "assembly"
     assert default_call_args.sample_mode == "metagenome"
-    assert default_call_args.fastq_strategy == "recruit"
     assert default_call_args.recruitment_preset is None
     assert default_call_args.recruitment_min_identity == 0.9
     assert default_call_args.recruitment_min_aligned_bp == 100
@@ -962,7 +959,6 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.min_snp_depth == 3
     assert default_call_args.min_snp_alternate_reads == 2
     assert default_call_args.min_snp_frequency == 0.2
-    assert default_call_args.algorithm == "legacy"
     assert default_call_args.max_primer_mismatches == 2
     assert default_call_args.raxml_model == "DNA"
 
@@ -990,10 +986,14 @@ def test_cli_has_conventional_output_and_thread_options():
         "vsearch_bin",
     }.isdisjoint(inspect.signature(run_call).parameters)
 
-    novel_call_args = parser.parse_args(
-        ["call", "-p", "primers.tsv", "-i", "assembly.fasta", "--algorithm", "novel"]
-    )
-    assert novel_call_args.algorithm == "novel"
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["call", "-p", "primers.tsv", "-i", "assembly.fasta", "--algorithm", "novel"]
+        )
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["call", "-p", "primers.tsv", "-i", "sample.fastq", "--fastq-strategy", "primer"]
+        )
 
     short_call_args = parser.parse_args(
         [

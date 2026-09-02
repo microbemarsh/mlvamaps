@@ -2,8 +2,9 @@
 
 Illumina mode is a separate evidence model for shotgun or amplicon reads that
 often do not span a complete VNTR. It does not reinterpret each mate as a short
-long read. Pair identity is retained from FASTQ validation through recruitment,
-merging, local assembly, boundary evaluation, and support summaries.
+long read. Pair identity is retained from FASTQ validation through one
+competitive Bowtie2 context alignment and read-level likelihood inference.
+Per-locus assembly is not required.
 
 ## Command line
 
@@ -45,55 +46,42 @@ mate fails. IDs and mate association are not rewritten.
 counts. When enough exact opposite-orientation mappings exist, it also records
 the empirical fragment-span median, median absolute deviation, and pair count.
 
-## Competitive recruitment
+## Competitive locus-context mapping
 
-Recruitment references follow this order:
+Contexts come from one of two explicit sources:
 
-1. per-locus products from `--database`;
-2. rich panel products synthesized from primers, flanks, motif, and expected
-   repeat range;
-3. separated forward/reverse primer targets when a complete template is
-   unavailable.
+1. the versioned `mlva_contexts.tsv` and `mlva_contexts.fasta.gz` files in a
+   current `--database`; or
+2. complete products synthesized from a rich panel's primers, flanks, motif,
+   and expected repeat range when no database is supplied.
 
-Filtered reads are mapped against the complete competitive reference bank by
-native minimap2 with its `sr` preset. Minimap2 receives the complete
-`-t/--threads` budget because this stage finishes before local assembly begins,
-and PAF output keeps unassigned WGS reads out of Python. Only the small mapped
-subset is parsed for locus evidence and retained for SKESA.
+A primer-only panel cannot define the repeat boundaries required by this
+algorithm and is rejected with guidance to build a reference database or enrich
+the panel.
+
+Filtered mates are mapped once with Bowtie2 against all candidate MLVA contexts,
+without an early taxon restriction. Contexts retain locus, reference, taxon,
+repeat interval, expected allele, and flank provenance. Equivalent alignments
+remain available to inference rather than being forced to one reference.
 
 Mate scores are resolved together. A confident mate can rescue its unaligned
 mate, equal best scores across loci are ambiguous, and confident mates assigned
 to different loci are discordant. Neither category is counted as unique support
-for multiple loci. Primer-only panels use separated primer targets when no
-complete product can be synthesized. Use `--minimap2-bin PATH` to select a
-compatible executable.
+for multiple loci. Use `--bowtie2-bin PATH` and `--bowtie2-build-bin PATH` to
+select compatible executables.
 
-## Read merging and local assembly
+## Direct VNTR inference
 
-Overlapping mates are merged only with at least 20 aligned bases and at most 3%
-mismatches. A candidate overlap explainable entirely by the tandem motif is
-rejected because it cannot establish the fragment span. Conflicts in accepted
-overlaps use the higher-quality base. Every locus is assembled
-independently with the native SKESA short-read assembler. There is no Python
-assembly fallback: Illumina mode exits with a clear error when SKESA is missing
-or fails. Install through the supplied Conda environment or select a compatible
-executable with `--skesa-bin PATH`.
+Candidate alleles vary only in whole repeat units. Evidence includes unique
+flank mappings, boundary junctions, full VNTR spans, opposite-flank proper pairs,
+forced. Bowtie2 context mapping is the only Illumina algorithm; no per-locus
+assembly or selectable hybrid mode is used.
 
-Up to four locus assemblies run concurrently. SKESA cores are divided from the
-global `--threads` budget, so nested jobs do not oversubscribe the requested
-CPU count. The local jobs use a small hash table appropriate for recruited
-locus reads and disables SKESA's whole-genome vector detector. That detector is
-not valid after locus enrichment because genuine target 19-mers occur in a
-large fraction of the recruited reads and could otherwise be clipped as vector
-sequence. Local jobs report contigs as short as 40 bases. Multiple contigs
-remain ambiguous and cannot create an exact call.
-
-`short_read_assembly_summary.tsv` reports the backend, status, contig count and
-length, depth estimate, and failure reason. `--keep-intermediates` retains each
-locus FASTQ, contig FASTA, and SKESA log under
-`short_read_assembly_intermediates/`. It also retains the native recruitment
-reference and mapped-read PAF files under
-`short_read_recruitment_intermediates/`.
+When `--database` is supplied, it must contain the versioned
+`mlva_contexts.tsv` and `mlva_contexts.fasta.gz` artifacts produced by the
+current reference builder. Older databases must be rebuilt rather than being
+silently reinterpreted. `--keep-intermediates` retains the filtered reads,
+candidate context bank, Bowtie2 index, SAM, and BAM files.
 
 ## Exact, interval, and presence evidence
 
@@ -180,10 +168,9 @@ Successful sample directories resume by default; use `--force` to recompute.
 Combined standard, sample-summary, and MYOGA tables are written at the batch
 root's clearly scoped `batch_summary/` directory. Samples are processed
 sequentially so a process never retains all batch
-FASTQs together. Within a sample, FASTQ/QC streams in bounded chunks, minimap2
-performs multithreaded native recruitment, and only uniquely locus-recruited
-molecules are retained for assembly. Live timing messages report the QC,
-minimap2, and SKESA stages unless `--quiet` is selected.
+Within a sample, FASTQ/QC streams in bounded chunks and Bowtie2 performs the
+multithreaded competitive alignment. Progress messages report QC, indexing,
+mapping, and inference unless `--quiet` is selected.
 
 For Slurm arrays, split the manifest by row while preserving its header and run
 one manifest shard per task into separate output roots. Merge the resulting TSV
@@ -229,10 +216,7 @@ mlvamaps validate \
 - **Presence-only locus:** this is expected when neither reads nor the local
   graph resolve both boundaries. Do not replace the blank call with the
   expected-range midpoint.
-- **SKESA not found:** create the supplied Conda environment, install the
-  `skesa` package, or pass `--skesa-bin PATH`.
-- **No contigs:** review retained depth, read length, and off-target repetitive
-  evidence. Exact merged reads may still call a locus when SKESA conservatively
-  breaks an ambiguous repeat assembly.
+- **Database predates the context schema:** rebuild it with the current
+  `build-reference` command, or omit `--database` and provide a rich panel.
 - **MYOGA row does not attach to a tip:** make `genome_id` exactly equal to the
   Newick label, including suffixes and case.

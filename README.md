@@ -8,6 +8,19 @@ The main outputs are an MLVA fingerprint, per-locus calls and evidence, and a
 self-contained HTML report. Optional reference databases add sequence-aware
 matching and phylogenetic placement.
 
+There are three analysis paths. Assemblies retain the in-silico PCR caller;
+accurate long reads are analyzed molecule-by-molecule; paired Illumina reads use
+one Bowtie2 competitive alignment against compact MLVA locus contexts followed
+by conservative discrete repeat-count inference. Illumina calling performs no
+de novo assembly. Each input mode has one supported algorithm so results do not
+depend on selecting a historical implementation.
+
+Mapping calls combine flank anchoring, junction/full-span reads, paired-fragment
+geometry, CIGAR indels, MAPQ, alignment score, and context consistency. Loci can
+be `called`, `detected_unresolved`, `low_coverage`, `ambiguous`, `no_evidence`,
+or `mapping_conflict`; unresolved loci remain missing in fingerprints and never
+abort a sample. Partial profiles are expected for low-abundance metagenomes.
+
 ## Install
 
 ### Conda/Miniforge (recommended)
@@ -163,6 +176,12 @@ mlvamaps call \
   --database references \
   -o results/sample
 ```
+
+Illumina databases must have been built by a current mlvamaps release and must
+contain `database/mlva_contexts.tsv` and `database/mlva_contexts.fasta.gz`.
+Rebuild older databases before using them for Illumina calls. A rich panel may
+still be used without a database; in that case compact contexts are synthesized
+from its primers, flanks, repeat motif, and expected range.
 
 For a multi-taxid build, that command automatically loads the saved panel and
 taxon metadata, then writes the taxonomic identification. No separate panel,

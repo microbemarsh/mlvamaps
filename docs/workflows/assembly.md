@@ -12,8 +12,7 @@ Amplirust searches both assembly orientations with degenerate-primer and
 primer-error support. For compatibility, assembly gaps represented by `N`
 bases are permitted inside products; MLVA_finder did not reject them. mlvamaps
 filters circular-wrap records and uses the historical raw-allele limit for
-discovery. Novel calling still enforces each locus's configured amplicon range
-before selecting a product.
+discovery.
 
 This stage returns:
 
@@ -22,42 +21,30 @@ This stage returns:
 - `assembly_amplicons.fasta.gz`: extracted products.
 - Native evidence under `amplirust/`.
 
-The default `--algorithm legacy` path reproduces MLVA_finder's decision rule:
+The assembly caller reproduces MLVA_finder's decision rule:
 it uses the lowest successful primer-error round, applies the original
 forward-strand and equal-length-match precedence, and retains the smallest raw
 allele on the last FASTA record with a valid product in that round. Product
 sizes also follow the original configured-primer-length formula when a primer
-match contains an indel. `--algorithm novel` selects the probabilistic caller
-described below. All accepted products remain available in the amplicon table.
+match contains an indel. All accepted products remain available in the amplicon table.
 The regression suite includes a self-contained MLVA_finder oracle covering
 perfect and mismatched primers, strict half-unit rounding, multiple FASTA
 records, and parallel PCR execution.
 
 ## 2. Estimate repeat count
 
-Both algorithms convert product size to repeat count when the panel provides
+The caller converts product size to repeat count when the panel provides
 repeat-unit length, nominal repeat units, and expected product size. It retains
-the raw estimate. The default legacy algorithm applies MLVA_finder's strict
+raw estimate. It applies MLVA_finder's strict
 integer tolerance (configured with `--assembly-round-tolerance`) and otherwise
 uses the intervening half allele.
 
-With `--algorithm novel`, mlvamaps evaluates the raw estimate against explicit
-integer and half-unit allele states. The reported probability reflects distance
-from those states at the locus's repeat-unit resolution. Exact midpoint ties
-remain `AMBIGUOUS` instead of being resolved by an arbitrary rounding rule.
-`--min-posterior` controls the novel caller's required confidence.
-
-In novel mode, when FASTQ or BAM support is supplied and the assembly contains
-multiple accepted products for a locus, mapped-read counts weight the
-product-length distribution. This lets the supported allele win rather than
-defaulting to the smallest legacy allele. Legacy mode records depth for its
-selected product but does not allow depth to change the historical call.
+FASTQ or BAM support records depth for the selected product but does not alter
+the historical product selection or repeat count.
 
 Assembly statuses:
 
 - `PASS`: product found and repeat count could be calculated.
-- `AMBIGUOUS`: the leading allele is below `--min-posterior` or leads the
-  runner-up by less than 0.2.
 - `PRESENT_COUNT_UNKNOWN`: product found, but panel metadata was insufficient
   for a repeat-count calculation.
 - `NOT_FOUND`: no accepted paired-primer product was found.

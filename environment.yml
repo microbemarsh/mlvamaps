@@ -7,7 +7,7 @@ dependencies:
   - pip
   - setuptools>=68
   - minimap2
-  - skesa
+  - bowtie2
   - sassy>=0.2.2
   - deacon
   - mafft

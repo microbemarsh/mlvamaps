@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 from dataclasses import asdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -432,6 +433,39 @@ def build_reference_database(
     panel_path = database_dir / "reference_panel.tsv"
     panel_fields = list(asdict(loci[0]))
     _write_tsv([asdict(locus) for locus in loci], panel_path, panel_fields)
+
+    # Persist the authoritative, versioned compact context bank used by the
+    # Illumina caller. Calls never infer database contexts lazily.
+    from .short_read_mapping import CONTEXT_FIELDS, CONTEXT_SCHEMA_VERSION
+    metadata_by_reference = {reference_id: row for reference_id, _assembly, row in matched}
+    context_rows = []
+    context_records = []
+    for locus in loci:
+        for index, (reference_id, sequence) in enumerate(records_by_locus[locus.locus_id], 1):
+            repeat_start = len(locus.forward_primer) + len(locus.left_flank_sequence)
+            repeat_end = len(sequence) - len(locus.right_flank_sequence) - len(locus.reverse_primer)
+            context_id = f"{locus.locus_id}|{reference_id}|{index}"
+            context_records.append((context_id, sequence))
+            context_rows.append({
+                "schema_version": CONTEXT_SCHEMA_VERSION,
+                "context_id": context_id, "locus_id": locus.locus_id,
+                "reference_id": reference_id,
+                "taxon_id": str(metadata_by_reference[reference_id].get(taxon_source, "")) if taxon_source else "",
+                "taxon_name": str(metadata_by_reference[reference_id].get(name_source, "")) if name_source else "",
+                "sequence_sha256": hashlib.sha256(sequence.encode()).hexdigest(),
+                "context_length_bp": len(sequence), "expected_product_size_bp": len(sequence),
+                "repeat_motif": locus.repeat_motif,
+                "repeat_unit_length_bp": locus.repeat_unit_length_bp,
+                "expected_repeat_count": "", "repeat_start": max(0, repeat_start),
+                "repeat_end": max(repeat_start, repeat_end), "reference_contig": "",
+                "reference_start": "", "reference_end": "", "strand": "+",
+                "upstream_flank_bp": max(0, repeat_start),
+                "downstream_flank_bp": max(0, len(sequence) - repeat_end),
+                "source": "reference_amplicon",
+            })
+    if context_records:
+        _write_fasta(context_records, database_dir / "mlva_contexts.fasta.gz")
+        _write_tsv(context_rows, database_dir / "mlva_contexts.tsv", CONTEXT_FIELDS)
 
     normalized_metadata = []
     myoga_metadata = []

@@ -1064,8 +1064,8 @@ def write_report(
         f"<td><span class=\"status-pill {'status-good' if row.get('repeat_count') not in ('', None) else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
         f"<td>{_safe(row.get('recruited_read_pairs', ''))}</td>"
         f"<td>{_safe(row.get('informative_molecule_count', ''))}</td>"
-        f"<td>{_safe(row.get('assembled_contig_length', ''))}</td>"
-        f"<td>{_safe(row.get('assembly_depth', ''))}</td>"
+        f"<td>{_safe(row.get('mean_mapq', ''))}</td>"
+        f"<td>{_safe(row.get('proper_spanning_pairs', ''))}</td>"
         f"<td>{_safe(row.get('boundary_1_support', ''))} / {_safe(row.get('boundary_2_support', ''))} / {_safe(row.get('both_boundary_support', ''))}</td>"
         f"<td>{_safe(row.get('repeat_count', '')) if row.get('repeat_count') not in ('', None) else _safe(str(row.get('repeat_count_min', '')) + '..' + str(row.get('repeat_count_max', ''))) if row.get('repeat_count_min') not in ('', None) else 'unresolved'}</td>"
         f"<td>{_safe(row.get('allele_confidence', ''))}</td>"
@@ -1078,9 +1078,9 @@ def write_report(
         short_read_section = f"""
       <section class="report-section">
         <h2>Illumina Evidence</h2>
-        <p class="section-intro">Exact values require a locally assembled product or a molecule that directly observes both repeat boundaries. Intervals and presence-only rows are deliberately shown without an exact repeat count.</p>
+        <p class="section-intro">Exact values require Bowtie2 context evidence that resolves one discrete repeat count, including a molecule that directly observes both repeat boundaries when available. Intervals and presence-only rows are deliberately shown without an exact repeat count.</p>
         <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Evidence</th><th>Recruited pairs</th><th>Informative molecules</th><th>Longest contig bp</th><th>Assembly depth</th><th>Boundary 1 / 2 / both</th><th>Repeat or interval</th><th>Confidence</th><th>Warning / failure</th></tr></thead>
+          <thead><tr><th>Locus</th><th>Evidence</th><th>Recruited pairs</th><th>Informative molecules</th><th>Mean MAPQ</th><th>Proper spanning pairs</th><th>Boundary 1 / 2 / both</th><th>Repeat or interval</th><th>Confidence</th><th>Warning / failure</th></tr></thead>
           <tbody>{short_read_table_rows}</tbody>
         </table></div>
       </section>

@@ -57,7 +57,7 @@ This stage returns:
 
 ## 3. Recruit reads competitively to loci
 
-The default `--fastq-strategy recruit` builds a competitive reference bank for
+The long-read algorithm builds a competitive reference bank for
 every panel locus and allowed repeat allele, then maps all retained reads
 against that bank in one minimap2 operation. Complete products from
 `--recruitment-database` (or `--database`) are preferred. The dedicated option
@@ -99,9 +99,6 @@ This stage returns:
 - `filtered_reads.fasta.gz`
 - `read_locus_assignments.tsv`
 - Native evidence under `amplirust/`
-
-Use `--fastq-strategy primer` to disable recruitment and retain the historical
-primer-only workflow.
 
 ## 5. Extract repeat evidence and local products
 
@@ -197,8 +194,8 @@ boundary calculation, product selection, repeat conversion, and historical
 rounding. Per-read likelihoods increase or decrease confidence around that
 allele but cannot move the primary call to a different repeat count. The
 unrounded product measurement is retained in `allele_calls.tsv` and
-`calls.tsv`. Use `--read-calling-convention probabilistic` to retain direct
-per-read half-unit inference instead.
+`calls.tsv`. This assembly-equivalent convention is the sole long-read calling
+algorithm.
 
 Singleton clusters are retained by default (`--min-cluster-size 1` and
 `--min-depth 1`). A single spanning read can therefore contribute a

@@ -24,7 +24,7 @@ requirements:
   run:
     - python >=3.10
     - minimap2
-    - skesa
+    - bowtie2
     - mafft
     - raxml-ng
     - epa-ng
@@ -57,7 +57,8 @@ about:
     mlvamaps converts VNTR sequencing reads and assemblies into
     interpretable repeat-copy-number calls, sequence-aware VNTR repeat
     variants, probabilistic MLVA fingerprints, and known-profile matches.
-    Illumina local assembly uses SKESA. Assembly and reference in-silico PCR
+    Illumina calling uses Bowtie2 competitive locus-context mapping. Assembly
+    and reference in-silico PCR
     extraction uses the Sassy command-line tool with MLVA_finder-compatible
     pairing and selection semantics.
   license: GPL-3.0-only

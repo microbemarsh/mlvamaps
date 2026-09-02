@@ -67,6 +67,8 @@ def test_combined_taxon_database_is_ready_for_default_call(tmp_path, monkeypatch
         ("R2", "2", "taxon_two"),
     ]
     assert (combined["database"] / "reference_panel.tsv").is_file()
+    assert (combined["database"] / "mlva_contexts.tsv").is_file()
+    assert (combined["database"] / "mlva_contexts.fasta.gz").is_file()
     records = pipeline.read_fasta(combined["database"] / "L1.fasta.gz")
     assert [name for name, _sequence in records] == [
         "R1",

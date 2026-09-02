@@ -5,8 +5,8 @@ possible, and avoid generic fuzzy-string packages for core matching.
 
 Current backend policy:
 
-- `skesa` performs conservative, multithreaded local assembly for recruited
-  Illumina locus reads. There is no Python assembly fallback.
+- `bowtie2` performs one competitive alignment of Illumina reads against all
+  versioned locus contexts; `pysam` parses the resulting alignment evidence.
 - The Bioconda `sassy>=0.2.2` command-line tool is the Rust/SIMD engine for
   in-silico PCR, paired-primer FASTQ assignment, and bounded flank localization.
   mlvamaps owns deterministic IUPAC expansion, MLVA_finder-compatible strand
@@ -36,5 +36,3 @@ Default threading policy:
   The current in-memory Sassy CLI adapter runs each search with one Sassy thread;
   assembly records can be distributed across mlvamaps worker processes.
 - Native mapping and phylogenetic tools receive the resolved thread count.
-- Up to four independent SKESA locus jobs share the resolved thread budget;
-  each job receives only its assigned share.

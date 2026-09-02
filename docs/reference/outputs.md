@@ -62,6 +62,12 @@ Multi-taxon databases additionally produce the following under `phylogeny/`:
 Illumina calls additionally always write `sample_summary.tsv`,
 `myoga_samples.csv`, and `myoga_loci.csv`.
 
+Mapping mode also writes `short_read_mapping_evidence.tsv` (state, support,
+spanning/junction/CIGAR evidence, MAPQ, candidates, and context provenance) and
+`short_read_run_metadata.json` (versions, thresholds, database, and insert-size
+estimate). `benchmark-fastq-assembly` writes
+`mlvamaps_fastq_vs_assembly_concordance.tsv` plus a summary TSV.
+
 ## Dataset-level MYOGA export outputs
 
 `mlvamaps export-myoga` reads completed calls and writes the following without
@@ -203,7 +209,8 @@ data are supplied.
 | --- | --- |
 | `short_read_qc_summary.tsv` | Input/retained reads and pairs, orphans, and empirical insert-size values when estimable. |
 | `short_read_recruitment_summary.tsv` | Unique, ambiguous, discordant, and orphan pair counts per locus. |
-| `short_read_assembly_summary.tsv` | Per-locus SKESA status, contig sizes, depth, and failure reason. |
+| `short_read_mapping_evidence.tsv` | Per-locus state, candidate scores, molecule support, boundary evidence, MAPQ, and context provenance. |
+| `short_read_run_metadata.json` | Bowtie2 and mlvamaps versions, resolved parameters, database source, and insert-size estimate. |
 | `filtered_reads_1.fastq.gz`, `filtered_reads_2.fastq.gz` | Quality-filtered mates, written with fast gzip compression for downstream native recruitment. |
 | `filtered_orphan_reads.fastq.gz` | Retained single mates whose partner failed QC; empty when no orphans are present. |
 | `sample_summary.tsv` | One normalized sample row for batch aggregation. |
