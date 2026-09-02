@@ -8,19 +8,6 @@ The main outputs are an MLVA fingerprint, per-locus calls and evidence, and a
 self-contained HTML report. Optional reference databases add sequence-aware
 matching and phylogenetic placement.
 
-There are three analysis paths. Assemblies retain the in-silico PCR caller;
-accurate long reads are analyzed molecule-by-molecule; paired Illumina reads use
-one Bowtie2 competitive alignment against compact MLVA locus contexts followed
-by conservative discrete repeat-count inference. Illumina calling performs no
-de novo assembly. Each input mode has one supported algorithm so results do not
-depend on selecting a historical implementation.
-
-Mapping calls combine flank anchoring, junction/full-span reads, paired-fragment
-geometry, CIGAR indels, MAPQ, alignment score, and context consistency. Loci can
-be `called`, `detected_unresolved`, `low_coverage`, `ambiguous`, `no_evidence`,
-or `mapping_conflict`; unresolved loci remain missing in fingerprints and never
-abort a sample. Partial profiles are expected for low-abundance metagenomes.
-
 ## Install
 
 ### Conda/Miniforge (recommended)
@@ -51,12 +38,7 @@ conda activate mlvamaps
 ```
 
 > **Bioconda status:** the `mlvamaps` recipe is staged in
-> [`packaging/bioconda/meta.yaml`](packaging/bioconda/meta.yaml). Its native
-> dependencies, including the `sassy` command-line tool, are available from
-> Bioconda. See the [Bioconda release checklist](packaging/bioconda/README.md).
-
-When Sassy is installed outside the active environment, set `SASSY_BIN` to its
-executable path.
+> [`packaging/bioconda/meta.yaml`](packaging/bioconda/meta.yaml). 
 
 ## Run your first sample
 
