@@ -7,22 +7,34 @@ annotated taxa. No calibration artifact or requested target is needed. Use
 `--taxon-identification` to require metadata and fail clearly when it is absent.
 
 For loci recovered in the query and represented in every candidate taxon,
-mlvamaps reuses `locus_marker_distances.tsv`: normalized SNP distance plus
-normalized VNTR distance, with the existing `--phylogeny-*-weight` values. It
-averages this distance across informative loci for each reference, then averages
-the nearest `--taxon-k` references (default 3) in each taxon. The transparent
-display score is:
+mlvamaps reuses `locus_marker_distances.tsv`. At reference-build time it writes
+`database/taxon_locus_discrimination.tsv`. Each locus weight is normalized
+mutual information between its repeat/SNP marker signature and taxon label,
+multiplied by reference coverage and the fraction of signatures observed more
+than once. Thus shared markers receive zero or little weight and singleton
+isolate signatures are discounted.
+
+Runtime taxon distance is the weighted mean over recovered discriminatory loci,
+followed by the mean of the nearest `--taxon-k` complete references (default 3).
+The transparent display similarity is:
 
 ```text
 taxon_score = locus_recovery_fraction / (1 + taxon_distance)
 ```
 
-Missing loci reduce recovery but are never interpreted as taxon absence. A call
-is `INSUFFICIENT_EVIDENCE` below the locus count/fraction thresholds,
-`AMBIGUOUS` for a single-taxon panel or a best/second relative distance margin
-below `--taxon-minimum-margin` (default 0.1), and otherwise `SUPPORTED`.
-Outputs are `phylogeny/taxonomic_identification.tsv` and
-`phylogeny/taxonomic_identification_evidence.tsv`.
+The similarity is not a probability. Species assignment additionally requires
+compatible distance, enough discriminatory loci, runner-up separation,
+non-conflicting evidence, and configured bootstrap stability. FASTQ/Illumina
+calls require 90% locus recovery, three discriminatory loci, and 1.5 times the
+assembly margin. Missing loci are never interpreted as taxon absence.
+
+When species criteria fail, metadata columns `species_group`/`taxon_group`/`group`,
+`genus`, `family`, `order`, `class`, and `phylum` are considered in that order.
+The most specific value shared by the closest competitors is reported; otherwise
+the assignment is unresolved.
+
+Outputs are summary, candidate, and locus-evidence TSVs plus
+`phylogeny/taxonomic_identification.json`.
 
 ## Optional calibrated target validation
 
@@ -133,8 +145,9 @@ Important optional controls:
 - `--taxon-alpha`: override conformal prediction-set alpha.
 - `--taxon-min-loci`: override the artifact's minimum callable loci.
 - `--taxon-min-locus-fraction`: required callable panel fraction.
-- `--taxon-bootstrap-replicates`: deterministic locus bootstrap count.
-- `--taxon-min-bootstrap-support`: target support required for `POSITIVE`.
+- `--taxon-bootstrap-replicates`: deterministic locus bootstrap count (default 200).
+- `--taxon-min-bootstrap-support`: winner support required for an automatic
+  species assignment and target support required for `POSITIVE` (default 0.90).
 - `--taxon-max-placement-entropy`: optional EPA-ng uncertainty ceiling.
 - `--taxon-min-placement-lwr`: optional median best-placement LWR floor.
 

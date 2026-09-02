@@ -1217,8 +1217,8 @@ def run_short_read_call(
     taxon_alpha: float | None = None,
     taxon_min_loci: int | None = None,
     taxon_min_locus_fraction: float = 0.8,
-    taxon_bootstrap_replicates: int = 2000,
-    taxon_min_bootstrap_support: float = 0.95,
+    taxon_bootstrap_replicates: int = 200,
+    taxon_min_bootstrap_support: float = 0.9,
     taxon_max_mean_placement_entropy: float | None = None,
     taxon_min_median_placement_lwr: float | None = None,
     taxon_identification: bool | None = None,
@@ -1509,6 +1509,15 @@ def run_short_read_call(
             taxon_identification=taxon_identification,
             taxon_k=taxon_k,
             taxon_minimum_margin=taxon_minimum_margin,
+            input_mode="illumina",
+            locus_quality={
+                str(row.get("locus_id", "")): {
+                    "depth": row.get("primary_read_depth", row.get("read_depth", "")),
+                    "consensus_strength": row.get("allele_confidence", ""),
+                    "status": row.get("status", ""),
+                }
+                for row in call_rows
+            },
         )
         phylogenetic_rows = read_profiles(
             phylogeny_paths["combined_marker_matches"]

@@ -362,7 +362,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.set_defaults(taxon_identification=None)
     call.add_argument("--taxon-k", type=_positive_int, default=3, help=argparse.SUPPRESS)
-    call.add_argument("--taxon-minimum-margin", type=_fraction, default=0.1, help=argparse.SUPPRESS)
+    call.add_argument(
+        "--taxon-minimum-margin",
+        type=_fraction,
+        default=0.1,
+        help="Minimum assembly best-versus-runner-up relative taxon distance margin; FASTQ requires 1.5x this value (default: %(default)s)",
+    )
     call.add_argument(
         "--reference-metadata",
         help="TSV/CSV with reference_id and optional date, coordinates, location, and source",
@@ -646,14 +651,14 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument(
         "--taxon-bootstrap-replicates",
         type=_positive_int,
-        default=2000,
-        help=argparse.SUPPRESS,
+        default=200,
+        help="Deterministic informative-locus bootstrap replicates for taxon stability (default: %(default)s)",
     )
     call.add_argument(
         "--taxon-min-bootstrap-support",
         type=_fraction,
-        default=0.95,
-        help=argparse.SUPPRESS,
+        default=0.9,
+        help="Minimum bootstrap winner fraction for species assignment (default: %(default)s)",
     )
     call.add_argument(
         "--taxon-max-placement-entropy",
@@ -1441,6 +1446,9 @@ def _run_short_batch(
         "taxon_assignment": "taxon_assignment.tsv",
         "taxon_assignment_candidates": "taxon_assignment_candidates.tsv",
         "taxon_assignment_loci": "taxon_assignment_loci.tsv",
+        "taxonomic_identification": "taxonomic_identification.tsv",
+        "taxonomic_identification_evidence": "taxonomic_identification_evidence.tsv",
+        "taxonomic_identification_loci": "taxonomic_identification_loci.tsv",
     }
     for key, filename in table_keys.items():
         _combine_tables([result[key] for result in results if key in result], output_root / filename)

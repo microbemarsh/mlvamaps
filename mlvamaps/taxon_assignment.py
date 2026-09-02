@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import math
 import random
 import statistics
@@ -12,6 +13,17 @@ from typing import Iterable, Mapping, Sequence
 
 CALIBRATION_SCHEMA_VERSION = "1.0"
 CHANNELS = ("repeat", "snp", "joint")
+LOGGER = logging.getLogger(__name__)
+
+TAXON_LOCUS_DISCRIMINATION_FIELDS = [
+    "locus_id",
+    "taxonomic_weight",
+    "normalized_information_gain",
+    "reference_coverage",
+    "references_compared",
+    "taxa_compared",
+    "marker_signatures",
+]
 
 TAXON_ASSIGNMENT_FIELDS = [
     "sample_id",
@@ -105,6 +117,27 @@ TAXONOMIC_SUMMARY_FIELDS = [
     "locus_recovery_fraction",
     "taxonomic_status",
     "status_reason",
+    "assignment",
+    "assignment_taxon_id",
+    "assignment_rank",
+    "assignment_status",
+    "confidence",
+    "closest_taxon",
+    "closest_taxon_id",
+    "closest_distance",
+    "runner_up_taxon",
+    "runner_up_taxon_id",
+    "runner_up_distance",
+    "distance_margin",
+    "relative_margin",
+    "loci_recovered",
+    "informative_loci_recovered",
+    "discriminative_loci_recovered",
+    "loci_supporting_assignment",
+    "conflicting_loci",
+    "bootstrap_support",
+    "bootstrap_replicates",
+    "input_mode",
 ]
 
 TAXONOMIC_EVIDENCE_FIELDS = [
@@ -118,6 +151,26 @@ TAXONOMIC_EVIDENCE_FIELDS = [
     "informative_loci",
     "locus_recovery_fraction",
     "is_best_taxon",
+    "compatibility",
+    "bootstrap_win_fraction",
+]
+
+TAXONOMIC_LOCUS_EVIDENCE_FIELDS = [
+    "sample_id",
+    "locus_id",
+    "recovered",
+    "taxonomic_weight",
+    "discriminative",
+    "favored_taxon_id",
+    "favored_taxon",
+    "closest_taxon_distance",
+    "runner_up_distance",
+    "distance_margin",
+    "supports_assignment",
+    "conflicts_with_assignment",
+    "depth",
+    "consensus_strength",
+    "quality_status",
 ]
 
 
@@ -245,6 +298,7 @@ class TaxonAssignment:
 class AutomaticTaxonAssignment:
     summary: dict
     evidence: tuple[dict, ...]
+    loci: tuple[dict, ...] = ()
 
 
 def _finite(value: object) -> float | None:
@@ -317,6 +371,101 @@ def _reference_taxa(
     return reference_taxon, taxon_names
 
 
+def _marker_signature(row: Mapping) -> tuple[str, str] | None:
+    """Return the stable repeat/SNP signature stored in the reference index."""
+    repeat = str(row.get("repeat_count", "")).strip()
+    snp = str(row.get("snp_sha256", "")).strip()
+    if not repeat and not snp:
+        return None
+    return repeat, snp
+
+
+def derive_locus_discrimination_weights(
+    reference_index_rows: Iterable[Mapping],
+    reference_metadata: Mapping[str, Mapping[str, str]],
+) -> list[dict]:
+    """Derive deterministic, explainable taxonomic information weights.
+
+    The weight is normalized mutual information between a locus marker signature
+    (repeat count plus repeat-masked SNP digest) and taxon label, multiplied by
+    reference coverage.  It is zero for a marker shared identically among taxa
+    and approaches one when signatures uniquely identify represented taxa.
+    """
+    reference_taxon, _names = _reference_taxa(reference_metadata)
+    labeled_references = set(reference_taxon)
+    by_locus: dict[str, list[tuple[str, tuple[str, str]]]] = {}
+    for row in reference_index_rows:
+        reference_id = str(row.get("reference_id", "")).strip()
+        locus_id = str(row.get("locus_id", "")).strip()
+        signature = _marker_signature(row)
+        if reference_id in reference_taxon and locus_id and signature is not None:
+            by_locus.setdefault(locus_id, []).append(
+                (reference_taxon[reference_id], signature)
+            )
+    results = []
+    for locus_id in sorted(by_locus):
+        observations = by_locus[locus_id]
+        total = len(observations)
+        taxon_counts: dict[str, int] = {}
+        signature_counts: dict[tuple[str, str], int] = {}
+        joint_counts: dict[tuple[str, tuple[str, str]], int] = {}
+        for taxon_id, signature in observations:
+            taxon_counts[taxon_id] = taxon_counts.get(taxon_id, 0) + 1
+            signature_counts[signature] = signature_counts.get(signature, 0) + 1
+            key = (taxon_id, signature)
+            joint_counts[key] = joint_counts.get(key, 0) + 1
+        taxon_entropy = -sum(
+            (count / total) * math.log(count / total, 2)
+            for count in taxon_counts.values()
+        )
+        mutual_information = sum(
+            (count / total)
+            * math.log(
+                (count * total)
+                / (taxon_counts[taxon_id] * signature_counts[signature]),
+                2,
+            )
+            for (taxon_id, signature), count in joint_counts.items()
+        )
+        information_gain = (
+            mutual_information / taxon_entropy if taxon_entropy > 0 else 0.0
+        )
+        coverage = total / len(labeled_references) if labeled_references else 0.0
+        # Singleton signatures cannot demonstrate a reproducible taxon pattern;
+        # discount them rather than overfitting isolate-specific SNP hashes.
+        replicated_fraction = sum(
+            count for count in signature_counts.values() if count >= 2
+        ) / total
+        results.append(
+            {
+                "locus_id": locus_id,
+                "taxonomic_weight": max(
+                    0.0, min(1.0, information_gain * coverage * replicated_fraction)
+                ),
+                "normalized_information_gain": information_gain,
+                "reference_coverage": coverage,
+                "references_compared": total,
+                "taxa_compared": len(taxon_counts),
+                "marker_signatures": len(signature_counts),
+            }
+        )
+    return results
+
+
+def read_locus_discrimination_weights(
+    path: str | Path | None,
+) -> dict[str, float]:
+    if path is None or not Path(path).is_file():
+        return {}
+    with Path(path).open(newline="") as handle:
+        rows = csv.DictReader(handle, delimiter="\t")
+        return {
+            str(row.get("locus_id", "")): float(row.get("taxonomic_weight", 0) or 0)
+            for row in rows
+            if str(row.get("locus_id", ""))
+        }
+
+
 def _locus_reference_values(
     locus_marker_rows: Iterable[Mapping],
     reference_taxon: Mapping[str, str],
@@ -358,8 +507,10 @@ def _aggregate_taxon_distances(
     selected_loci: Sequence[str],
     taxa: Sequence[str],
     k: int,
+    locus_weights: Mapping[str, float] | None = None,
 ) -> tuple[dict[str, dict[str, float | None]], dict[str, set[str]]]:
     """Aggregate each reference across loci, then average the k nearest."""
+    weights = locus_weights or {locus_id: 1.0 for locus_id in selected_loci}
     distances: dict[str, dict[str, float | None]] = {
         taxon_id: {channel: None for channel in CHANNELS} for taxon_id in taxa
     }
@@ -377,9 +528,23 @@ def _aggregate_taxon_distances(
                     by_reference.setdefault(reference_id, []).append(value)
             complete = sorted(
                 (
-                    (sum(values) / len(values), reference_id)
+                    (
+                        sum(
+                            value * max(0.0, float(weights.get(locus_id, 1.0)))
+                            for locus_id, value in zip(selected_loci, values)
+                        )
+                        / sum(
+                            max(0.0, float(weights.get(locus_id, 1.0)))
+                            for locus_id in selected_loci
+                        ),
+                        reference_id,
+                    )
                     for reference_id, values in by_reference.items()
                     if len(values) == len(selected_loci)
+                    and sum(
+                        max(0.0, float(weights.get(locus_id, 1.0)))
+                        for locus_id in selected_loci
+                    ) > 0
                 ),
                 key=lambda item: (item[0], item[1]),
             )
@@ -394,6 +559,72 @@ def _aggregate_taxon_distances(
     return distances, nearest
 
 
+_BACKOFF_RANKS = (
+    ("species_group", ("species_group", "taxon_group", "group")),
+    ("genus", ("genus",)),
+    ("family", ("family",)),
+    ("order", ("order",)),
+    ("class", ("class", "taxonomic_class")),
+    ("phylum", ("phylum",)),
+)
+
+
+def _taxon_hierarchy(
+    metadata: Mapping[str, Mapping[str, str]], reference_taxon: Mapping[str, str]
+) -> dict[str, dict[str, str]]:
+    hierarchy: dict[str, dict[str, str]] = {}
+    for reference_id, taxon_id in reference_taxon.items():
+        row = metadata[reference_id]
+        values = hierarchy.setdefault(taxon_id, {})
+        for rank, aliases in _BACKOFF_RANKS:
+            value = next((str(row.get(alias, "")).strip() for alias in aliases if str(row.get(alias, "")).strip()), "")
+            if value:
+                previous = values.get(rank)
+                if previous and previous != value:
+                    values.pop(rank, None)
+                elif rank not in values:
+                    values[rank] = value
+        if "genus" not in values:
+            scientific_name = str(
+                row.get("species")
+                or row.get("organism_name")
+                or row.get("scientific_name")
+                or row.get("taxon_name")
+                or ""
+            ).strip()
+            words = scientific_name.split()
+            if len(words) >= 2 and words[0][0:1].isupper():
+                values["genus"] = words[0]
+    return hierarchy
+
+
+def _shared_backoff(
+    taxon_ids: Sequence[str], hierarchy: Mapping[str, Mapping[str, str]]
+) -> tuple[str, str]:
+    for rank, _aliases in _BACKOFF_RANKS:
+        values = {hierarchy.get(taxon_id, {}).get(rank, "") for taxon_id in taxon_ids}
+        if len(values) == 1 and "" not in values:
+            return next(iter(values)), rank
+    return "Unresolved", "unresolved"
+
+
+def _locus_taxon_distances(
+    values: Mapping[str, Mapping[str, Mapping[str, Mapping[str, float]]]],
+    loci: Sequence[str],
+    taxa: Sequence[str],
+    k: int,
+) -> dict[str, dict[str, float]]:
+    result: dict[str, dict[str, float]] = {}
+    for locus_id in loci:
+        for taxon_id in taxa:
+            distance = _mean_k_smallest(
+                values.get(locus_id, {}).get(taxon_id, {}).get("joint", {}).values(), k
+            )
+            if distance is not None:
+                result.setdefault(locus_id, {})[taxon_id] = distance
+    return result
+
+
 def assign_best_taxon(
     *,
     sample_id: str,
@@ -406,6 +637,14 @@ def assign_best_taxon(
     minimum_loci: int = 3,
     minimum_locus_fraction: float = 0.8,
     minimum_relative_margin: float = 0.1,
+    locus_weights: Mapping[str, float] | None = None,
+    input_mode: str = "assembly",
+    bootstrap_replicates: int = 200,
+    minimum_bootstrap_support: float = 0.9,
+    minimum_discriminative_loci: int = 2,
+    maximum_compatible_distance: float = 1.0,
+    locus_quality: Mapping[str, Mapping[str, object]] | None = None,
+    seed: int = 0,
 ) -> AutomaticTaxonAssignment:
     """Select the nearest annotated taxon using existing MLVA marker distances.
 
@@ -446,6 +685,8 @@ def assign_best_taxon(
             "Taxonomic metadata is missing for compared references: "
             + ", ".join(missing_metadata[:10])
         )
+    if input_mode not in {"assembly", "fastq", "illumina"}:
+        raise ValueError("input_mode must be assembly, fastq, or illumina")
     values = _locus_reference_values(
         marker_rows, reference_taxon, snp_weight, repeat_weight
     )
@@ -454,8 +695,17 @@ def assign_best_taxon(
         for locus_id, by_taxon in values.items()
         if all(bool(by_taxon.get(taxon_id, {}).get("joint")) for taxon_id in taxa)
     )
-    recovery = min(1.0, len(informative) / expected_loci)
-    distances, nearest = _aggregate_taxon_distances(values, informative, taxa, k)
+    recovery = min(1.0, len(informative) / expected_loci) if expected_loci else 0.0
+    supplied_weights = locus_weights is not None
+    weights = {
+        locus_id: max(0.0, float((locus_weights or {}).get(locus_id, 1.0)))
+        for locus_id in informative
+    }
+    discriminative = [locus_id for locus_id in informative if weights[locus_id] >= 0.05]
+    scoring_loci = discriminative if discriminative else ([] if supplied_weights else informative)
+    distances, nearest = _aggregate_taxon_distances(
+        values, scoring_loci, taxa, k, weights
+    )
     ranked = sorted(
         (
             (float(channels["joint"]), taxon_id)
@@ -464,6 +714,25 @@ def assign_best_taxon(
         ),
         key=lambda item: (item[0], item[1]),
     )
+    per_locus = _locus_taxon_distances(values, informative, taxa, k)
+    bootstrap_wins = {taxon_id: 0 for taxon_id in taxa}
+    valid_bootstraps = 0
+    if scoring_loci and bootstrap_replicates > 0:
+        rng = random.Random(seed)
+        for _replicate in range(bootstrap_replicates):
+            selected = [rng.choice(scoring_loci) for _ in scoring_loci]
+            replicate_distances, _ = _aggregate_taxon_distances(
+                values, selected, taxa, k, weights
+            )
+            ordered = sorted(
+                (float(channels["joint"]), taxon_id)
+                for taxon_id, channels in replicate_distances.items()
+                if channels["joint"] is not None
+            )
+            if not ordered:
+                continue
+            valid_bootstraps += 1
+            bootstrap_wins[ordered[0][1]] += 1
     evidence = []
     for rank, (distance, taxon_id) in enumerate(ranked, start=1):
         evidence.append(
@@ -478,26 +747,113 @@ def assign_best_taxon(
                 "informative_loci": len(informative),
                 "locus_recovery_fraction": recovery,
                 "is_best_taxon": "yes" if rank == 1 else "no",
+                "compatibility": 1.0 / (1.0 + distance),
+                "bootstrap_win_fraction": (
+                    bootstrap_wins[taxon_id] / valid_bootstraps
+                    if valid_bootstraps else ""
+                ),
             }
         )
 
     required_loci = min(expected_loci, minimum_loci)
-    if len(informative) < required_loci or recovery < minimum_locus_fraction:
+    fastq_mode = input_mode in {"fastq", "illumina"}
+    required_fraction = max(minimum_locus_fraction, 0.9) if fastq_mode else minimum_locus_fraction
+    required_margin = minimum_relative_margin * (1.5 if fastq_mode else 1.0)
+    required_discriminative = max(minimum_discriminative_loci, 3 if fastq_mode else 2)
+    best_distance = ranked[0][0] if ranked else None
+    second_distance = ranked[1][0] if len(ranked) > 1 else None
+    absolute_margin = (
+        second_distance - best_distance
+        if best_distance is not None and second_distance is not None else None
+    )
+    relative_margin = (
+        absolute_margin / max(second_distance, 1e-12)
+        if absolute_margin is not None and second_distance is not None else None
+    )
+    best_taxon_id = ranked[0][1] if ranked else ""
+    bootstrap_support = (
+        bootstrap_wins.get(best_taxon_id, 0) / valid_bootstraps
+        if valid_bootstraps else None
+    )
+    locus_rows = []
+    supporting = conflicting = 0
+    for locus_id in sorted(set(values) | set((locus_quality or {}))):
+        ordered = sorted((distance, taxon_id) for taxon_id, distance in per_locus.get(locus_id, {}).items())
+        favored_id = (
+            ordered[0][1]
+            if ordered and not (
+                len(ordered) > 1
+                and math.isclose(ordered[0][0], ordered[1][0], rel_tol=1e-12, abs_tol=1e-12)
+            )
+            else ""
+        )
+        supports = bool(best_taxon_id and favored_id == best_taxon_id)
+        conflicts = bool(best_taxon_id and favored_id and favored_id != best_taxon_id)
+        if weights.get(locus_id, 0.0) >= 0.05:
+            supporting += int(supports)
+            conflicting += int(conflicts)
+        quality = dict((locus_quality or {}).get(locus_id, {}))
+        locus_rows.append({
+            "sample_id": sample_id,
+            "locus_id": locus_id,
+            "recovered": "yes" if locus_id in informative else "no",
+            "taxonomic_weight": weights.get(locus_id, 0.0),
+            "discriminative": "yes" if weights.get(locus_id, 0.0) >= 0.05 else "no",
+            "favored_taxon_id": favored_id,
+            "favored_taxon": taxon_names.get(favored_id, favored_id),
+            "closest_taxon_distance": ordered[0][0] if ordered else "",
+            "runner_up_distance": ordered[1][0] if len(ordered) > 1 else "",
+            "distance_margin": ordered[1][0] - ordered[0][0] if len(ordered) > 1 else "",
+            "supports_assignment": "yes" if supports else "no",
+            "conflicts_with_assignment": "yes" if conflicts else "no",
+            "depth": quality.get("depth", ""),
+            "consensus_strength": quality.get("consensus_strength", ""),
+            "quality_status": quality.get("status", ""),
+        })
+
+    low_quality_discriminative = sum(
+        1
+        for locus_id in discriminative
+        if str((locus_quality or {}).get(locus_id, {}).get("status", "")).upper()
+        not in {"", "PASS", "PRESENT", "INCLUDED"}
+        or (
+            _finite((locus_quality or {}).get(locus_id, {}).get("consensus_strength"))
+            is not None
+            and float((locus_quality or {})[locus_id]["consensus_strength"]) < 0.75
+        )
+    )
+    if len(informative) < required_loci or recovery < required_fraction:
         status = "INSUFFICIENT_EVIDENCE"
         reason = "INSUFFICIENT_INFORMATIVE_LOCI"
+    elif len(discriminative) < required_discriminative:
+        status = "AMBIGUOUS"
+        reason = "INSUFFICIENT_DISCRIMINATIVE_LOCI"
     elif len(taxa) == 1:
         status = "AMBIGUOUS"
         reason = "NO_ALTERNATIVE_TAXON_IN_REFERENCE_PANEL"
     elif len(ranked) < 2:
         status = "INSUFFICIENT_EVIDENCE"
         reason = "FEWER_THAN_TWO_COMPARABLE_TAXA"
+    elif fastq_mode and low_quality_discriminative > max(0, len(discriminative) // 4):
+        status = "AMBIGUOUS"
+        reason = "FASTQ_LOCUS_QUALITY_INSUFFICIENT"
     else:
-        best_distance, _best_taxon = ranked[0]
-        second_distance, _second_taxon = ranked[1]
-        relative_margin = (second_distance - best_distance) / max(second_distance, 1e-12)
-        if relative_margin + 1e-12 < minimum_relative_margin:
+        assert best_distance is not None and relative_margin is not None
+        if best_distance > maximum_compatible_distance:
+            status = "INSUFFICIENT_EVIDENCE"
+            reason = "CLOSEST_TAXON_NOT_COMPATIBLE"
+        elif relative_margin + 1e-12 < required_margin:
             status = "AMBIGUOUS"
             reason = "TAXON_DISTANCE_MARGIN_BELOW_THRESHOLD"
+        elif bootstrap_replicates > 0 and (
+            bootstrap_support is None
+            or bootstrap_support < minimum_bootstrap_support
+        ):
+            status = "AMBIGUOUS"
+            reason = "BOOTSTRAP_SUPPORT_BELOW_THRESHOLD"
+        elif conflicting > supporting:
+            status = "AMBIGUOUS"
+            reason = "CONFLICTING_LOCUS_EVIDENCE"
         else:
             status = "SUPPORTED"
             reason = "NEAREST_TAXON_SEPARATED"
@@ -506,6 +862,20 @@ def assign_best_taxon(
     second = evidence[1] if len(evidence) > 1 else {}
     best_score = _finite(best.get("score"))
     second_score = _finite(second.get("score"))
+    if status == "SUPPORTED":
+        assignment_name = str(best.get("species") or best.get("taxon_id", ""))
+        assignment_id = str(best.get("taxon_id", ""))
+        assignment_rank = "species"
+        assignment_status = "SPECIES_ASSIGNED"
+        confidence = "HIGH" if bootstrap_support is not None and bootstrap_support >= 0.95 and not conflicting else "MODERATE"
+    else:
+        contenders = [str(item.get("taxon_id", "")) for item in evidence[:2]]
+        assignment_name, assignment_rank = _shared_backoff(
+            contenders, _taxon_hierarchy(reference_metadata, reference_taxon)
+        )
+        assignment_id = ""
+        assignment_status = "SPECIES_UNRESOLVED" if assignment_rank != "unresolved" else "UNRESOLVED"
+        confidence = "LOW" if assignment_rank != "unresolved" else "UNRESOLVED"
     summary = {
         "sample_id": sample_id,
         "best_taxon": best.get("taxon_id", ""),
@@ -521,8 +891,35 @@ def assign_best_taxon(
         "locus_recovery_fraction": recovery,
         "taxonomic_status": status,
         "status_reason": reason,
+        "assignment": assignment_name,
+        "assignment_taxon_id": assignment_id,
+        "assignment_rank": assignment_rank,
+        "assignment_status": assignment_status,
+        "confidence": confidence,
+        "closest_taxon": best.get("species") or best.get("taxon_id", ""),
+        "closest_taxon_id": best.get("taxon_id", ""),
+        "closest_distance": "" if best_distance is None else best_distance,
+        "runner_up_taxon": second.get("species") or second.get("taxon_id", ""),
+        "runner_up_taxon_id": second.get("taxon_id", ""),
+        "runner_up_distance": "" if second_distance is None else second_distance,
+        "distance_margin": "" if absolute_margin is None else absolute_margin,
+        "relative_margin": "" if relative_margin is None else relative_margin,
+        "loci_recovered": len(informative),
+        "informative_loci_recovered": len(informative),
+        "discriminative_loci_recovered": len(discriminative),
+        "loci_supporting_assignment": supporting,
+        "conflicting_loci": conflicting,
+        "bootstrap_support": "" if bootstrap_support is None else bootstrap_support,
+        "bootstrap_replicates": valid_bootstraps,
+        "input_mode": input_mode,
     }
-    return AutomaticTaxonAssignment(summary, tuple(evidence))
+    LOGGER.debug(
+        "Taxon candidates=%s winner=%s distance=%s runner_up=%s margin=%s bootstrap=%s support_loci=%s conflicts=%s status=%s backoff=%s",
+        [(row["taxon_id"], row["distance"]) for row in evidence], best_taxon_id,
+        best_distance, second.get("taxon_id", ""), relative_margin, bootstrap_support,
+        supporting, conflicting, status, assignment_rank,
+    )
+    return AutomaticTaxonAssignment(summary, tuple(evidence), tuple(locus_rows))
 
 
 def _aggregate_bootstrap_joint_distances(

@@ -62,7 +62,8 @@ files. Directory discovery is non-recursive, and each file is written beneath
 Taxonomic identification runs automatically when `--database` resolves to
 metadata containing `taxon_id`. `--taxon-k` (default 3) controls the nearest
 references averaged per taxon, `--taxon-minimum-margin` (default 0.1) controls
-best/second separation, and `--no-taxon-identification` disables it. The
+best/second separation (FASTQ requires 1.5 times this margin), and
+`--no-taxon-identification` disables it. The
 existing locus count and fraction options gate insufficient evidence.
 
 The following target-specific conformal mode is retained as an advanced,
@@ -79,8 +80,8 @@ near-neighbor references with `taxon_id`.
 | `--taxon-alpha` | Artifact value | Prediction-set significance level. |
 | `--taxon-min-loci` | Artifact value | Minimum callable loci. |
 | `--taxon-min-locus-fraction` | `0.8` | Minimum panel fraction callable against every candidate taxon. |
-| `--taxon-bootstrap-replicates` | `2000` | Deterministic locus bootstrap replicates. |
-| `--taxon-min-bootstrap-support` | `0.95` | Target-favoring fraction required for `POSITIVE`. |
+| `--taxon-bootstrap-replicates` | `200` | Deterministic informative-locus bootstrap replicates. |
+| `--taxon-min-bootstrap-support` | `0.90` | Winner fraction required for automatic species assignment and target-favoring fraction required for `POSITIVE`. |
 | `--taxon-max-placement-entropy` | None | Optional maximum mean EPA-ng placement entropy. |
 | `--taxon-min-placement-lwr` | None | Optional minimum median best-placement LWR. |
 

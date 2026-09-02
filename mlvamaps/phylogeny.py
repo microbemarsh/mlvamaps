@@ -21,12 +21,16 @@ from .io import gzip_output_file
 from .models import Locus, RepeatFeature
 from .progress import ProgressReporter
 from .taxon_assignment import (
+    TAXONOMIC_LOCUS_EVIDENCE_FIELDS,
     TAXONOMIC_EVIDENCE_FIELDS,
     TAXONOMIC_SUMMARY_FIELDS,
+    TAXON_LOCUS_DISCRIMINATION_FIELDS,
     TAXON_ASSIGNMENT_FIELDS,
     TAXON_CANDIDATE_FIELDS,
     TAXON_LOCUS_FIELDS,
     TaxonCalibration,
+    derive_locus_discrimination_weights,
+    read_locus_discrimination_weights,
     _finite,
     _reference_taxa,
     assign_best_taxon,
@@ -1866,6 +1870,9 @@ def _add_taxon_assignment_outputs(
     taxon_identification: bool | None = None,
     identification_k: int = 3,
     identification_minimum_margin: float = 0.1,
+    input_mode: str = "assembly",
+    locus_quality: dict[str, dict[str, object]] | None = None,
+    locus_weights: dict[str, float] | None = None,
 ) -> dict[str, Path]:
     reference_taxa, _taxon_names = _reference_taxa(reference_metadata)
     automatic_enabled = taxon_identification is not False and bool(reference_taxa)
@@ -1881,16 +1888,39 @@ def _add_taxon_assignment_outputs(
             minimum_loci=min_loci or 3,
             minimum_locus_fraction=min_locus_fraction,
             minimum_relative_margin=identification_minimum_margin,
+            locus_weights=locus_weights,
+            input_mode=input_mode,
+            bootstrap_replicates=bootstrap_replicates,
+            minimum_bootstrap_support=min_bootstrap_support,
+            locus_quality=locus_quality,
         )
         output = paths["phylogeny"]
         summary_path = output / "taxonomic_identification.tsv"
         evidence_path = output / "taxonomic_identification_evidence.tsv"
+        loci_evidence_path = output / "taxonomic_identification_loci.tsv"
+        json_path = output / "taxonomic_identification.json"
         _write_tsv([assignment.summary], summary_path, TAXONOMIC_SUMMARY_FIELDS)
         _write_tsv(list(assignment.evidence), evidence_path, TAXONOMIC_EVIDENCE_FIELDS)
+        _write_tsv(list(assignment.loci), loci_evidence_path, TAXONOMIC_LOCUS_EVIDENCE_FIELDS)
+        json_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "2.0",
+                    **assignment.summary,
+                    "candidates": list(assignment.evidence),
+                    "loci": list(assignment.loci),
+                },
+                indent=2,
+                sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
         paths = {
             **paths,
             "taxonomic_identification": summary_path,
             "taxonomic_identification_evidence": evidence_path,
+            "taxonomic_identification_loci": loci_evidence_path,
+            "taxonomic_identification_json": json_path,
         }
     if target_taxon_id is None and calibration_path is None:
         return paths
@@ -1980,13 +2010,15 @@ def run_phylogenetic_placement(
     taxon_alpha: float | None = None,
     taxon_min_loci: int | None = None,
     taxon_min_locus_fraction: float = 0.8,
-    taxon_bootstrap_replicates: int = 2000,
-    taxon_min_bootstrap_support: float = 0.95,
+    taxon_bootstrap_replicates: int = 200,
+    taxon_min_bootstrap_support: float = 0.9,
     taxon_max_mean_placement_entropy: float | None = None,
     taxon_min_median_placement_lwr: float | None = None,
     taxon_identification: bool | None = None,
     taxon_k: int = 3,
     taxon_minimum_margin: float = 0.1,
+    input_mode: str = "assembly",
+    locus_quality: dict[str, dict[str, object]] | None = None,
 ) -> dict[str, Path]:
     if snp_weight < 0 or repeat_weight < 0 or snp_weight + repeat_weight <= 0:
         raise ValueError("SNP and repeat weights must be non-negative with a positive total")
@@ -2005,6 +2037,10 @@ def run_phylogenetic_placement(
         if automatic_metadata.exists():
             reference_metadata_path = automatic_metadata
     reference_metadata = read_reference_metadata(reference_metadata_path)
+    locus_weights = read_locus_discrimination_weights(
+        sequence_database_path / "taxon_locus_discrimination.tsv"
+        if sequence_database_path.is_dir() else None
+    )
     if taxon_identification is True and not _reference_taxa(reference_metadata)[0]:
         raise ValueError(
             "--taxon-identification requires reference metadata with taxon_id "
@@ -2115,6 +2151,9 @@ def run_phylogenetic_placement(
                 taxon_identification=taxon_identification,
                 identification_k=taxon_k,
                 identification_minimum_margin=taxon_minimum_margin,
+                input_mode=input_mode,
+                locus_quality=locus_quality,
+                locus_weights=locus_weights or None,
             )
     if references is None:
         references = read_sequence_database(sequence_database_path, requested_locus_ids)
@@ -2943,6 +2982,9 @@ def run_phylogenetic_placement(
         taxon_identification=taxon_identification,
         identification_k=taxon_k,
         identification_minimum_margin=taxon_minimum_margin,
+        input_mode=input_mode,
+        locus_quality=locus_quality,
+        locus_weights=locus_weights or None,
     )
 
 
@@ -2981,6 +3023,17 @@ def build_reference_phylogenies(
         sequence_index_path,
         REFERENCE_SEQUENCE_INDEX_FIELDS,
     )
+    metadata_path = database / "reference_metadata.tsv" if database.is_dir() else None
+    weights_path: Path | None = None
+    if metadata_path is not None and metadata_path.is_file():
+        index_rows = _read_reference_sequence_index(sequence_index_path)
+        metadata = read_reference_metadata(metadata_path)
+        weights_path = database / "taxon_locus_discrimination.tsv"
+        _write_tsv(
+            derive_locus_discrimination_weights(index_rows, metadata),
+            weights_path,
+            TAXON_LOCUS_DISCRIMINATION_FIELDS,
+        )
     mafft = check_mafft(mafft_bin)
     raxml_ng = check_raxml_ng(raxml_ng_bin)
     status_rows: list[dict] = []
@@ -3100,13 +3153,16 @@ def build_reference_phylogenies(
     for sequence_path in sequence_artifacts:
         if sequence_path.is_file():
             gzip_output_file(sequence_path)
-    return {
+    result = {
         "phylogeny": output,
         "tree_status": status_path,
         "marker_components": components_path,
         "sequence_index": sequence_index_path,
         "haplotype_groups": haplotypes_path,
     }
+    if weights_path is not None:
+        result["taxon_locus_discrimination"] = weights_path
+    return result
 
 
 def dominant_read_query_sequences(

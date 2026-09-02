@@ -38,12 +38,15 @@ def _automatic_taxon_identification_section(outdir: Path) -> str:
     if not rows:
         return ""
     row = rows[0]
-    status = str(row.get("taxonomic_status", "INSUFFICIENT_EVIDENCE"))
-    tone = "good" if status == "SUPPORTED" else "warn"
-    best_taxon = row.get("best_species") or row.get("best_taxon", "")
-
-    second_taxon = row.get("second_best_taxon", "")
+    status = str(row.get("assignment_status") or row.get("taxonomic_status", "INSUFFICIENT_EVIDENCE"))
+    confidence = str(row.get("confidence") or ("HIGH" if status == "SUPPORTED" else "UNRESOLVED"))
+    resolved = status in {"SUPPORTED", "SPECIES_ASSIGNED"}
+    tone = "good" if resolved else "warn"
+    assignment = row.get("assignment") or row.get("best_species") or row.get("best_taxon", "")
+    assignment_rank = row.get("assignment_rank") or ("species" if resolved else "unresolved")
+    second_taxon = row.get("runner_up_taxon") or row.get("second_best_taxon", "")
     evidence_path = outdir / "phylogeny" / "taxonomic_identification_evidence.tsv"
+    evidence_rows = []
     if evidence_path.is_file():
         with evidence_path.open(newline="") as handle:
             evidence_rows = list(csv.DictReader(handle, delimiter="\t"))
@@ -54,23 +57,60 @@ def _automatic_taxon_identification_section(outdir: Path) -> str:
         if second:
             second_taxon = second.get("species") or second.get("taxon_id", second_taxon)
 
-    finding_kind = "info" if status == "SUPPORTED" else "warn"
-    finding_title = (
-        "Taxon assignment supported"
-        if status == "SUPPORTED"
-        else "Taxon assignment is not definitive"
+    candidates_html = "".join(
+        "<tr>"
+        f"<td>{_safe(candidate.get('rank', ''))}</td>"
+        f"<td>{_safe(candidate.get('species') or candidate.get('taxon_id', ''))}</td>"
+        f"<td>{_safe(candidate.get('distance', ''))}</td>"
+        f"<td>{_safe(candidate.get('compatibility', ''))}</td>"
+        f"<td>{_safe(candidate.get('bootstrap_win_fraction', ''))}</td>"
+        "</tr>"
+        for candidate in evidence_rows[:5]
     )
+    loci_path = outdir / "phylogeny" / "taxonomic_identification_loci.tsv"
+    locus_rows = []
+    if loci_path.is_file():
+        with loci_path.open(newline="") as handle:
+            locus_rows = list(csv.DictReader(handle, delimiter="\t"))
+    loci_html = "".join(
+        "<tr>"
+        f"<td>{_safe(item.get('locus_id', ''))}</td>"
+        f"<td>{_safe(item.get('recovered', ''))}</td>"
+        f"<td>{_safe(item.get('taxonomic_weight', ''))}</td>"
+        f"<td>{_safe(item.get('favored_taxon', ''))}</td>"
+        f"<td>{_safe(item.get('depth', ''))}</td>"
+        f"<td>{_safe(item.get('consensus_strength', ''))}</td>"
+        f"<td>{'conflicts' if item.get('conflicts_with_assignment') == 'yes' else ('supports' if item.get('supports_assignment') == 'yes' else 'neutral')}</td>"
+        "</tr>" for item in locus_rows
+    )
+    explanation = ""
+    if not resolved:
+        explanation = (
+            "The recovered MLVA markers support multiple taxa or do not provide "
+            "enough stable discriminatory evidence for a species-level call."
+        )
     return f"""
-      <section class="report-section">
-        <h2>Automatic Taxonomic Identification</h2>
-        <p class="section-intro">The best-matching taxon is selected from the taxa represented in the reference database using combined repeat and repeat-masked sequence distances. The score is a similarity-and-locus-recovery measure, not a posterior probability or proof that the sample belongs to a represented taxon.</p>
+      <section class="report-section taxon-result {tone}" aria-label="Automatic Taxonomic Identification">
+        <h2>Taxonomic identification</h2>
+        <div class="taxon-call">{_safe(assignment or 'Unresolved')}</div>
+        <div class="taxon-badge {tone}">{_safe(confidence + ' CONFIDENCE' if resolved else status.replace('_', ' '))}</div>
+        {f'<p class="taxon-explanation">{_safe(explanation)}</p>' if explanation else ''}
         <div class="summary">
-          {_metric_card("Best-matching taxon", best_taxon or "Not resolved", f"taxon ID {row.get('best_taxon', '')}", tone)}
-          {_metric_card("Status", status, row.get("status_reason", ""), tone)}
-          {_metric_card("Taxon score", row.get("taxon_score", ""), f"runner-up: {second_taxon or 'not available'}")}
-          {_metric_card("Informative loci", row.get("informative_loci", ""), f"of {row.get('expected_loci', '')} expected; recovery {row.get('locus_recovery_fraction', '')}")}
+          {_metric_card("Rank", assignment_rank)}
+          {_metric_card("Loci recovered", f"{row.get('loci_recovered', row.get('informative_loci', ''))}/{row.get('expected_loci', '')}")}
+          {_metric_card("Discriminatory support", f"{row.get('loci_supporting_assignment', '')}/{row.get('discriminative_loci_recovered', '')}", f"{row.get('conflicting_loci', '') or 0} conflicting")}
+          {_metric_card("Runner-up", second_taxon or "Not available", f"relative margin {row.get('relative_margin', row.get('score_margin', ''))}")}
+          {_metric_card("Bootstrap support", row.get("bootstrap_support", "Not available"), "stability, not probability")}
         </div>
-        {_finding(finding_kind, finding_title, row.get("status_reason", ""))}
+        {'' if resolved else _finding('warn', 'Species unresolved', f"Recommendation: interpret this sample at the {assignment_rank} level." if assignment_rank != 'unresolved' else 'No supported taxonomic rank is available.')}
+        <details><summary>Closest taxa</summary><div class="table-scroll"><table>
+          <thead><tr><th>Rank</th><th>Taxon</th><th>Distance</th><th>Similarity</th><th>Bootstrap wins</th></tr></thead>
+          <tbody>{candidates_html}</tbody></table></div></details>
+        {f'<details><summary>Locus-level taxonomic evidence</summary><div class="table-scroll"><table><thead><tr><th>Locus</th><th>Recovered</th><th>Weight</th><th>Favored taxon</th><th>Depth</th><th>Consensus</th><th>Interpretation</th></tr></thead><tbody>{loci_html}</tbody></table></div></details>' if locus_rows else ''}
+        <details><summary>How this assignment was calculated</summary>
+          <p class="section-intro">Distances use database-calibrated locus discrimination weights. A species call requires compatibility with the closest taxon, separation from alternatives, sufficient informative and discriminatory loci, and stable locus-bootstrap support. FASTQ inputs use stricter recovery and margin requirements. Each similarity is not a posterior probability, and bootstrap stability is not one either.</p>
+          <p class="terminal-note">Status: {_safe(status)}; decision: {_safe(row.get('status_reason', ''))}; input mode: {_safe(row.get('input_mode', ''))}; absolute margin: {_safe(row.get('distance_margin', ''))}.</p>
+        </details>
       </section>
 """
 
@@ -1341,6 +1381,14 @@ def write_report(
     details {{ border: 1px solid var(--line); border-radius: 6px; margin: 0.7rem 0; padding: 0.65rem 0.8rem; background: rgba(98, 255, 155, 0.035); }}
     summary {{ color: var(--cyan); cursor: pointer; font-weight: 700; }}
     .table-scroll {{ overflow-x: auto; }}
+    .taxon-result {{ padding: 1.1rem; margin: 1rem 0 1.5rem; border: 2px solid var(--line); border-radius: 8px; }}
+    .taxon-result.good {{ border-color: rgba(98,255,155,0.7); }}
+    .taxon-result.warn {{ border-color: rgba(255,200,87,0.8); background: rgba(255,200,87,0.04); }}
+    .taxon-call {{ font-size: clamp(1.7rem, 4vw, 2.7rem); font-weight: 800; color: #fff; margin: 0.3rem 0; }}
+    .taxon-badge {{ display: inline-block; padding: 0.3rem 0.65rem; border-radius: 999px; font-weight: 800; letter-spacing: 0.05em; }}
+    .taxon-badge.good {{ color: var(--green); border: 1px solid var(--green); }}
+    .taxon-badge.warn {{ color: var(--amber); border: 1px solid var(--amber); }}
+    .taxon-explanation {{ max-width: 70ch; }}
     @media (max-width: 700px) {{
       main {{ padding: 1rem; }}
       .finding {{ grid-template-columns: 1fr; gap: 0.2rem; }}
@@ -1358,6 +1406,7 @@ def write_report(
         {summary_html}
       </div>
       <div class="findings">{findings_html}</div>
+      {phylogenetic_section}
       <h2>Individual Locus Repeat Counts</h2>
       <div class="chart-scroll">{repeat_count_plot}</div>
       {short_read_section}
@@ -1369,7 +1418,6 @@ def write_report(
       <h2>Generated Gel</h2>
       {gel}
       {profile_section}
-      {phylogenetic_section}
       <h2>Detailed Evidence</h2>
       <p class="terminal-note">The plots above are the primary interpretation view. Expand a section below when exact values are needed.</p>
       <details>
@@ -1684,6 +1732,14 @@ def write_assembly_report(
     details {{ border: 1px solid var(--line); border-radius: 6px; margin: 0.7rem 0; padding: 0.65rem 0.8rem; background: rgba(98,255,155,0.035); }}
     summary {{ color: var(--cyan); cursor: pointer; font-weight: 700; }}
     .table-scroll {{ overflow-x: auto; }}
+    .taxon-result {{ padding: 1.1rem; margin: 1rem 0 1.5rem; border: 2px solid var(--line); border-radius: 8px; }}
+    .taxon-result.good {{ border-color: rgba(98,255,155,0.7); }}
+    .taxon-result.warn {{ border-color: rgba(255,200,87,0.8); background: rgba(255,200,87,0.04); }}
+    .taxon-call {{ font-size: clamp(1.7rem, 4vw, 2.7rem); font-weight: 800; color: #fff; margin: 0.3rem 0; }}
+    .taxon-badge {{ display: inline-block; padding: 0.3rem 0.65rem; border-radius: 999px; font-weight: 800; letter-spacing: 0.05em; }}
+    .taxon-badge.good {{ color: var(--green); border: 1px solid var(--green); }}
+    .taxon-badge.warn {{ color: var(--amber); border: 1px solid var(--amber); }}
+    .taxon-explanation {{ max-width: 70ch; }}
     @media (max-width: 700px) {{
       main {{ padding: 1rem; }}
       .finding {{ grid-template-columns: 1fr; gap: 0.2rem; }}
@@ -1700,12 +1756,12 @@ def write_assembly_report(
         {summary_html}
       </div>
       <div class="findings">{findings_html}</div>
+      {phylogenetic_section}
       <h2>Individual Locus Repeat Counts</h2>
       <div class="chart-scroll">{repeat_count_plot}</div>
       <h2>Generated Gel</h2>
       {gel}
       {profile_section}
-      {phylogenetic_section}
       <section class="report-section">
         <h2>Detailed Evidence</h2>
         <p class="section-intro">Expand these tables when exact product coordinates or alternative-call probabilities are needed.</p>

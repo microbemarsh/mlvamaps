@@ -13,6 +13,7 @@ from mlvamaps.taxon_assignment import (
     assign_best_taxon,
     build_taxon_calibration,
     conformal_p_value,
+    derive_locus_discrimination_weights,
     run_taxon_calibration,
 )
 
@@ -199,6 +200,65 @@ def test_automatic_identification_accepts_legacy_taxonomy_aliases():
         reference_metadata=metadata, expected_loci=3,
     )
     assert result.summary["best_species"] == "Target taxon"
+
+
+def test_discrimination_weights_ignore_shared_markers_and_weight_separating_markers():
+    metadata = _metadata()
+    rows = []
+    for reference_id in metadata:
+        taxon = metadata[reference_id]["taxon_id"]
+        rows.extend([
+            {"locus_id": "shared", "reference_id": reference_id, "repeat_count": "5", "snp_sha256": "same"},
+            {"locus_id": "separating", "reference_id": reference_id, "repeat_count": "5", "snp_sha256": taxon},
+        ])
+    weights = {row["locus_id"]: row["taxonomic_weight"] for row in derive_locus_discrimination_weights(rows, metadata)}
+    assert weights["shared"] == pytest.approx(0.0)
+    assert weights["separating"] == pytest.approx(1.0)
+
+
+def test_automatic_identification_backs_off_to_metadata_group_on_close_competition():
+    metadata = {
+        reference: {**row, "species_group": "Shared group", "genus": "Shared"}
+        for reference, row in _metadata().items()
+    }
+    result = assign_best_taxon(
+        sample_id="sample",
+        locus_marker_rows=_rows(0.10, 0.10, 0.105, 0.105),
+        reference_metadata=metadata,
+        expected_loci=3,
+        bootstrap_replicates=40,
+    )
+    assert result.summary["assignment"] == "Shared group"
+    assert result.summary["assignment_rank"] == "species_group"
+    assert result.summary["assignment_status"] == "SPECIES_UNRESOLVED"
+
+
+def test_fastq_requires_stronger_margin_than_assembly():
+    kwargs = dict(
+        sample_id="sample", locus_marker_rows=_rows(0.10, 0.10, 0.117, 0.117),
+        reference_metadata=_metadata(), expected_loci=3,
+        minimum_relative_margin=0.1, bootstrap_replicates=40,
+    )
+    assembly = assign_best_taxon(input_mode="assembly", **kwargs)
+    fastq = assign_best_taxon(input_mode="fastq", **kwargs)
+    assert assembly.summary["assignment_status"] == "SPECIES_ASSIGNED"
+    assert fastq.summary["assignment_status"] == "UNRESOLVED"
+
+
+def test_bootstrap_instability_with_conflicting_loci_withholds_species():
+    rows = []
+    rows.extend(_rows(0.05, 0.05, 1.0, 1.0, loci=1))
+    for row in _rows(1.0, 1.0, 0.05, 0.05, loci=1):
+        row["locus_id"] = "L2"
+        rows.append(row)
+    result = assign_best_taxon(
+        sample_id="sample", locus_marker_rows=rows,
+        reference_metadata=_metadata(), expected_loci=2, minimum_loci=2,
+        bootstrap_replicates=200, minimum_bootstrap_support=0.9,
+    )
+    assert result.summary["assignment_status"] == "UNRESOLVED"
+    assert float(result.summary["bootstrap_support"]) < 0.9
+    assert result.summary["conflicting_loci"] == 1
 
 
 def test_unique_target_support_is_positive_and_reproducible():

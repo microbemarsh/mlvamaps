@@ -16,6 +16,15 @@ a matching `.gz` suffix. Input files are never modified.
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
 
+Multi-taxon databases additionally produce the following under `phylogeny/`:
+
+| File | Meaning |
+| --- | --- |
+| `taxonomic_identification.tsv` | Backward-compatible summary columns plus assignment rank/status, categorical confidence, closest and runner-up distances, margins, locus support, bootstrap stability, and input mode. |
+| `taxonomic_identification_evidence.tsv` | Ranked candidate taxa with distance, similarity (not probability), and bootstrap winner fraction. |
+| `taxonomic_identification_loci.tsv` | Per-locus recovery, taxonomic weight, favored taxon, support/conflict state, and available FASTQ depth/consensus evidence. |
+| `taxonomic_identification.json` | Complete versioned machine-readable assignment, candidate, and locus evidence object. |
+
 Illumina calls additionally always write `sample_summary.tsv`,
 `myoga_samples.csv`, and `myoga_loci.csv`.
 
@@ -59,6 +68,7 @@ filter behavior.
 | `database/LOCUS.fasta.gz` | Gzip-compressed unmasked reference amplicons accepted by `--database`. |
 | `database/reference_metadata.tsv` | Metadata normalized to a `reference_id` key. |
 | `database/reference_sequence_index.tsv` | Canonical amplicon, repeat-masked SNP, and complete marker SHA-256 keys used by the default exact-match fast path. |
+| `database/taxon_locus_discrimination.tsv` | Build-time per-locus taxonomic weight, normalized information gain, reference coverage, and supporting counts. |
 | `database/reference_assemblies.tsv` | Reference-ID, source-assembly path, and canonical whole-genome SHA-256 used for assembly-query tie breaking. |
 | `reference_build_manifest.tsv` | Per-reference/locus product counts, selected product, primer errors, and exclusion status. |
 | `reference_locus_amplifiability.tsv` | Per-locus retained amplicon and genome counts, amplifiable percentage, and `NO_AMPLICONS`, `INSUFFICIENT_REFERENCES`, or `BUILT` tree status. |
