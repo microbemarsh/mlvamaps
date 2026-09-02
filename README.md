@@ -107,6 +107,11 @@ Failed or unresolved loci are reported explicitly rather than silently changed
 to zero. See the complete [output reference](docs/reference/outputs.md) for all
 evidence and diagnostic files.
 
+Single-input calls write directly to the requested output directory. Directory
+and manifest calls write each sample under `OUTDIR/<sample_id>/` and place only
+batch-wide aggregate tables and status information under
+`OUTDIR/batch_summary/`.
+
 ## Build a reference database
 
 Build directly from NCBI assemblies for one taxon:

@@ -36,6 +36,30 @@ FASTA_SUFFIXES = (
     ".fna.gz",
     ".fas.gz",
 )
+BATCH_OUTPUT_DIRECTORY = "batch_summary"
+
+
+def _sample_output_dir(output_root: Path, sample_id: str) -> Path:
+    """Return the output directory for one sample in a batch."""
+    return output_root / sample_id
+
+
+def _batch_output_dir(output_root: Path) -> Path:
+    """Return the directory reserved for multi-sample aggregate outputs."""
+    return output_root / BATCH_OUTPUT_DIRECTORY
+
+
+def _validate_batch_sample_ids(sample_ids: list[str]) -> None:
+    """Prevent sample directories from colliding with batch-level outputs."""
+    reserved = [
+        sample_id
+        for sample_id in sample_ids
+        if sample_id.casefold() == BATCH_OUTPUT_DIRECTORY.casefold()
+    ]
+    if reserved:
+        raise ValueError(
+            f"sample ID {reserved[0]!r} is reserved for batch aggregate outputs"
+        )
 
 
 def _sample_id_from_path(path: str) -> str:
@@ -1392,9 +1416,15 @@ def _run_short_batch(
     statuses: list[dict[str, str]] = []
     output_root = Path(args.outdir)
     output_root.mkdir(parents=True, exist_ok=True)
+    batch_outdir = _batch_output_dir(output_root)
+    try:
+        _validate_batch_sample_ids([row["sample_id"] for row in rows])
+    except ValueError as exc:
+        parser.error(str(exc))
+    batch_outdir.mkdir(parents=True, exist_ok=True)
     for row in rows:
         sample_id = row["sample_id"]
-        sample_outdir = output_root / sample_id
+        sample_outdir = _sample_output_dir(output_root, sample_id)
         summary_path = sample_outdir / "sample_summary.tsv"
         if summary_path.exists() and not args.force:
             summary_rows = _read_table(summary_path)
@@ -1432,7 +1462,7 @@ def _run_short_batch(
         except Exception as exc:
             statuses.append({"sample_id": sample_id, "status": "failed", "message": f"{type(exc).__name__}: {exc}"})
             print(f"Sample {sample_id} failed: {type(exc).__name__}: {exc}")
-    write_tsv(statuses, output_root / "batch_status.tsv", ["sample_id", "status", "message"])
+    write_tsv(statuses, batch_outdir / "batch_status.tsv", ["sample_id", "status", "message"])
     table_keys = {
         "calls": "calls.tsv",
         "repeat_counts": "locus_repeat_counts.tsv",
@@ -1448,10 +1478,17 @@ def _run_short_batch(
         "taxonomic_identification_loci": "taxonomic_identification_loci.tsv",
     }
     for key, filename in table_keys.items():
-        _combine_tables([result[key] for result in results if key in result], output_root / filename)
+        _combine_tables(
+            [result[key] for result in results if key in result],
+            batch_outdir / filename,
+        )
     myoga_sample_rows = [row for result in results if "myoga_samples" in result for row in _read_table(result["myoga_samples"], ",")]
-    write_csv(myoga_sample_rows, output_root / "myoga_samples.csv", MYOGA_SAMPLE_FIELDS)
-    _combine_tables([result["myoga_loci"] for result in results if "myoga_loci" in result], output_root / "myoga_loci.csv", ",")
+    write_csv(myoga_sample_rows, batch_outdir / "myoga_samples.csv", MYOGA_SAMPLE_FIELDS)
+    _combine_tables(
+        [result["myoga_loci"] for result in results if "myoga_loci" in result],
+        batch_outdir / "myoga_loci.csv",
+        ",",
+    )
 
 
 def _run_manifest(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -1500,7 +1537,7 @@ def _combine_legacy_fingerprints(
 
 def _batch_analysis_path(input_path: str, outdir: str) -> Path:
     directory_name = Path(input_path).resolve().name
-    return Path(outdir) / f"MLVA_analysis_{directory_name}.csv"
+    return _batch_output_dir(Path(outdir)) / f"MLVA_analysis_{directory_name}.csv"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1625,10 +1662,20 @@ def main(argv: list[str] | None = None) -> int:
                 "input filenames produce duplicate sample IDs: "
                 + ", ".join(duplicate_ids)
             )
+        if batch:
+            try:
+                _validate_batch_sample_ids(sample_ids)
+            except ValueError as exc:
+                parser.error(str(exc))
+            _batch_output_dir(Path(args.outdir)).mkdir(parents=True, exist_ok=True)
         legacy_fingerprints = []
         for input_path, derived_sample_id in zip(input_files, sample_ids):
             sample_id = args.sample_id or derived_sample_id
-            outdir = Path(args.outdir) / sample_id if batch else Path(args.outdir)
+            outdir = (
+                _sample_output_dir(Path(args.outdir), sample_id)
+                if batch
+                else Path(args.outdir)
+            )
             if batch:
                 print(f"Processing {input_path} as sample {sample_id}")
             technology = args.read_technology

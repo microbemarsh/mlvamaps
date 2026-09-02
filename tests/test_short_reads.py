@@ -456,11 +456,28 @@ def test_manifest_isolates_failure_and_writes_combined_tables(tmp_path):
             str(outdir),
         ]
     ) == 0
-    with (outdir / "batch_status.tsv").open() as handle:
+    batch_summary = outdir / "batch_summary"
+    with (batch_summary / "batch_status.tsv").open() as handle:
         status = {row["sample_id"]: row["status"] for row in csv.DictReader(handle, delimiter="\t")}
     assert status == {"SRR_GOOD": "success", "SRR_BAD": "failed"}
-    assert (outdir / "calls.tsv").exists()
-    assert (outdir / "myoga_samples.csv").exists()
+    assert (outdir / "SRR_GOOD" / "calls.tsv").exists()
+    assert (batch_summary / "calls.tsv").exists()
+    assert (batch_summary / "myoga_samples.csv").exists()
+    assert {path.name for path in outdir.iterdir()} == {
+        "SRR_GOOD", "batch_summary"
+    }
+    for filename in (
+        "calls.tsv",
+        "locus_repeat_counts.tsv",
+        "mlva_fingerprint.tsv",
+        "sample_summary.tsv",
+        "taxon_assignment.tsv",
+        "taxonomic_identification.tsv",
+        "myoga_samples.csv",
+        "myoga_loci.csv",
+        "batch_status.tsv",
+    ):
+        assert not (outdir / filename).exists()
     assert not [
         path
         for path in outdir.rglob("*")

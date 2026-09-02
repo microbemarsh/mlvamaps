@@ -25,8 +25,9 @@ are recognized when the default coordinate names are requested.
 ## Discovery and filtering
 
 The exporter recursively finds `calls.tsv`, prefers per-sample files over the
-combined copy at a batch root, and consults `batch_status.tsv` and
-`sample_summary.tsv` when available. Failed, incomplete, duplicate, and
+combined copy in `batch_summary/`, and consults `batch_status.tsv` and
+`sample_summary.tsv` when available. Legacy batch roots that store aggregate
+files directly at their top level remain supported. Failed, incomplete, duplicate, and
 malformed results are recorded in `samples_excluded.tsv` rather than stopping
 other samples. Directories containing recognizable MLVAmaps outputs but no
 `calls.tsv` are reported as `MISSING_CALLS_FILE`.

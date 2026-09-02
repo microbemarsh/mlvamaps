@@ -15,6 +15,23 @@ def _write_panel(path: Path) -> Path:
     return panel
 
 
+def _fake_short_result(outdir: Path, sample_id: str) -> dict[str, Path]:
+    outdir.mkdir(parents=True, exist_ok=True)
+    files = {
+        "calls": ("calls.tsv", f"sample_id\tlocus_id\trepeat_count\n{sample_id}\tL1\t4\n"),
+        "repeat_counts": ("locus_repeat_counts.tsv", f"sample_id\tlocus_id\trepeat_count\n{sample_id}\tL1\t4\n"),
+        "fingerprint": ("mlva_fingerprint.tsv", f"sample_id\tL1\n{sample_id}\t4\n"),
+        "sample_summary": ("sample_summary.tsv", f"sample_id\trun_status\n{sample_id}\tsuccess\n"),
+        "myoga_samples": ("myoga_samples.csv", f"genome_id,sample_id\n{sample_id},{sample_id}\n"),
+        "myoga_loci": ("myoga_loci.csv", f"genome_id,sample_id,locus_id,repeat_count\n{sample_id},{sample_id},L1,4\n"),
+    }
+    result = {}
+    for key, (filename, contents) in files.items():
+        result[key] = outdir / filename
+        result[key].write_text(contents)
+    return result
+
+
 def test_input_directory_discovers_supported_files_in_stable_order(tmp_path):
     inputs = tmp_path / "inputs"
     inputs.mkdir()
@@ -175,7 +192,7 @@ def test_call_directory_writes_combined_mlva_finder_analysis(
     assert cli.main(
         ["call", "-p", str(panel), "-i", str(inputs), "--outdir", str(results)]
     ) == 0
-    combined = results / "MLVA_analysis_Ba_ref_genomes.csv"
+    combined = results / "batch_summary" / "MLVA_analysis_Ba_ref_genomes.csv"
     with combined.open(newline="") as handle:
         assert list(csv.reader(handle)) == [
             ["key", "Access_number", "VNTR_01"],
@@ -183,3 +200,153 @@ def test_call_directory_writes_combined_mlva_finder_analysis(
             ["002", "GCF_000002", "5"],
         ]
     assert str(combined) in capsys.readouterr().out
+    assert not (results / "MLVA_analysis_Ba_ref_genomes.csv").exists()
+
+
+@pytest.mark.parametrize(
+    ("filename", "contents"),
+    [("A.fasta", ">a\nACGT\n"), ("A.fastq", "@a\nACGT\n+\nIIII\n")],
+)
+def test_normal_directory_batches_keep_samples_separate_from_batch_outputs(
+    tmp_path, monkeypatch, filename, contents
+):
+    panel = _write_panel(tmp_path)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / filename).write_text(contents)
+    (inputs / filename.replace("A.", "B.")).write_text(contents.replace("a", "b"))
+
+    def fake_run(args, input_path, outdir, sample_id):
+        outdir.mkdir(parents=True)
+        (outdir / "calls.tsv").write_text(
+            f"sample_id\tlocus_id\trepeat_count\n{sample_id}\tL1\t4\n"
+        )
+        return {}
+
+    monkeypatch.setattr(cli, "_run_single_input", fake_run)
+    results = tmp_path / "results"
+
+    assert cli.main(
+        ["call", "-p", str(panel), "-i", str(inputs), "-o", str(results)]
+    ) == 0
+    assert {path.name for path in results.iterdir()} == {"A", "B", "batch_summary"}
+    assert (results / "A" / "calls.tsv").exists()
+    assert (results / "B" / "calls.tsv").exists()
+    assert not (results / "calls.tsv").exists()
+
+
+def test_single_input_keeps_user_selected_output_directory(tmp_path, monkeypatch):
+    panel = _write_panel(tmp_path)
+    assembly = tmp_path / "sample.fasta"
+    assembly.write_text(">sample\nACGT\n")
+    observed = {}
+
+    def fake_run(args, input_path, outdir, sample_id):
+        observed.update(outdir=outdir, sample_id=sample_id)
+        outdir.mkdir(parents=True)
+        (outdir / "calls.tsv").write_text("sample_id\n")
+        return {}
+
+    monkeypatch.setattr(cli, "_run_single_input", fake_run)
+    results = tmp_path / "sample_results"
+
+    assert cli.main(
+        ["call", "-p", str(panel), "-i", str(assembly), "-o", str(results)]
+    ) == 0
+    assert observed == {"outdir": results, "sample_id": "sample"}
+    assert (results / "calls.tsv").exists()
+    assert not (results / "sample").exists()
+    assert not (results / "batch_summary").exists()
+
+
+def test_directory_batch_rejects_reserved_sample_id(tmp_path, capsys):
+    panel = _write_panel(tmp_path)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "batch_summary.fasta").write_text(">sample\nACGT\n")
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["call", "-p", str(panel), "-i", str(inputs)])
+
+    assert "reserved for batch aggregate outputs" in capsys.readouterr().err
+
+
+def test_paired_fastq_directory_writes_clean_batch_layout(tmp_path, monkeypatch):
+    panel = _write_panel(tmp_path)
+    inputs = tmp_path / "reads"
+    inputs.mkdir()
+    for sample_id in ("sample1", "sample2"):
+        (inputs / f"{sample_id}_1.fastq.gz").write_bytes(b"")
+        (inputs / f"{sample_id}_2.fastq.gz").write_bytes(b"")
+
+    def fake_run(args, reads1, reads2, outdir, sample_id, metadata):
+        return _fake_short_result(outdir, sample_id)
+
+    monkeypatch.setattr(cli, "_run_short_input", fake_run)
+    results = tmp_path / "results"
+
+    assert cli.main(
+        ["call", "-p", str(panel), "-i", str(inputs), "--short-reads", "-o", str(results)]
+    ) == 0
+    assert {path.name for path in results.iterdir()} == {
+        "sample1", "sample2", "batch_summary"
+    }
+    for sample_id in ("sample1", "sample2"):
+        assert (results / sample_id / "calls.tsv").exists()
+        assert (results / sample_id / "myoga_samples.csv").exists()
+    for filename in (
+        "batch_status.tsv", "calls.tsv", "locus_repeat_counts.tsv",
+        "mlva_fingerprint.tsv", "sample_summary.tsv", "myoga_samples.csv",
+        "myoga_loci.csv",
+    ):
+        assert (results / "batch_summary" / filename).exists()
+        assert not (results / filename).exists()
+
+
+def test_manifest_batch_layout_resumes_from_sample_directory(tmp_path, monkeypatch):
+    panel = _write_panel(tmp_path)
+    reads = tmp_path / "reads.fastq"
+    reads.write_text("@r\nACGT\n+\nIIII\n")
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(
+        "sample_id\treads1\n"
+        f"sample1\t{reads}\n"
+        f"sample2\t{reads}\n"
+    )
+    calls = []
+
+    def fake_run(args, reads1, reads2, outdir, sample_id, metadata):
+        calls.append(sample_id)
+        return _fake_short_result(outdir, sample_id)
+
+    monkeypatch.setattr(cli, "_run_short_input", fake_run)
+    results = tmp_path / "results"
+    command = [
+        "call", "-p", str(panel), "-i", "sr", "--manifest", str(manifest),
+        "-o", str(results),
+    ]
+
+    assert cli.main(command) == 0
+    assert cli.main(command) == 0
+    assert calls == ["sample1", "sample2"]
+    with (results / "batch_summary" / "batch_status.tsv").open() as handle:
+        statuses = [row["status"] for row in csv.DictReader(handle, delimiter="\t")]
+    assert statuses == ["skipped_success", "skipped_success"]
+    assert {path.name for path in results.iterdir()} == {
+        "sample1", "sample2", "batch_summary"
+    }
+
+
+def test_manifest_rejects_reserved_batch_summary_sample_id(tmp_path, capsys):
+    panel = _write_panel(tmp_path)
+    reads = tmp_path / "reads.fastq"
+    reads.write_text("@r\nACGT\n+\nIIII\n")
+    manifest = tmp_path / "manifest.tsv"
+    manifest.write_text(f"sample_id\treads1\nbatch_summary\t{reads}\n")
+
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(
+            ["call", "-p", str(panel), "-i", "sr", "--manifest", str(manifest)]
+        )
+
+    assert "reserved for batch aggregate outputs" in capsys.readouterr().err

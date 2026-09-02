@@ -146,6 +146,7 @@ def _status_records(results: Path) -> tuple[dict[str, list[tuple[str, Path, str]
     statuses: dict[str, list[tuple[str, Path, str]]] = defaultdict(list)
     malformed: list[dict] = []
     for path in sorted(results.rglob("batch_status.tsv")):
+        batch_root = path.parent.parent if path.parent.name == "batch_summary" else path.parent
         try:
             fields, rows = _read_table(path)
             if not {"sample_id", "status"}.issubset(fields):
@@ -155,11 +156,11 @@ def _status_records(results: Path) -> tuple[dict[str, list[tuple[str, Path, str]
                 if not sample_id:
                     continue
                 statuses[sample_id].append(
-                    (row.get("status", "").casefold(), path.parent, row.get("message", ""))
+                    (row.get("status", "").casefold(), batch_root, row.get("message", ""))
                 )
         except ValueError as exc:
             malformed.append(
-                _excluded(path.parent.name, "MALFORMED_RESULTS", "tree", path, details=str(exc))
+                _excluded(batch_root.name, "MALFORMED_RESULTS", "tree", path, details=str(exc))
             )
     return statuses, malformed
 

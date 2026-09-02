@@ -3,6 +3,40 @@
 All generated FASTA and FASTQ artifacts are gzip-compressed by default and use
 a matching `.gz` suffix. Input files are never modified.
 
+## Single-sample and batch layouts
+
+A single input writes files directly to the requested output directory:
+
+```text
+OUTDIR/
+├── report.html
+├── calls.tsv
+├── mlva_fingerprint.tsv
+└── ...
+```
+
+A directory or manifest run separates each sample from batch-wide aggregates:
+
+```text
+OUTDIR/
+├── SAMPLE_A/
+│   ├── report.html
+│   ├── calls.tsv
+│   └── ...
+├── SAMPLE_B/
+│   └── ...
+└── batch_summary/
+    ├── batch_status.tsv
+    ├── calls.tsv
+    ├── mlva_fingerprint.tsv
+    └── ...
+```
+
+Files below a sample directory contain only that sample. Files below
+`batch_summary/` combine available results across the run; failed samples are
+recorded in `batch_summary/batch_status.tsv`. The `batch_summary` name is
+reserved and cannot be used as a sample ID in a batch.
+
 ## Files returned for every call
 
 | File | Meaning |
@@ -175,7 +209,7 @@ data are supplied.
 | `sample_summary.tsv` | One normalized sample row for batch aggregation. |
 | `myoga_samples.csv` | MYOGA metadata; `genome_id` equals `sample_id` and generated sample tree-tip IDs. |
 | `myoga_loci.csv` | Long-form exact calls, intervals, evidence, and confidence. |
-| `batch_status.tsv` | Success, failure, or resume status for every manifest sample. |
+| `batch_summary/batch_status.tsv` | Success, failure, or resume status for every directory or manifest sample. |
 
 Illumina `calls.tsv` preserves the compact columns and appends read technology,
 evidence class, boundary support, informative molecules, local assembly,
@@ -249,7 +283,7 @@ they are independent of locus-wide read mapping.
 | `legacy_primer_mismatches.txt` | Historical primer mismatch summary. |
 
 For a directory input containing assemblies, mlvamaps also writes
-`MLVA_analysis_<input-directory>.csv` at the top level of the output directory.
+`batch_summary/MLVA_analysis_<input-directory>.csv`.
 It combines all per-assembly `legacy_mlva_analysis.csv` rows in deterministic
 filename order and assigns the historical zero-padded `key` values.
 

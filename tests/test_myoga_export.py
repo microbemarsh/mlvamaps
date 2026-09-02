@@ -472,6 +472,26 @@ def test_failed_and_incomplete_results_are_reported_without_crashing(tmp_path):
     assert [row["sample_id"] for row in _read_tsv(output / "samples_used.tsv")] == ["GOOD"]
 
 
+def test_batch_summary_status_resolves_failed_sample_at_batch_root(tmp_path):
+    results = tmp_path / "results"
+    _write_calls(results, "FAILED", {"L1": 2})
+    batch_summary = results / "batch_summary"
+    batch_summary.mkdir()
+    (batch_summary / "batch_status.tsv").write_text(
+        "sample_id\tstatus\tmessage\nFAILED\tfailed\tassembler failed\n"
+    )
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text("shared_identifier\tlatitude\tlongitude\nFAILED\t1\t2\n")
+    output = tmp_path / "export"
+
+    export_myoga(results, metadata, output)
+
+    excluded = _read_tsv(output / "samples_excluded.tsv")
+    failed = next(row for row in excluded if row["sample_id"] == "FAILED")
+    assert failed["reason"] == "FAILED_BATCH_SAMPLE"
+    assert failed["path"] == str(results / "FAILED")
+
+
 def test_batch_root_combined_calls_do_not_duplicate_leaf_samples(tmp_path):
     results = tmp_path / "results"
     leaf = _write_calls(results, "S1", {"L1": 1})

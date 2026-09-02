@@ -174,10 +174,12 @@ mlvamaps call -p panel.tsv -i sr --manifest samples.tsv \
 ```
 
 Samples run independently and write to `results/<sample_id>/`. One malformed or
-missing sample is recorded in `batch_status.tsv` without stopping the rest.
+missing sample is recorded in `results/batch_summary/batch_status.tsv` without
+stopping the rest.
 Successful sample directories resume by default; use `--force` to recompute.
 Combined standard, sample-summary, and MYOGA tables are written at the batch
-root. Samples are processed sequentially so a process never retains all batch
+root's clearly scoped `batch_summary/` directory. Samples are processed
+sequentially so a process never retains all batch
 FASTQs together. Within a sample, FASTQ/QC streams in bounded chunks, minimap2
 performs multithreaded native recruitment, and only uniquely locus-recruited
 molecules are retained for assembly. Live timing messages report the QC,
