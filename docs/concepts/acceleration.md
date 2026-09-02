@@ -1,4 +1,4 @@
-# acceleration backends
+# Acceleration backends and threading
 
 mlvamaps should use biological sequence tooling implemented in Rust or C where
 possible, and avoid generic fuzzy-string packages for core matching.

@@ -1,3 +1,50 @@
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlvamaps"
+dynamic = ["version"]
+description = "MLVA/VNTR genotyping from sequencing reads and assemblies"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-only"
+authors = [{ name = "mlvamaps contributors" }]
+keywords = ["mlva", "vntr", "amplicon", "genotyping", "bioinformatics"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "Natural Language :: English",
+  "Operating System :: POSIX",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+  "numpy>=1.24",
+  "parasail>=1.3.4",
+  "pysam>=0.22",
+  "regex>=2024.5.15",
+  "sassy-rs>=0.2.6",
+  "spoars>=0.1.3,<0.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+mlvamaps = "mlvamaps.cli:main"
+
+[project.urls]
+Repository = "https://github.com/microbemarsh/mlvamaps"
+Issues = "https://github.com/microbemarsh/mlvamaps/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "mlvamaps._version.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["mlvamaps", "mlvamaps.*"]

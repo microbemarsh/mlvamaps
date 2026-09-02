@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import inspect
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -23,12 +24,7 @@ from mlvamaps.assembly_call import (
 )
 from mlvamaps.calling import legacy_round_repeat_count
 from mlvamaps.cli import build_parser, main
-from mlvamaps.clustering import (
-    _alignment_metrics,
-    build_vsearch_cluster_command,
-    build_vsearch_derep_command,
-    cluster_vntr_asvs,
-)
+from mlvamaps.alignment import alignment_metrics
 from mlvamaps.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
 from mlvamaps.io import read_loci
 from mlvamaps.mapping import (
@@ -45,7 +41,6 @@ from mlvamaps.profile_matching import (
     sequence_reference_match_rows,
 )
 from mlvamaps.simulation import simulate_reads
-from scripts.convert_uf_ba_vntrs import convert_profiles
 
 
 def write_panel(tmp_path):
@@ -158,50 +153,6 @@ def make_repeat_feature(read_id, sequence, repeat_count=4):
     )
 
 
-def write_fake_vsearch(tmp_path):
-    executable = tmp_path / "vsearch"
-    executable.write_text(
-        """#!/usr/bin/env python3
-import collections, pathlib, sys
-if '--version' in sys.argv:
-    print('vsearch v2.30.0_linux_x86_64')
-    raise SystemExit(0)
-args = sys.argv[1:]
-def value(flag): return args[args.index(flag) + 1]
-def uc(kind, query, target='*', cluster=0, length='*', identity='*'):
-    return '\\t'.join([kind, str(cluster), str(length), str(identity), '+', '0', '0', '*', query, target]) + '\\n'
-if '--fastx_uniques' in args:
-    lines = pathlib.Path(value('--fastx_uniques')).read_text().splitlines()
-    records = [(lines[i][1:].split()[0], lines[i + 1]) for i in range(0, len(lines), 4)]
-    groups = collections.OrderedDict()
-    for read_id, sequence in records: groups.setdefault(sequence, []).append(read_id)
-    ordered = sorted(groups.items(), key=lambda item: -len(item[1]))
-    with pathlib.Path(value('--fastaout')).open('w') as fasta, pathlib.Path(value('--uc')).open('w') as out:
-        for cluster, (sequence, read_ids) in enumerate(ordered):
-            centroid = read_ids[0]
-            fasta.write(f'>{centroid};size={len(read_ids)};\\n{sequence}\\n')
-            out.write(uc('S', centroid, cluster=cluster, length=len(sequence)))
-            for read_id in read_ids[1:]:
-                out.write(uc('H', read_id, centroid, cluster, len(sequence), '100.0'))
-    raise SystemExit(0)
-if '--cluster_size' in args:
-    lines = pathlib.Path(value('--cluster_size')).read_text().splitlines()
-    records = [(lines[i][1:].split()[0], lines[i + 1]) for i in range(0, len(lines), 2)]
-    centroid, centroid_sequence = records[0]
-    with pathlib.Path(value('--centroids')).open('w') as fasta:
-        fasta.write(f'>{centroid}\\n{centroid_sequence}\\n')
-    with pathlib.Path(value('--uc')).open('w') as out:
-        out.write(uc('S', centroid, cluster=0, length=len(centroid_sequence)))
-        for query, sequence in records[1:]:
-            out.write(uc('H', query, centroid, 0, len(sequence), '99.0'))
-    raise SystemExit(0)
-raise SystemExit(2)
-"""
-    )
-    executable.chmod(0o755)
-    return executable
-
-
 def write_fake_amplirust(tmp_path):
     executable = tmp_path / "amplirust"
     executable.write_text(
@@ -255,58 +206,11 @@ with pathlib.Path(value('--tsv')).open('w') as stats:
     return executable
 
 
-def test_vsearch_clustering_uses_observed_centroid_and_retains_indels(tmp_path):
-    reference = "ATG" * 4
-    insertion = reference[:4] + "A" + reference[4:]
-    deletion = reference[:4] + reference[5:]
-    features = [
-        make_repeat_feature("ref1", reference),
-        make_repeat_feature("ref2", reference),
-        make_repeat_feature("ref3", reference),
-        make_repeat_feature("insertion", insertion),
-        make_repeat_feature("deletion", deletion),
-    ]
-    vsearch = write_fake_vsearch(tmp_path)
-    locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=5)
-    rows, fasta, memberships = cluster_vntr_asvs(
-        features, [locus], tmp_path / "vsearch-out", threads=4, executable=str(vsearch)
-    )
-
-    dominant = rows[0]
-    assert dominant["support_reads"] == 5
-    assert dominant["unique_sequences"] == 3
-    assert dominant["representative_sequence"] == reference
-    assert dominant["representative_read_id"] == "ref1"
-    assert dominant["reads_with_indels"] == 2
-    assert dominant["total_insertions"] == 1
-    assert dominant["total_deletions"] == 1
-    assert len(rows) == 1
-    assert fasta[0] == ("VNTR_ASV1", reference)
-
-    insertion_membership = next(row for row in memberships if row["read_id"] == "insertion")
-    assert insertion_membership["variant_id"] == "VNTR_ASV1"
-    assert insertion_membership["insertions_vs_representative"] == 1
-    assert insertion_membership["deletions_vs_representative"] == 0
-    assert "-" in insertion_membership["aligned_representative_sequence"]
-
-    deletion_membership = next(row for row in memberships if row["read_id"] == "deletion")
-    assert deletion_membership["insertions_vs_representative"] == 0
-    assert deletion_membership["deletions_vs_representative"] == 1
-    assert "-" in deletion_membership["aligned_repeat_sequence"]
-
-    predictions = predict_read_alleles(features, [locus], memberships)
-    by_read = {prediction.read_id: prediction for prediction in predictions}
-    assert by_read["insertion"].insertions_vs_representative == 1
-    assert by_read["deletion"].deletions_vs_representative == 1
-    assert by_read["insertion"].evidence_weight < by_read["ref1"].evidence_weight
-    assert by_read["deletion"].evidence_weight < by_read["ref1"].evidence_weight
-
-
 def test_parasail_global_alignment_retains_indels_and_substitutions():
-    insertion = _alignment_metrics("AACGT", "ACGT")
-    deletion = _alignment_metrics("ACGT", "AACGT")
-    substitution = _alignment_metrics("ACAT", "ACGT")
-    empty = _alignment_metrics("", "ACGT")
+    insertion = alignment_metrics("AACGT", "ACGT")
+    deletion = alignment_metrics("ACGT", "AACGT")
+    substitution = alignment_metrics("ACAT", "ACGT")
+    empty = alignment_metrics("", "ACGT")
 
     assert insertion["insertions_vs_representative"] == 1
     assert "-" in insertion["aligned_representative_sequence"]
@@ -413,51 +317,6 @@ def test_native_repeat_motif_statistics_preserve_patterns_and_partials():
     assert sequence.mean_qscore("IIII") == 40.0
 
 
-def test_vsearch_commands_use_native_dereplication_and_full_thread_count(tmp_path):
-    input_path = tmp_path / "locus_0000.fastq"
-    derep = build_vsearch_derep_command(
-        input_path,
-        tmp_path / "uniques.fasta",
-        tmp_path / "derep.uc",
-    )
-    command = build_vsearch_cluster_command(
-        tmp_path / "uniques.fasta",
-        tmp_path / "centroids.fasta",
-        tmp_path / "clusters.uc",
-        threads=32,
-        min_identity=0.97,
-    )
-    assert derep[:3] == ["vsearch", "--fastx_uniques", str(input_path)]
-    assert "--sizeout" in derep
-    assert command[:2] == ["vsearch", "--cluster_size"]
-    assert command[command.index("--threads") + 1] == "32"
-    assert command[command.index("--id") + 1] == "0.97"
-    assert command[command.index("--iddef") + 1] == "1"
-    assert command[command.index("--qmask") + 1] == "none"
-    assert command[command.index("--wordlength") + 1] == "3"
-    assert command[command.index("--minwordmatches") + 1] == "1"
-    assert command[command.index("--gapopen") + 1] == "4"
-    assert "--sizein" in command
-
-
-def test_vsearch_work_directory_is_reset_before_clustering(tmp_path):
-    reference = "ATG" * 4
-    features = [make_repeat_feature("ref1", reference), make_repeat_feature("ref2", reference)]
-    vsearch = write_fake_vsearch(tmp_path)
-    locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=5)
-    retry_dir = tmp_path / "vsearch-retry"
-    retry_dir.mkdir()
-    (retry_dir / "stale-partial-output.tsv").write_text("incomplete\n")
-
-    rows, _fasta, memberships = cluster_vntr_asvs(
-        features, [locus], retry_dir, threads=2, executable=str(vsearch)
-    )
-
-    assert rows[0]["support_reads"] == 2
-    assert len(memberships) == 2
-    assert not (retry_dir / "stale-partial-output.tsv").exists()
-
-
 def test_simulate_and_call_pipeline(tmp_path):
     loci, profiles = write_panel(tmp_path)
     sim = simulate_reads(
@@ -469,7 +328,6 @@ def test_simulate_and_call_pipeline(tmp_path):
         depth=25,
         error_rate=0.0,
     )
-    vsearch = write_fake_vsearch(tmp_path)
     amplirust = write_fake_amplirust(tmp_path)
     result = run_call(
         reads_path=str(sim["reads"]),
@@ -479,7 +337,6 @@ def test_simulate_and_call_pipeline(tmp_path):
         sample_id="SIM1",
         min_read_length=20,
         min_depth=5,
-        vsearch_bin=str(vsearch),
         amplirust_bin=str(amplirust),
         locus_mapping=False,
         fastq_strategy="primer",
@@ -606,7 +463,6 @@ def test_fastq_poa_and_assembly_produce_same_gold_standard_fingerprint(tmp_path)
         sample_id="SAME",
         min_read_length=20,
         min_depth=5,
-        vsearch_bin="/deprecated/vsearch/is/not/invoked",
         locus_mapping=False,
         fastq_strategy="primer",
         threads=1,
@@ -1033,7 +889,6 @@ def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
 
 def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
     loci, profiles = write_panel(tmp_path)
-    vsearch = write_fake_vsearch(tmp_path)
     amplirust = write_fake_amplirust(tmp_path)
     sim = simulate_reads(
         loci_path=str(loci),
@@ -1059,8 +914,6 @@ def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
             "20",
             "--min-depth",
             "5",
-            "--vsearch-bin",
-            str(vsearch),
             "--amplirust-bin",
             str(amplirust),
             "--no-locus-mapping",
@@ -1115,6 +968,30 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.algorithm == "legacy"
     assert default_call_args.max_primer_mismatches == 2
     assert default_call_args.raxml_model == "DNA"
+
+    compatibility_args = parser.parse_args(
+        [
+            "call",
+            "-p",
+            "primers.tsv",
+            "-i",
+            "sample.fastq.gz",
+            "--min-cluster-size",
+            "99",
+            "--cluster-min-identity",
+            "0.5",
+            "--vsearch-bin",
+            "/missing/vsearch",
+        ]
+    )
+    assert compatibility_args.min_cluster_size == 99
+    assert compatibility_args.cluster_min_identity == 0.5
+    assert compatibility_args.vsearch_bin == "/missing/vsearch"
+    assert {
+        "min_cluster_size",
+        "cluster_min_identity",
+        "vsearch_bin",
+    }.isdisjoint(inspect.signature(run_call).parameters)
 
     novel_call_args = parser.parse_args(
         ["call", "-p", "primers.tsv", "-i", "assembly.fasta", "--algorithm", "novel"]
@@ -1343,39 +1220,3 @@ def test_sassy_searchers_are_thread_local(monkeypatch):
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _index: sequence.find_best("ACGT", "TTTACGTTT", 1), range(2)))
     assert results == [(3, 0), (3, 0)]
-
-
-def test_cleaned_mlvamaps_primer_tsv_is_ingestible():
-    loci = read_primer_pairs("examples/seer_lab_Ba/mlvamaps_primers.example.tsv")
-    assert len(loci) == 31
-    assert loci[0].locus_id == "vrrA_12bp_314bp_10U"
-    assert loci[0].forward_primer == "CACAACTACCACCGATGGCACA"
-    assert loci[0].reverse_primer == "GCGCGTTTCGTTTGATTCATAC"
-    assert len(loci[0].repeat_motif) == 12
-    assert loci[0].expected_amplicon_min_bp == 194
-    assert loci[0].expected_amplicon_max_bp == 434
-
-
-def test_raw_legacy_primer_file_is_ingestible():
-    loci = read_primer_pairs("examples/seer_lab_Ba/insilicoMLVAprimers_all.raw.example.csv")
-    assert len(loci) == 31
-    assert loci[-1].locus_id == "Bavntr35_6bp_115bp_5U"
-    assert len(loci[-1].repeat_motif) == 6
-
-
-def test_uf_ba_profile_converter_maps_short_locus_names(tmp_path):
-    source = tmp_path / "uf_ba_vntrs.tsv"
-    source.write_text("Access_number\tvrrA\tBams13\nEMPTY\t\t\nUF1\t10\t72\n")
-    output = tmp_path / "profiles.tsv"
-    rows_written, mapped_loci, unmatched = convert_profiles(
-        source,
-        primers_path=Path("examples/seer_lab_Ba/mlvamaps_primers.example.tsv"),
-        output_path=output,
-    )
-    assert rows_written == 1
-    assert mapped_loci == 2
-    assert unmatched == []
-    rows = read_tsv(output)
-    assert rows[0]["profile_id"] == "UF1"
-    assert rows[0]["vrrA_12bp_314bp_10U"] == "10"
-    assert rows[0]["Bams13_9bp_814bp_70U"] == "72"

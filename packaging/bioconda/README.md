@@ -19,7 +19,7 @@ external executables are also available from Bioconda/conda-forge.
 ## Prepare a release
 
 1. Ensure the version in `mlvamaps/_version.py` matches the version in
-   `meta.yaml`; `setup.py` reads the Python version file automatically.
+   `meta.yaml`; `pyproject.toml` reads the Python version file automatically.
 2. Run the test and package checks from the repository root:
 
    ```bash

@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
+from .alignment import alignment_metrics, alignment_metrics_pair
 from .calling import legacy_round_repeat_count, normalize_allele
-from .clustering import _alignment_metrics, _alignment_metrics_pair
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .models import RepeatFeature
 
@@ -100,12 +100,12 @@ def mapped_read_variant_groups(
                 ]
                 if alignment_executor is not None and len(missing_pairs) > 1:
                     missing_metrics = alignment_executor.map(
-                        _alignment_metrics_pair, missing_pairs
+                        alignment_metrics_pair, missing_pairs
                     )
                     metrics_cache.update(zip(missing_pairs, missing_metrics))
                 else:
                     for pair in missing_pairs:
-                        metrics_cache[pair] = _alignment_metrics(*pair)
+                        metrics_cache[pair] = alignment_metrics(*pair)
                 metrics_by_read = {
                     feature.read_id: metrics_cache[
                         (feature.repeat_sequence, representative_sequence)

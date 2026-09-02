@@ -18,6 +18,7 @@ path, intermediate stage, output, and interpretation boundary.
 - [Repeat-aware SNP placement and phylogeography](concepts/repeat-snp-phylogeography.md)
 - [Representative mapping and SNP evidence](concepts/representative-mapping.md)
 - [Allele calling and profiles](concepts/calling-and-profiles.md)
+- [Acceleration backends and threading](concepts/acceleration.md)
 
 ## Reference
 

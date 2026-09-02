@@ -4,7 +4,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from .clustering import _alignment_metrics
+from .alignment import alignment_metrics
 
 
 MIXTURE_FIELDS = [
@@ -55,7 +55,7 @@ def _log_likelihood_matrix(rows: list[dict], error_rate: float) -> np.ndarray:
         for source_index, source in enumerate(sequences):
             if observed_index == source_index:
                 continue
-            metrics = _alignment_metrics(observed, source)
+            metrics = alignment_metrics(observed, source)
             edit_distance = int(metrics["edit_distance_to_representative"])
             matrix[observed_index, source_index] = edit_distance * edit_log_odds
     return matrix
