@@ -71,11 +71,11 @@ EM-meaningful variants, plus the dominant estimated fraction. See
 `mlva_fingerprint_probabilistic.tsv` contains long-form repeat counts and
 posterior values.
 
-Assembly calls use the same fingerprint shape and half-unit grid. With one
-product, its exact length is evaluated using a one-base-resolution measurement
-model. With multiple products and FASTQ/BAM support, their mapped-read counts
-weight the allele distribution and select the supported product. Assembly
-confidence therefore reflects the evidence instead of always being 1.0.
+Assembly calls use the same fingerprint shape and historical integer/half-unit
+rounding convention. Product selection follows the MLVA_finder-compatible rule
+described in the assembly workflow. Optional FASTQ/BAM mapping reports depth
+for the selected product but does not choose a different product or alter its
+size-derived repeat count; the assembly call confidence is therefore `1.0`.
 
 ## Profile matching
 

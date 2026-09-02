@@ -11,7 +11,7 @@ mlvamaps export-myoga --results results/ --metadata metadata.tsv \
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--results DIR` | required | Recursively searched completed MLVAmaps result root. |
+| `--results DIR` | required | Recursively searched completed `mlvamaps` result root. |
 | `--metadata CSV_OR_TSV` | required | Metadata joined to recorded sample IDs. |
 | `--metadata-id COLUMN` | `shared_identifier` | Metadata join column. |
 | `--latitude COLUMN` | `latitude` | Latitude column; standard aliases are recognized for the default. |
@@ -49,7 +49,7 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `--sample-id` | Input filename | Sample identifier. |
 | `-t`, `--threads` | `32` | CPU budget shared across concurrent EPA-ng locus workers; `0` uses all CPUs. |
 | `--quiet` | Off | Suppress live progress. |
-| `--max-primer-mismatches` | `2` | Allowed primer errors for paired-primer detection, matching MLVA_finder's default. |
+| `--max-primer-mismatches` | `2` | Maximum edit distance allowed independently for each primer during Sassy-backed paired-primer detection. Searches proceed through error rounds 0 to this value. |
 | `--profiles` | None | Known MLVA profile TSV. |
 | `--database` | None | Reference-build directory whose fixed trees are reused, or a sequence-only database built on demand. |
 | `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
@@ -59,7 +59,7 @@ files. Directory discovery is non-recursive, and each file is written beneath
 
 ## MLVA-only target-taxon assignment
 
-Taxonomic identification runs automatically when `--database` resolves to
+Taxon assignment runs automatically when `--database` resolves to
 metadata containing `taxon_id`. `--taxon-k` (default 3) controls the nearest
 references averaged per taxon, `--taxon-minimum-margin` (default 0.1) controls
 best/second separation (FASTQ requires 1.5 times this margin), and
@@ -234,14 +234,16 @@ recovery, and the false exact-call rate.
 
 ## External executable overrides
 
-- `--amplirust-bin`
 - `--minimap2-bin`
 - `--mafft-bin`
 - `--raxml-ng-bin`
 - `--epa-ng-bin`
 
 These options are useful for testing, containers, and installations whose
-executables are not on the default `PATH`.
+executables are not on the default `PATH`. Sassy is resolved from `PATH`; set
+the `SASSY_BIN` environment variable when its executable is elsewhere. The
+hidden legacy executable option is retained only for command-line compatibility
+and does not select or invoke another primer-search tool.
 
 ## Reference database builder
 
@@ -252,8 +254,8 @@ auto-detects minimal primer lists and rich locus panels.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--multiple-products` | `exclude` | Exclude, choose the best, or fail on equally good multiple products. |
-| `--max-primer-mismatches` | `2` | Maximum Amplirust primer errors. |
+| `--multiple-products` | `exclude` | For equally best products, exclude the assembly/locus pair, choose the deterministic best candidate, or fail. |
+| `--max-primer-mismatches` | `2` | Maximum Sassy-backed edit distance allowed independently for each primer. |
 | `--min-references-per-tree` | `3` | Minimum references required to infer a locus tree. |
 | `-t`, `--threads` | `32` | Parallel assembly-extraction workers and maximum MAFFT/RAxML-NG threads; `0` uses all CPUs. RAxML-NG retries low-pattern loci with fewer threads automatically. |
 | `--quiet` | off | Suppress per-assembly and per-locus progress updates. |

@@ -6,9 +6,9 @@ path, intermediate stage, output, and interpretation boundary.
 
 ## Workflows
 
-- [FASTQ and amplicon sequencing](workflows/fastq.md)
+- [Accurate long-read and amplicon FASTQ](workflows/fastq.md)
 - [Paired/single-end Illumina sequencing](workflows/illumina.md)
-- [Assemblies and assembly read support](workflows/assembly.md)
+- [Genome assemblies and optional read support](workflows/assembly.md)
 - [Reference building](workflows/reference-building.md)
 - [Dataset aggregation and MYOGA export](workflows/myoga-export.md)
 
@@ -37,7 +37,8 @@ data when the user supplies the primers and interpretation metadata for that
 scheme. It does not infer an unknown MLVA panel from a genome, and it does not
 claim that profiles from different laboratories or schemes are interchangeable.
 
-The FASTQ path is best suited to accurate amplicon or long reads that span both
-primers. The assembly path is best suited to assembled products and can add
-accurate-read support without requiring individual reads to span the complete
-locus. Noisy long-read mapping is outside the supported scope.
+The accurate-long/amplicon pathway operates directly on FASTQ reads and can
+retain locus-presence evidence when a read does not span the complete product.
+The assembly pathway operates on FASTA contigs and can add read-depth support
+without changing the selected assembly product or its repeat count. Noisy
+long-read mapping is outside the supported scope.

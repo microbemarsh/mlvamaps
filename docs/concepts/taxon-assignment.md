@@ -1,4 +1,4 @@
-# Automatic MLVA taxonomic identification
+# Automatic MLVA taxon assignment
 
 When `mlvamaps call` receives a reference database whose
 `reference_metadata.tsv` contains `taxon_id`, it automatically ranks all

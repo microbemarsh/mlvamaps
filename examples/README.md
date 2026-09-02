@@ -15,6 +15,6 @@ Optional columns:
   the repeat region, used to improve repeat extraction.
 - `pool_id`: primer-pool or multiplex identifier.
 
-`amplirust_primers.example.csv` shows the comma-delimited CSV shape that
-mlvamaps can write for `amplirust`. Users normally provide
-`mlvamaps_primers.example.tsv`, the raw legacy primer file, or `mlva_loci.tsv`.
+`primer.example.csv` shows the minimal comma-delimited `primer.csv` shape
+accepted by `mlvamaps`: one locus ID and its forward and reverse primer per row.
+The same fields can be supplied as TSV or in the rich locus table.

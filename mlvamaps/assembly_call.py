@@ -106,8 +106,8 @@ def _primer_match_display(primer: str, observed: str) -> str:
     """Render an observed primer match using the legacy case convention.
 
     Substitutions and insertions are lower-case and deleted primer bases are
-    dots. Amplirust normally reports equal-length matches here; handling the
-    length difference also keeps the compatibility output useful for indels.
+    dots. Sassy usually reports equal-length matches here; handling the length
+    difference also keeps the compatibility output useful for indels.
     """
     primer = primer.upper()
     observed = observed.upper()
@@ -165,7 +165,7 @@ def _format_float(value: float | None, digits: int = 3) -> str:
 
 
 def legacy_amplicon_bounds(loci: list[Locus]) -> tuple[int, int]:
-    """Return global Amplirust bounds covering every MLVA_finder-valid hit."""
+    """Return global PCR-search bounds covering every MLVA_finder-valid hit."""
     bounds = []
     for locus in loci:
         repeat_bp = repeat_unit_length(locus)

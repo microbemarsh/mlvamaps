@@ -542,7 +542,7 @@ def _paired_product_row(
     max_n_fraction: float,
     ordinal: int,
 ) -> dict[str, str | int] | None:
-    """Build one Amplirust-shaped row for existing downstream table readers."""
+    """Build one compatibility-shaped row for existing downstream table readers."""
     legacy_len = (
         second.start
         + len(locus.reverse_primer)
@@ -619,7 +619,7 @@ def run_in_silico_pcr_loci(
     amplicon_bounds: tuple[int, int] | None = None,
     **_compatibility_options,
 ) -> dict[str, Path]:
-    """Run mlvamaps' Sassy-backed, MLVA_finder-compatible in-silico PCR."""
+    """Run mlvamaps' Sassy-backed, MLVA_finder-compatible in silico PCR."""
     if not 0 <= max_n_fraction <= 1:
         raise ValueError("max_n_fraction must be between 0 and 1")
     if max_errors < 0:

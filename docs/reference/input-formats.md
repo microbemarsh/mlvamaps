@@ -9,8 +9,10 @@ Supported read suffixes:
 - `.fastq.gz`
 - `.fq.gz`
 
-The accurate-long FASTQ workflow uses `-i READS` and expects individual reads
-to contain a valid paired-primer product. Illumina FASTQ instead uses
+The accurate-long/amplicon FASTQ workflow uses `-i READS` and operates directly
+on FASTQ records. Complete primer-spanning reads can produce repeat-count calls;
+partial but locus-specific reads can provide provisional or presence-only
+evidence. Illumina FASTQ instead uses
 `-i sr --fq1 READS_1` and optional `--fq2 READS_2`; gzip and plain text are
 read directly. Separate mate files must
 have equal record counts and the same normalized read ID in the same order.
@@ -97,9 +99,13 @@ locus_id	forward_primer	reverse_primer	repeat_unit_length_bp	expected_product_si
 vrrA_12bp_314bp_10U	CACAACTACCACCGATGGCACA	GCGCGTTTCGTTTGATTCATAC	12	314	10
 ```
 
-Primer sequences are supplied 5-prime to 3-prime. mlvamaps searches for the
-reverse complement of the reverse primer in an oriented product. IUPAC
-degenerate bases are handled by Amplirust.
+Primer sequences are supplied 5-prime to 3-prime. For Sassy-backed in silico
+PCR, `mlvamaps` expands IUPAC ambiguity codes in each configured primer, searches
+for the forward primer and the reverse complement of the reverse primer in an
+oriented sequence, and pairs downstream matches into candidate products. The
+target sequence is not expanded as IUPAC ambiguity; ambiguous target bases can
+consume the configured edit allowance. See the assembly workflow for strand,
+mismatch, size, and product-selection details.
 
 ## Rich locus table
 
@@ -207,4 +213,4 @@ source fields to the columns above.
 
 Assembly mode accepts SAM or BAM aligned to the supplied assembly through
 `--bam` or `--alignments`. Contig names must match the assembly contig names
-reported by Amplirust.
+reported in `assembly_amplicons.tsv`.

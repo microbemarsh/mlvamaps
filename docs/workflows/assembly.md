@@ -8,25 +8,50 @@ mlvamaps call -p primers.tsv -i assembly.fasta -o results
 
 ## 1. Find paired-primer products
 
-Amplirust searches both assembly orientations with degenerate-primer and
-primer-error support. For compatibility, assembly gaps represented by `N`
-bases are permitted inside products; MLVA_finder did not reject them. mlvamaps
-filters circular-wrap records and uses the historical raw-allele limit for
-discovery.
+`mlvamaps` uses the `sassy search` command-line tool to discover approximate
+primer matches. It then applies its own MLVA_finder-compatible IUPAC expansion,
+strand logic, primer pairing, length filtering, and product selection:
+
+- Both primers are supplied 5-prime to 3-prime. In each oriented sequence,
+  `mlvamaps` searches for the forward primer and the reverse complement of the
+  reverse primer, then pairs downstream reverse-primer matches with each
+  forward-primer match.
+- Configured IUPAC primer codes are expanded deterministically before Sassy is
+  called. Assembly `N` bases are not treated as primer wildcards; overlap with
+  an ambiguous target base consumes edit distance. Assembly gaps represented by
+  `N` are nevertheless permitted elsewhere inside a recovered product.
+- Sassy's own reverse-complement search is disabled because `mlvamaps` controls
+  orientation. For each concrete forward-primer expansion it searches the input
+  contig first and searches the reverse-complemented contig only as a fallback
+  when no input-strand forward match is found. The reported orientation is
+  relative to the original contig.
+- `--max-primer-mismatches` defaults to 2 and is applied independently to each
+  primer as edit distance (substitutions plus insertions and deletions).
+  Searches run cumulatively from error round 0 through the configured maximum.
+- A candidate must have the primers in order and satisfy the PCR engine's
+  inclusive product-length bounds. Assembly calls use global bounds broad enough
+  to cover every locus's historical MLVA_finder-valid raw allele (`0 <= raw
+  repeat count < 100`); this is deliberately not the same as enforcing every
+  rich panel's `expected_amplicon_min_bp`/`expected_amplicon_max_bp` per locus.
+- Sassy discovers candidate locations. The `regex` package is used only in
+  windows around those locations to reproduce legacy equal-cost indel traceback
+  choices; it is not the genome-wide primer search engine.
 
 This stage returns:
 
 - `assembly_amplicons.tsv`: locus, contig, 1-based coordinates, orientation,
   product size, and primer mismatches.
 - `assembly_amplicons.fasta.gz`: extracted products.
-- Native evidence under `amplirust/`.
+- Sassy-backed evidence under `in_silico_pcr/` (`primers.csv`, `matches.tsv`,
+  and `products.fasta.gz`).
 
-The assembly caller reproduces MLVA_finder's decision rule:
-it uses the lowest successful primer-error round, applies the original
-forward-strand and equal-length-match precedence, and retains the smallest raw
-allele on the last FASTA record with a valid product in that round. Product
-sizes also follow the original configured-primer-length formula when a primer
-match contains an indel. All accepted products remain available in the amplicon table.
+The assembly caller reproduces MLVA_finder's decision rule. It uses the lowest
+successful primer-error round, applies input-strand and equal-length-match
+precedence, and retains the smallest raw repeat count on the last FASTA record
+with a valid product in that round. Product sizes also follow the original
+configured-primer-length formula when a primer match contains an indel. All
+recovered candidate products remain available in `assembly_amplicons.tsv`, even
+though only the selected product supplies the locus repeat-count call.
 The regression suite includes a self-contained MLVA_finder oracle covering
 perfect and mismatched primers, strict half-unit rounding, multiple FASTA
 records, and parallel PCR execution.
@@ -35,7 +60,7 @@ records, and parallel PCR execution.
 
 The caller converts product size to repeat count when the panel provides
 repeat-unit length, nominal repeat units, and expected product size. It retains
-raw estimate. It applies MLVA_finder's strict
+the raw estimate and applies MLVA_finder's strict
 integer tolerance (configured with `--assembly-round-tolerance`) and otherwise
 uses the intervening half allele.
 
@@ -45,9 +70,11 @@ the historical product selection or repeat count.
 Assembly statuses:
 
 - `PASS`: product found and repeat count could be calculated.
-- `PRESENT_COUNT_UNKNOWN`: product found, but panel metadata was insufficient
-  for a repeat-count calculation.
-- `NOT_FOUND`: no accepted paired-primer product was found.
+- `NOT_FOUND`: no recovered product was eligible for the historical
+  repeat-count selection rule. A primer product can therefore remain visible in
+  `assembly_amplicons.tsv` while the locus has no repeat-count call when the
+  panel cannot convert product length to repeat count or the raw count is 100 or
+  greater.
 
 This stage returns `calls.tsv`.
 

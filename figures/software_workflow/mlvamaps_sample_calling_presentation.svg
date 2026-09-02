@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="sample-presentation-title sample-presentation-desc">
+    <title id="sample-presentation-title">mlvamaps sample calling pathways</title>
+    <desc id="sample-presentation-desc">Presentation diagram showing three sequencing input pathways, optional Deacon screening of FASTQ reads, and common locus calls producing an MLVA fingerprint and reference-enabled taxon identification.</desc>
+    <defs>
+      <style>
+        .node{fill:#fff;stroke:#4f625d;stroke-width:1.5}.input{fill:#f2f4f3;stroke:#71807c;stroke-width:1.4}.focal{fill:#eaf4f3;stroke:#2b7a78;stroke-width:2.2}.output{fill:#fff;stroke:#18211f;stroke-width:1.8}
+        .edge{fill:none;stroke:#4f625d;stroke-width:1.8;marker-end:url(#arrow)}.guide{fill:none;stroke:#71807c;stroke-width:1.4;stroke-dasharray:7 5}.accent{fill:none;stroke:#2b7a78;stroke-width:2.4;marker-end:url(#arrow-accent)}
+        .kicker{fill:#4f625d;font:700 13px Arial,Helvetica,sans-serif;letter-spacing:.12em}.headline{fill:#18211f;font:700 32px Arial,Helvetica,sans-serif}.tag{fill:#315f78;font:700 11px Arial,Helvetica,sans-serif;letter-spacing:.07em}.tag2{fill:#2b7a78;font:700 11px Arial,Helvetica,sans-serif;letter-spacing:.07em}.name{fill:#18211f;font:700 18px Arial,Helvetica,sans-serif}.sub{fill:#4f625d;font:13px Arial,Helvetica,sans-serif}.note{fill:#4f625d;font:italic 13px Arial,Helvetica,sans-serif}
+      </style>
+      <marker id="arrow" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#4f625d"/></marker>
+      <marker id="arrow-accent" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#2b7a78"/></marker>
+    </defs>
+    <rect width="1280" height="720" fill="#fcfcfa"/>
+    <text class="kicker" x="56" y="48">mlvamaps · SAMPLE CALLING</text>
+    <text class="headline" x="56" y="88">Three pathways to MLVA and taxon identification</text>
+
+    <!-- Connectors -->
+    <path class="guide" d="M176 164 H44 V530"/>
+    <line class="edge" x1="44" y1="274" x2="72" y2="274"/>
+    <line class="edge" x1="44" y1="410" x2="72" y2="410"/>
+    <line class="edge" x1="44" y1="546" x2="72" y2="546"/>
+    <path class="edge" d="M436 274 H500 Q508 274 508 282 V346 Q508 354 516 354 H548"/>
+    <line class="edge" x1="436" y1="410" x2="548" y2="410"/>
+    <path class="edge" d="M436 546 H500 Q508 546 508 538 V474 Q508 466 516 466 H548"/>
+    <line class="accent" x1="844" y1="410" x2="916" y2="410"/>
+
+    <rect class="input" x="72" y="124" width="208" height="80" rx="4"/>
+    <text class="tag" x="96" y="150">SHARED PRIMER PANEL</text>
+    <text class="name" x="96" y="178">primer.csv</text>
+    <text class="sub" x="296" y="178">locus · forward · reverse</text>
+
+    <rect class="node" x="72" y="226" width="364" height="96" rx="4"/>
+    <text class="tag" x="96" y="252">GENOME ASSEMBLY</text>
+    <text class="name" x="96" y="282">Sassy in silico PCR</text>
+    <text class="sub" x="96" y="306">primer-bounded product → length → calibrated repeat count</text>
+
+    <rect class="node" x="72" y="362" width="364" height="96" rx="4"/>
+    <text class="tag" x="96" y="388">PAIRED-END ILLUMINA FASTQ · DEACON OPTIONAL</text>
+    <text class="name" x="96" y="418">Competitive Bowtie2 mapping</text>
+    <text class="sub" x="96" y="442">target-like reads → spanning · junction · pair support</text>
+
+    <rect class="node" x="72" y="498" width="364" height="96" rx="4"/>
+    <text class="tag" x="96" y="524">LONG / AMPLICON FASTQ · DEACON OPTIONAL</text>
+    <text class="name" x="96" y="554">minimap2 recruitment</text>
+    <text class="sub" x="96" y="578">target-like reads → SPOARS consensus → repeat count</text>
+
+    <rect class="focal" x="548" y="314" width="296" height="192" rx="6"/>
+    <text class="tag2" x="576" y="344">SHARED REPRESENTATION</text>
+    <text class="name" x="576" y="378">Common locus calls</text>
+    <line x1="576" y1="394" x2="816" y2="394" stroke="#9fc5c3" stroke-width="1.2"/>
+    <text class="sub" x="576" y="422">locus · repeat count</text>
+    <text class="sub" x="576" y="450">call status · confidence/evidence</text>
+    <text class="sub" x="576" y="478">locus sequence, when resolved</text>
+
+    <rect class="output" x="916" y="314" width="300" height="192" rx="4"/>
+    <text class="tag" x="944" y="344">OUTPUTS</text>
+    <text class="name" x="944" y="378">MLVA fingerprint</text>
+    <text class="sub" x="944" y="404">sample × locus repeat counts</text>
+    <line x1="944" y1="426" x2="1188" y2="426" stroke="#c3ccc9" stroke-width="1.2"/>
+    <text class="tag" x="944" y="452">REFERENCE-ENABLED</text>
+    <text class="name" x="944" y="482">Taxon identification</text>
+    <text class="sub" x="944" y="500">weighted evidence across recovered loci</text>
+
+    <text class="note" x="548" y="554">Detection and confident repeat-count calling are distinct.</text>
+    <text class="note" x="548" y="576">Unresolved loci remain explicit rather than becoming zero.</text>
+  </svg>

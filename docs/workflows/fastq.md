@@ -87,18 +87,20 @@ from whether a repeat count can be reported.
 
 ## 4. Pair primers and apply the specificity fallback
 
-mlvamaps creates a lossless FASTA projection of retained reads for Amplirust.
-Amplirust handles IUPAC primer bases, both orientations, primer alignment, and
-valid product-length constraints. The original FASTQ qualities remain connected
-to the assigned read. A valid primer-pair assignment takes precedence when it
-and recruitment both recover the same read. Primer pairing also supplies a
-fallback when a panel lacks a usable complete recruitment product.
+`mlvamaps` creates a lossless FASTA projection of retained reads and passes it
+through the same Sassy-backed in silico PCR engine used for assemblies. Sassy
+discovers approximate primer locations; `mlvamaps` handles deterministic IUPAC
+primer expansion, orientation, primer pairing, and product-length constraints.
+The original FASTQ qualities remain connected to the assigned read. A valid
+primer-pair assignment takes precedence when it and recruitment both recover
+the same read. Primer pairing also supplies a fallback when a panel lacks a
+usable complete recruitment product.
 
 This stage returns:
 
 - `filtered_reads.fasta.gz`
 - `read_locus_assignments.tsv`
-- Native evidence under `amplirust/`
+- Sassy-backed evidence under `in_silico_pcr/`
 
 ## 5. Extract repeat evidence and local products
 
@@ -116,7 +118,8 @@ This stage returns `read_repeat_features.tsv`.
 
 Complete products in the EM-dominant cluster are globally aligned as a partial
 order alignment with the `spoars` Python bindings. Its consensus is written to
-`local_locus_products.fasta.gz`, then processed by the same Sassy in-silico PCR,
+`local_locus_products.fasta.gz`, then processed by the same Sassy-backed in
+silico PCR,
 legacy primer-coordinate product-size calculation, and repeat caller used for
 whole assemblies. This corrects minority read insertions and deletions before
 repeat counting. Repeat-spanning partial reads can produce provisional allele

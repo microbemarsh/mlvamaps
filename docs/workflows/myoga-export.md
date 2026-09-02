@@ -1,6 +1,6 @@
 # Dataset aggregation and MYOGA export
 
-`mlvamaps export-myoga` converts already completed MLVAmaps result directories
+`mlvamaps export-myoga` converts already completed `mlvamaps` result directories
 into a filtered sample-by-locus dataset, pairwise MLVA distances, and a
 MYOGA-ready neighbor-joining tree. It reads existing result files and never
 reruns MLVA calling.
@@ -29,7 +29,7 @@ combined copy in `batch_summary/`, and consults `batch_status.tsv` and
 `sample_summary.tsv` when available. Legacy batch roots that store aggregate
 files directly at their top level remain supported. Failed, incomplete, duplicate, and
 malformed results are recorded in `samples_excluded.tsv` rather than stopping
-other samples. Directories containing recognizable MLVAmaps outputs but no
+Directories containing recognizable `mlvamaps` outputs but no
 `calls.tsv` are reported as `MISSING_CALLS_FILE`.
 
 A locus is callable only when its final `repeat_count` in `calls.tsv` is a
@@ -72,7 +72,7 @@ repeat_distance     = repeat_distance_raw / |Cij|
 
 The default tree metric is `repeat`, the mean absolute repeat-count difference.
 Use `--distance categorical` for the proportion of differing shared alleles.
-The existing combined-marker normalization in MLVAmaps scales query/reference
+The existing combined-marker normalization in `mlvamaps` scales query/reference
 repeat differences by dispersion in a supplied reference database. That scale
 cannot be recovered reliably from ordinary completed sample results, so this
 export does not invent or silently reuse a dataset-derived replacement in its
@@ -200,7 +200,7 @@ The pairwise long table also retains threshold-passing samples subsequently
 removed for insufficient overlap, making those decisions auditable. The square
 matrix contains only final samples in identical row and column order.
 
-`mlva_nj.tree` is built with MLVAmaps' deterministic NumPy neighbor-joining
+`mlva_nj.tree` is built with `mlvamaps`' deterministic NumPy neighbor-joining
 implementation. One- and two-sample exports produce valid simple Newick trees;
 no tree is written for zero retained samples. Negative reconstruction branch
 lengths are clamped to zero. Supply `mlva_nj.tree` and `myoga_metadata.tsv` to

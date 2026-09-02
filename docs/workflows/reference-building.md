@@ -7,6 +7,12 @@ mlvamaps separates reference acquisition from reference construction:
 2. `build-reference` extracts each MLVA locus and builds its fixed reference
    alignment and phylogeny.
 
+Locus extraction uses the same Sassy-backed in silico PCR engine as assembly
+calling. For local assemblies, a metadata CSV/TSV links each reference ID to an
+assembly file. For NCBI inputs, one `--taxid` creates one taxon cohort, while
+`--taxids-csv taxids.csv` creates a separate downloaded and built cohort for
+each row before combining their non-overlapping references.
+
 The build also writes `database/reference_panel.tsv`, allowing subsequent calls
 to omit `-p`, and normalizes `taxid`/`ncbi_taxid` plus
 `organism_name`/`species` to `taxon_id` and `taxon_name`. If a taxonomy column
@@ -19,6 +25,13 @@ original local-assembly behavior.
 
 ## One taxid
 
+Use a minimal `primer.csv` or a rich panel. A minimal file can be:
+
+```csv
+name,forward,reverse
+VNTR_01,ACGTTGCAAC,TGCATGCAAA
+```
+
 ```bash
 mlvamaps build-reference \
   --taxid 86661 \
@@ -30,7 +43,7 @@ mlvamaps build-reference \
 
 The resulting database is `references/taxid_86661/reference/database`.
 
-## A CSV of taxids
+## Multiple taxa with `taxids.csv`
 
 The input must have a `taxid`, `taxon_id`, or `ncbi_taxid` column. An optional
 `name`, `reference_name`, or `database_name` column controls the output
@@ -44,7 +57,7 @@ taxid,name
 
 ```bash
 mlvamaps build-reference \
-  --taxids-csv taxa.csv \
+  --taxids-csv taxids.csv \
   -p panels/mlva_loci.tsv \
   --output references \
   --threads 32
@@ -75,10 +88,13 @@ references/
 └── reference_pipeline_manifest.json
 ```
 
-The top-level database combines all non-overlapping reference accessions and
-labels each reference with the taxid/name of the cohort requested in the input
-CSV. Original NCBI organism metadata is retained. A reference accession found
-in more than one cohort is rejected rather than assigned conflicting labels.
+Each taxon directory is an isolated reference cohort with its own assembly
+inputs, per-locus amplicons, database, phylogeny, build manifest, and locus
+amplifiability summary. The top-level reference database combines all
+non-overlapping reference accessions and labels each reference with the
+taxid/name of the cohort requested in `taxids.csv`. Original NCBI organism
+metadata is retained. A reference accession found in more than one cohort is
+rejected rather than assigned conflicting labels.
 
 Use the build output directly; the panel and taxon metadata are defaults:
 
@@ -86,7 +102,7 @@ Use the build output directly; the panel and taxon metadata are defaults:
 mlvamaps call -i sample.fasta --database references -o results/sample
 ```
 
-Automatic taxon identification is enabled whenever this database contains
+Automatic taxon assignment is enabled whenever this database contains
 taxon metadata. No `-p`, target-taxon, calibration, or taxon-identification
 option is needed. If `references` was produced by an older mlvamaps version,
 the first call builds the combined top-level database from its pipeline
@@ -99,10 +115,18 @@ The two top-level TSVs summarize panel compatibility across taxa.
 `taxon_reference_summary.tsv` has one row per taxon, while
 `taxon_locus_amplifiability.tsv` has one row per taxon/locus and can be pivoted
 into a heatmap using `percent_genomes_amplifiable`. A locus is amplifiable when
-at least one examined genome has a product retained by the normal in-silico PCR
+at least one examined genome has a product retained by the normal in silico PCR
 and multiple-product policy. Thus `NO_AMPLICONS` is distinct from
 `INSUFFICIENT_REFERENCES`: the latter is amplifiable but lacks enough retained
-references for `--min-references-per-tree`.
+references for `--min-references-per-tree`. Within each taxon cohort,
+`reference_locus_amplifiability.tsv` reports the corresponding per-locus genome
+counts, valid amplicon counts, percentage amplifiable, and tree status.
+
+For each assembly/locus pair, reference construction ranks products by primer
+error round, total primer edit distance, product size, and product ID. Only a
+tie on the best primer quality invokes `--multiple-products`: the default
+`exclude` writes `AMBIGUOUS_EXCLUDED`, `best` retains the deterministic first
+candidate, and `error` stops the build.
 
 Taxon status is `BUILT` only when every panel locus has a tree, `PARTIAL` when
 at least one locus is amplifiable but the full panel was not built, and

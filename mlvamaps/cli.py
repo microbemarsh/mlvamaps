@@ -727,7 +727,7 @@ def build_parser() -> argparse.ArgumentParser:
         "export-myoga",
         help="Aggregate completed MLVA results into a MYOGA-ready relatedness dataset",
         description=(
-            "Discover completed MLVAmaps samples, filter exact repeat-count profiles, "
+            "Discover completed mlvamaps samples, filter exact repeat-count profiles, "
             "join metadata, calculate shared-locus distances, and write a deterministic "
             "neighbor-joining MLVA relatedness tree without rerunning calling. An "
             "optional combined-marker mode reuses accepted amplicons to add per-locus "
@@ -738,13 +738,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--results",
         required=True,
         metavar="DIR",
-        help="Root containing completed per-sample MLVAmaps result directories",
+        help="Root containing completed per-sample mlvamaps result directories",
     )
     export.add_argument(
         "--metadata",
         required=True,
         metavar="CSV_OR_TSV",
-        help="Sample metadata table to join to recorded MLVAmaps sample IDs",
+        help="Sample metadata table to join to recorded mlvamaps sample IDs",
     )
     export.add_argument(
         "--metadata-id",

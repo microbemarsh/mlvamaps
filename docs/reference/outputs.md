@@ -283,7 +283,7 @@ they are independent of locus-wide read mapping.
 | `assembly_amplicons.fasta.gz` | Extracted assembly primer products. |
 | `read_support.tsv` | Optional mapped reads and mean coverage per product. |
 | `read_support.sam` | minimap2 alignments when `--reads` is used. |
-| `amplirust/` | Native in-silico PCR evidence. |
+| `in_silico_pcr/` | Sassy-backed primer-search and paired-product evidence (`primers.csv`, `matches.tsv`, and `products.fasta.gz`). |
 | `legacy_output.csv` | Historical row-oriented locus details, including zero-based primer positions and mismatch display. |
 | `legacy_mlva_analysis.csv` | Historical wide repeat-count layout. |
 | `legacy_predicted_pcr_sizes.csv` | Historical wide product-size layout. |
@@ -315,6 +315,4 @@ backwards compatibility.
 | Status | Meaning |
 | --- | --- |
 | `PASS` | Product found and repeat count calculated. |
-| `AMBIGUOUS` | Product found, but the leading allele is below the configured posterior threshold or leads the runner-up by less than 0.2. |
-| `PRESENT_COUNT_UNKNOWN` | Product found but panel metadata cannot convert its size to repeat count. |
-| `NOT_FOUND` | No accepted paired-primer product found. |
+| `NOT_FOUND` | No product was eligible for the historical assembly repeat-count rule. Candidate products can still appear in `assembly_amplicons.tsv` when repeat calibration is unavailable or the raw repeat count is 100 or greater. |

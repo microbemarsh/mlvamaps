@@ -8,6 +8,21 @@ The main outputs are an MLVA fingerprint, per-locus calls and evidence, and a
 self-contained HTML report. Optional reference databases add sequence-aware
 matching and phylogenetic placement.
 
+There are three calling pathways:
+
+- **Genome assemblies:** Sassy-backed, primer-directed in silico PCR recovers
+  candidate amplicons; the assembly caller applies MLVA_finder-compatible
+  product selection and size-to-repeat conversion.
+- **Paired-end or single-end Illumina reads:** one competitive Bowtie2 alignment
+  against versioned locus contexts supports conservative discrete repeat-count
+  inference. This pathway does not perform de novo assembly.
+- **Accurate long-read or amplicon FASTQ:** reads are processed directly,
+  recruited competitively with minimap2, and grouped into locus products before
+  a SPOARS consensus is passed through the assembly-equivalent caller.
+
+Locus detection does not by itself imply a confident repeat-count call.
+Unresolved and missing calls remain explicit and are never converted to zero.
+
 ## Install
 
 ### Conda/Miniforge (recommended)
@@ -38,7 +53,10 @@ conda activate mlvamaps
 ```
 
 > **Bioconda status:** the `mlvamaps` recipe is staged in
-> [`packaging/bioconda/meta.yaml`](packaging/bioconda/meta.yaml). 
+> [`packaging/bioconda/meta.yaml`](packaging/bioconda/meta.yaml). Its native
+> dependencies include the `sassy>=0.2.2` command-line tool used for primer
+> matching. If Sassy is installed outside the active environment, set
+> `SASSY_BIN` to its executable path.
 
 ## Run your first sample
 
@@ -119,7 +137,8 @@ mlvamaps build-reference \
   -t 16
 ```
 
-Or compare one primer panel across taxa:
+The panel may be a minimal `primer.csv` (locus, forward primer, reverse primer)
+or a rich CSV/TSV panel. To compare one panel across taxa, provide `taxids.csv`:
 
 ```csv
 taxid,name
@@ -129,7 +148,7 @@ taxid,name
 
 ```bash
 mlvamaps build-reference \
-  --taxids-csv taxa.csv \
+  --taxids-csv taxids.csv \
   -p panel.tsv \
   -o references \
   -t 16
@@ -166,7 +185,7 @@ still be used without a database; in that case compact contexts are synthesized
 from its primers, flanks, repeat motif, and expected range.
 
 For a multi-taxid build, that command automatically loads the saved panel and
-taxon metadata, then writes the taxonomic identification. No separate panel,
+taxon metadata, then writes the taxon assignment. No separate panel,
 target taxid, calibration artifact, or taxon-identification flag is required.
 Passing an older multi-taxid build directory upgrades it in place by creating
 the same combined top-level database.

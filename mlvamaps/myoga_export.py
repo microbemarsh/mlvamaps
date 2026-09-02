@@ -666,7 +666,7 @@ def export_myoga(
     raxml_model: str = "DNA",
     force: bool = False,
 ) -> dict[str, Path | int | str]:
-    """Export completed MLVAmaps results as a relatedness dataset for MYOGA."""
+    """Export completed mlvamaps results as a relatedness dataset for MYOGA."""
     if not 0 <= min_callable_fraction <= 1:
         raise ValueError("min_callable_fraction must be between 0 and 1")
     if min_callable_loci < 0:
@@ -985,8 +985,8 @@ def export_myoga(
         ["metric", "value"],
     )
     summary_text = [
-        "MLVAmaps MYOGA export",
-        "======================",
+        "mlvamaps MYOGA export",
+        "=====================",
         "",
         *[f"{metric}: {value}" for metric, value in summary_values],
         "",

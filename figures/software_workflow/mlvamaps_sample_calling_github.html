@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mlvamaps sample calling pathways</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; background: #fcfcfa; color: #18211f; }
+    body { font-family: Arial, Helvetica, sans-serif; padding: 20px; }
+    main { width: min(960px, 100%); margin: 0 auto; }
+    h1 { margin: 0 0 14px; font-size: 25px; line-height: 1.15; font-weight: 650; }
+    svg { display: block; width: 100%; height: auto; background: #fcfcfa; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Three sample types, MLVA calling, and taxon identification</h1>
+    <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="sample-github-title sample-github-desc">
+      <title id="sample-github-title">mlvamaps sample calling pathways</title>
+      <desc id="sample-github-desc">A primer panel guides distinct assembly, Illumina, and accurate long-read or amplicon workflows; optional Deacon screening retains target-like FASTQ reads, and common locus calls support an MLVA fingerprint and reference-enabled taxon identification.</desc>
+      <defs>
+        <style>
+          .node{fill:#fff;stroke:#4f625d;stroke-width:1.2}.input{fill:#f2f4f3;stroke:#71807c;stroke-width:1.1}.focal{fill:#eaf4f3;stroke:#2b7a78;stroke-width:1.8}.output{fill:#fff;stroke:#18211f;stroke-width:1.5}
+          .edge{fill:none;stroke:#4f625d;stroke-width:1.4;marker-end:url(#arrow)}.guide{fill:none;stroke:#71807c;stroke-width:1.1;stroke-dasharray:5 4}.accent{fill:none;stroke:#2b7a78;stroke-width:1.8;marker-end:url(#arrow-accent)}
+          .tag{fill:#315f78;font:700 9px Arial,Helvetica,sans-serif;letter-spacing:.07em}.tag2{fill:#2b7a78;font:700 9px Arial,Helvetica,sans-serif;letter-spacing:.07em}.name{fill:#18211f;font:700 14px Arial,Helvetica,sans-serif}.sub{fill:#4f625d;font:10px Arial,Helvetica,sans-serif}.note{fill:#4f625d;font:italic 10px Arial,Helvetica,sans-serif}
+        </style>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4f625d"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#2b7a78"/></marker>
+      </defs>
+      <rect width="960" height="600" fill="#fcfcfa"/>
+
+      <!-- Connectors -->
+      <path class="guide" d="M140 92 H44 V466"/>
+      <line class="edge" x1="44" y1="202" x2="72" y2="202"/>
+      <line class="edge" x1="44" y1="334" x2="72" y2="334"/>
+      <line class="edge" x1="44" y1="466" x2="72" y2="466"/>
+      <path class="edge" d="M360 202 H416 Q424 202 424 210 V286 Q424 294 432 294 H456"/>
+      <line class="edge" x1="360" y1="334" x2="456" y2="334"/>
+      <path class="edge" d="M360 466 H416 Q424 466 424 458 V382 Q424 374 432 374 H456"/>
+      <line class="accent" x1="680" y1="334" x2="724" y2="334"/>
+
+      <!-- Primer panel -->
+      <rect class="input" x="72" y="56" width="176" height="72" rx="4"/>
+      <text class="tag" x="92" y="79">SHARED PRIMER PANEL</text>
+      <text class="name" x="92" y="104">primer.csv</text>
+      <text class="sub" x="92" y="119">locus · forward · reverse</text>
+
+      <!-- Calling pathways -->
+      <rect class="node" x="72" y="156" width="288" height="92" rx="4"/>
+      <text class="tag" x="92" y="178">GENOME ASSEMBLY</text>
+      <text class="name" x="92" y="204">Sassy in silico PCR</text>
+      <text class="sub" x="92" y="224">primer-bounded product → length → repeat count</text>
+
+      <rect class="node" x="72" y="288" width="288" height="92" rx="4"/>
+      <text class="tag" x="92" y="310">PAIRED-END ILLUMINA FASTQ · DEACON OPTIONAL</text>
+      <text class="name" x="92" y="336">Competitive Bowtie2 mapping</text>
+      <text class="sub" x="92" y="356">target-like reads → spanning · junction · pair evidence</text>
+
+      <rect class="node" x="72" y="420" width="288" height="92" rx="4"/>
+      <text class="tag" x="92" y="442">LONG / AMPLICON FASTQ · DEACON OPTIONAL</text>
+      <text class="name" x="92" y="468">minimap2 recruitment</text>
+      <text class="sub" x="92" y="488">target-like reads → SPOARS consensus → repeat count</text>
+
+      <!-- Convergence and output -->
+      <rect class="focal" x="456" y="254" width="224" height="160" rx="6"/>
+      <text class="tag2" x="476" y="278">SHARED REPRESENTATION</text>
+      <text class="name" x="476" y="308">Common locus calls</text>
+      <line x1="476" y1="322" x2="660" y2="322" stroke="#9fc5c3"/>
+      <text class="sub" x="476" y="344">locus · repeat count</text>
+      <text class="sub" x="476" y="366">call status · confidence/evidence</text>
+      <text class="sub" x="476" y="388">locus sequence, when resolved</text>
+
+      <rect class="output" x="724" y="254" width="200" height="160" rx="4"/>
+      <text class="tag" x="744" y="278">OUTPUTS</text>
+      <text class="name" x="744" y="306">MLVA fingerprint</text>
+      <text class="sub" x="744" y="326">sample × locus repeat counts</text>
+      <line x1="744" y1="344" x2="904" y2="344" stroke="#c3ccc9"/>
+      <text class="tag" x="744" y="366">REFERENCE-ENABLED</text>
+      <text class="name" x="744" y="392">Taxon identification</text>
+      <text class="sub" x="744" y="407">weighted evidence across loci</text>
+
+      <text class="note" x="456" y="446">Locus detection can remain unresolved;</text>
+      <text class="note" x="456" y="462">missing repeat counts are not imputed.</text>
+    </svg>
+  </main>
+</body>
+</html>
