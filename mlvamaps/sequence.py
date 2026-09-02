@@ -5,7 +5,7 @@ from threading import local
 from typing import Optional, Tuple
 
 import numpy as np
-import sassy
+from .sassy_cli import Searcher
 
 
 _RC = str.maketrans("ACGTRYSWKMBDHVNacgtryswkmbdhvn", "TGCAYRSWMKVHDBNtgcayrswmkvhdbn")
@@ -71,13 +71,13 @@ def _sassy_searcher(alphabet: str, rc: bool = False):
     if searchers is None:
         searchers = {}
         _SASSY_LOCAL.searchers = searchers
-    cache_key = (alphabet, rc, id(sassy))
+    cache_key = (alphabet, rc, id(Searcher))
     if cache_key in searchers:
         return searchers[cache_key]
     try:
-        searcher = sassy.Searcher(alphabet, rc=rc)
+        searcher = Searcher(alphabet, rc=rc)
     except TypeError:
-        searcher = sassy.Searcher(alphabet)
+        searcher = Searcher(alphabet)
     searchers[cache_key] = searcher
     return searcher
 

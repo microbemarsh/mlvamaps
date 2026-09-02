@@ -4,13 +4,13 @@ This directory stages the recipe that will be copied to
 `bioconda/bioconda-recipes/recipes/mlvamaps/meta.yaml`. It is not an installable
 channel by itself.
 
-## Current blocker
+## Dependency status
 
-`mlvamaps` imports `sassy` from the PyPI distribution `sassy-rs>=0.2.6` for its
-core primer search. As of 2026-08-27, `sassy-rs` is not available from Bioconda
-or conda-forge. Bioconda recipes cannot satisfy runtime dependencies with pip,
-so package `sassy-rs` first and have that recipe accepted before submitting
-`mlvamaps`.
+`mlvamaps` invokes the `sassy>=0.2.2` command-line tool for its core primer
+search. That package is available from Bioconda on supported Linux and macOS
+platforms, so Sassy no longer blocks submission. The adapter sets `--no-rc`
+where mlvamaps owns strand handling and parses Sassy's zero-based, half-open TSV
+coordinates and CIGAR strings.
 
 `spoars`, the other native Python extension imported by the calling pipeline,
 is already available from Bioconda. The remaining declared Python packages and
@@ -56,8 +56,8 @@ external executables are also available from Bioconda/conda-forge.
 4. Run the current `bioconda-utils` lint/build workflow from the recipes
    checkout, following the
    [Bioconda contributor documentation](https://bioconda.github.io/contributor/).
-5. Open a pull request and disclose that `sassy-rs` is a required native
-   dependency with its own prerequisite recipe.
+5. Open a pull request and note that the existing Bioconda `sassy` package is a
+   required external executable.
 
 The recipe is `noarch: python` because the `mlvamaps` distribution itself is
 pure Python. Platform-specific code is supplied through conda dependencies.

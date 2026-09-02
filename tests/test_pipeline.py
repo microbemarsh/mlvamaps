@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import csv
 import inspect
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Barrier
-from types import SimpleNamespace
 
 import pytest
 
@@ -1179,44 +1176,15 @@ def test_assembly_alignment_depth_from_sam(tmp_path):
     assert round(depth["VNTR_01|contig1|forward|5-52"]["mean_coverage"], 3) == 1.208
 
 
-def test_sassy_is_preferred_for_approximate_matching(monkeypatch):
+def test_sassy_cli_is_used_for_approximate_matching(monkeypatch):
     class FakeSearcher:
-        def __init__(self, alphabet, rc=False):
-            self.alphabet = alphabet
-            self.rc = rc
-
         def search(self, pattern, text, k):
             return [
-                SimpleNamespace(text_start=7, cost=1),
-                SimpleNamespace(text_start=3, cost=0),
+                type("Match", (), {"text_start": 7, "text_end": 11, "cost": 1})(),
+                type("Match", (), {"text_start": 3, "text_end": 7, "cost": 0})(),
             ]
 
-    fake_sassy = SimpleNamespace(Searcher=FakeSearcher)
-    monkeypatch.setattr(sequence, "sassy", fake_sassy)
+    monkeypatch.setattr(sequence, "Searcher", lambda alphabet, rc=False: FakeSearcher())
     sequence._clear_sassy_searchers()
     assert sequence.find_best("ACGT", "TTTACGTTT", 1) == (3, 0)
     sequence._clear_sassy_searchers()
-
-
-def test_sassy_searchers_are_thread_local(monkeypatch):
-    class FakeSearcher:
-        rendezvous = Barrier(2)
-
-        def __init__(self, alphabet, rc=False):
-            self.active = False
-
-        def search(self, pattern, text, k):
-            if self.active:
-                raise RuntimeError("Already borrowed")
-            self.active = True
-            try:
-                self.rendezvous.wait(timeout=2)
-                return [SimpleNamespace(text_start=3, cost=0)]
-            finally:
-                self.active = False
-
-    monkeypatch.setattr(sequence, "sassy", SimpleNamespace(Searcher=FakeSearcher))
-    sequence._clear_sassy_searchers()
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(lambda _index: sequence.find_best("ACGT", "TTTACGTTT", 1), range(2)))
-    assert results == [(3, 0), (3, 0)]

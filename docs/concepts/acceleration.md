@@ -7,10 +7,10 @@ Current backend policy:
 
 - `skesa` performs conservative, multithreaded local assembly for recruited
   Illumina locus reads. There is no Python assembly fallback.
-- `sassy-rs>=0.2.6` is the Rust/SIMD engine for in-silico PCR, paired-primer
-  FASTQ assignment, and bounded flank localization. mlvamaps owns deterministic
-  IUPAC expansion, MLVA_finder-compatible strand fallback and product pairing,
-  product-length constraints, and result selection.
+- The Bioconda `sassy>=0.2.2` command-line tool is the Rust/SIMD engine for
+  in-silico PCR, paired-primer FASTQ assignment, and bounded flank localization.
+  mlvamaps owns deterministic IUPAC expansion, MLVA_finder-compatible strand
+  fallback and product pairing, product-length constraints, and result selection.
 - `parasail` computes exact Needleman-Wunsch global tracebacks between each
   mapped read repeat and its diagnostic product-group representative.
 - `spoars` performs SIMD-accelerated partial-order assembly of complete reads
@@ -32,9 +32,9 @@ Default threading policy:
 - CLI options use 32 threads by default. Users can explicitly pass `--threads 0`
   to use all available CPUs.
 - `0` means auto-detect available CPUs for mlvamaps workers.
-- Native backends receive the resolved thread count directly. mlvamaps does
-  not place a Python thread pool around Sassy's internally threaded batch
-  search, which avoids nested parallelism and CPU oversubscription.
+- Native backends receive an appropriate share of the resolved thread count.
+  The current in-memory Sassy CLI adapter runs each search with one Sassy thread;
+  assembly records can be distributed across mlvamaps worker processes.
 - Native mapping and phylogenetic tools receive the resolved thread count.
 - Up to four independent SKESA locus jobs share the resolved thread budget;
   each job receives only its assigned share.

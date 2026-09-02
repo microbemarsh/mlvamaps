@@ -9,13 +9,13 @@ from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 
-import sassy
 import regex
 
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .io import open_text
 from .models import Locus
 from .primers import read_loci_or_primers
+from .sassy_cli import Searcher
 
 
 PCR_TSV_FIELDS = [
@@ -116,9 +116,9 @@ def _new_searcher():
     # ASCII is intentional. MLVA_finder expands ambiguity in the primer, while
     # an N in an assembly is an error rather than an IUPAC wildcard.
     try:
-        return sassy.Searcher("ascii", rc=False)
+        return Searcher("ascii", rc=False)
     except TypeError:  # pragma: no cover - compatibility with early bindings
-        return sassy.Searcher("ascii")
+        return Searcher("ascii")
 
 
 def _match_key(match: _PrimerMatch) -> tuple[int, int, int, str]:
@@ -133,7 +133,7 @@ def _sassy_matches(searcher, pattern: str, sequence: str, max_errors: int) -> li
         raw = itertools.chain.from_iterable(
             searcher.search_all_alignments(pattern_bytes, sequence_bytes, k=max_errors)
         )
-    elif hasattr(searcher, "search_all"):  # pragma: no cover - sassy-rs < 0.2.6
+    elif hasattr(searcher, "search_all"):  # pragma: no cover - binding compatibility
         raw = searcher.search_all(pattern_bytes, sequence_bytes, k=max_errors)
     else:  # pragma: no cover - retained for a useful dependency error
         raw = searcher.search(pattern_bytes, sequence_bytes, k=max_errors)

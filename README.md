@@ -38,10 +38,12 @@ conda activate mlvamaps
 ```
 
 > **Bioconda status:** the `mlvamaps` recipe is staged in
-> [`packaging/bioconda/meta.yaml`](packaging/bioconda/meta.yaml). Submission is
-> currently blocked until the required native Python dependency `sassy-rs` is
-> available from Bioconda or conda-forge. See the
-> [Bioconda release checklist](packaging/bioconda/README.md).
+> [`packaging/bioconda/meta.yaml`](packaging/bioconda/meta.yaml). Its native
+> dependencies, including the `sassy` command-line tool, are available from
+> Bioconda. See the [Bioconda release checklist](packaging/bioconda/README.md).
+
+When Sassy is installed outside the active environment, set `SASSY_BIN` to its
+executable path.
 
 ## Run your first sample
 
