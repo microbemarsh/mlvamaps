@@ -15,7 +15,6 @@ from mlvamaps.short_read_mapping import (
     load_locus_contexts,
 )
 from mlvamaps.minimap_mapping import minimap2_competitive_command
-from mlvamaps.validation import fastq_assembly_concordance
 
 
 def _locus(unit: int = 4) -> Locus:
@@ -57,27 +56,6 @@ def test_insert_estimation_is_robust_to_outlier_and_reports_low_support():
     assert sparse.median is None and sparse.pairs_used == 2
 
 
-def test_fastq_assembly_concordance_counts_exact_unresolved_and_discordant():
-    fastq = [
-        {"sample_id": "S", "locus_id": "A", "repeat_count": "4", "product_size_bp": "100", "allele_confidence": "0.99"},
-        {"sample_id": "S", "locus_id": "B", "repeat_count": "", "failure_reason": "low coverage"},
-        {"sample_id": "S", "locus_id": "C", "repeat_count": "6"},
-    ]
-    assembly = [
-        {"sample_id": "S", "locus_id": "A", "repeat_count": "4", "product_size_bp": "100"},
-        {"sample_id": "S", "locus_id": "B", "repeat_count": "5"},
-        {"sample_id": "S", "locus_id": "C", "repeat_count": "7"},
-    ]
-    details, summary = fastq_assembly_concordance(fastq, assembly)
-    assert [row["agreement"] for row in details] == ["exact", "fastq_unresolved", "discordant"]
-    assert summary == {
-        "comparable_loci": 2, "exact_repeat_count_agreement": 1,
-        "exact_length_agreement": 1, "repeat_count_concordance": 0.5,
-        "fastq_only_calls": 0, "assembly_only_calls": 1,
-        "fastq_unresolved": 1, "discordant_calls": 1,
-    }
-
-
 def test_minimap2_command_is_single_competitive_paired_mapping(tmp_path):
     command = minimap2_competitive_command(
         tmp_path / "contexts.fasta", tmp_path / "r1.fq",
@@ -103,7 +81,7 @@ def test_old_database_without_context_schema_requires_rebuild(tmp_path):
         load_locus_contexts([_locus()], tmp_path)
 
 
-def test_context_database_validates_schema_and_sequence_hash(tmp_path):
+def test_context_database_checks_schema_and_sequence_hash(tmp_path):
     sequence = "ACGTAACCGGTT" + "ATGC" * 4 + "GGTTAACCTGCA"
     (tmp_path / "mlva_contexts.fasta.gz").write_bytes(b"")
     # Use the project writer so gzip handling matches production behavior.

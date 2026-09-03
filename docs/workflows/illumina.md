@@ -49,7 +49,8 @@ the empirical fragment-span median, median absolute deviation, and pair count.
 
 Contexts come from one of two explicit sources:
 
-1. the versioned `mlva_contexts.tsv` and `mlva_contexts.fasta.gz` files in a
+1. the versioned `competitive_mapping/candidate_metadata.tsv` and
+   `competitive_mapping/candidate_contexts.fasta` files in a
    current `--database`; or
 2. complete products synthesized from a rich panel's primers, flanks, motif,
    and expected repeat range when no database is supplied.
@@ -77,7 +78,8 @@ forced. Candidate competition, not the primary alignment label alone, supplies
 repeat-state evidence; no per-locus de novo assembly is required.
 
 When `--database` is supplied, it must contain the versioned
-`mlva_contexts.tsv` and `mlva_contexts.fasta.gz` artifacts produced by the
+`competitive_mapping/candidate_metadata.tsv`, `candidate_contexts.fasta`, and
+technology-specific minimap2 indexes produced by the
 current reference builder. Older databases must be rebuilt rather than being
 silently reinterpreted. `--keep-intermediates` retains the filtered reads,
 candidate context bank and minimap2 SAM file.
@@ -195,15 +197,12 @@ mlvamaps call -p examples/illumina_demo/panel.tsv -i sr \
 ```
 
 Open `results/report.html`, inspect the exact-versus-unresolved evidence, and
-load `results/myoga_samples.csv` into MYOGA. Validate against an assembly call:
+load `results/myoga_samples.csv` into MYOGA. An assembly can be called
+independently for scientific concordance assessment:
 
 ```bash
 mlvamaps call -p examples/illumina_demo/panel.tsv \
   -i examples/illumina_demo/truth.fasta.gz -o examples/illumina_demo/truth
-mlvamaps validate \
-  --truth examples/illumina_demo/truth/calls.tsv \
-  --illumina examples/illumina_demo/results/calls.tsv \
-  -o examples/illumina_demo/validation
 ```
 
 ## Troubleshooting

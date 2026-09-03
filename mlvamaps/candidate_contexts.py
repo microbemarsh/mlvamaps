@@ -25,10 +25,15 @@ CONTEXT_FIELDS = [
     "schema_version", "candidate_id", "locus_id", "repeat_count",
     "repeat_unit_length", "repeat_start", "repeat_end", "left_flank",
     "right_flank", "reference_accession", "taxon_id", "taxon_name",
-    "reference_sequence_id", "reference_id", "sequence_sha256",
+    "reference_sequence_id", "reference_id", "background_id", "sequence_sha256",
     "context_length_bp", "expected_product_size_bp", "repeat_motif",
     "reference_contig", "reference_start", "reference_end", "strand",
-    "source", "provenance_count",
+    "observed_or_synthetic", "source_repeat_count", "source", "provenance_count",
+]
+CANDIDATE_PROVENANCE_FIELDS = [
+    "candidate_id", "locus_id", "background_id", "reference_accession",
+    "reference_sequence_id", "taxon_id", "taxon_name", "source_repeat_count",
+    "candidate_repeat_count", "observed_or_synthetic",
 ]
 
 
@@ -48,6 +53,7 @@ class CandidateContext:
     taxon_name: str = ""
     reference_sequence_id: str = ""
     reference_id: str = ""
+    background_id: str = ""
     expected_product_size_bp: int = 0
     repeat_motif: str = ""
     reference_contig: str = ""
@@ -56,6 +62,11 @@ class CandidateContext:
     strand: str = "+"
     source: str = ""
     provenance_count: int = 1
+    observed_or_synthetic: str = "synthetic"
+    source_repeat_count: int | float | None = None
+    provenance_links: tuple[
+        tuple[str, str, str, str, str, int | float | None], ...
+    ] = ()
 
     # Compatibility names used by the original Illumina implementation.
     @property
@@ -94,6 +105,7 @@ class CandidateContext:
             "taxon_name": self.taxon_name,
             "reference_sequence_id": self.reference_sequence_id,
             "reference_id": self.reference_id or self.reference_accession,
+            "background_id": self.background_id,
             "sequence_sha256": hashlib.sha256(self.sequence.encode()).hexdigest(),
             "context_length_bp": len(self.sequence),
             "expected_product_size_bp": self.expected_product_size_bp or len(self.sequence),
@@ -102,6 +114,10 @@ class CandidateContext:
             "reference_start": "" if self.reference_start is None else self.reference_start,
             "reference_end": "" if self.reference_end is None else self.reference_end,
             "strand": self.strand,
+            "observed_or_synthetic": self.observed_or_synthetic,
+            "source_repeat_count": (
+                "" if self.source_repeat_count is None else self.source_repeat_count
+            ),
             "source": self.source,
             "provenance_count": self.provenance_count,
         }
@@ -178,25 +194,64 @@ def candidate_repeat_counts(
         raise ValueError("maximum candidate repeat count must be at least 1")
     if expansion < 0:
         raise ValueError("candidate expansion cannot be negative")
-    expected_lower = max(0, int(locus.expected_min_repeats))
-    expected_upper = min(maximum, int(locus.expected_max_repeats))
-    states = set(range(expected_lower, expected_upper + 1))
-    for observed in observed_states:
-        if observed is None or not float(observed).is_integer():
-            continue
-        center = int(observed)
+    all_observed = sorted({
+        int(value) for value in observed_states
+        if value is not None and float(value).is_integer() and int(value) >= 0
+    })
+    observed = [value for value in all_observed if value <= maximum]
+    explicit_range = (
+        locus.expected_max_repeats < 100
+        or locus.expected_min_repeats > 0
+    )
+    if explicit_range:
+        expected_lower = max(0, int(locus.expected_min_repeats))
+        expected_upper = min(maximum, int(locus.expected_max_repeats))
+        if expected_lower > expected_upper:
+            raise ValueError(
+                f"Invalid candidate repeat range for {locus.locus_id!r}: "
+                f"{locus.expected_min_repeats}..{locus.expected_max_repeats}"
+            )
+        states = set(range(expected_lower, expected_upper + 1))
+    elif observed:
+        # A primer-only/default 0..100 range is not treated as an explicit
+        # biological range. Expand conservatively around observed alleles.
+        lower = max(0, min(observed) - expansion)
+        upper = min(maximum, max(observed) + expansion)
+        if upper - lower > 20:
+            center = int(locus.nominal_repeat_units or sorted(observed)[len(observed) // 2])
+            lower, upper = max(0, center - 10), min(maximum, center + 10)
+        states = set(range(lower, upper + 1))
+    elif locus.nominal_repeat_units:
+        center = min(maximum, max(0, int(locus.nominal_repeat_units)))
+        states = set(range(max(0, center - expansion), min(maximum, center + expansion) + 1))
+    else:
+        raise ValueError(
+            f"Locus {locus.locus_id!r} has neither an explicit repeat range nor "
+            "a calibrated observed repeat count"
+        )
+    for center in observed:
         for state in range(max(0, center - expansion), min(maximum, center + expansion) + 1):
             # Database observations are retained, but expansion remains local
             # and the explicit maximum prevents unbounded state generation.
             states.add(state)
+    if not states:
+        raise ValueError(
+            f"No plausible candidate repeat counts remain for {locus.locus_id!r} "
+            f"under the maximum of {maximum}"
+        )
     return sorted(states)
 
 
 def _load_v2(database: Path, loci: list[Locus]) -> list[CandidateContext] | None:
-    metadata_path = database / "candidate_metadata.tsv"
-    fasta_path = database / "candidate_contexts.fasta"
+    resource = (
+        database / "competitive_mapping"
+        if (database / "competitive_mapping").is_dir()
+        else database
+    )
+    metadata_path = resource / "candidate_metadata.tsv"
+    fasta_path = resource / "candidate_contexts.fasta"
     if not fasta_path.is_file():
-        fasta_path = database / "candidate_contexts.fasta.gz"
+        fasta_path = resource / "candidate_contexts.fasta.gz"
     if not metadata_path.is_file() or not fasta_path.is_file():
         return None
     sequences = dict(read_fasta(fasta_path))
@@ -215,16 +270,41 @@ def _load_v2(database: Path, loci: list[Locus]) -> list[CandidateContext] | None
         if hashlib.sha256(sequence.encode()).hexdigest() != row["sequence_sha256"]:
             raise ValueError(f"Candidate context hash mismatch for {candidate_id!r}")
         contexts.append(CandidateContext(
-            candidate_id, row["locus_id"], sequence,
-            float(row["repeat_count"]) if "." in row["repeat_count"] else int(row["repeat_count"]),
-            int(row["repeat_unit_length"]), int(row["repeat_start"]), int(row["repeat_end"]),
-            row["left_flank"], row["right_flank"], row["reference_accession"],
-            row["taxon_id"], row["taxon_name"], row["reference_sequence_id"],
-            row["reference_id"], int(row["expected_product_size_bp"] or 0),
-            row["repeat_motif"], row["reference_contig"],
-            int(row["reference_start"]) if row["reference_start"] else None,
-            int(row["reference_end"]) if row["reference_end"] else None,
-            row["strand"], row["source"], int(row["provenance_count"] or 1),
+            candidate_id=candidate_id,
+            locus_id=row["locus_id"],
+            sequence=sequence,
+            repeat_count=(
+                float(row["repeat_count"])
+                if "." in row["repeat_count"]
+                else int(row["repeat_count"])
+            ),
+            repeat_unit_length=int(row["repeat_unit_length"]),
+            repeat_start=int(row["repeat_start"]),
+            repeat_end=int(row["repeat_end"]),
+            left_flank=row["left_flank"],
+            right_flank=row["right_flank"],
+            reference_accession=row["reference_accession"],
+            taxon_id=row["taxon_id"],
+            taxon_name=row["taxon_name"],
+            reference_sequence_id=row["reference_sequence_id"],
+            reference_id=row["reference_id"],
+            background_id=row["background_id"],
+            expected_product_size_bp=int(row["expected_product_size_bp"] or 0),
+            repeat_motif=row["repeat_motif"],
+            reference_contig=row["reference_contig"],
+            reference_start=int(row["reference_start"]) if row["reference_start"] else None,
+            reference_end=int(row["reference_end"]) if row["reference_end"] else None,
+            strand=row["strand"],
+            source=row["source"],
+            provenance_count=int(row["provenance_count"] or 1),
+            observed_or_synthetic=row["observed_or_synthetic"],
+            source_repeat_count=(
+                float(row["source_repeat_count"])
+                if "." in row["source_repeat_count"]
+                else int(row["source_repeat_count"])
+                if row["source_repeat_count"]
+                else None
+            ),
         ))
     return contexts
 
@@ -256,14 +336,18 @@ def _base_contexts(loci: list[Locus], database_path: str | Path | None) -> list[
             if repeat is None and repeat_unit_length(locus):
                 repeat = (end - start) / repeat_unit_length(locus)
             meta = metadata.get(reference_id.split()[0], {})
+            background_id = hashlib.sha256(
+                f"{locus.locus_id}\0{sequence[:start]}\0{sequence[end:]}".encode()
+            ).hexdigest()[:16]
             contexts.append(CandidateContext(
                 f"base{len(contexts)+1:07d}", locus.locus_id, sequence, repeat,
                 repeat_unit_length(locus), start, end, locus.left_flank_sequence,
                 locus.right_flank_sequence, reference_id.split()[0],
                 str(meta.get("taxon_id") or meta.get("taxid") or ""),
                 str(meta.get("taxon_name") or meta.get("organism_name") or ""),
-                reference_id, reference_id, len(sequence), locus.repeat_motif,
+                reference_id, reference_id, background_id, len(sequence), locus.repeat_motif,
                 source="database_amplicon" if database else "panel_synthetic",
+                source_repeat_count=repeat,
             ))
     if not contexts:
         raise ValueError(
@@ -298,11 +382,22 @@ def generate_candidate_contexts(
             ]
             sequence = base.sequence[:base.repeat_start] + repeat_sequence + base.sequence[base.repeat_end:]
             key = (base.locus_id, sequence, count)
-            item = collapsed.setdefault(key, {"base": base, "references": set(), "taxa": set(), "names": set(), "sequence_ids": set()})
+            item = collapsed.setdefault(key, {"base": base, "references": set(), "taxa": set(), "names": set(), "sequence_ids": set(), "backgrounds": set(), "source_counts": set(), "links": set()})
             item["references"].add(base.reference_accession)
             item["taxa"].add(base.taxon_id)
             item["names"].add(base.taxon_name)
             item["sequence_ids"].add(base.reference_sequence_id)
+            item["backgrounds"].add(base.background_id)
+            item["links"].add((
+                base.reference_accession,
+                base.reference_sequence_id,
+                base.background_id,
+                base.taxon_id,
+                base.taxon_name,
+                base.repeat_count,
+            ))
+            if base.repeat_count is not None:
+                item["source_counts"].add(base.repeat_count)
     contexts = []
     ordered = sorted(
         collapsed.items(), key=lambda item: (item[0][0], float(item[0][2]), item[0][1])
@@ -318,7 +413,14 @@ def generate_candidate_contexts(
             taxon_id=";".join(sorted(item["taxa"] - {""})),
             taxon_name=";".join(sorted(item["names"] - {""})),
             reference_sequence_id=";".join(sorted(item["sequence_ids"] - {""})),
+            background_id=";".join(sorted(item["backgrounds"] - {""})),
             expected_product_size_bp=len(sequence), provenance_count=max(len(item["references"] - {""}), 1),
+            observed_or_synthetic="observed" if count in item["source_counts"] else "synthetic",
+            source_repeat_count=(
+                sorted(item["source_counts"], key=float)[0]
+                if len(item["source_counts"]) == 1 else None
+            ),
+            provenance_links=tuple(sorted(item["links"])),
         ))
     if not contexts:
         raise ValueError("Candidate contexts do not encode usable discrete repeat-count states")
@@ -331,8 +433,33 @@ def write_candidate_contexts(contexts: list[CandidateContext], directory: str | 
     fasta = directory / "candidate_contexts.fasta"
     metadata = directory / "candidate_metadata.tsv"
     provenance = directory / "candidate_provenance.json"
+    provenance_table = directory / "candidate_provenance.tsv"
     write_fasta(((context.candidate_id, context.sequence) for context in contexts), fasta)
     write_tsv((context.row() for context in contexts), metadata, CONTEXT_FIELDS)
+    provenance_rows = []
+    for context in contexts:
+        links = context.provenance_links or ((
+            context.reference_accession,
+            context.reference_sequence_id,
+            context.background_id,
+            context.taxon_id,
+            context.taxon_name,
+            context.source_repeat_count,
+        ),)
+        for reference, sequence_id, background, taxon, taxon_name, source_count in links:
+            provenance_rows.append({
+                "candidate_id": context.candidate_id,
+                "locus_id": context.locus_id,
+                "background_id": background,
+                "reference_accession": reference,
+                "reference_sequence_id": sequence_id,
+                "taxon_id": taxon,
+                "taxon_name": taxon_name,
+                "source_repeat_count": "" if source_count is None else source_count,
+                "candidate_repeat_count": context.repeat_count,
+                "observed_or_synthetic": context.observed_or_synthetic,
+            })
+    write_tsv(provenance_rows, provenance_table, CANDIDATE_PROVENANCE_FIELDS)
     locus_ranges: dict[str, list[int | float]] = defaultdict(list)
     for context in contexts:
         if context.repeat_count is not None:
@@ -352,7 +479,12 @@ def write_candidate_contexts(contexts: list[CandidateContext], directory: str | 
             "\n".join(f"{c.candidate_id}\t{c.locus_id}\t{c.repeat_count}\t{c.sequence}" for c in contexts).encode()
         ).hexdigest(),
     }, indent=2, sort_keys=True) + "\n")
-    return {"fasta": fasta, "metadata": metadata, "provenance": provenance}
+    return {
+        "fasta": fasta,
+        "metadata": metadata,
+        "provenance": provenance,
+        "provenance_table": provenance_table,
+    }
 
 
 # Compatibility API for the former short-read-only context module.

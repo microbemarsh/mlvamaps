@@ -67,8 +67,7 @@ Illumina calls additionally always write `sample_summary.tsv`,
 Mapping mode also writes `short_read_mapping_evidence.tsv` (state, support,
 spanning/junction/CIGAR evidence, MAPQ, candidates, and context provenance) and
 `short_read_run_metadata.json` (versions, thresholds, database, and insert-size
-estimate). `benchmark-fastq-assembly` writes
-`mlvamaps_fastq_vs_assembly_concordance.tsv` plus a summary TSV.
+estimate).
 
 ## Dataset-level MYOGA export outputs
 
@@ -112,6 +111,14 @@ filter behavior.
 | `database/reference_sequence_index.tsv` | Canonical amplicon, repeat-masked SNP, and complete marker SHA-256 keys used by the default exact-match fast path. |
 | `database/taxon_locus_discrimination.tsv` | Build-time per-locus taxonomic weight, normalized information gain, reference coverage, and supporting counts. |
 | `database/reference_assemblies.tsv` | Reference-ID, source-assembly path, and canonical whole-genome SHA-256 used for assembly-query tie breaking. |
+| `database/competitive_mapping/candidate_contexts.fasta` | Unique observed or synthetic repeat-state sequence hypotheses used for competitive FASTQ mapping. |
+| `database/competitive_mapping/candidate_metadata.tsv` | Stable candidate IDs, repeat coordinates/states, background IDs, taxon data, and observed/synthetic status. |
+| `database/competitive_mapping/candidate_provenance.tsv` | Candidate-to-reference, taxon, and background relationships retained after sequence deduplication. |
+| `database/competitive_mapping/short.mmi` | minimap2 index using `-k 21 -w 11` for Illumina reads. |
+| `database/competitive_mapping/long.mmi` | minimap2 index using `-k 11 -w 5` for accurate long/amplicon reads. |
+| `database/deacon/reference_genomes.fasta` | Combined real genomes used for broad target-group recruitment; synthetic alleles are excluded. |
+| `database/deacon/target_recruitment.idx` | Deacon minimizer index over the real reference genomes. |
+| `manifest.json` | Completed schema-2.0 database manifest with checksums, versions, parameters, and asset paths. |
 | `reference_build_manifest.tsv` | Per-reference/locus product counts, selected product, primer errors, and exclusion status. |
 | `reference_locus_amplifiability.tsv` | Per-locus retained amplicon and genome counts, amplifiable percentage, and `NO_AMPLICONS`, `INSUFFICIENT_REFERENCES`, or `BUILT` tree status. |
 | `phylogeny/LOCUS.tree` | Portable Newick SNP tree for the locus. |

@@ -7,22 +7,17 @@ from pathlib import Path
 from . import __version__
 from .assembly_call import run_assembly_call
 from .concurrency import DEFAULT_THREADS
-from .in_silico_pcr import run_in_silico_pcr
 from .io import open_text, write_tsv
 from .myoga_export import export_myoga
 from .pipeline import run_call
 from .reference_builder import build_reference_database
 from .reference_pipeline import (
     build_taxon_references,
-    ensure_combined_taxon_database,
-    prepare_taxon_references,
     read_taxon_references,
 )
-from .simulation import simulate_reads
 from .sample_metadata import MYOGA_SAMPLE_FIELDS, metadata_by_sample, read_sample_metadata, write_csv
 from .short_reads import SAMPLE_SUMMARY_FIELDS, run_short_read_call
 from .taxon_assignment import run_taxon_calibration
-from .validation import run_fastq_assembly_concordance, run_validation
 
 
 FASTQ_SUFFIXES = (".fastq", ".fq", ".fastq.gz", ".fq.gz")
@@ -49,7 +44,7 @@ def _batch_output_dir(output_root: Path) -> Path:
     return output_root / BATCH_OUTPUT_DIRECTORY
 
 
-def _validate_batch_sample_ids(sample_ids: list[str]) -> None:
+def _check_batch_sample_ids(sample_ids: list[str]) -> None:
     """Prevent sample directories from colliding with batch-level outputs."""
     reserved = [
         sample_id
@@ -240,18 +235,26 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         and not (database / "database" / "reference_panel.tsv").is_file()
     )
     if legacy_multi_taxon_build:
-        try:
-            args.database = str(
-                ensure_combined_taxon_database(
-                    database,
-                    threads=args.threads,
-                    mafft_bin=args.mafft_bin,
-                    raxml_ng_bin=args.raxml_ng_bin,
-                    raxml_model=args.raxml_model,
-                )
+        parser.error(
+            "This reference database predates the competitive FASTQ mapping schema. "
+            "Rebuild it with the current `mlvamaps build-reference`."
+        )
+    if database:
+        root = database / "database" if (database / "database").is_dir() else database
+        manifest = database / "manifest.json"
+        if not manifest.is_file():
+            manifest = root.parent / "manifest.json"
+        required = [
+            root / "competitive_mapping" / "candidate_contexts.fasta",
+            root / "competitive_mapping" / "candidate_metadata.tsv",
+            root / "competitive_mapping" / "short.mmi",
+            root / "competitive_mapping" / "long.mmi",
+        ]
+        if not manifest.is_file() or any(not path.is_file() for path in required):
+            parser.error(
+                "This reference database predates the competitive FASTQ mapping schema. "
+                "Rebuild it with the current `mlvamaps build-reference`."
             )
-        except ValueError as exc:
-            parser.error(str(exc))
     explicit_short_read_mode = args.input_path == "sr"
     args.short_read_mode = explicit_short_read_mode or args.short_reads
     if explicit_short_read_mode:
@@ -865,95 +868,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace an existing export in the output directory",
     )
 
-    simulate = subparsers.add_parser("simulate", help="Simulate amplicon reads for a VNTR panel")
-    simulate.add_argument("-p", "--panel", dest="loci", required=True)
-    simulate.add_argument("--profile", dest="profiles")
-    simulate.add_argument("--profile-id")
-    simulate.add_argument("--sample-id", required=True)
-    simulate.add_argument("--depth", type=int, default=200)
-    simulate.add_argument("--error-rate", type=float, default=0.03)
-    simulate.add_argument("--seed", type=int, default=13)
-    simulate.add_argument(
-        "-o", "--output", "--outdir", dest="outdir", required=True, metavar="DIR", help="Output directory"
-    )
-
-    extract = subparsers.add_parser(
-        "extract-amplicons",
-        help="Extract MLVA_finder-compatible amplicons from FASTA with Sassy",
-    )
-    extract.add_argument("-i", "--input", required=True, help="Input FASTA, optionally gzip-compressed")
-    extract.add_argument(
-        "-p",
-        "--panel",
-        dest="panel_path",
-        required=True,
-        help="Primer list or rich locus panel",
-    )
-    extract.set_defaults(loci=None, primers=None)
-    extract.add_argument(
-        "-o",
-        "--output",
-        "--outdir",
-        dest="outdir",
-        default="assembly_amplicons",
-        metavar="DIR",
-        help="Output directory (default: %(default)s)",
-    )
-    extract.add_argument("--max-errors", type=int, default=2)
-    extract.add_argument(
-        "-t",
-        "--threads",
-        type=int,
-        default=DEFAULT_THREADS,
-        help="PCR search threads (default: %(default)s; 0 auto-detects CPUs)",
-    )
-    extract.add_argument("--circular", action="store_true")
-    extract.add_argument("--no-search-rc", action="store_true")
-    extract.add_argument("--trim-primers", action="store_true")
-    extract.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
-
-    prepare_reference = subparsers.add_parser(
-        "prepare-reference",
-        help="Download reproducible NCBI assembly inputs for one taxid or a CSV of taxids",
-    )
-    prepare_source = prepare_reference.add_mutually_exclusive_group(required=True)
-    prepare_source.add_argument("--taxid", help="Single NCBI taxonomy identifier")
-    prepare_source.add_argument(
-        "--taxids-csv",
-        help="CSV/TSV with a taxid column and optional name column",
-    )
-    prepare_reference.add_argument(
-        "-o", "--output", "--outdir", dest="outdir", default="reference_builds"
-    )
-    prepare_reference.add_argument(
-        "--assembly-source",
-        choices=("refseq", "genbank", "all"),
-        default="refseq",
-        help="NCBI assembly source (default: %(default)s)",
-    )
-    prepare_reference.add_argument(
-        "--datasets-arg",
-        action="append",
-        default=[],
-        help="Extra NCBI Datasets argument; repeat as needed",
-    )
-    prepare_reference.add_argument(
-        "--resume",
-        action="store_true",
-        help="Reuse each existing prepared/ncbi_dataset.zip",
-    )
-    prepare_reference.add_argument(
-        "--download-retries",
-        type=_positive_int,
-        default=3,
-        help="NCBI download attempts after transient failures (default: %(default)s)",
-    )
-    prepare_reference.add_argument("--datasets-bin", default="datasets", help=argparse.SUPPRESS)
-    prepare_reference.add_argument("--dataformat-bin", default="dataformat", help=argparse.SUPPRESS)
-
     reference = subparsers.add_parser(
         "build-reference",
-        help="Build reference databases from local assemblies, one taxid, or a CSV of taxids",
+        help="Build a complete reference database from local assemblies or NCBI taxids",
+        description=(
+            "Build the complete mlvamaps database: fetch references when needed, "
+            "extract real loci, summarize amplifiability, infer reference trees, "
+            "generate competitive allele contexts, build short/long minimap2 "
+            "indexes, and build broad Deacon recruitment assets."
+        ),
     )
     reference_source = reference.add_mutually_exclusive_group(required=True)
     reference_source.add_argument(
@@ -971,6 +894,7 @@ def build_parser() -> argparse.ArgumentParser:
     panel.add_argument(
         "-p",
         "--panel",
+        "--primers",
         dest="panel_path",
         help="Primer list or rich locus panel",
     )
@@ -1027,6 +951,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reference.add_argument("--quiet", action="store_true", help="Suppress live progress updates")
     reference.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
+    reference.add_argument("--minimap2-bin", default="minimap2", help=argparse.SUPPRESS)
+    reference.add_argument("--deacon-bin", default="deacon", help=argparse.SUPPRESS)
     reference.add_argument("--mafft-bin", default="mafft")
     reference.add_argument("--raxml-ng-bin", default="raxml-ng")
     reference.add_argument(
@@ -1066,21 +992,6 @@ def build_parser() -> argparse.ArgumentParser:
         "-o", "--output", "--outdir", dest="outdir", required=True
     )
 
-    validate = subparsers.add_parser(
-        "validate",
-        help="Compare assembly-truth calls with long-read and Illumina results",
-    )
-    validate.add_argument("--truth", required=True, help="Assembly-truth calls.tsv")
-    validate.add_argument("--long-read", help="Accurate-long-read calls.tsv")
-    validate.add_argument("--illumina", help="Illumina calls.tsv")
-    validate.add_argument("-o", "--output", "--outdir", dest="outdir", required=True)
-    concordance = subparsers.add_parser(
-        "benchmark-fastq-assembly",
-        help="Report direct FASTQ versus assembly-derived MLVA concordance",
-    )
-    concordance.add_argument("--fastq", required=True, help="Mapping-method calls.tsv")
-    concordance.add_argument("--assembly", required=True, help="Assembly calls.tsv")
-    concordance.add_argument("-o", "--output", "--outdir", dest="outdir", required=True)
     return parser
 
 
@@ -1378,7 +1289,7 @@ def _run_short_batch(
     output_root.mkdir(parents=True, exist_ok=True)
     batch_outdir = _batch_output_dir(output_root)
     try:
-        _validate_batch_sample_ids([row["sample_id"] for row in rows])
+        _check_batch_sample_ids([row["sample_id"] for row in rows])
     except ValueError as exc:
         parser.error(str(exc))
     batch_outdir.mkdir(parents=True, exist_ok=True)
@@ -1624,7 +1535,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if batch:
             try:
-                _validate_batch_sample_ids(sample_ids)
+                _check_batch_sample_ids(sample_ids)
             except ValueError as exc:
                 parser.error(str(exc))
             _batch_output_dir(Path(args.outdir)).mkdir(parents=True, exist_ok=True)
@@ -1661,20 +1572,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"Wrote combined MLVA_finder analysis to {analysis_path}")
         return 0
-    if args.command == "simulate":
-        result = simulate_reads(
-            loci_path=args.loci,
-            profiles_path=args.profiles,
-            profile_id=args.profile_id,
-            outdir=args.outdir,
-            sample_id=args.sample_id,
-            depth=args.depth,
-            error_rate=args.error_rate,
-            seed=args.seed,
-        )
-        print(f"Wrote simulated reads to {result['reads']}")
-        print(f"Wrote truth profile to {result['truth']}")
-        return 0
     if args.command == "calibrate-taxa":
         try:
             result = run_taxon_calibration(
@@ -1692,68 +1589,6 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
         print(f"Wrote taxon calibration to {result['calibration']}")
         print(f"Wrote leave-one-out scores to {result['scores']}")
-        return 0
-    if args.command == "validate":
-        try:
-            result = run_validation(
-                args.truth,
-                args.outdir,
-                long_read_path=args.long_read,
-                illumina_path=args.illumina,
-            )
-        except ValueError as exc:
-            parser.error(str(exc))
-        print(f"Wrote locus validation details to {result['details']}")
-        print(f"Wrote validation metrics to {result['summary']}")
-        return 0
-    if args.command == "benchmark-fastq-assembly":
-        try:
-            result = run_fastq_assembly_concordance(
-                args.fastq, args.assembly, args.outdir
-            )
-        except (OSError, ValueError) as exc:
-            parser.error(str(exc))
-        print(f"Wrote FASTQ-versus-assembly concordance to {result['details']}")
-        print(f"Wrote concordance summary to {result['summary']}")
-        return 0
-    if args.command == "extract-amplicons":
-        _resolve_panel_option(parser, args)
-        if not args.loci and not args.primers:
-            parser.error("extract-amplicons requires -p PANEL")
-        result = run_in_silico_pcr(
-            input_path=args.input,
-            loci_path=args.loci,
-            primers_path=args.primers,
-            outdir=args.outdir,
-            max_errors=args.max_errors,
-            threads=args.threads,
-            circular=args.circular,
-            search_rc=not args.no_search_rc,
-            trim_primers=args.trim_primers,
-        )
-        print(f"Wrote normalized primer CSV to {result['primers']}")
-        print(f"Wrote extracted amplicons to {result['products']}")
-        print(f"Wrote primer-match stats to {result['stats']}")
-        return 0
-    if args.command == "prepare-reference":
-        references = read_taxon_references(
-            taxid=args.taxid, taxids_csv=args.taxids_csv
-        )
-        results = prepare_taxon_references(
-            references,
-            args.outdir,
-            assembly_source=args.assembly_source,
-            datasets_args=args.datasets_arg,
-            datasets_bin=args.datasets_bin,
-            dataformat_bin=args.dataformat_bin,
-            resume=args.resume,
-            download_retries=args.download_retries,
-        )
-        for result in results:
-            print(
-                f"Prepared taxid {result['taxid']} ({result['name']}) in "
-                f"{result['outdir']}"
-            )
         return 0
     if args.command == "build-reference":
         _resolve_panel_option(parser, args)
@@ -1781,6 +1616,8 @@ def main(argv: list[str] | None = None) -> int:
                 min_references_per_tree=args.min_references_per_tree,
                 threads=args.threads,
                 amplirust_bin=args.amplirust_bin,
+                minimap2_bin=args.minimap2_bin,
+                deacon_bin=args.deacon_bin,
                 mafft_bin=args.mafft_bin,
                 raxml_ng_bin=args.raxml_ng_bin,
                 raxml_model=args.raxml_model,
@@ -1803,6 +1640,8 @@ def main(argv: list[str] | None = None) -> int:
             min_references_per_tree=args.min_references_per_tree,
             threads=args.threads,
             amplirust_bin=args.amplirust_bin,
+            minimap2_bin=args.minimap2_bin,
+            deacon_bin=args.deacon_bin,
             mafft_bin=args.mafft_bin,
             raxml_ng_bin=args.raxml_ng_bin,
             raxml_model=args.raxml_model,

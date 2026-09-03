@@ -444,6 +444,13 @@ def run_call(
     screen_summary: dict = {}
     screen_paths: dict[str, Path] = {}
     downstream_reads_path = Path(reads_path)
+    if not taxon_screen_index and sample_mode == "metagenome" and database_path:
+        database_root = Path(database_path)
+        if (database_root / "database").is_dir():
+            database_root = database_root / "database"
+        built_index = database_root / "deacon" / "target_recruitment.idx"
+        if built_index.is_file():
+            taxon_screen_index = str(built_index)
     if taxon_screen_index:
         (
             downstream_reads_path,

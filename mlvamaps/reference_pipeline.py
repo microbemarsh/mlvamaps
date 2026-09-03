@@ -19,11 +19,14 @@ from .concurrency import DEFAULT_THREADS
 from .io import read_fasta, write_fasta
 from .phylogeny import REFERENCE_ASSEMBLY_FIELDS, build_reference_phylogenies
 from .primers import read_loci_or_primers
+from .progress import ProgressReporter
 from .reference_builder import (
+    DATABASE_SCHEMA_VERSION,
     REFERENCE_BUILD_STATUS_BUILT,
     REFERENCE_BUILD_STATUS_NO_USABLE_LOCI,
     REFERENCE_BUILD_STATUS_PARTIAL,
     build_reference_database,
+    build_mapping_resources,
 )
 
 
@@ -70,6 +73,8 @@ TAXON_LOCUS_AMPLIFIABILITY_FIELDS = [
     "genomes_examined",
     "genomes_with_valid_amplicon",
     "valid_amplicons",
+    "genomes_with_multiple_products",
+    "genomes_failing_product_constraints",
     "percent_genomes_amplifiable",
     "amplifiable",
     "tree_status",
@@ -500,19 +505,6 @@ def prepare_taxon_reference(
     }
 
 
-def prepare_taxon_references(
-    references: list[TaxonReference],
-    outdir: str | Path,
-    **kwargs: Any,
-) -> list[dict[str, Any]]:
-    """Prepare independent NCBI input packages for multiple taxids."""
-    output = Path(outdir)
-    return [
-        prepare_taxon_reference(reference, output / reference.name / "prepared", **kwargs)
-        for reference in references
-    ]
-
-
 def _write_tsv(rows: list[dict[str, Any]], path: Path, fields: list[str]) -> None:
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(
@@ -554,6 +546,8 @@ def build_combined_taxon_database(
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
     raxml_model: str = "DNA",
+    minimap2_bin: str = "minimap2",
+    deacon_bin: str = "deacon",
 ) -> dict[str, Path]:
     """Merge taxon cohorts into the default database used for identification."""
     if len(references) != len(results):
@@ -563,6 +557,15 @@ def build_combined_taxon_database(
     database = root / "database"
     phylogeny = root / "phylogeny"
     database.mkdir(parents=True, exist_ok=True)
+    taxids_path = root / "taxids.csv"
+    if not taxids_path.is_file():
+        with taxids_path.open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["taxid", "name"])
+            writer.writeheader()
+            writer.writerows(
+                {"taxid": reference.taxid, "name": reference.name}
+                for reference in references
+            )
     loci = read_loci_or_primers(loci_path, None if loci_path else primers_path)
 
     records_by_locus: dict[str, list[tuple[str, str]]] = {
@@ -626,11 +629,6 @@ def build_combined_taxon_database(
     metadata_rows = [
         row for row in metadata_rows if row["reference_id"] in usable_reference_ids
     ]
-    assembly_rows = [
-        row
-        for row in assembly_rows
-        if str(row.get("reference_id", "")) in usable_reference_ids
-    ]
     if not metadata_rows:
         raise ValueError(
             "Cannot combine taxon databases: no references with usable locus sequences were found"
@@ -654,61 +652,19 @@ def build_combined_taxon_database(
         records = records_by_locus[locus.locus_id]
         if records:
             write_fasta(records, database / f"{locus.locus_id}.fasta.gz")
-    # Build one authoritative context bank for the combined multi-taxon
-    # database. Reference IDs are unique across cohorts by the check above.
-    from .short_read_mapping import CONTEXT_FIELDS, LocusContext, _repeat_interval
-    from .calling import assembly_equivalent_product_allele, repeat_unit_length
-
-    metadata_by_reference = {row["reference_id"]: row for row in metadata_rows}
-    context_rows: list[dict[str, Any]] = []
-    context_records: list[tuple[str, str]] = []
-    for locus in loci:
-        for index, (reference_id, sequence) in enumerate(records_by_locus[locus.locus_id], 1):
-            repeat_start, repeat_end = _repeat_interval(sequence, locus)
-            context_id = f"{locus.locus_id}|{reference_id}|{index}"
-            metadata = metadata_by_reference[reference_id]
-            context = LocusContext(
-                context_id=context_id, locus_id=locus.locus_id, sequence=sequence,
-                reference_id=reference_id, taxon_id=metadata.get("taxon_id", ""),
-                taxon_name=metadata.get("taxon_name", ""),
-                expected_product_size_bp=len(sequence), repeat_motif=locus.repeat_motif,
-                repeat_unit_length_bp=repeat_unit_length(locus),
-                expected_repeat_count=assembly_equivalent_product_allele(locus, len(sequence))[1],
-                repeat_start=repeat_start, repeat_end=repeat_end,
-                upstream_flank_bp=repeat_start,
-                downstream_flank_bp=len(sequence) - repeat_end,
-                source="combined_reference_amplicon",
-            )
-            context_rows.append(context.row())
-            context_records.append((context_id, sequence))
-    if context_records:
-        write_fasta(context_records, database / "mlva_contexts.fasta.gz")
-        _write_tsv(context_rows, database / "mlva_contexts.tsv", CONTEXT_FIELDS)
-    from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
-    if context_records and any(
-        locus.repeat_motif and set(locus.repeat_motif) <= set("ACGT")
-        and locus.repeat_unit_length_bp and locus.left_flank_sequence
-        and locus.right_flank_sequence
-        for locus in loci
-    ):
-        candidate_paths = write_candidate_contexts(
-            generate_candidate_contexts(loci, database), database
-        )
-        try:
-            from .minimap_mapping import build_minimap2_index, minimap2_version
-            index_path = build_minimap2_index(
-                candidate_paths["fasta"], database / "candidate_contexts.mmi"
-            )
-            provenance = json.loads(candidate_paths["provenance"].read_text())
-            provenance["minimap2_version"] = minimap2_version("minimap2")
-            panel_file = database / "reference_panel.tsv"
-            provenance["panel_sha256"] = hashlib.sha256(panel_file.read_bytes()).hexdigest()
-            provenance["minimap2_index"] = index_path.name
-            candidate_paths["provenance"].write_text(
-                json.dumps(provenance, indent=2, sort_keys=True) + "\n"
-            )
-        except RuntimeError:
-            pass
+    mapping_paths = build_mapping_resources(
+        database_dir=database,
+        loci=loci,
+        assemblies=[
+            (str(row["reference_id"]), Path(str(row["assembly_file"])))
+            for row in assembly_rows
+        ],
+        panel_path=database / "reference_panel.tsv",
+        threads=threads,
+        minimap2_bin=minimap2_bin,
+        deacon_bin=deacon_bin,
+        progress=ProgressReporter(enabled=False),
+    )
     paths = build_reference_phylogenies(
         database,
         phylogeny,
@@ -719,64 +675,35 @@ def build_combined_taxon_database(
         raxml_ng_bin=raxml_ng_bin,
         raxml_model=raxml_model,
     )
-    return {"database": database, "phylogeny": phylogeny, **paths}
-
-
-def ensure_combined_taxon_database(
-    reference_build: str | Path,
-    *,
-    threads: int = DEFAULT_THREADS,
-    mafft_bin: str = "mafft",
-    raxml_ng_bin: str = "raxml-ng",
-    raxml_model: str = "DNA",
-) -> Path:
-    """Return a complete current combined database or rebuild an old combined view."""
-    root = Path(reference_build).resolve()
-    if (
-        (root / "database" / "reference_panel.tsv").is_file()
-        and (root / "database" / "mlva_contexts.tsv").is_file()
-        and (root / "database" / "mlva_contexts.fasta.gz").is_file()
-    ):
-        return root
-    manifest_path = root / "reference_pipeline_manifest.json"
-    if not manifest_path.is_file():
-        return root
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Could not read reference pipeline manifest: {manifest_path}") from exc
-    entries = manifest.get("references")
-    if not isinstance(entries, list) or not entries:
-        raise ValueError(f"Reference pipeline manifest contains no references: {manifest_path}")
-
-    references: list[TaxonReference] = []
-    results: list[dict[str, Any]] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise ValueError(f"Invalid reference entry in {manifest_path}")
-        taxid = _clean_taxid(entry.get("taxid"))
-        name = _clean_name(entry.get("name"), taxid)
-        database = Path(str(entry.get("database", "")))
-        portable_database = root / name / "reference" / "database"
-        if not database.is_dir() and portable_database.is_dir():
-            database = portable_database
-        references.append(TaxonReference(taxid, name))
-        results.append({"database": database})
-
-    panel_path = Path(str(results[0]["database"])) / "reference_panel.tsv"
-    if not panel_path.is_file():
-        raise ValueError(f"Multi-taxid reference build has no saved panel: {panel_path}")
-    build_combined_taxon_database(
-        references,
-        results,
-        panel_path,
-        root,
-        threads=threads,
-        mafft_bin=mafft_bin,
-        raxml_ng_bin=raxml_ng_bin,
-        raxml_model=raxml_model,
+    manifest_path = root / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": DATABASE_SCHEMA_VERSION,
+                "status": "complete",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "database": "database",
+                "taxids": [reference.taxid for reference in references],
+                "taxids_input": {
+                    "path": "taxids.csv",
+                    "sha256": _sha256(taxids_path),
+                },
+                "competitive_mapping": "database/competitive_mapping",
+                "deacon": "database/deacon",
+                "phylogeny": "phylogeny",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
     )
-    return root
+    return {
+        "database": database,
+        "phylogeny": phylogeny,
+        "manifest": manifest_path,
+        **mapping_paths,
+        **paths,
+    }
 
 
 def build_taxon_references(
@@ -796,6 +723,8 @@ def build_taxon_references(
     min_references_per_tree: int = 3,
     threads: int = DEFAULT_THREADS,
     amplirust_bin: str = "amplirust",
+    minimap2_bin: str = "minimap2",
+    deacon_bin: str = "deacon",
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
     raxml_model: str = "DNA",
@@ -805,6 +734,14 @@ def build_taxon_references(
     """Prepare and build one isolated mlvamaps database per taxid."""
     output = Path(outdir).resolve()
     output.mkdir(parents=True, exist_ok=True)
+    taxids_path = output / "taxids.csv"
+    with taxids_path.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["taxid", "name"])
+        writer.writeheader()
+        writer.writerows(
+            {"taxid": reference.taxid, "name": reference.name}
+            for reference in references
+        )
     results = []
     taxon_summary_rows: list[dict[str, Any]] = []
     locus_summary_rows: list[dict[str, Any]] = []
@@ -831,6 +768,8 @@ def build_taxon_references(
             min_references_per_tree=min_references_per_tree,
             threads=threads,
             amplirust_bin=amplirust_bin,
+            minimap2_bin=minimap2_bin,
+            deacon_bin=deacon_bin,
             mafft_bin=mafft_bin,
             raxml_ng_bin=raxml_ng_bin,
             raxml_model=raxml_model,
@@ -885,6 +824,7 @@ def build_taxon_references(
                 "reference": str(built["outdir"]),
                 "database": str(built["database"]),
                 "manifest": str(built["manifest"]),
+                "build_qc": str(built.get("build_qc", "")),
                 "locus_amplifiability": str(built.get("locus_amplifiability", "")),
             }
         )
@@ -902,6 +842,8 @@ def build_taxon_references(
             mafft_bin=mafft_bin,
             raxml_ng_bin=raxml_ng_bin,
             raxml_model=raxml_model,
+            minimap2_bin=minimap2_bin,
+            deacon_bin=deacon_bin,
         )
         if builder is build_reference_database
         else {"database": output, "phylogeny": output / "phylogeny"}
@@ -914,8 +856,12 @@ def build_taxon_references(
     pipeline_manifest.write_text(
         json.dumps(
             {
-                "schema_version": "1.0",
+                "schema_version": DATABASE_SCHEMA_VERSION,
                 "created_at": datetime.now(timezone.utc).isoformat(),
+                "taxids_input": {
+                    "path": taxids_path.name,
+                    "sha256": _sha256(taxids_path),
+                },
                 "taxon_summary": taxon_summary_path.name,
                 "locus_amplifiability": locus_summary_path.name,
                 "default_database": ".",

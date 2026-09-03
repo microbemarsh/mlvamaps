@@ -187,16 +187,18 @@ mlvamaps call \
   -o results/sample
 ```
 
-Current databases store reusable `candidate_contexts.fasta` and
-`candidate_metadata.tsv` artifacts. A rich panel may still be used without a
+Current databases store reusable `competitive_mapping/candidate_contexts.fasta`,
+`candidate_metadata.tsv`, short/long minimap2 indexes, and a broad real-genome
+Deacon recruitment index. A rich panel may still be used without a
 database; bounded contexts are then synthesized from its primers, flanks,
 repeat motif, expected range, and observed database states when available.
 
 For a multi-taxid build, that command automatically loads the saved panel and
 taxon metadata, then writes the taxon assignment. No separate panel,
 target taxid, calibration artifact, or taxon-identification flag is required.
-Passing an older multi-taxid build directory upgrades it in place by creating
-the same combined top-level database.
+Databases that predate schema 2.0 must be rebuilt with the current
+`mlvamaps build-reference` so all competitive-mapping and recruitment assets
+have reproducible provenance.
 
 See the [reference-building guide](docs/workflows/reference-building.md) for
 local assemblies, metadata, resuming downloads, and output interpretation.

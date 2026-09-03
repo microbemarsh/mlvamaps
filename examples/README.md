@@ -3,7 +3,7 @@
 `make_illumina_example.py` creates a tiny offline paired-end dataset, rich
 panel, truth assembly, and SRA-style metadata. See the
 [Illumina workflow](../docs/workflows/illumina.md#synthetic-worked-example) for
-the complete call, validation, and MYOGA commands.
+the complete calling and MYOGA workflow.
 
 `mlva_loci.example.tsv` is the richer optional format for mlvamaps. It includes
 primer sequences plus repeat motif, flank, coordinate, and amplicon metadata.

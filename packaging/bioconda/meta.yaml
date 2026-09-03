@@ -45,8 +45,6 @@ test:
     - mlvamaps --help
     - mlvamaps --version
     - mlvamaps call --help
-    - mlvamaps simulate --help
-    - mlvamaps extract-amplicons --help
     - mlvamaps build-reference --help
 
 about:

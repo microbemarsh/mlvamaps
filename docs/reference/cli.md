@@ -215,21 +215,6 @@ retain the original detection uncertainty.
 
 `--reads` and `--bam` cannot be used together.
 
-## Validation command
-
-```bash
-mlvamaps validate \
-  --truth assembly_results/calls.tsv \
-  --long-read long_results/calls.tsv \
-  --illumina short_results/calls.tsv \
-  -o validation
-```
-
-The detailed table classifies exact matches, covered intervals, incorrect
-calls, unresolved loci, false positives, and false negatives. The summary
-reports exact-call accuracy, callable fraction, interval coverage, profile
-recovery, and the false exact-call rate.
-
 ## External executable overrides
 
 - `--minimap2-bin`
@@ -245,10 +230,13 @@ and does not select or invoke another primer-search tool.
 
 ## Reference database builder
 
-`mlvamaps build-reference -i DIR -p PANEL.csv --metadata
-metadata.csv -o OUT` extracts every locus from each metadata-linked assembly,
-writes the per-locus database, and runs MAFFT plus RAxML-NG. The `-p` option
-auto-detects minimal primer lists and rich locus panels.
+`mlvamaps build-reference --taxids-csv taxids.csv -p PANEL.csv -o OUT`
+downloads references, extracts every locus, writes amplifiability summaries,
+builds real-reference MAFFT/RAxML-NG assets, generates deduplicated competitive
+allele contexts, builds short- and long-read minimap2 indexes, and creates a
+broad real-genome Deacon recruitment index. Local assemblies remain supported
+with `-i DIR --metadata metadata.csv`. The `-p` option auto-detects minimal
+primer lists and rich locus panels.
 
 | Option | Default | Purpose |
 | --- | --- | --- |

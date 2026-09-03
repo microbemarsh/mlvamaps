@@ -3,15 +3,18 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import subprocess
 from dataclasses import asdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .assembly_call import pcr_rows_to_products
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
-from .io import open_text
+from .io import open_text, read_fasta, write_fasta
 from .models import Locus
 from .phylogeny import (
     REFERENCE_ASSEMBLY_FIELDS,
@@ -20,6 +23,14 @@ from .phylogeny import (
 )
 from .primers import read_loci_or_primers
 from .progress import ProgressReporter
+
+
+DATABASE_SCHEMA_VERSION = "2.0"
+MINIMAP2_INDEX_PARAMETERS = {
+    "short": {"k": 21, "w": 11},
+    "long": {"k": 11, "w": 5},
+}
+DEACON_INDEX_PARAMETERS = {"k": 31, "w": 15}
 
 
 _ASSEMBLY_SUFFIXES = (
@@ -68,6 +79,8 @@ REFERENCE_LOCUS_AMPLIFIABILITY_FIELDS = [
     "genomes_examined",
     "genomes_with_valid_amplicon",
     "valid_amplicons",
+    "genomes_with_multiple_products",
+    "genomes_failing_product_constraints",
     "percent_genomes_amplifiable",
     "amplifiable",
     "tree_status",
@@ -200,11 +213,101 @@ def _write_tsv(rows: list[dict], path: Path, fields: list[str]) -> None:
         writer.writerows(rows)
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _tool_version(executable: str) -> str:
+    for argument in ("--version", "version"):
+        result = subprocess.run(
+            [executable, argument], capture_output=True, text=True, check=False
+        )
+        if result.returncode == 0:
+            return (result.stdout or result.stderr).strip().splitlines()[0]
+    raise RuntimeError(f"Could not determine tool version for {executable!r}")
+
+
+def build_mapping_resources(
+    *,
+    database_dir: Path,
+    loci: list[Locus],
+    assemblies: list[tuple[str, Path]],
+    panel_path: Path,
+    threads: int,
+    minimap2_bin: str,
+    deacon_bin: str,
+    progress: ProgressReporter,
+) -> dict[str, Path]:
+    """Build candidate and broad recruitment resources from real references."""
+    from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
+    from .minimap_mapping import build_competitive_indexes, minimap2_version
+    from .taxon_screen import build_deacon_index, deacon_version
+
+    competitive = database_dir / "competitive_mapping"
+    deacon = database_dir / "deacon"
+    progress.step("Generating competitive allele contexts")
+    contexts = generate_candidate_contexts(loci, database_dir)
+    candidate_paths = write_candidate_contexts(contexts, competitive)
+
+    progress.step("Building short- and long-read minimap2 indexes")
+    indexes = build_competitive_indexes(
+        candidate_paths["fasta"], competitive, minimap2_bin
+    )
+
+    progress.step("Building broad target-group Deacon recruitment reference")
+    recruitment_fasta = deacon / "reference_genomes.fasta"
+    write_fasta(
+        (
+            (f"{reference_id}|{contig}", sequence)
+            for reference_id, assembly in assemblies
+            for contig, sequence in read_fasta(assembly)
+        ),
+        recruitment_fasta,
+    )
+    deacon_index = build_deacon_index(
+        recruitment_fasta,
+        deacon / "target_recruitment.idx",
+        threads,
+        deacon_bin,
+        **{
+            "kmer_size": DEACON_INDEX_PARAMETERS["k"],
+            "window_size": DEACON_INDEX_PARAMETERS["w"],
+        },
+    )
+
+    provenance = json.loads(candidate_paths["provenance"].read_text())
+    provenance.update({
+        "panel_sha256": _sha256(panel_path),
+        "minimap2_version": minimap2_version(minimap2_bin),
+        "minimap2_indexes": {
+            name: {"path": path.name, **MINIMAP2_INDEX_PARAMETERS[name]}
+            for name, path in indexes.items()
+        },
+    })
+    candidate_paths["provenance"].write_text(
+        json.dumps(provenance, indent=2, sort_keys=True) + "\n"
+    )
+    return {
+        **candidate_paths,
+        "short_index": indexes["short"],
+        "long_index": indexes["long"],
+        "deacon_reference": recruitment_fasta,
+        "deacon_index": deacon_index,
+        "minimap2_version": minimap2_version(minimap2_bin),
+        "deacon_version": deacon_version(deacon_bin),
+    }
+
+
 def _locus_amplifiability_rows(
     loci: list[Locus],
     records_by_locus: dict[str, list[tuple[str, str]]],
     genomes_examined: int,
     min_references_per_tree: int,
+    manifest_rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Summarize products retained by the existing extraction/QC policy."""
     rows = []
@@ -212,6 +315,14 @@ def _locus_amplifiability_rows(
         records = records_by_locus[locus.locus_id]
         genomes_with_amplicon = len({reference_id for reference_id, _sequence in records})
         valid_amplicons = len(records)
+        locus_manifest = [
+            row for row in (manifest_rows or []) if row["locus_id"] == locus.locus_id
+        ]
+        multiple = sum(int(row["product_count"] or 0) > 1 for row in locus_manifest)
+        failed = sum(
+            row["status"] in {"NOT_FOUND", "AMBIGUOUS_EXCLUDED"}
+            for row in locus_manifest
+        )
         if valid_amplicons == 0:
             tree_status = "NO_AMPLICONS"
         elif valid_amplicons < min_references_per_tree:
@@ -224,6 +335,8 @@ def _locus_amplifiability_rows(
                 "genomes_examined": genomes_examined,
                 "genomes_with_valid_amplicon": genomes_with_amplicon,
                 "valid_amplicons": valid_amplicons,
+                "genomes_with_multiple_products": multiple,
+                "genomes_failing_product_constraints": failed,
                 "percent_genomes_amplifiable": (
                     round(100.0 * genomes_with_amplicon / genomes_examined, 1)
                     if genomes_examined
@@ -285,6 +398,8 @@ def build_reference_database(
     min_references_per_tree: int = 3,
     threads: int = DEFAULT_THREADS,
     amplirust_bin: str = "amplirust",
+    minimap2_bin: str = "minimap2",
+    deacon_bin: str = "deacon",
     mafft_bin: str = "mafft",
     raxml_ng_bin: str = "raxml-ng",
     raxml_model: str = "DNA",
@@ -435,65 +550,6 @@ def build_reference_database(
     panel_fields = list(asdict(loci[0]))
     _write_tsv([asdict(locus) for locus in loci], panel_path, panel_fields)
 
-    # Persist reusable, technology-neutral candidate allele contexts.
-    from .short_read_mapping import CONTEXT_FIELDS, CONTEXT_SCHEMA_VERSION
-    metadata_by_reference = {reference_id: row for reference_id, _assembly, row in matched}
-    context_rows = []
-    context_records = []
-    for locus in loci:
-        for index, (reference_id, sequence) in enumerate(records_by_locus[locus.locus_id], 1):
-            repeat_start = len(locus.forward_primer) + len(locus.left_flank_sequence)
-            repeat_end = len(sequence) - len(locus.right_flank_sequence) - len(locus.reverse_primer)
-            context_id = f"{locus.locus_id}|{reference_id}|{index}"
-            context_records.append((context_id, sequence))
-            context_rows.append({
-                "schema_version": CONTEXT_SCHEMA_VERSION,
-                "context_id": context_id, "locus_id": locus.locus_id,
-                "reference_id": reference_id,
-                "taxon_id": str(metadata_by_reference[reference_id].get(taxon_source, "")) if taxon_source else "",
-                "taxon_name": str(metadata_by_reference[reference_id].get(name_source, "")) if name_source else "",
-                "sequence_sha256": hashlib.sha256(sequence.encode()).hexdigest(),
-                "context_length_bp": len(sequence), "expected_product_size_bp": len(sequence),
-                "repeat_motif": locus.repeat_motif,
-                "repeat_unit_length_bp": locus.repeat_unit_length_bp,
-                "expected_repeat_count": "", "repeat_start": max(0, repeat_start),
-                "repeat_end": max(repeat_start, repeat_end), "reference_contig": "",
-                "reference_start": "", "reference_end": "", "strand": "+",
-                "upstream_flank_bp": max(0, repeat_start),
-                "downstream_flank_bp": max(0, len(sequence) - repeat_end),
-                "source": "reference_amplicon",
-            })
-    if context_records:
-        _write_fasta(context_records, database_dir / "mlva_contexts.fasta.gz")
-        _write_tsv(context_rows, database_dir / "mlva_contexts.tsv", CONTEXT_FIELDS)
-    from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
-    candidate_paths = {}
-    if context_records and any(
-        locus.repeat_motif and set(locus.repeat_motif) <= set("ACGT")
-        and locus.repeat_unit_length_bp and locus.left_flank_sequence
-        and locus.right_flank_sequence
-        for locus in loci
-    ):
-        candidate_paths = write_candidate_contexts(
-            generate_candidate_contexts(loci, database_dir), database_dir
-        )
-        try:
-            from .minimap_mapping import build_minimap2_index, minimap2_version
-            index_path = build_minimap2_index(
-                candidate_paths["fasta"], database_dir / "candidate_contexts.mmi"
-            )
-            candidate_paths["minimap2_index"] = index_path
-            provenance = json.loads(candidate_paths["provenance"].read_text())
-            provenance["minimap2_version"] = minimap2_version("minimap2")
-            provenance["panel_sha256"] = hashlib.sha256(panel_path.read_bytes()).hexdigest()
-            candidate_paths["provenance"].write_text(
-                json.dumps(provenance, indent=2, sort_keys=True) + "\n"
-            )
-        except RuntimeError:
-            # Database construction remains possible on a build host without
-            # minimap2; the calling host can use the stored FASTA directly.
-            pass
-
     normalized_metadata = []
     myoga_metadata = []
     for reference_id, _assembly, row in matched:
@@ -526,9 +582,21 @@ def build_reference_database(
         reference_assemblies_path,
         REFERENCE_ASSEMBLY_FIELDS,
     )
+    candidate_paths: dict[str, Any] = {}
+    if locus_fasta_paths:
+        candidate_paths = build_mapping_resources(
+            database_dir=database_dir,
+            loci=loci,
+            assemblies=[(reference_id, assembly) for reference_id, assembly, _row in matched],
+            panel_path=panel_path,
+            threads=thread_count,
+            minimap2_bin=minimap2_bin,
+            deacon_bin=deacon_bin,
+            progress=progress,
+        )
     _write_tsv(manifest_rows, output / "reference_build_manifest.tsv", REFERENCE_BUILD_FIELDS)
     locus_summary_rows = _locus_amplifiability_rows(
-        loci, records_by_locus, len(matched), min_references_per_tree
+        loci, records_by_locus, len(matched), min_references_per_tree, manifest_rows
     )
     locus_summary_path = output / "reference_locus_amplifiability.tsv"
     _write_tsv(
@@ -567,17 +635,66 @@ def build_reference_database(
         progress.step(
             "No usable reference amplicons were recovered; skipping phylogeny construction."
         )
+    manifest_path = output / "manifest.json"
+    manifest = {
+        "schema_version": DATABASE_SCHEMA_VERSION,
+        "status": "complete",
+        "mlvamaps_version": __version__,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "primer_panel": {
+            "path": str(panel_path.relative_to(output)),
+            "sha256": _sha256(panel_path),
+        },
+        "taxids_input": None,
+        "reference_accessions": [reference_id for reference_id, _assembly, _row in matched],
+        "reference_metadata": str(reference_metadata_path.relative_to(output)),
+        "reference_assemblies": str(reference_assemblies_path.relative_to(output)),
+        "candidate_generation": {
+            "schema_version": "2.0",
+            "maximum_repeat_count": 100,
+            "observed_expansion": 1,
+            "deduplication": "locus, sequence, and repeat count",
+        },
+        "competitive_mapping": {
+            "fasta": str(Path(candidate_paths["fasta"]).relative_to(output)) if candidate_paths else "",
+            "metadata": str(Path(candidate_paths["metadata"]).relative_to(output)) if candidate_paths else "",
+            "provenance": str(Path(candidate_paths["provenance_table"]).relative_to(output)) if candidate_paths else "",
+            "minimap2_version": candidate_paths.get("minimap2_version", ""),
+            "indexes": MINIMAP2_INDEX_PARAMETERS if candidate_paths else {},
+        },
+        "deacon": {
+            "version": candidate_paths.get("deacon_version", ""),
+            "reference": str(Path(candidate_paths["deacon_reference"]).relative_to(output)) if candidate_paths else "",
+            "index": str(Path(candidate_paths["deacon_index"]).relative_to(output)) if candidate_paths else "",
+            "parameters": DEACON_INDEX_PARAMETERS if candidate_paths else {},
+        },
+        "phylogeny": {
+            "mafft_version": _tool_version(mafft_bin) if locus_fasta_paths else "",
+            "raxml_ng_version": _tool_version(raxml_ng_bin) if locus_fasta_paths else "",
+            "model": raxml_model,
+            "directory": "phylogeny",
+            "sequence_type": "real_observed_locus_sequences_only",
+        },
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     progress.step(f"Done. Reference database: {database_dir}")
     return {
         "status": build_status,
         "outdir": output,
         "database": database_dir,
+        "candidate_contexts": candidate_paths.get("fasta"),
+        "candidate_metadata": candidate_paths.get("metadata"),
+        "candidate_provenance": candidate_paths.get("provenance_table"),
+        "short_index": candidate_paths.get("short_index"),
+        "long_index": candidate_paths.get("long_index"),
+        "deacon_reference": candidate_paths.get("deacon_reference"),
+        "deacon_index": candidate_paths.get("deacon_index"),
         "metadata": reference_metadata_path,
         "myoga_metadata": output / "myoga_metadata.csv",
-        "manifest": output / "reference_build_manifest.tsv",
+        "manifest": manifest_path,
+        "build_qc": output / "reference_build_manifest.tsv",
         "locus_amplifiability": locus_summary_path,
         "locus_summary_rows": locus_summary_rows,
         "reference_assemblies": reference_assemblies_path,
-        **candidate_paths,
         **tree_paths,
     }

@@ -11,7 +11,6 @@ from mlvamaps.models import Locus, ReadPair, ReadRecord
 from mlvamaps.sample_metadata import myoga_sample_row, normalize_metadata_row
 from mlvamaps.sequence import revcomp
 from mlvamaps.short_reads import merge_read_pair, qc_read_pairs, run_short_read_call
-from mlvamaps.validation import compare_call_sets, summarize_validation
 
 
 def _write_fastq(path: Path, records: list[tuple[str, str]], quality: str = "I") -> None:
@@ -94,22 +93,6 @@ def test_metadata_alias_normalization_and_myoga_id_consistency():
                            {"sample_id": "SRR123", "L1": "4"}, 1)
     assert row["genome_id"] == row["sample_id"] == "SRR123"
     assert row["latitude"] == "1.5" and row["longitude"] == "-2.5"
-
-
-def test_validation_distinguishes_exact_interval_and_false_exact_calls():
-    truth = [{"sample_id": "s", "locus_id": name, "repeat_count": count}
-             for name, count in (("L1", "4"), ("L2", "8"), ("L3", "5"))]
-    observed = [
-        {"sample_id": "s", "locus_id": "L1", "repeat_count": "4"},
-        {"sample_id": "s", "locus_id": "L2", "repeat_count": "",
-         "repeat_count_min": "7", "repeat_count_max": "9"},
-        {"sample_id": "s", "locus_id": "L3", "repeat_count": "6"},
-    ]
-    details = compare_call_sets(truth, observed, "illumina")
-    assert [row["classification"] for row in details] == [
-        "exact_match", "within_reported_interval", "incorrect_call"
-    ]
-    assert summarize_validation(details)[0]["false_exact_call_rate"] == 0.5
 
 
 @pytest.mark.skipif(

@@ -1,53 +1,19 @@
 # Reference building
 
-mlvamaps separates reference acquisition from reference construction:
-
-1. `prepare-reference` downloads a portable NCBI Datasets package, extracts its
-   assemblies, normalizes metadata, and records a checksum and tool versions.
-2. `build-reference` extracts each MLVA locus and builds its fixed reference
-   alignment and phylogeny.
-
-Locus extraction uses the same Sassy-backed in silico PCR engine as assembly
-calling. For local assemblies, a metadata CSV/TSV links each reference ID to an
-assembly file. For NCBI inputs, one `--taxid` creates one taxon cohort, while
-`--taxids-csv taxids.csv` creates a separate downloaded and built cohort for
-each row before combining their non-overlapping references.
-
-The build also writes `database/reference_panel.tsv`, allowing subsequent calls
-to omit `-p`, and normalizes `taxid`/`ncbi_taxid` plus
-`organism_name`/`species` to `taxon_id` and `taxon_name`. If a taxonomy column
-is supplied, blank taxon identifiers are rejected. Local multi-taxon builds
-should provide one stable `taxon_id` per reference; names must be consistent
-within each identifier.
-
-`build-reference` can run both stages as one pipeline, or it can retain its
-original local-assembly behavior.
-
-## One taxid
-
-Use a minimal `primer.csv` or a rich panel. A minimal file can be:
-
-```csv
-name,forward,reverse
-VNTR_01,ACGTTGCAAC,TGCATGCAAA
-```
+`build-reference` is the complete database-construction workflow for mlvamaps.
+It accepts one NCBI taxonomy ID, a `taxids.csv` cohort, or local assemblies plus
+metadata. No separate preparation or locus-extraction command is required.
 
 ```bash
 mlvamaps build-reference \
-  --taxid 86661 \
-  -p panels/b_cereus_group.csv \
-  --assembly-source refseq \
-  --output references \
-  --threads 32
+  --taxids-csv taxids.csv \
+  --panel primer.csv \
+  --output mlvamaps_db \
+  --threads 16
 ```
 
-The resulting database is `references/taxid_86661/reference/database`.
-
-## Multiple taxa with `taxids.csv`
-
-The input must have a `taxid`, `taxon_id`, or `ncbi_taxid` column. An optional
-`name`, `reference_name`, or `database_name` column controls the output
-directory:
+`taxids.csv` requires `taxid` (aliases `taxon_id` and `ncbi_taxid`) and may
+include `name`:
 
 ```csv
 taxid,name
@@ -55,128 +21,62 @@ taxid,name
 1280,staphylococcus_aureus
 ```
 
+For local material:
+
 ```bash
-mlvamaps build-reference \
-  --taxids-csv taxids.csv \
-  -p panels/mlva_loci.tsv \
-  --output references \
-  --threads 32
+mlvamaps build-reference -i assemblies/ --metadata metadata.tsv \
+  --panel primer.csv --output mlvamaps_db --threads 16
 ```
 
-This creates independent databases:
+## Internal stages
+
+The command fetches references, extracts real primer-bounded loci, summarizes
+amplifiability, builds real-reference MAFFT/RAxML-NG assets, generates bounded
+candidate repeat states, deduplicates identical sequence hypotheses, builds
+short- and long-read minimap2 indexes, builds a Deacon index from complete real
+genomes, and finally writes `manifest.json`.
+
+Candidate generation uses `expected_min_repeats` and `expected_max_repeats`
+when explicitly supplied. Otherwise it conservatively uses observed calibrated
+alleles plus one state on each side, capped to a 20-state window and an absolute
+maximum of 100. Synthetic editing changes only the defined repeat interval.
+
+## Database layout
 
 ```text
-references/
-├── database/                  # combined database used by `mlvamaps call`
-├── phylogeny/                 # combined fixed trees
-├── taxon_reference_summary.tsv
-├── taxon_locus_amplifiability.tsv
-├── bacillus_cereus_group/
-│   ├── prepared/
-│   │   ├── package/
-│   │   ├── metadata.tsv
-│   │   ├── ncbi_dataset.zip
-│   │   └── download_manifest.json
-│   └── reference/
-│       ├── database/
-│       ├── phylogeny/
-│       ├── reference_locus_amplifiability.tsv
-│       └── reference_build_manifest.tsv
-├── staphylococcus_aureus/
-│   ├── prepared/
-│   └── reference/
-└── reference_pipeline_manifest.json
+mlvamaps_db/
+├── manifest.json
+├── database/
+│   ├── reference_panel.tsv
+│   ├── reference_metadata.tsv
+│   ├── reference_assemblies.tsv
+│   ├── LOCUS.fasta.gz
+│   ├── competitive_mapping/
+│   │   ├── candidate_contexts.fasta
+│   │   ├── candidate_metadata.tsv
+│   │   ├── candidate_provenance.tsv
+│   │   ├── short.mmi
+│   │   └── long.mmi
+│   └── deacon/
+│       ├── reference_genomes.fasta
+│       └── target_recruitment.idx
+├── phylogeny/
+├── reference_build_manifest.tsv
+└── reference_locus_amplifiability.tsv
 ```
 
-Each taxon directory is an isolated reference cohort with its own assembly
-inputs, per-locus amplicons, database, phylogeny, build manifest, and locus
-amplifiability summary. The top-level reference database combines all
-non-overlapping reference accessions and labels each reference with the
-taxid/name of the cohort requested in `taxids.csv`. Original NCBI organism
-metadata is retained. A reference accession found in more than one cohort is
-rejected rather than assigned conflicting labels.
+Multi-taxon builds retain isolated taxon work directories and write
+`taxon_reference_summary.tsv` plus `taxon_locus_amplifiability.tsv`. The
+combined Deacon index includes all requested real genomes, so recruitment does
+not preselect one taxon. Real locus FASTAs and phylogenies never contain
+synthetic candidate alleles. Candidate prevalence is metadata rather than
+duplicated mapping evidence.
 
-Use the build output directly; the panel and taxon metadata are defaults:
+Use the completed build directly:
 
 ```bash
-mlvamaps call -i sample.fasta --database references -o results/sample
+mlvamaps call -i sample.fasta --database mlvamaps_db -o results/sample
 ```
 
-Automatic taxon assignment is enabled whenever this database contains
-taxon metadata. No `-p`, target-taxon, calibration, or taxon-identification
-option is needed. If `references` was produced by an older mlvamaps version,
-the first call builds the combined top-level database from its pipeline
-manifest and existing per-taxon databases.
-
-All taxids in one invocation use the same `-p` panel. Run
-separate commands when taxa require different MLVA schemes.
-
-The two top-level TSVs summarize panel compatibility across taxa.
-`taxon_reference_summary.tsv` has one row per taxon, while
-`taxon_locus_amplifiability.tsv` has one row per taxon/locus and can be pivoted
-into a heatmap using `percent_genomes_amplifiable`. A locus is amplifiable when
-at least one examined genome has a product retained by the normal in silico PCR
-and multiple-product policy. Thus `NO_AMPLICONS` is distinct from
-`INSUFFICIENT_REFERENCES`: the latter is amplifiable but lacks enough retained
-references for `--min-references-per-tree`. Within each taxon cohort,
-`reference_locus_amplifiability.tsv` reports the corresponding per-locus genome
-counts, valid amplicon counts, percentage amplifiable, and tree status.
-
-For each assembly/locus pair, reference construction ranks products by primer
-error round, total primer edit distance, product size, and product ID. Only a
-tie on the best primer quality invokes `--multiple-products`: the default
-`exclude` writes `AMBIGUOUS_EXCLUDED`, `best` retains the deterministic first
-candidate, and `error` stops the build.
-
-Taxon status is `BUILT` only when every panel locus has a tree, `PARTIAL` when
-at least one locus is amplifiable but the full panel was not built, and
-`NO_USABLE_LOCI` when no locus is amplifiable. A no-usable-loci taxon skips
-phylogeny construction without stopping later taxon rows. Unless `--quiet` is
-used, the command also prints this summary after each taxon.
-
-`-p` accepts either the rich comma- or tab-delimited locus table used by
-`mlvamaps call` or a minimal three-column primer CSV/TSV. Header aliases are
-normalized in both cases, including
-`name`/`locus`/`id`, `forward`/`fwd`, and `reverse`/`rev`.
-
-## Prepare now, build later
-
-To acquire inputs without performing the computational build:
-
-```bash
-mlvamaps prepare-reference \
-  --taxids-csv taxa.csv \
-  --assembly-source refseq \
-  --output references
-```
-
-The prepared metadata includes an `assembly_file` path relative to the
-extracted package, so each cohort can later be built through the local input
-interface:
-
-```bash
-mlvamaps build-reference \
-  -i references/bacillus_cereus_group/prepared/package \
-  --metadata references/bacillus_cereus_group/prepared/metadata.tsv \
-  -p panels/b_cereus_group.tsv \
-  --output references/bacillus_cereus_group/reference
-```
-
-Use `--resume` only to reuse an existing
-`prepared/ncbi_dataset.zip` after an interrupted acquisition. Published
-reference outputs should otherwise be treated as immutable.
-
-## Requirements and selection
-
-Taxid acquisition requires NCBI's `datasets` and `dataformat` executables. They
-are included in the conda environment through `ncbi-datasets-cli`.
-
-`--assembly-source refseq` is the default. `genbank` selects GenBank assemblies,
-and `all` asks NCBI for both sources. Extra NCBI Datasets options can be passed
-by repeating `--datasets-arg`; use the `--datasets-arg=--option` form for values
-that begin with a dash.
-
-NCBI downloads are retried three times by default when a transient network
-error or incomplete ZIP is detected. Change this with `--download-retries N`.
-An incomplete archive is removed before retrying, while a completed,
-ZIP-validated archive can be reused with `--resume`.
+Databases without schema 2.0 competitive assets must be rebuilt. NCBI package
+downloads can be reused with `--resume` after an interrupted build.

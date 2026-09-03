@@ -45,7 +45,13 @@ def run_unified_fastq_inference(
     database = Path(database_path) if database_path else None
     if database is not None and (database / "database").is_dir():
         database = database / "database"
-    cached_index = database / "candidate_contexts.mmi" if database is not None else None
+    resource = (
+        database / "competitive_mapping"
+        if database is not None and (database / "competitive_mapping").is_dir()
+        else database
+    )
+    index_name = "short.mmi" if technology == "illumina" else "long.mmi"
+    cached_index = resource / index_name if resource is not None else None
     mapping_reference = cached_index if cached_index is not None and cached_index.is_file() else paths["fasta"]
     alignments = map_reads_to_candidates(
         mapping_reference, reads1, reads2, contexts, sam, threads, technology,

@@ -38,7 +38,6 @@ from mlvamaps.profile_matching import (
     match_profiles,
     sequence_reference_match_rows,
 )
-from mlvamaps.simulation import simulate_reads
 
 
 def write_panel(tmp_path):
@@ -315,82 +314,6 @@ def test_native_repeat_motif_statistics_preserve_patterns_and_partials():
     assert sequence.mean_qscore("IIII") == 40.0
 
 
-@pytest.mark.skipif(shutil.which("minimap2") is None, reason="minimap2 unavailable")
-def test_simulate_and_call_pipeline(tmp_path):
-    loci, profiles = write_panel(tmp_path)
-    sim = simulate_reads(
-        loci_path=str(loci),
-        profiles_path=str(profiles),
-        profile_id="P1",
-        outdir=str(tmp_path / "sim"),
-        sample_id="SIM1",
-        depth=25,
-        error_rate=0.0,
-    )
-    amplirust = write_fake_amplirust(tmp_path)
-    result = run_call(
-        reads_path=str(sim["reads"]),
-        loci_path=str(loci),
-        profiles_path=str(profiles),
-        outdir=str(tmp_path / "results"),
-        sample_id="SIM1",
-        min_read_length=20,
-        min_depth=5,
-        amplirust_bin=str(amplirust),
-        locus_mapping=False,
-    )
-
-    calls = {row["locus_id"]: row for row in read_tsv(result["allele_calls"])}
-    assert calls["VNTR_01"]["called_repeat_count"] == "5"
-    assert calls["VNTR_02"]["called_repeat_count"] == "4"
-    assert calls["VNTR_01"]["call_status"] == "PASS"
-    assert calls["VNTR_01"]["effective_read_depth"] == "25.0"
-    asv_rows = read_tsv(result["asv_table"])
-    assert asv_rows[0]["support_reads"] == "25"
-    assert asv_rows[0]["representative_read_id"]
-    assert asv_rows[0]["representative_sequence"]
-    assert "total_insertions" in asv_rows[0]
-    assert result["asv_representatives"].exists()
-    mixture_rows = read_tsv(result["mixture_abundance"])
-    assert {row["abundance_class"] for row in mixture_rows} == {"DOMINANT"}
-    assert all(row["estimated_fraction"] == "1.0" for row in mixture_rows)
-    assert not (tmp_path / "results" / "vntr_asv_consensus.fasta").exists()
-    memberships = read_tsv(result["asv_memberships"])
-    assert len(memberships) == 50
-    assert {row["sample_id"] for row in memberships} == {"SIM1"}
-    assert all("aligned_repeat_sequence" in row for row in memberships)
-    assert all("aligned_representative_sequence" in row for row in memberships)
-    easy_calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
-    assert easy_calls["VNTR_01"]["present"] == "yes"
-    assert easy_calls["VNTR_01"]["repeat_count"] == "5"
-    assert easy_calls["VNTR_01"]["primary_read_depth"] == "25"
-    assert easy_calls["VNTR_01"]["num_candidate_variants"] == "0"
-    assert easy_calls["VNTR_01"]["num_confirmed_secondary_variants"] == "0"
-    matches = read_tsv(tmp_path / "results" / "profile_matches.tsv")
-    assert matches[0]["best_profile_id"] == "P1"
-    assert matches[0]["profile_id"] == "P1"
-    assert matches[0]["is_best_match"] == "yes"
-    assert matches[0]["distance"] == "0.0"
-    assert matches[0]["rank"] == "1"
-    assert matches[0]["matched_locus_ids"] == "VNTR_01,VNTR_02"
-    assert matches[0]["query_alleles"] == "VNTR_01=5;VNTR_02=4"
-    assert matches[0]["profile_alleles"] == "VNTR_01=5;VNTR_02=4"
-    match_loci = read_tsv(result["profile_match_loci"])
-    assert {row["match_status"] for row in match_loci if row["rank"] == "1"} == {
-        "MATCH"
-    }
-    report = result["report"].read_text()
-    assert "Generated MLVA agarose gel comparison" in report
-    assert "P1" in report
-    assert "query-band" in report
-    assert "reference-band" in report
-    assert "query band intensity = fragment read support" in report
-    assert "25 reads" in report
-    assert "Variant Mixture Abundance" in report
-    assert "EM-estimated variant abundance plot" in report
-    assert "Locus Confidence" in report
-    assert "<details>" in report
-
 
 def test_dropout_is_reported(tmp_path):
     loci, _profiles = write_panel(tmp_path)
@@ -429,75 +352,6 @@ def test_legacy_amplirust_primer_export_and_removed_command(tmp_path):
             circular=True,
         )
 
-
-@pytest.mark.skipif(shutil.which("minimap2") is None, reason="minimap2 unavailable")
-def test_fastq_poa_and_assembly_produce_same_gold_standard_fingerprint(tmp_path):
-    loci_path, profiles = write_panel(tmp_path)
-    loci = read_loci(loci_path)
-    profile_counts = {"VNTR_01": 5, "VNTR_02": 4}
-    assembly = tmp_path / "gold_standard.fasta"
-    assembly.write_text(
-        "".join(
-            f">contig_{index}\n"
-            f"{locus.forward_primer}{locus.left_flank_sequence}"
-            f"{locus.repeat_motif * profile_counts[locus.locus_id]}"
-            f"{locus.right_flank_sequence}{sequence.revcomp(locus.reverse_primer)}\n"
-            for index, locus in enumerate(loci)
-        )
-    )
-    simulated = simulate_reads(
-        loci_path=str(loci_path),
-        profiles_path=str(profiles),
-        profile_id="P1",
-        outdir=str(tmp_path / "simulated"),
-        sample_id="SAME",
-        depth=30,
-        error_rate=0.01,
-    )
-    fastq_result = run_call(
-        reads_path=str(simulated["reads"]),
-        loci_path=str(loci_path),
-        profiles_path=str(profiles),
-        outdir=str(tmp_path / "fastq"),
-        sample_id="SAME",
-        min_read_length=20,
-        min_depth=5,
-        locus_mapping=False,
-        threads=1,
-    )
-    assembly_result = run_assembly_call(
-        assembly_path=str(assembly),
-        loci_path=str(loci_path),
-        profiles_path=str(profiles),
-        outdir=str(tmp_path / "assembly"),
-        sample_id="SAME",
-        threads=1,
-    )
-
-    fastq_fingerprint = read_tsv(fastq_result["fingerprint"])[0]
-    assembly_fingerprint = read_tsv(assembly_result["fingerprint"])[0]
-    assert fastq_fingerprint == assembly_fingerprint
-
-    fastq_calls = {
-        row["locus_id"]: row for row in read_tsv(fastq_result["calls"])
-    }
-    assembly_calls = {
-        row["locus_id"]: row for row in read_tsv(assembly_result["calls"])
-    }
-    assert {
-        locus_id: (
-            row["repeat_count"],
-            row["product_size_bp"],
-        )
-        for locus_id, row in fastq_calls.items()
-    } == {
-        locus_id: (
-            row["repeat_count"],
-            row["product_size_bp"],
-        )
-        for locus_id, row in assembly_calls.items()
-    }
-    assert "dominant_cluster_poa_assembly" in fastq_result["report"].read_text()
 
 
 def test_assembly_call_from_primer_products(tmp_path):
@@ -884,44 +738,6 @@ def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
     assert 'opacity="0.740"' in report
 
 
-@pytest.mark.skipif(shutil.which("minimap2") is None, reason="minimap2 unavailable")
-def test_easy_cli_accepts_primer_and_fastq_positionals(tmp_path):
-    loci, profiles = write_panel(tmp_path)
-    amplirust = write_fake_amplirust(tmp_path)
-    sim = simulate_reads(
-        loci_path=str(loci),
-        profiles_path=str(profiles),
-        profile_id="P1",
-        outdir=str(tmp_path / "sim"),
-        sample_id="SIM1",
-        depth=12,
-        error_rate=0.0,
-    )
-    exit_code = main(
-        [
-            "call",
-            "-p",
-            str(loci),
-            "-i",
-            str(sim["reads"]),
-            "--outdir",
-            str(tmp_path / "cli_results"),
-            "--sample-id",
-            "SIM1",
-            "--min-read-length",
-            "20",
-            "--min-depth",
-            "5",
-            "--amplirust-bin",
-            str(amplirust),
-            "--no-locus-mapping",
-        ]
-    )
-    assert exit_code == 0
-    calls = {row["locus_id"]: row for row in read_tsv(tmp_path / "cli_results" / "calls.tsv")}
-    assert calls["VNTR_01"]["present"] == "yes"
-    assert calls["VNTR_02"]["repeat_count"] == "4"
-
 
 def test_cli_has_conventional_output_and_thread_options():
     parser = build_parser()
@@ -1013,10 +829,6 @@ def test_cli_has_conventional_output_and_thread_options():
     assert short_call_args.reads1 == "reads_1.fastq.gz"
     assert short_call_args.reads2 == "reads_2.fastq.gz"
 
-    extract_args = parser.parse_args(
-        ["extract-amplicons", "-i", "assembly.fasta", "-p", "p.tsv"]
-    )
-    assert extract_args.threads == 32
 
 
 def test_minimap2_depth_parser(tmp_path):

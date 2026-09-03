@@ -32,8 +32,15 @@ def _locus_from_primer_row(
     repeat_unit_length_bp: str | None = None,
     expected_product_size_bp: str | None = None,
     nominal_repeat_units: str | None = None,
+    repeat_motif: str | None = None,
+    expected_min_repeats: str | None = None,
+    expected_max_repeats: str | None = None,
+    expected_amplicon_min_bp: str | None = None,
+    expected_amplicon_max_bp: str | None = None,
+    left_flank_sequence: str | None = None,
+    right_flank_sequence: str | None = None,
 ) -> Locus:
-    repeat_motif = ""
+    motif = str(repeat_motif or "").upper()
     expected_min = 0
     expected_max = 100
     expected_min_bp = 0
@@ -49,7 +56,7 @@ def _locus_from_primer_row(
     if match and units is None:
         units = int(match.group("units"))
     if repeat_bp:
-        repeat_motif = "N" * repeat_bp
+        motif = motif or "N" * repeat_bp
     if units is not None:
         expected_min = max(0, units - 10)
         expected_max = units + 10
@@ -60,11 +67,13 @@ def _locus_from_primer_row(
         locus_id=locus_id,
         forward_primer=forward.upper(),
         reverse_primer=reverse.upper(),
-        repeat_motif=repeat_motif,
-        expected_min_repeats=expected_min,
-        expected_max_repeats=expected_max,
-        expected_amplicon_min_bp=expected_min_bp,
-        expected_amplicon_max_bp=expected_max_bp,
+        repeat_motif=motif,
+        expected_min_repeats=_int_value(expected_min_repeats) if expected_min_repeats not in (None, "") else expected_min,
+        expected_max_repeats=_int_value(expected_max_repeats) if expected_max_repeats not in (None, "") else expected_max,
+        expected_amplicon_min_bp=_int_value(expected_amplicon_min_bp) if expected_amplicon_min_bp not in (None, "") else expected_min_bp,
+        expected_amplicon_max_bp=_int_value(expected_amplicon_max_bp) if expected_amplicon_max_bp not in (None, "") else expected_max_bp,
+        left_flank_sequence=str(left_flank_sequence or "").upper(),
+        right_flank_sequence=str(right_flank_sequence or "").upper(),
         repeat_unit_length_bp=repeat_bp or 0,
         expected_product_size_bp=amplicon_bp or 0,
         nominal_repeat_units=units or 0,
@@ -106,6 +115,11 @@ def read_primer_pairs(path: str | Path) -> list[Locus]:
         "amplicon_bp": "expected_product_size_bp",
         "product_bp": "expected_product_size_bp",
         "units": "nominal_repeat_units",
+        "motif": "repeat_motif",
+        "minimum_repeats": "expected_min_repeats",
+        "maximum_repeats": "expected_max_repeats",
+        "minimum_product_size_bp": "expected_amplicon_min_bp",
+        "maximum_product_size_bp": "expected_amplicon_max_bp",
     }
     normalized_header = [header_aliases.get(cell, cell) for cell in header]
     has_header = {"locus_id", "forward_primer", "reverse_primer"}.issubset(normalized_header)
@@ -116,7 +130,12 @@ def read_primer_pairs(path: str | Path) -> list[Locus]:
         idx = {name: normalized_header.index(name) for name in ("locus_id", "forward_primer", "reverse_primer")}
         optional_idx = {
             name: normalized_header.index(name)
-            for name in ("repeat_unit_length_bp", "expected_product_size_bp", "nominal_repeat_units")
+            for name in (
+                "repeat_unit_length_bp", "expected_product_size_bp", "nominal_repeat_units",
+                "repeat_motif", "expected_min_repeats", "expected_max_repeats",
+                "expected_amplicon_min_bp", "expected_amplicon_max_bp",
+                "left_flank_sequence", "right_flank_sequence",
+            )
             if name in normalized_header
         }
         for row in data_rows:
@@ -134,6 +153,13 @@ def read_primer_pairs(path: str | Path) -> list[Locus]:
                     optional.get("repeat_unit_length_bp"),
                     optional.get("expected_product_size_bp"),
                     optional.get("nominal_repeat_units"),
+                    optional.get("repeat_motif"),
+                    optional.get("expected_min_repeats"),
+                    optional.get("expected_max_repeats"),
+                    optional.get("expected_amplicon_min_bp"),
+                    optional.get("expected_amplicon_max_bp"),
+                    optional.get("left_flank_sequence"),
+                    optional.get("right_flank_sequence"),
                 )
             )
         return loci

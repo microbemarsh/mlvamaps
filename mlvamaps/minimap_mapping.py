@@ -25,6 +25,13 @@ PRESETS: dict[str, tuple[str, ...]] = {
     "hifi": ("-x", "map-hifi", "-k", "11", "-w", "5", "-m", "10", "-s", "10", "-n", "2"),
 }
 
+# Index parameters are deliberately technology-specific even though both
+# indexes contain exactly the same biological candidate sequences.
+INDEX_PARAMETERS: dict[str, tuple[int, int]] = {
+    "short": (21, 11),
+    "long": (11, 5),
+}
+
 
 def minimap2_version(executable: str) -> str:
     result = subprocess.run([executable, "--version"], capture_output=True, text=True, check=False)
@@ -37,16 +44,44 @@ def build_minimap2_index(
     fasta: str | Path,
     index: str | Path,
     executable: str = "minimap2",
+    *,
+    kmer_size: int | None = None,
+    window_size: int | None = None,
 ) -> Path:
     resolved = shutil.which(executable) or (executable if Path(executable).is_file() else None)
     if resolved is None:
         raise RuntimeError(f"minimap2 executable {executable!r} was not found")
     index = Path(index)
     index.parent.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run([resolved, "-d", str(index), str(fasta)], capture_output=True, text=True)
+    command = [resolved]
+    if kmer_size is not None:
+        command.extend(["-k", str(kmer_size)])
+    if window_size is not None:
+        command.extend(["-w", str(window_size)])
+    command.extend(["-d", str(index), str(fasta)])
+    result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError(f"minimap2 indexing failed: {result.stderr.strip()}")
     return index
+
+
+def build_competitive_indexes(
+    fasta: str | Path,
+    directory: str | Path,
+    executable: str = "minimap2",
+) -> dict[str, Path]:
+    """Build reusable short- and long-read indexes over one candidate FASTA."""
+    directory = Path(directory)
+    paths: dict[str, Path] = {}
+    for technology, (kmer_size, window_size) in INDEX_PARAMETERS.items():
+        paths[technology] = build_minimap2_index(
+            fasta,
+            directory / f"{technology}.mmi",
+            executable,
+            kmer_size=kmer_size,
+            window_size=window_size,
+        )
+    return paths
 
 
 def minimap2_competitive_command(

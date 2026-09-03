@@ -19,6 +19,43 @@ def check_deacon(executable: str = "deacon") -> str:
     return path
 
 
+def deacon_version(executable: str = "deacon") -> str:
+    executable_path = check_deacon(executable)
+    result = subprocess.run(
+        [executable_path, "--version"], capture_output=True, text=True, check=False
+    )
+    if result.returncode:
+        raise RuntimeError(f"Could not determine Deacon version from {executable_path}")
+    return (result.stdout or result.stderr).strip()
+
+
+def build_deacon_index(
+    fasta: str | Path,
+    index: str | Path,
+    threads: int,
+    executable: str = "deacon",
+    *,
+    kmer_size: int = 31,
+    window_size: int = 15,
+) -> Path:
+    """Build a broad target-group recruitment index from real genomes."""
+    executable_path = check_deacon(executable)
+    index = Path(index)
+    index.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        executable_path, "index", "build", "-k", str(kmer_size), "-w",
+        str(window_size), "--threads", str(resolve_threads(threads)), "--quiet",
+        "--output", str(index), str(fasta),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
+        raise RuntimeError(f"Deacon indexing failed ({result.returncode}): {detail}")
+    if not index.is_file():
+        raise RuntimeError("Deacon completed without writing its recruitment index")
+    return index
+
+
 def build_deacon_filter_command(
     index_path: str | Path,
     reads_path: str | Path,

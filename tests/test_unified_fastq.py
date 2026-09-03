@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from mlvamaps.alignment_evidence import CandidateEvidence
 from mlvamaps.allele_inference import InferenceThresholds, infer_alleles
-from mlvamaps.candidate_contexts import CandidateContext, generate_candidate_contexts
+from mlvamaps.candidate_contexts import (
+    CandidateContext,
+    candidate_repeat_counts,
+    generate_candidate_contexts,
+    write_candidate_contexts,
+)
 from mlvamaps.models import Locus
+from mlvamaps.minimap_mapping import build_competitive_indexes
 
 
 def _locus() -> Locus:
@@ -20,6 +28,59 @@ def test_candidate_generation_is_bounded_and_structured():
     assert [context.repeat_count for context in contexts] == [2, 3, 4]
     assert all(context.repeat_end - context.repeat_start == context.repeat_count * 2 for context in contexts)
     assert {context.row()["locus_id"] for context in contexts} == {"L1"}
+
+
+def test_invalid_candidate_range_is_rejected():
+    locus = Locus(
+        "bad", repeat_motif="AT", repeat_unit_length_bp=2,
+        expected_min_repeats=8, expected_max_repeats=4,
+    )
+    import pytest
+    with pytest.raises(ValueError, match="Invalid candidate repeat range"):
+        candidate_repeat_counts(locus, [6])
+
+
+def test_candidates_preserve_backgrounds_and_deduplicate_provenance(tmp_path):
+    locus = _locus()
+    database = tmp_path / "database"
+    database.mkdir()
+    sequence = "AAAA" + "GGGG" + "AT" * 3 + "TTTT" + "GGGG"
+    (database / "L1.fasta").write_text(
+        f">R1\n{sequence}\n>R2\n{sequence}\n>R3\n{sequence[:-1]}A\n"
+    )
+    (database / "reference_metadata.tsv").write_text(
+        "reference_id\ttaxon_id\ttaxon_name\n"
+        "R1\t1\tone\nR2\t1\tone\nR3\t2\ttwo\n"
+    )
+    contexts = generate_candidate_contexts([locus], database, expansion=0)
+    assert len(contexts) == 8
+    assert {context.provenance_count for context in contexts} == {1, 2}
+    assert len({context.background_id for context in contexts}) == 2
+    paths = write_candidate_contexts(contexts, database / "competitive_mapping")
+    assert paths["provenance_table"].is_file()
+    assert {context.observed_or_synthetic for context in contexts} == {"observed", "synthetic"}
+
+
+def test_short_and_long_indexes_use_distinct_parameters(tmp_path, monkeypatch):
+    commands = []
+    executable = tmp_path / "minimap2"
+    executable.write_text("test")
+    monkeypatch.setattr("mlvamaps.minimap_mapping.shutil.which", lambda _name: str(executable))
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        Path(command[command.index("-d") + 1]).write_text("index")
+        import subprocess
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("mlvamaps.minimap_mapping.subprocess.run", fake_run)
+    fasta = tmp_path / "candidate_contexts.fasta"
+    fasta.write_text(">candidate0000001\nAAAA\n")
+    indexes = build_competitive_indexes(fasta, tmp_path)
+    assert indexes["short"].name == "short.mmi"
+    assert indexes["long"].name == "long.mmi"
+    assert commands[0][1:5] == ["-k", "21", "-w", "11"]
+    assert commands[1][1:5] == ["-k", "11", "-w", "5"]
 
 
 def test_shared_inference_low_coverage_direct_measurement_is_retained():

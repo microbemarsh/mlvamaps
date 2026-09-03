@@ -15,10 +15,31 @@ from mlvamaps.reference_pipeline import (
     TaxonReference,
     build_combined_taxon_database,
     build_taxon_references,
-    ensure_combined_taxon_database,
     prepare_taxon_reference,
     read_taxon_references,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_combined_mapping_resources(monkeypatch):
+    def fake_resources(*, database_dir, **kwargs):
+        competitive = Path(database_dir) / "competitive_mapping"
+        deacon = Path(database_dir) / "deacon"
+        competitive.mkdir(parents=True, exist_ok=True)
+        deacon.mkdir(parents=True, exist_ok=True)
+        paths = {
+            "fasta": competitive / "candidate_contexts.fasta",
+            "metadata": competitive / "candidate_metadata.tsv",
+            "provenance_table": competitive / "candidate_provenance.tsv",
+            "short_index": competitive / "short.mmi",
+            "long_index": competitive / "long.mmi",
+            "deacon_index": deacon / "target_recruitment.idx",
+        }
+        for path in paths.values():
+            path.write_text("test\n")
+        return paths
+
+    monkeypatch.setattr(pipeline, "build_mapping_resources", fake_resources)
 
 
 def _write_taxon_database(root, reference_id, sequence, taxid, taxon_name):
@@ -67,8 +88,6 @@ def test_combined_taxon_database_is_ready_for_default_call(tmp_path, monkeypatch
         ("R2", "2", "taxon_two"),
     ]
     assert (combined["database"] / "reference_panel.tsv").is_file()
-    assert (combined["database"] / "mlva_contexts.tsv").is_file()
-    assert (combined["database"] / "mlva_contexts.fasta.gz").is_file()
     records = pipeline.read_fasta(combined["database"] / "L1.fasta.gz")
     assert [name for name, _sequence in records] == [
         "R1",
@@ -133,35 +152,6 @@ def test_combined_taxon_database_excludes_metadata_without_usable_loci(
     assert [row["reference_id"] for row in metadata] == ["R1"]
 
 
-def test_existing_multi_taxid_build_is_upgraded_for_call(tmp_path, monkeypatch):
-    root = tmp_path / "references"
-    panel = root / "taxon_one" / "reference" / "database" / "reference_panel.tsv"
-    results = [
-        _write_taxon_database(root / "taxon_one" / "reference", "R1", "AAATTTCCC", "1", "one"),
-        _write_taxon_database(root / "taxon_two" / "reference", "R2", "AAAGGGCCC", "2", "two"),
-    ]
-    panel.write_text("name,forward,reverse\nL1,AAA,CCC\n")
-    (root / "reference_pipeline_manifest.json").write_text(
-        json.dumps(
-            {
-                "references": [
-                    {"taxid": "1", "name": "taxon_one", "database": results[0]["database"]},
-                    {"taxid": "2", "name": "taxon_two", "database": results[1]["database"]},
-                ]
-            }
-        )
-    )
-    monkeypatch.setattr(
-        pipeline,
-        "build_reference_phylogenies",
-        lambda database, phylogeny, *args, **kwargs: {"phylogeny": Path(phylogeny)},
-    )
-
-    assert ensure_combined_taxon_database(root) == root.resolve()
-    assert (root / "database" / "reference_panel.tsv").is_file()
-    assert ensure_combined_taxon_database(root) == root.resolve()
-
-
 def test_call_help_keeps_automatic_taxon_workflow_simple(capsys):
     with pytest.raises(SystemExit, match="0"):
         cli.build_parser().parse_args(["call", "--help"])
@@ -170,6 +160,20 @@ def test_call_help_keeps_automatic_taxon_workflow_simple(capsys):
     assert "--taxon-identification" not in help_text
     assert "--target-taxon-id" not in help_text
     assert "--taxon-calibration" not in help_text
+
+
+def test_cli_rejects_database_without_competitive_schema(tmp_path, capsys):
+    database = tmp_path / "old_database"
+    (database / "database").mkdir(parents=True)
+    (database / "database" / "reference_panel.tsv").write_text(
+        "locus_id\tforward_primer\treverse_primer\nL1\tAAA\tCCC\n"
+    )
+    args = cli.build_parser().parse_args(
+        ["call", "-i", "sample.fasta", "--database", str(database)]
+    )
+    with pytest.raises(SystemExit, match="2"):
+        cli._resolve_call_args(cli.build_parser(), args)
+    assert "predates the competitive FASTQ mapping schema" in capsys.readouterr().err
 
 
 def test_read_taxon_references_from_csv_with_optional_names(tmp_path):
