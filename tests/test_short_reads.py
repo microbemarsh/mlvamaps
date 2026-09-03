@@ -113,8 +113,8 @@ def test_validation_distinguishes_exact_interval_and_false_exact_calls():
 
 
 @pytest.mark.skipif(
-    shutil.which("bowtie2") is None or shutil.which("bowtie2-build") is None,
-    reason="Bowtie2 unavailable",
+    shutil.which("minimap2") is None,
+    reason="minimap2 unavailable",
 )
 def test_canonical_short_read_pipeline_calls_recoverable_product(tmp_path):
     panel = tmp_path / "panel.tsv"
@@ -128,5 +128,5 @@ def test_canonical_short_read_pipeline_calls_recoverable_product(tmp_path):
     with result["calls"].open() as handle:
         call = next(csv.DictReader(handle, delimiter="\t"))
     assert call["repeat_count"] == "4"
-    assert call["mlva_method"] == "Bowtie2 short-read mapping"
+    assert call["mlva_method"] == "competitive minimap2 shared inference"
     assert not (tmp_path / "out" / "short_read_assembly_summary.tsv").exists()

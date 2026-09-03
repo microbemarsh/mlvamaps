@@ -1,10 +1,9 @@
 # Illumina short-read workflow
 
-Illumina mode is a separate evidence model for shotgun or amplicon reads that
-often do not span a complete VNTR. It does not reinterpret each mate as a short
-long read. Pair identity is retained from FASTQ validation through one
-competitive Bowtie2 context alignment and read-level likelihood inference.
-Per-locus assembly is not required.
+Illumina mode uses the shared FASTQ architecture. Pair identity is retained
+through competitive minimap2 mapping against candidate MLVA allele contexts.
+Illumina-specific molecule, overlap, boundary, repeat-indel, and pair-geometry
+evidence then enters the same locus-level inference used for long reads.
 
 ## Command line
 
@@ -59,7 +58,7 @@ A primer-only panel cannot define the repeat boundaries required by this
 algorithm and is rejected with guidance to build a reference database or enrich
 the panel.
 
-Filtered mates are mapped once with Bowtie2 against all candidate MLVA contexts,
+Filtered mates are mapped once with minimap2 against all candidate MLVA contexts,
 without an early taxon restriction. Contexts retain locus, reference, taxon,
 repeat interval, expected allele, and flank provenance. Equivalent alignments
 remain available to inference rather than being forced to one reference.
@@ -67,21 +66,21 @@ remain available to inference rather than being forced to one reference.
 Mate scores are resolved together. A confident mate can rescue its unaligned
 mate, equal best scores across loci are ambiguous, and confident mates assigned
 to different loci are discordant. Neither category is counted as unique support
-for multiple loci. Use `--bowtie2-bin PATH` and `--bowtie2-build-bin PATH` to
-select compatible executables.
+for multiple loci. Conventional MAPQ contributes to locus assignment but does
+not define allele confidence among intentionally similar repeat states.
 
 ## Direct VNTR inference
 
 Candidate alleles vary only in whole repeat units. Evidence includes unique
 flank mappings, boundary junctions, full VNTR spans, opposite-flank proper pairs,
-forced. Bowtie2 context mapping is the only Illumina algorithm; no per-locus
-assembly or selectable hybrid mode is used.
+forced. Candidate competition, not the primary alignment label alone, supplies
+repeat-state evidence; no per-locus de novo assembly is required.
 
 When `--database` is supplied, it must contain the versioned
 `mlva_contexts.tsv` and `mlva_contexts.fasta.gz` artifacts produced by the
 current reference builder. Older databases must be rebuilt rather than being
 silently reinterpreted. `--keep-intermediates` retains the filtered reads,
-candidate context bank, Bowtie2 index, SAM, and BAM files.
+candidate context bank and minimap2 SAM file.
 
 ## Exact, interval, and presence evidence
 
@@ -168,7 +167,7 @@ Successful sample directories resume by default; use `--force` to recompute.
 Combined standard, sample-summary, and MYOGA tables are written at the batch
 root's clearly scoped `batch_summary/` directory. Samples are processed
 sequentially so a process never retains all batch
-Within a sample, FASTQ/QC streams in bounded chunks and Bowtie2 performs the
+Within a sample, FASTQ/QC streams in bounded chunks and minimap2 performs the
 multithreaded competitive alignment. Progress messages report QC, indexing,
 mapping, and inference unless `--quiet` is selected.
 

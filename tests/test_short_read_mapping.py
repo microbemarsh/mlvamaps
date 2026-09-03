@@ -12,10 +12,9 @@ from mlvamaps.short_read_mapping import (
     candidate_repeat_counts,
     estimate_insert_size_distribution,
     expand_candidate_contexts,
-    bowtie2_mapping_command,
-    build_context_index,
     load_locus_contexts,
 )
+from mlvamaps.minimap_mapping import minimap2_competitive_command
 from mlvamaps.validation import fastq_assembly_concordance
 
 
@@ -79,33 +78,23 @@ def test_fastq_assembly_concordance_counts_exact_unresolved_and_discordant():
     }
 
 
-def test_bowtie2_command_is_single_competitive_paired_mapping(tmp_path):
-    command = bowtie2_mapping_command(
-        "/opt/bowtie2", tmp_path / "index", tmp_path / "r1.fq",
-        tmp_path / "r2.fq", tmp_path / "out.sam", 8,
+def test_minimap2_command_is_single_competitive_paired_mapping(tmp_path):
+    command = minimap2_competitive_command(
+        tmp_path / "contexts.fasta", tmp_path / "r1.fq",
+        tmp_path / "r2.fq", 8, "illumina", "/opt/minimap2",
     )
-    assert command.count("-x") == 1
-    assert command[command.index("-p") + 1] == "8"
-    assert command[command.index("-1") + 1].endswith("r1.fq")
-    assert command[command.index("-2") + 1].endswith("r2.fq")
-    assert "-a" in command
+    assert command[:4] == ["/opt/minimap2", "-a", "-x", "sr"]
+    assert "--cs=long" in command and "--secondary=yes" in command
+    assert command[-2].endswith("r1.fq") and command[-1].endswith("r2.fq")
 
 
-@pytest.mark.skipif(shutil.which("bowtie2-build") is None, reason="bowtie2-build unavailable")
-def test_context_index_build_is_versioned_and_reusable(tmp_path):
-    locus = _locus()
-    sequence = "ACGTAACCGGTT" + "ATGC" * 4 + "GGTTAACCTGCA"
-    contexts = expand_candidate_contexts([
-        LocusContext("ctx", "L1", sequence, "REF", expected_repeat_count=4,
-                     repeat_motif="ATGC", repeat_unit_length_bp=4,
-                     repeat_start=12, repeat_end=28)
-    ], [locus], maximum=6)
-    first = build_context_index(contexts, tmp_path)
-    timestamp = first["metadata"].stat().st_mtime_ns
-    second = build_context_index(contexts, tmp_path)
-    assert second["prefix"] == first["prefix"]
-    assert second["metadata"].stat().st_mtime_ns == timestamp
-    assert len(list(Path(tmp_path).glob("mlva_contexts.*.bt2*"))) == 6
+def test_candidate_contexts_are_structured_and_collapsed(tmp_path):
+    from mlvamaps.candidate_contexts import generate_candidate_contexts, write_candidate_contexts
+    contexts = generate_candidate_contexts([_locus()], maximum=6)
+    first = write_candidate_contexts(contexts, tmp_path)
+    assert first["metadata"].is_file()
+    assert first["fasta"].is_file()
+    assert [context.repeat_count for context in contexts] == [2, 3, 4, 5, 6]
 
 
 def test_old_database_without_context_schema_requires_rebuild(tmp_path):

@@ -1078,7 +1078,7 @@ def write_report(
         short_read_section = f"""
       <section class="report-section">
         <h2>Illumina Evidence</h2>
-        <p class="section-intro">Exact values require Bowtie2 context evidence that resolves one discrete repeat count, including a molecule that directly observes both repeat boundaries when available. Intervals and presence-only rows are deliberately shown without an exact repeat count.</p>
+        <p class="section-intro">Exact values require VNTR-specific evidence derived from competing minimap2 candidate alignments. Conventional mapping uniqueness is not allele confidence; unresolved and presence-only evidence remains explicit.</p>
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>Evidence</th><th>Recruited pairs</th><th>Informative molecules</th><th>Mean MAPQ</th><th>Proper spanning pairs</th><th>Boundary 1 / 2 / both</th><th>Repeat or interval</th><th>Confidence</th><th>Warning / failure</th></tr></thead>
           <tbody>{short_read_table_rows}</tbody>

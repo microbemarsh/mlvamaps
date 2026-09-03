@@ -49,6 +49,8 @@ reserved and cannot be used as a sample ID in a batch.
 | `report.html` | Self-contained interpretation report with sample findings, locus-quality flags, FASTQ SPOARS/assembly-PCR concordance, gel evidence, profile matches, closest reference genomes, and technical tables. |
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
+| `common_locus_calls.tsv` | Technology-neutral FASTQ calls with probability, margin, molecule support, and explicit called/low-coverage/unresolved/ambiguous/mixed/not-found status. |
+| `molecule_candidate_evidence.tsv` | Optional detailed competitive-alignment and VNTR evidence for each molecule/candidate state; intended for validation rather than the default report. |
 
 Multi-taxon databases additionally produce the following under `phylogeny/`:
 
@@ -210,7 +212,7 @@ data are supplied.
 | `short_read_qc_summary.tsv` | Input/retained reads and pairs, orphans, and empirical insert-size values when estimable. |
 | `short_read_recruitment_summary.tsv` | Unique, ambiguous, discordant, and orphan pair counts per locus. |
 | `short_read_mapping_evidence.tsv` | Per-locus state, candidate scores, molecule support, boundary evidence, MAPQ, and context provenance. |
-| `short_read_run_metadata.json` | Bowtie2 and mlvamaps versions, resolved parameters, database source, and insert-size estimate. |
+| `short_read_run_metadata.json` | minimap2 and mlvamaps versions, resolved parameters, database source, and insert-size estimate. |
 | `filtered_reads_1.fastq.gz`, `filtered_reads_2.fastq.gz` | Quality-filtered mates, written with fast gzip compression for downstream native recruitment. |
 | `filtered_orphan_reads.fastq.gz` | Retained single mates whose partner failed QC; empty when no orphans are present. |
 | `sample_summary.tsv` | One normalized sample row for batch aggregation. |

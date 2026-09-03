@@ -1,9 +1,8 @@
 # FASTQ and amplicon sequencing workflow
 
-This page describes accurate primer-spanning/long-read FASTQ. Paired and
-single-end Illumina data use the separate
-[Illumina short-read workflow](illumina.md), because individual short reads
-must not be assumed to span a complete VNTR product.
+Both long reads and [Illumina reads](illumina.md) use competitive minimap2
+alignment against the same candidate MLVA allele contexts. The technologies
+differ in evidence extraction, not in the meaning of the final locus call.
 
 The FASTQ path accepts `.fastq`, `.fq`, and gzip-compressed equivalents. It
 is intended for current high-accuracy long-read sequencing. Reads may span a
@@ -191,14 +190,13 @@ combined multiplicatively, allowing confidence to increase with support.
 `--max-confidence-depth` caps the effective evidence at 25 by default to limit
 overconfidence from correlated reads.
 
-By default, the dominant cluster's SPOARS consensus goes through the complete
-assembly calling path. This includes primer matching, legacy-compatible product
-boundary calculation, product selection, repeat conversion, and historical
-rounding. Per-read likelihoods increase or decrease confidence around that
-allele but cannot move the primary call to a different repeat count. The
-unrounded product measurement is retained in `allele_calls.tsv` and
-`calls.tsv`. This assembly-equivalent convention is the sole long-read calling
-algorithm.
+Each sufficiently informative long read contributes an explicit molecule-level
+allele observation before consensus generation. Complete primer-bounded reads
+use the same calibrated product-length conversion as assemblies; complete VNTR
+spans, repeat-sized indels, one-boundary reads, and flank-only reads occupy
+successively weaker evidence tiers. SPOARS supplies corrected representative
+sequences, confirmatory measurements, and sequence-variant characterization,
+but is not a prerequisite for a repeat-count call.
 
 Singleton clusters are retained by default (`--min-cluster-size 1` and
 `--min-depth 1`). A single spanning read can therefore contribute a

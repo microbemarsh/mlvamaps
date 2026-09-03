@@ -109,10 +109,8 @@ input contract, decision semantics, and validation requirements.
 | `--manifest` | None | Failure-isolated batch TSV. |
 | `--sample-metadata` | None | CSV/TSV joined by sample ID. |
 | `--force` | Off | Rerun already-successful manifest samples. |
-| `--keep-intermediates` | Off | Retain Bowtie2 mapping intermediates. |
-| `--bowtie2-bin PATH` | `bowtie2` | Bowtie2 used by the Illumina caller. |
-| `--bowtie2-build-bin PATH` | `bowtie2-build` | Context-index builder. |
-| `--short-min-mapq` | `0` | Minimum MAPQ; ambiguity is retained and scored across contexts by default. |
+| `--keep-intermediates` | Off | Retain minimap2 candidate-mapping alignments. |
+| `--short-min-mapq` | `0` | Locus-assignment aid only; allele competition retains low-MAPQ alternatives. |
 | `--short-min-spanning-pairs` | `2` | Opposite-flank pairs required as decisive geometry evidence. |
 | `--short-confidence-threshold` | `0.8` | Minimum normalized candidate score for a call. |
 

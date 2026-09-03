@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 from dataclasses import asdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -434,8 +435,7 @@ def build_reference_database(
     panel_fields = list(asdict(loci[0]))
     _write_tsv([asdict(locus) for locus in loci], panel_path, panel_fields)
 
-    # Persist the authoritative, versioned compact context bank used by the
-    # Illumina caller. Calls never infer database contexts lazily.
+    # Persist reusable, technology-neutral candidate allele contexts.
     from .short_read_mapping import CONTEXT_FIELDS, CONTEXT_SCHEMA_VERSION
     metadata_by_reference = {reference_id: row for reference_id, _assembly, row in matched}
     context_rows = []
@@ -466,6 +466,33 @@ def build_reference_database(
     if context_records:
         _write_fasta(context_records, database_dir / "mlva_contexts.fasta.gz")
         _write_tsv(context_rows, database_dir / "mlva_contexts.tsv", CONTEXT_FIELDS)
+    from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
+    candidate_paths = {}
+    if context_records and any(
+        locus.repeat_motif and set(locus.repeat_motif) <= set("ACGT")
+        and locus.repeat_unit_length_bp and locus.left_flank_sequence
+        and locus.right_flank_sequence
+        for locus in loci
+    ):
+        candidate_paths = write_candidate_contexts(
+            generate_candidate_contexts(loci, database_dir), database_dir
+        )
+        try:
+            from .minimap_mapping import build_minimap2_index, minimap2_version
+            index_path = build_minimap2_index(
+                candidate_paths["fasta"], database_dir / "candidate_contexts.mmi"
+            )
+            candidate_paths["minimap2_index"] = index_path
+            provenance = json.loads(candidate_paths["provenance"].read_text())
+            provenance["minimap2_version"] = minimap2_version("minimap2")
+            provenance["panel_sha256"] = hashlib.sha256(panel_path.read_bytes()).hexdigest()
+            candidate_paths["provenance"].write_text(
+                json.dumps(provenance, indent=2, sort_keys=True) + "\n"
+            )
+        except RuntimeError:
+            # Database construction remains possible on a build host without
+            # minimap2; the calling host can use the stored FASTA directly.
+            pass
 
     normalized_metadata = []
     myoga_metadata = []
@@ -551,5 +578,6 @@ def build_reference_database(
         "locus_amplifiability": locus_summary_path,
         "locus_summary_rows": locus_summary_rows,
         "reference_assemblies": reference_assemblies_path,
+        **candidate_paths,
         **tree_paths,
     }

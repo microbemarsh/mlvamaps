@@ -5,8 +5,9 @@ possible, and avoid generic fuzzy-string packages for core matching.
 
 Current backend policy:
 
-- `bowtie2` performs one competitive alignment of Illumina reads against all
-  versioned locus contexts; `pysam` parses the resulting alignment evidence.
+- `minimap2` performs competitive alignment of both Illumina and long reads
+  against versioned candidate allele contexts; `pysam` parses all retained
+  primary and secondary alignments.
 - The Bioconda `sassy>=0.2.2` command-line tool is the Rust/SIMD search engine
   used by in silico PCR, paired-primer FASTQ assignment, and bounded flank
   localization.
@@ -19,9 +20,8 @@ Current backend policy:
 - NumPy performs quality-score reductions, batched repeat-motif comparisons,
   and per-read repeat-count likelihood vectors in compiled loops.
   `pysam.FastxFile` delegates FASTA/FASTQ parsing to htslib.
-- `minimap2` performs competitive FASTQ locus/product recruitment and maps
-  locus reads back to assembly-PCR-resolved SPOARS products; `pysam` parses
-  SAM evidence.
+- SPOARS corrects and represents sequence variants after direct molecule
+  evidence has already entered shared allele inference.
 - `minimap2` also maps accurate reads to extracted assembly products for depth
   support. `pysam` handles existing SAM/BAM support supplied by the user.
 - MUMmer4 `dnadiff` performs exact whole-genome alignments only when an assembly

@@ -78,7 +78,7 @@
 
       <rect class="node" x="56" y="240" width="280" height="72" rx="4"/>
       <text class="tag" x="72" y="259">PAIRED-END ILLUMINA FASTQ</text>
-      <text class="title-small" x="72" y="280">Competitive Bowtie2 contexts</text>
+      <text class="title-small" x="72" y="280">Competitive minimap2 contexts</text>
       <text class="sub-small" x="72" y="297">span/junction · pair geometry · CIGAR/MAPQ · molecules</text>
 
       <rect class="node" x="56" y="328" width="280" height="96" rx="4"/>
@@ -89,7 +89,7 @@
 
       <!-- Shared calls -->
       <rect class="focal" x="428" y="248" width="208" height="136" rx="6"/>
-      <text class="tag-teal" x="448" y="270">SHARED REPRESENTATION</text>
+      <text class="tag-teal" x="448" y="270">SHARED ALLELE INFERENCE</text>
       <text class="title" x="448" y="294">Common locus calls</text>
       <line x1="448" y1="306" x2="616" y2="306" stroke="#9fc5c3" stroke-width="1"/>
       <text class="sub" x="448" y="326">locus · repeat count</text>

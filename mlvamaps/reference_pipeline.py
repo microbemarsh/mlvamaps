@@ -684,6 +684,31 @@ def build_combined_taxon_database(
     if context_records:
         write_fasta(context_records, database / "mlva_contexts.fasta.gz")
         _write_tsv(context_rows, database / "mlva_contexts.tsv", CONTEXT_FIELDS)
+    from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
+    if context_records and any(
+        locus.repeat_motif and set(locus.repeat_motif) <= set("ACGT")
+        and locus.repeat_unit_length_bp and locus.left_flank_sequence
+        and locus.right_flank_sequence
+        for locus in loci
+    ):
+        candidate_paths = write_candidate_contexts(
+            generate_candidate_contexts(loci, database), database
+        )
+        try:
+            from .minimap_mapping import build_minimap2_index, minimap2_version
+            index_path = build_minimap2_index(
+                candidate_paths["fasta"], database / "candidate_contexts.mmi"
+            )
+            provenance = json.loads(candidate_paths["provenance"].read_text())
+            provenance["minimap2_version"] = minimap2_version("minimap2")
+            panel_file = database / "reference_panel.tsv"
+            provenance["panel_sha256"] = hashlib.sha256(panel_file.read_bytes()).hexdigest()
+            provenance["minimap2_index"] = index_path.name
+            candidate_paths["provenance"].write_text(
+                json.dumps(provenance, indent=2, sort_keys=True) + "\n"
+            )
+        except RuntimeError:
+            pass
     paths = build_reference_phylogenies(
         database,
         phylogeny,

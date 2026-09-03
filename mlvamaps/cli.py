@@ -327,7 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--read-technology",
-        choices=("auto", "illumina", "accurate-long"),
+        choices=("auto", "illumina", "accurate-long", "ont", "ont-hq", "hifi"),
         default="auto",
         help="Read evidence model compatibility override (default: %(default)s; -i sr selects Illumina)",
     )
@@ -350,9 +350,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="One-row-per-sample metadata joined by sample_id and exported for MYOGA",
     )
     call.add_argument("--force", action="store_true", help="Reprocess successful manifest samples")
-    call.add_argument("--keep-intermediates", action="store_true", help="Retain short-read intermediate files")
-    call.add_argument("--bowtie2-bin", default="bowtie2", metavar="PATH")
-    call.add_argument("--bowtie2-build-bin", default="bowtie2-build", metavar="PATH")
+    call.add_argument("--keep-intermediates", action="store_true", help="Retain FASTQ candidate-mapping alignments")
     call.add_argument("--bam", "--alignments", dest="alignments_path", metavar="BAM/SAM", help="Assembly-aligned BAM/SAM for assembly depth support")
     call.add_argument(
         "-p",
@@ -412,7 +410,7 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--short-max-candidate-repeat-count", type=_positive_int, default=100)
     call.add_argument(
         "--no-short-secondary-alignments", action="store_true",
-        help="Ignore Bowtie2 secondary alignments (not recommended for homologous contexts)",
+        help="Ignore secondary candidate alignments (not recommended for homologous contexts)",
     )
     call.add_argument(
         "--short-min-informative-molecules",
@@ -1262,8 +1260,7 @@ def _run_short_input(
         threads=args.threads,
         keep_intermediates=args.keep_intermediates,
         sample_mode=args.sample_mode,
-        bowtie2_bin=args.bowtie2_bin,
-        bowtie2_build_bin=args.bowtie2_build_bin,
+        minimap2_bin=args.minimap2_bin,
         short_min_mapping_quality=args.short_min_mapq,
         short_min_spanning_pairs=args.short_min_spanning_pairs,
         short_confidence_threshold=args.short_confidence_threshold,
@@ -1274,7 +1271,7 @@ def _run_short_input(
     print(f"Wrote conservative Illumina calls to {result['calls']}")
     print(f"Wrote short-read QC to {result['short_read_qc']}")
     print(f"Wrote locus recruitment to {result['short_read_recruitment']}")
-    print(f"Wrote Bowtie2 mapping evidence to {result['short_read_mapping']}")
+    print(f"Wrote minimap2-derived mapping evidence to {result['short_read_mapping']}")
     print(f"Wrote MYOGA metadata to {result['myoga_samples']}")
     if "taxon_assignment" in result:
         print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")

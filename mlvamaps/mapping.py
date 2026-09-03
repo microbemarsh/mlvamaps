@@ -172,7 +172,7 @@ def _write_mapping_inputs(
             quality = feature.amplicon_quality or ("I" * len(sequence))
             if len(quality) != len(sequence):
                 quality = "I" * len(sequence)
-            query_name = f"mlvamap_read_{query_index}"
+            query_name = f"mlvamaps_read_{query_index}"
             query_index += 1
             query_metadata[query_name] = {
                 "read_id": feature.read_id,

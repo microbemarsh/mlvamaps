@@ -1,4 +1,4 @@
-"""Shared Illumina helpers and the canonical Bowtie2 short-read entry point."""
+"""Shared Illumina helpers and the competitive minimap2 entry point."""
 
 from __future__ import annotations
 
@@ -154,13 +154,13 @@ def run_short_read_call(
     short_min_mean_quality: float = 15.0, short_trim_quality: int = 0,
     short_min_pair_retention: float = 0.5, min_depth: int = 3,
     threads: int = DEFAULT_THREADS, keep_intermediates: bool = False,
-    sample_mode: str = "isolate", bowtie2_bin: str = "bowtie2",
-    bowtie2_build_bin: str = "bowtie2-build", short_min_mapping_quality: int = 0,
+    sample_mode: str = "isolate", minimap2_bin: str = "minimap2",
+    short_min_mapping_quality: int = 0,
     short_min_spanning_pairs: int = 2, short_confidence_threshold: float = 0.8,
     short_max_candidate_repeat_count: int = 100, short_consider_secondary: bool = True,
     show_progress: bool = True,
 ) -> dict[str, Path]:
-    """Call Illumina data with the sole supported Bowtie2 context algorithm."""
+    """Call Illumina data with competitive minimap2 candidate mapping."""
     from .short_read_mapping import run_mapping_short_read_call
 
     return run_mapping_short_read_call(
@@ -171,7 +171,7 @@ def run_short_read_call(
         short_min_mean_quality=short_min_mean_quality, short_trim_quality=short_trim_quality,
         short_min_pair_retention=short_min_pair_retention, min_depth=min_depth,
         threads=threads, keep_intermediates=keep_intermediates, sample_mode=sample_mode,
-        bowtie2_bin=bowtie2_bin, bowtie2_build_bin=bowtie2_build_bin,
+        minimap2_bin=minimap2_bin,
         short_min_mapping_quality=short_min_mapping_quality,
         short_min_spanning_pairs=short_min_spanning_pairs,
         short_confidence_threshold=short_confidence_threshold,

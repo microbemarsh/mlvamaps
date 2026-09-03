@@ -498,6 +498,35 @@ def run_call(
     write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
 
+    # Candidate-competition inference is independent of SPOARS and runs first.
+    # The established downstream sequence workflow remains confirmatory and
+    # supplies representative sequences for placement.
+    unified_calls: list[dict] = []
+    unified_paths: dict[str, Path] = {}
+    if filtered_reads:
+        from .unified_fastq import run_unified_fastq_inference
+
+        preset = {
+            "map-ont": "ont", "ont": "ont", "lr:hq": "ont-hq",
+            "map-hifi": "hifi", "hifi": "hifi",
+        }.get(str(recruitment_preset or "").lower(), "hifi")
+        unified_calls, _candidate_evidence, _molecule_calls, unified_paths = (
+            run_unified_fastq_inference(
+                reads1=outdir_path / "filtered_reads.fastq.gz",
+                reads2=None,
+                loci=loci,
+                database_path=recruitment_database_path or database_path,
+                outdir=outdir_path,
+                sample_id=sample_id,
+                technology=preset,
+                minimap2_bin=minimap2_bin,
+                threads=thread_count,
+                minimum_molecules=min_depth,
+                minimum_probability=min_posterior,
+                keep_alignments=debug_disagreements,
+            )
+        )
+
     recruitment_paths = {
         "recruited_reads": outdir_path / "locus_recruited_reads.tsv",
         "locus_presence": outdir_path / "locus_presence.tsv",
@@ -760,8 +789,37 @@ def run_call(
         primary_product_measurements=primary_product_measurements,
         read_evidence_rows=recruited_rows,
     )
+    # The shared caller owns repeat-state selection and status semantics. SPOARS
+    # and the historical read workflow remain sequence/confirmation evidence.
+    unified_by_locus = {str(row["locus"]): row for row in unified_calls}
     for row in allele_rows:
         row["sample_id"] = sample_id
+        shared = unified_by_locus.get(str(row["locus_id"]))
+        if shared is None:
+            continue
+        status_map = {
+            "called": "PASS", "low_coverage": "LOW_DEPTH",
+            "detected_unresolved": "LOCUS_DROPOUT", "ambiguous": "AMBIGUOUS",
+            "not_found": "LOCUS_DROPOUT", "mixed": "MULTIPLE_VARIANTS",
+        }
+        row.update({
+            "called_repeat_count": shared["repeat_count"],
+            "posterior_probability": shared["best_probability"],
+            "second_best_repeat_count": (
+                str(shared["candidate_distribution"]).split(";")[1].split(":", 1)[0]
+                if len(str(shared["candidate_distribution"]).split(";")) > 1 else ""
+            ),
+            "second_best_posterior": shared["second_best_probability"],
+            "read_depth": shared["molecule_support"],
+            "primary_read_depth": shared["molecule_support"],
+            "dominant_variant_fraction": shared["dominant_fraction"] or 0,
+            "allele_distribution": shared["candidate_distribution"],
+            "call_status": status_map[str(shared["status"])],
+            "primary_measurement_source": "shared_competitive_minimap2_inference",
+            "evidence_status": str(shared["status"]).upper(),
+            "full_product_reads": shared["direct_product_support"],
+            "repeat_informative_reads": shared["full_span_support"],
+        })
     write_tsv(allele_rows, outdir_path / "allele_calls.tsv", ALLELE_FIELDS)
     allele_distribution_path = outdir_path / "allele_probability_distribution.tsv"
     write_tsv(
@@ -944,5 +1002,6 @@ def run_call(
         "disagreement_summary": disagreement_summary_path,
         **screen_paths,
         **recruitment_paths,
+        **unified_paths,
         **phylogeny_paths,
     }

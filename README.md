@@ -15,15 +15,22 @@ There are three calling pathways:
 - **Genome assemblies:** Sassy-backed, primer-directed in silico PCR recovers
   candidate amplicons; the assembly caller applies MLVA_finder-compatible
   product selection and size-to-repeat conversion.
-- **Paired-end or single-end Illumina reads:** one competitive Bowtie2 alignment
-  against versioned locus contexts supports conservative discrete repeat-count
-  inference. This pathway does not perform de novo assembly.
-- **Accurate long-read or amplicon FASTQ:** reads are processed directly,
-  recruited competitively with minimap2, and grouped into locus products before
-  a SPOARS consensus is passed through the assembly-equivalent caller.
+- **Paired-end or single-end Illumina reads:** competitive minimap2 alignment
+  against candidate MLVA allele contexts supplies paired-molecule, boundary,
+  indel, and direct-product evidence to the shared allele caller.
+- **Long-read or amplicon FASTQ:** the same competitive candidate mapping is
+  followed by direct molecule measurement and shared allele inference. SPOARS
+  remains available for representative sequence correction and confirmation;
+  it is not required before a repeat-count call.
 
 Locus detection does not by itself imply a confident repeat-count call.
 Unresolved and missing calls remain explicit and are never converted to zero.
+
+mlvamaps uses competitive minimap2 alignment against candidate MLVA allele
+contexts for both short- and long-read sequencing data. Technology-specific
+evidence is extracted from these alignments and integrated by a shared
+locus-level allele inference framework. minimap2 supplies competing alignments;
+it does not by itself determine the MLVA allele.
 
 ## Install
 
@@ -180,11 +187,10 @@ mlvamaps call \
   -o results/sample
 ```
 
-Illumina databases must have been built by a current mlvamaps release and must
-contain `database/mlva_contexts.tsv` and `database/mlva_contexts.fasta.gz`.
-Rebuild older databases before using them for Illumina calls. A rich panel may
-still be used without a database; in that case compact contexts are synthesized
-from its primers, flanks, repeat motif, and expected range.
+Current databases store reusable `candidate_contexts.fasta` and
+`candidate_metadata.tsv` artifacts. A rich panel may still be used without a
+database; bounded contexts are then synthesized from its primers, flanks,
+repeat motif, expected range, and observed database states when available.
 
 For a multi-taxid build, that command automatically loads the saved panel and
 taxon metadata, then writes the taxon assignment. No separate panel,
