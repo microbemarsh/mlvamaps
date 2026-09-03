@@ -6,10 +6,10 @@ metadata. No separate preparation or locus-extraction command is required.
 
 ```bash
 mlvamaps build-reference \
-  --taxids-csv taxids.csv \
+  --taxids taxids.csv \
   --panel primer.csv \
   --output mlvamaps_db \
-  --threads 16
+  --threads 32
 ```
 
 `taxids.csv` requires `taxid` (aliases `taxon_id` and `ncbi_taxid`) and may
@@ -25,7 +25,7 @@ For local material:
 
 ```bash
 mlvamaps build-reference -i assemblies/ --metadata metadata.tsv \
-  --panel primer.csv --output mlvamaps_db --threads 16
+  --panel primer.csv --output mlvamaps_db --threads 32
 ```
 
 ## Internal stages
@@ -35,6 +35,11 @@ amplifiability, builds real-reference MAFFT/RAxML-NG assets, generates bounded
 candidate repeat states, deduplicates identical sequence hypotheses, builds
 short- and long-read minimap2 indexes, builds a Deacon index from complete real
 genomes, and finally writes `manifest.json`.
+
+`--threads` sets the overall build budget and remains available to parallel
+extraction, MAFFT, and other threaded stages. RAxML-NG reference-tree searches
+are safely run with one internal thread per process; users do not need to reduce
+the entire build to `--threads 1`.
 
 Candidate generation uses `expected_min_repeats` and `expected_max_repeats`
 when explicitly supplied. Otherwise it conservatively uses observed calibrated

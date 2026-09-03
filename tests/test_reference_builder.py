@@ -303,6 +303,42 @@ def test_cli_exposes_reference_builder():
     assert args.quiet is False
 
 
+def test_reference_build_keeps_global_threads_but_pins_raxml_in_manifest(
+    tmp_path, monkeypatch
+):
+    assemblies, primers, metadata = _reference_inputs(tmp_path)
+    _mock_empty_extraction(monkeypatch)
+    monkeypatch.setattr(
+        reference_builder,
+        "pcr_rows_to_products",
+        lambda rows, loci, sample_id: [{
+            "locus_id": "L1", "product_id": "L1|R1|0", "sequence": "AAACCC",
+            "product_size_bp": 6, "forward_mismatches": 0,
+            "reverse_mismatches": 0, "primer_error_round": 0,
+        }],
+    )
+    observed = {}
+
+    def fake_resources(**kwargs):
+        observed["mapping_threads"] = kwargs["threads"]
+        return {}
+
+    def fake_phylogeny(database, outdir, loci, threads, **kwargs):
+        observed["phylogeny_threads"] = threads
+        return {"phylogeny": Path(outdir)}
+
+    monkeypatch.setattr(reference_builder, "build_mapping_resources", fake_resources)
+    monkeypatch.setattr(reference_builder, "build_reference_phylogenies", fake_phylogeny)
+    result = build_reference_database(
+        assemblies, primers, metadata, tmp_path / "reference", threads=32
+    )
+
+    assert observed == {"mapping_threads": 32, "phylogeny_threads": 32}
+    manifest = json.loads(result["manifest"].read_text())
+    assert manifest["build_threads"] == 32
+    assert manifest["phylogeny"]["raxml_ng_threads_per_process"] == 1
+
+
 def test_cli_help_lists_only_supported_commands(capsys):
     from mlvamaps.cli import build_parser
 
@@ -316,10 +352,14 @@ def test_build_reference_accepts_primers_and_taxids_spelling():
     from mlvamaps.cli import build_parser
 
     args = build_parser().parse_args(
-        ["build-reference", "--primers", "primer.csv", "--taxids-csv", "taxids.csv"]
+        [
+            "build-reference", "--primers", "primer.csv", "--taxids", "taxids.csv",
+            "--threads", "32",
+        ]
     )
     assert args.panel_path == "primer.csv"
     assert args.taxids_csv == "taxids.csv"
+    assert args.threads == 32
 
 
 def test_reference_builder_normalizes_and_checks_taxonomy(tmp_path, monkeypatch):

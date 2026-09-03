@@ -206,25 +206,26 @@ def test_empty_sequence_database_remains_an_error(tmp_path):
         read_sequence_database(database, {"L1"})
 
 
-def test_mafft_commands_keep_reference_coordinates():
-    assert build_mafft_reference_command("refs.fa", 4, "mafft-x") == [
-        "mafft-x", "--auto", "--thread", "4", "refs.fa"
+@pytest.mark.parametrize("build_threads", [1, 4, 32])
+def test_raxml_command_is_single_threaded_while_mafft_uses_build_threads(build_threads):
+    assert build_mafft_reference_command("refs.fa", build_threads, "mafft-x") == [
+        "mafft-x", "--auto", "--thread", str(build_threads), "refs.fa"
     ]
-    assert build_mafft_add_command("query.fa", "refs.aln.fa", 4, "mafft-x") == [
-        "mafft-x", "--add", "query.fa", "--keeplength", "--thread", "4", "refs.aln.fa"
+    assert build_mafft_add_command("query.fa", "refs.aln.fa", build_threads, "mafft-x") == [
+        "mafft-x", "--add", "query.fa", "--keeplength", "--thread", str(build_threads), "refs.aln.fa"
     ]
-    assert build_raxml_ng_command("placed.fa", "run", 4, "raxml-ng-x") == [
+    assert build_raxml_ng_command("placed.fa", "run", "raxml-ng-x") == [
         "raxml-ng-x", "--search", "--msa", "placed.fa", "--model", "DNA",
-        "--prefix", "run", "--seed", "12345", "--threads", "4", "--redo",
+        "--prefix", "run", "--seed", "12345", "--threads", "1", "--redo",
     ]
-    assert build_epa_ng_command("refs.fa", "tree.nwk", "query.fa", "model", "epa", 4, "epa-x") == [
+    assert build_epa_ng_command("refs.fa", "tree.nwk", "query.fa", "model", "epa", build_threads, "epa-x") == [
         "epa-x", "--ref-msa", "refs.fa", "--tree", "tree.nwk", "--query", "query.fa",
-        "--model", "model", "--outdir", "epa", "--threads", "4",
+        "--model", "model", "--outdir", "epa", "--threads", str(build_threads),
     ]
 
 
-def test_raxml_retries_low_pattern_alignment_with_fewer_threads(tmp_path):
-    executable = tmp_path / "raxml-ng-retry"
+def test_raxml_runner_enforces_one_thread_and_reports_failure_details(tmp_path):
+    executable = tmp_path / "raxml-ng-failure"
     executable.write_text(
         """#!/usr/bin/env python3
 import pathlib, sys
@@ -233,33 +234,24 @@ def value(flag): return args[args.index(flag) + 1]
 prefix = value('--prefix')
 threads = int(value('--threads'))
 with open(prefix + '.attempts', 'a') as handle: handle.write(f'{threads}\\n')
-if threads > 2:
-    print('ERROR: Too few patterns per thread!', file=sys.stderr)
-    raise SystemExit(1)
-pathlib.Path(prefix + '.raxml.bestTree').write_text('(R1:0,R2:0);\\n')
-pathlib.Path(prefix + '.raxml.bestModel').write_text('GTR+G\\n')
+print('deliberate failure', file=sys.stderr)
+raise SystemExit(7)
 """
     )
     executable.chmod(0o755)
     prefix = tmp_path / "reference"
     tree = tmp_path / "reference_tree.nwk"
-    stream = io.StringIO()
-    progress = ProgressReporter(stream=stream)
+    command = build_raxml_ng_command("alignment.fa", prefix, str(executable))
+    command[command.index("--threads") + 1] = "32"
+    with pytest.raises(RuntimeError) as error:
+        _run_raxml_ng(command, prefix, tree, "reference tree search for L1")
 
-    _run_raxml_ng(
-        build_raxml_ng_command("alignment.fa", prefix, 8, str(executable)),
-        prefix,
-        tree,
-        "test tree",
-        progress,
-    )
-
-    assert Path(f"{prefix}.attempts").read_text().splitlines() == ["8", "4", "2"]
-    assert tree.read_text() == "(R1:0,R2:0);\n"
-    assert "retrying test tree with 4" in stream.getvalue()
-    assert "Too few patterns per thread" in Path(
-        f"{prefix}.mlvamaps.raxml.log"
-    ).read_text()
+    assert Path(f"{prefix}.attempts").read_text().splitlines() == ["1"]
+    message = str(error.value)
+    assert "reference tree search for L1" in message
+    assert "exit 7" in message
+    assert "--threads 1" in message
+    assert str(Path(f"{prefix}.mlvamaps.raxml.log")) in message
 
 
 def test_phylogenetic_placement_ranks_all_locus_distance_sum(tmp_path):
@@ -474,13 +466,15 @@ def test_reference_phylogeny_build_persists_sequence_identity_index(tmp_path):
         database,
         reference_build / "phylogeny",
         [Locus(locus_id="L1")],
-        1,
+        32,
         min_references=2,
         mafft_bin=str(_fake_mafft(tmp_path)),
         raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
     )
 
     assert result["sequence_index"] == database / "reference_sequence_index.tsv"
+    raxml_log = result["phylogeny"] / "L1" / "reference.mlvamaps.raxml.log"
+    assert "--threads 1" in raxml_log.read_text()
     index_rows = _read_tsv(result["sequence_index"])
     assert [row["reference_id"] for row in index_rows] == ["R1", "R2", "R3"]
     assert all(len(row["amplicon_sha256"]) == 64 for row in index_rows)

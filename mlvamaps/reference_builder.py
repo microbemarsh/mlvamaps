@@ -17,6 +17,7 @@ from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import open_text, read_fasta, write_fasta
 from .models import Locus
 from .phylogeny import (
+    RAXML_NG_THREADS_PER_PROCESS,
     REFERENCE_ASSEMBLY_FIELDS,
     build_reference_phylogenies,
     canonical_assembly_digest,
@@ -441,6 +442,10 @@ def build_reference_database(
         f"Starting reference build for {len(matched):,} assemblies and "
         f"{len(loci):,} loci with {thread_count} worker(s)"
     )
+    progress.step(f"Global build threads: {thread_count}")
+    progress.step(
+        f"RAxML-NG threads per process: {RAXML_NG_THREADS_PER_PROCESS}"
+    )
     output = Path(outdir)
     database_dir = output / "database"
     extraction_dir = output / "extraction"
@@ -641,6 +646,7 @@ def build_reference_database(
         "status": "complete",
         "mlvamaps_version": __version__,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "build_threads": thread_count,
         "primer_panel": {
             "path": str(panel_path.relative_to(output)),
             "sha256": _sha256(panel_path),
@@ -672,6 +678,7 @@ def build_reference_database(
             "mafft_version": _tool_version(mafft_bin) if locus_fasta_paths else "",
             "raxml_ng_version": _tool_version(raxml_ng_bin) if locus_fasta_paths else "",
             "model": raxml_model,
+            "raxml_ng_threads_per_process": RAXML_NG_THREADS_PER_PROCESS,
             "directory": "phylogeny",
             "sequence_type": "real_observed_locus_sequences_only",
         },

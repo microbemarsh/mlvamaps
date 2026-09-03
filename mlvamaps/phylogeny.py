@@ -38,6 +38,9 @@ from .taxon_assignment import (
 )
 
 
+RAXML_NG_THREADS_PER_PROCESS = 1
+
+
 PLACEMENT_FIELDS = [
     "sample_id",
     "locus_id",
@@ -847,7 +850,6 @@ def check_raxml_ng(executable: str) -> str:
 def build_raxml_ng_command(
     alignment_path: str | Path,
     prefix: str | Path,
-    threads: int,
     executable: str = "raxml-ng",
     model: str = "DNA",
 ) -> list[str]:
@@ -863,7 +865,7 @@ def build_raxml_ng_command(
         "--seed",
         "12345",
         "--threads",
-        str(threads),
+        str(RAXML_NG_THREADS_PER_PROCESS),
         "--redo",
     ]
 
@@ -875,40 +877,25 @@ def _run_raxml_ng(
     stage: str,
     progress: ProgressReporter | None = None,
 ) -> None:
-    """Run RAxML-NG, reducing only its threads for low-pattern alignments."""
+    """Run RAxML-NG with the invariant one-thread process configuration."""
     attempted_command = list(command)
     thread_index = attempted_command.index("--threads") + 1
-    raxml_threads = int(attempted_command[thread_index])
+    attempted_command[thread_index] = str(RAXML_NG_THREADS_PER_PROCESS)
     log_path = Path(f"{prefix}.mlvamaps.raxml.log")
-    attempts: list[str] = []
-
-    while True:
-        attempted_command[thread_index] = str(raxml_threads)
-        result = subprocess.run(
-            attempted_command, capture_output=True, text=True, check=False
+    result = subprocess.run(
+        attempted_command, capture_output=True, text=True, check=False
+    )
+    detail = "\n".join(
+        part.strip() for part in (result.stdout, result.stderr) if part.strip()
+    )
+    rendered_command = " ".join(attempted_command)
+    log_path.write_text(f"$ {rendered_command}\n{detail}".rstrip() + "\n")
+    if result.returncode:
+        detail_tail = "\n".join(detail.splitlines()[-40:])
+        raise RuntimeError(
+            f"RAxML-NG {stage} failed (exit {result.returncode}). "
+            f"Command: {rendered_command}. Full output: {log_path}\n{detail_tail}"
         )
-        detail = "\n".join(
-            part.strip() for part in (result.stdout, result.stderr) if part.strip()
-        )
-        attempts.append(
-            f"$ {' '.join(attempted_command)}\n{detail}".rstrip()
-        )
-        log_path.write_text("\n\n".join(attempts) + "\n")
-        if not result.returncode:
-            break
-        if "Too few patterns per thread" not in detail or raxml_threads == 1:
-            detail_tail = "\n".join(detail.splitlines()[-40:])
-            raise RuntimeError(
-                f"RAxML-NG {stage} failed (exit {result.returncode}). Full output: "
-                f"{log_path}\n{detail_tail}"
-            )
-        next_threads = max(1, raxml_threads // 2)
-        if progress is not None:
-            progress.step(
-                f"RAxML-NG found too few alignment patterns for {raxml_threads} "
-                f"threads; retrying {stage} with {next_threads}"
-            )
-        raxml_threads = next_threads
 
     best_tree = Path(f"{prefix}.raxml.bestTree")
     if not best_tree.exists():
@@ -989,12 +976,12 @@ def _run_reference_tree_job(
     mafft: str,
     raxml_ng: str,
     raxml_model: str,
-    native_threads: int,
+    mafft_threads: int,
 ) -> None:
     """Build one locus tree; callers parallelize independent loci."""
     _run_mafft(
         build_mafft_reference_command(
-            job.reference_fasta, native_threads, mafft
+            job.reference_fasta, mafft_threads, mafft
         ),
         job.reference_alignment,
         f"reference alignment for {job.locus_id}",
@@ -1003,7 +990,6 @@ def _run_reference_tree_job(
         build_raxml_ng_command(
             job.reference_alignment,
             job.reference_prefix,
-            native_threads,
             raxml_ng,
             raxml_model,
         ),
@@ -2335,17 +2321,18 @@ def run_phylogenetic_placement(
     if reference_tree_jobs:
         cpu_budget = resolve_threads(threads)
         worker_count = min(cpu_budget, len(reference_tree_jobs))
-        native_threads = max(1, cpu_budget // worker_count)
+        mafft_threads = max(1, cpu_budget // worker_count)
         if progress is not None:
             progress.step(
                 f"Building {len(reference_tree_jobs):,} independent reference "
                 f"locus trees with {worker_count} worker(s) and "
-                f"{native_threads} native thread(s) per worker"
+                f"{mafft_threads} MAFFT thread(s) per worker; RAxML-NG uses "
+                f"{RAXML_NG_THREADS_PER_PROCESS} thread per process"
             )
         if worker_count == 1:
             for locus_id, job in reference_tree_jobs.items():
                 _run_reference_tree_job(
-                    job, mafft, str(raxml_ng), raxml_model, native_threads
+                    job, mafft, str(raxml_ng), raxml_model, mafft_threads
                 )
         else:
             with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -2356,7 +2343,7 @@ def run_phylogenetic_placement(
                         mafft,
                         str(raxml_ng),
                         raxml_model,
-                        native_threads,
+                        mafft_threads,
                     ): locus_id
                     for locus_id, job in reference_tree_jobs.items()
                 }
@@ -3008,6 +2995,7 @@ def build_reference_phylogenies(
     """
     if min_references < 2:
         raise ValueError("min_references must be at least 2")
+    build_threads = resolve_threads(threads)
     locus_by_id = {locus.locus_id: locus for locus in loci}
     references = read_sequence_database(database_path, set(locus_by_id))
     output = Path(outdir)
@@ -3114,12 +3102,12 @@ def build_reference_phylogenies(
         prefix = locus_dir / "reference"
         _write_fasta(masked_records, reference_fasta)
         _run_mafft(
-            build_mafft_reference_command(reference_fasta, threads, mafft),
+            build_mafft_reference_command(reference_fasta, build_threads, mafft),
             alignment,
             f"reference alignment for {locus_id}",
         )
         _run_raxml_ng(
-            build_raxml_ng_command(alignment, prefix, threads, raxml_ng, raxml_model),
+            build_raxml_ng_command(alignment, prefix, raxml_ng, raxml_model),
             prefix,
             tree,
             f"reference tree search for {locus_id}",

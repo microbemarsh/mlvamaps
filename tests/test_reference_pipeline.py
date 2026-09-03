@@ -547,6 +547,8 @@ def test_cli_dispatches_taxid_reference_pipeline(tmp_path, monkeypatch):
                     str(panel),
                 "--output",
                 str(tmp_path / "references"),
+                "--threads",
+                "32",
                 "--quiet",
             ]
         )
@@ -554,4 +556,5 @@ def test_cli_dispatches_taxid_reference_pipeline(tmp_path, monkeypatch):
     )
     assert observed["references"] == [TaxonReference("1280", "taxid_1280")]
     assert observed["outdir"] == str(tmp_path / "references")
+    assert observed["kwargs"]["threads"] == 32
     assert observed["kwargs"]["show_progress"] is False

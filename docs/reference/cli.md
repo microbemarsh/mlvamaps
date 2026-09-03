@@ -243,7 +243,7 @@ primer lists and rich locus panels.
 | `--multiple-products` | `exclude` | For equally best products, exclude the assembly/locus pair, choose the deterministic best candidate, or fail. |
 | `--max-primer-mismatches` | `2` | Maximum Sassy-backed edit distance allowed independently for each primer. |
 | `--min-references-per-tree` | `3` | Minimum references required to infer a locus tree. |
-| `-t`, `--threads` | `32` | Parallel assembly-extraction workers and maximum MAFFT/RAxML-NG threads; `0` uses all CPUs. RAxML-NG retries low-pattern loci with fewer threads automatically. |
+| `-t`, `--threads` | `32` | Overall build CPU budget, including parallel assembly extraction and MAFFT; `0` uses all CPUs. Each RAxML-NG process uses one internal thread for reliable short-locus inference. |
 | `--quiet` | off | Suppress per-assembly and per-locus progress updates. |
 | `--raxml-model` | `DNA` | Model-selection set used independently for each reference tree. |
 

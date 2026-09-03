@@ -15,9 +15,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .concurrency import DEFAULT_THREADS
+from .concurrency import DEFAULT_THREADS, resolve_threads
 from .io import read_fasta, write_fasta
-from .phylogeny import REFERENCE_ASSEMBLY_FIELDS, build_reference_phylogenies
+from .phylogeny import (
+    RAXML_NG_THREADS_PER_PROCESS,
+    REFERENCE_ASSEMBLY_FIELDS,
+    build_reference_phylogenies,
+)
 from .primers import read_loci_or_primers
 from .progress import ProgressReporter
 from .reference_builder import (
@@ -553,6 +557,7 @@ def build_combined_taxon_database(
     if len(references) != len(results):
         raise ValueError("Cannot combine taxon databases: reference/result counts differ")
 
+    build_threads = resolve_threads(threads)
     root = Path(output).resolve()
     database = root / "database"
     phylogeny = root / "phylogeny"
@@ -660,7 +665,7 @@ def build_combined_taxon_database(
             for row in assembly_rows
         ],
         panel_path=database / "reference_panel.tsv",
-        threads=threads,
+        threads=build_threads,
         minimap2_bin=minimap2_bin,
         deacon_bin=deacon_bin,
         progress=ProgressReporter(enabled=False),
@@ -669,7 +674,7 @@ def build_combined_taxon_database(
         database,
         phylogeny,
         loci,
-        threads,
+        build_threads,
         min_references=min_references_per_tree,
         mafft_bin=mafft_bin,
         raxml_ng_bin=raxml_ng_bin,
@@ -682,6 +687,10 @@ def build_combined_taxon_database(
                 "schema_version": DATABASE_SCHEMA_VERSION,
                 "status": "complete",
                 "created_at": datetime.now(timezone.utc).isoformat(),
+                "build_threads": build_threads,
+                "phylogeny_threads": {
+                    "raxml_ng_threads_per_process": RAXML_NG_THREADS_PER_PROCESS,
+                },
                 "database": "database",
                 "taxids": [reference.taxid for reference in references],
                 "taxids_input": {
@@ -732,6 +741,12 @@ def build_taxon_references(
     builder: Callable[..., dict[str, Any]] = build_reference_database,
 ) -> dict[str, Any]:
     """Prepare and build one isolated mlvamaps database per taxid."""
+    build_threads = resolve_threads(threads)
+    progress = ProgressReporter(enabled=show_progress)
+    progress.step(f"Global build threads: {build_threads}")
+    progress.step(
+        f"RAxML-NG threads per process: {RAXML_NG_THREADS_PER_PROCESS}"
+    )
     output = Path(outdir).resolve()
     output.mkdir(parents=True, exist_ok=True)
     taxids_path = output / "taxids.csv"
@@ -766,7 +781,7 @@ def build_taxon_references(
             multiple_products=multiple_products,
             max_primer_mismatches=max_primer_mismatches,
             min_references_per_tree=min_references_per_tree,
-            threads=threads,
+            threads=build_threads,
             amplirust_bin=amplirust_bin,
             minimap2_bin=minimap2_bin,
             deacon_bin=deacon_bin,
@@ -838,7 +853,7 @@ def build_taxon_references(
             output,
             loci_path=loci_path,
             min_references_per_tree=min_references_per_tree,
-            threads=threads,
+            threads=build_threads,
             mafft_bin=mafft_bin,
             raxml_ng_bin=raxml_ng_bin,
             raxml_model=raxml_model,
@@ -858,6 +873,10 @@ def build_taxon_references(
             {
                 "schema_version": DATABASE_SCHEMA_VERSION,
                 "created_at": datetime.now(timezone.utc).isoformat(),
+                "build_threads": build_threads,
+                "phylogeny_threads": {
+                    "raxml_ng_threads_per_process": RAXML_NG_THREADS_PER_PROCESS,
+                },
                 "taxids_input": {
                     "path": taxids_path.name,
                     "sha256": _sha256(taxids_path),

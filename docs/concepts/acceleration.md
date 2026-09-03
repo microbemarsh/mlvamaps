@@ -37,4 +37,7 @@ Default threading policy:
   The Sassy CLI adapter uses temporary FASTA inputs and runs each search with
   one Sassy thread; assembly records can be distributed across mlvamaps worker
   processes.
-- Native mapping and phylogenetic tools receive the resolved thread count.
+- Native mapping and phylogenetic tools receive an appropriate share of the
+  resolved thread count. RAxML-NG is the exception: each process is pinned to
+  one internal thread while independent locus jobs may run concurrently where
+  the workflow supports it.

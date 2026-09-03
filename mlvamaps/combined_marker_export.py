@@ -474,7 +474,7 @@ def export_combined_markers(
                     raw_tree = locus_dir / "haplotypes.raxml.tree"
                     _run_raxml_ng(
                         build_raxml_ng_command(
-                            alignment_path, prefix, threads, raxml_ng, raxml_model
+                            alignment_path, prefix, raxml_ng, raxml_model
                         ),
                         prefix,
                         raw_tree,

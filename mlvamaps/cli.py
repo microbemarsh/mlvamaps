@@ -887,7 +887,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reference_source.add_argument("--taxid", help="Single NCBI taxonomy identifier")
     reference_source.add_argument(
+        "--taxids",
         "--taxids-csv",
+        dest="taxids_csv",
         help="CSV/TSV with a taxid column and optional name column",
     )
     panel = reference.add_mutually_exclusive_group(required=True)
@@ -947,7 +949,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--threads",
         type=int,
         default=DEFAULT_THREADS,
-        help="Parallel extraction workers and tree-tool threads (default: %(default)s; 0 auto-detects CPUs)",
+        help="Overall build parallelism (default: %(default)s; 0 auto-detects CPUs)",
     )
     reference.add_argument("--quiet", action="store_true", help="Suppress live progress updates")
     reference.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
