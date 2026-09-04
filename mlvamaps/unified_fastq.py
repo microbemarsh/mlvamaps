@@ -13,7 +13,7 @@ from .allele_inference import (
 from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
 from .io import write_tsv
 from .long_read_evidence import extract_long_read_evidence
-from .minimap_mapping import map_reads_to_candidates
+from .minimap_mapping import map_reads_to_candidates_bam
 from .models import Locus
 from .short_read_evidence import extract_short_read_evidence
 
@@ -40,8 +40,6 @@ def run_unified_fastq_inference(
     contexts = generate_candidate_contexts(
         loci, database_path, maximum=maximum_candidate_repeat_count
     )
-    paths = write_candidate_contexts(contexts, work)
-    sam = work / "candidate_alignments.sam"
     database = Path(database_path) if database_path else None
     if database is not None and (database / "database").is_dir():
         database = database / "database"
@@ -50,11 +48,21 @@ def run_unified_fastq_inference(
         if database is not None and (database / "competitive_mapping").is_dir()
         else database
     )
+    cached_fasta = resource / "candidate_contexts.fasta" if resource is not None else None
+    if cached_fasta is not None and cached_fasta.is_file():
+        paths = {
+            "fasta": cached_fasta,
+            "metadata": resource / "candidate_metadata.tsv",
+            "provenance": resource / "candidate_provenance.json",
+        }
+    else:
+        paths = write_candidate_contexts(contexts, work)
+    bam = work / "candidate_alignments.bam"
     index_name = "short.mmi" if technology == "illumina" else "long.mmi"
     cached_index = resource / index_name if resource is not None else None
     mapping_reference = cached_index if cached_index is not None and cached_index.is_file() else paths["fasta"]
-    alignments = map_reads_to_candidates(
-        mapping_reference, reads1, reads2, contexts, sam, threads, technology,
+    alignments = map_reads_to_candidates_bam(
+        mapping_reference, reads1, reads2, contexts, bam, threads, technology,
         executable=minimap2_bin,
     )
     if technology == "illumina":
@@ -77,14 +85,14 @@ def run_unified_fastq_inference(
         EVIDENCE_FIELDS,
     )
     if not keep_alignments:
-        sam.unlink(missing_ok=True)
+        bam.unlink(missing_ok=True)
     return calls, evidence, molecule_calls, {
         "common_locus_calls": common_calls,
         "molecule_evidence": evidence_path,
         "candidate_contexts": paths["fasta"],
         "candidate_metadata": paths["metadata"],
         "candidate_provenance": paths["provenance"],
-        **({"candidate_alignments": sam} if keep_alignments else {}),
+        **({"candidate_alignments": bam} if keep_alignments else {}),
     }
 
 

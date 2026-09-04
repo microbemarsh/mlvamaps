@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import time
 from typing import TextIO
+from contextlib import contextmanager
 
 
 class ProgressReporter:
@@ -12,6 +13,16 @@ class ProgressReporter:
         self.min_interval = min_interval
         self.started = time.monotonic()
         self._last_update: dict[str, float] = {}
+
+    @contextmanager
+    def phase(self, name: str, detail: str = ""):
+        """Report a phase boundary and its own elapsed wall time."""
+        started = time.monotonic()
+        self.step(f"Phase {name} started{': ' + detail if detail else ''}")
+        try:
+            yield
+        finally:
+            self.step(f"Phase {name} finished in {time.monotonic() - started:.1f}s")
 
     def step(self, message: str) -> None:
         if not self.enabled:

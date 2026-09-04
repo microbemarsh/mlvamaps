@@ -405,8 +405,14 @@ def build_reference_database(
     raxml_ng_bin: str = "raxml-ng",
     raxml_model: str = "DNA",
     show_progress: bool = False,
+    finalize: bool = True,
 ) -> dict[str, Any]:
-    """Extract reference amplicons and infer a SNP tree for every usable locus."""
+    """Extract reference amplicons and optionally finalize reusable resources.
+
+    ``finalize=False`` is used only by the taxid coordinator: it retains the
+    taxon's amplicons and QC but deliberately does not construct resources that
+    belong to the completed, combined database.
+    """
     if multiple_products not in {"exclude", "best", "error"}:
         raise ValueError("multiple_products must be exclude, best, or error")
     if min_references_per_tree < 2:
@@ -455,7 +461,7 @@ def build_reference_database(
     }
     manifest_rows: list[dict] = []
 
-    progress.step("Extracting primer products from reference assemblies")
+    progress.step(f"Assembly extraction: {len(matched):,} assemblies, {len(loci):,} loci")
     products_by_reference: dict[str, list[dict]] = {}
     if thread_count == 1 or len(matched) == 1:
         for completed, (reference_id, assembly, _metadata) in enumerate(matched, start=1):
@@ -588,17 +594,18 @@ def build_reference_database(
         REFERENCE_ASSEMBLY_FIELDS,
     )
     candidate_paths: dict[str, Any] = {}
-    if locus_fasta_paths:
-        candidate_paths = build_mapping_resources(
-            database_dir=database_dir,
-            loci=loci,
-            assemblies=[(reference_id, assembly) for reference_id, assembly, _row in matched],
-            panel_path=panel_path,
-            threads=thread_count,
-            minimap2_bin=minimap2_bin,
-            deacon_bin=deacon_bin,
-            progress=progress,
-        )
+    if locus_fasta_paths and finalize:
+        with progress.phase("combined mapping resources", f"{len(matched):,} assemblies"):
+            candidate_paths = build_mapping_resources(
+                database_dir=database_dir,
+                loci=loci,
+                assemblies=[(reference_id, assembly) for reference_id, assembly, _row in matched],
+                panel_path=panel_path,
+                threads=thread_count,
+                minimap2_bin=minimap2_bin,
+                deacon_bin=deacon_bin,
+                progress=progress,
+            )
     _write_tsv(manifest_rows, output / "reference_build_manifest.tsv", REFERENCE_BUILD_FIELDS)
     locus_summary_rows = _locus_amplifiability_rows(
         loci, records_by_locus, len(matched), min_references_per_tree, manifest_rows
@@ -616,8 +623,8 @@ def build_reference_database(
         writer.writerows(myoga_metadata)
 
     tree_paths: dict[str, Path | None] = {}
-    if locus_fasta_paths:
-        progress.step("Building per-locus reference alignments and trees")
+    if locus_fasta_paths and finalize:
+        progress.step(f"Phylogeny finalization: {len(locus_fasta_paths):,} candidate loci")
         tree_paths = build_reference_phylogenies(
             database_dir,
             output / "phylogeny",
@@ -634,12 +641,16 @@ def build_reference_database(
             if all(row["tree_status"] == REFERENCE_BUILD_STATUS_BUILT for row in locus_summary_rows)
             else REFERENCE_BUILD_STATUS_PARTIAL
         )
-    else:
+    elif not locus_fasta_paths:
         build_status = REFERENCE_BUILD_STATUS_NO_USABLE_LOCI
         tree_paths = {"phylogeny": None}
         progress.step(
             "No usable reference amplicons were recovered; skipping phylogeny construction."
         )
+    else:
+        build_status = REFERENCE_BUILD_STATUS_PARTIAL
+        tree_paths = {"phylogeny": None}
+        progress.step("Extraction-only taxon stage complete; combined resources deferred")
     manifest_path = output / "manifest.json"
     manifest = {
         "schema_version": DATABASE_SCHEMA_VERSION,
@@ -675,13 +686,14 @@ def build_reference_database(
             "parameters": DEACON_INDEX_PARAMETERS if candidate_paths else {},
         },
         "phylogeny": {
-            "mafft_version": _tool_version(mafft_bin) if locus_fasta_paths else "",
-            "raxml_ng_version": _tool_version(raxml_ng_bin) if locus_fasta_paths else "",
+            "mafft_version": _tool_version(mafft_bin) if locus_fasta_paths and finalize else "",
+            "raxml_ng_version": _tool_version(raxml_ng_bin) if locus_fasta_paths and finalize else "",
             "model": raxml_model,
             "raxml_ng_threads_per_process": RAXML_NG_THREADS_PER_PROCESS,
             "directory": "phylogeny",
             "sequence_type": "real_observed_locus_sequences_only",
         },
+        "finalized": finalize,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     progress.step(f"Done. Reference database: {database_dir}")

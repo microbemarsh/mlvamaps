@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 
 RESERVED_PROFILE_COLUMNS = {"profile_id", "strain_id", "metadata"}
 
@@ -63,8 +65,30 @@ def match_profiles(
         for row in allele_rows or []
     }
     locus_columns = [col for col in profiles[0] if col not in RESERVED_PROFILE_COLUMNS]
+    # Numeric profile distance is the dominant path.  Compute the complete
+    # profiles x loci matrix in NumPy and retain the scalar loop only for TSV
+    # formatting and categorical compatibility.
+    query_numeric = np.asarray(
+        [float(fingerprint.get(locus)) if fingerprint.get(locus) not in ("", None) else np.nan for locus in locus_columns],
+        dtype=np.float64,
+    )
+    profile_numeric = np.full((len(profiles), len(locus_columns)), np.nan)
+    numeric = np.ones_like(profile_numeric, dtype=bool)
+    for row_index, profile in enumerate(profiles):
+        for column_index, locus in enumerate(locus_columns):
+            value = profile.get(locus, "")
+            if value in ("", None):
+                continue
+            try:
+                profile_numeric[row_index, column_index] = float(value)
+            except (TypeError, ValueError):
+                numeric[row_index, column_index] = False
+    comparable = np.isfinite(profile_numeric) & np.isfinite(query_numeric)[None, :] & numeric
+    numeric_differences = np.abs(profile_numeric - query_numeric[None, :])
+    vector_distances = np.where(comparable, numeric_differences, 0.0).sum(axis=1)
     rows = []
-    for profile in profiles:
+    locus_indexes = {locus: index for index, locus in enumerate(locus_columns)}
+    for profile_index, profile in enumerate(profiles):
         matched = 0
         matched_locus_ids = []
         mismatched = []
@@ -72,7 +96,7 @@ def match_profiles(
         query_alleles = []
         profile_alleles = []
         locus_differences = []
-        distance = 0.0
+        distance = float(vector_distances[profile_index])
         compared = 0
         negative_log_likelihood = 0.0
         for locus in locus_columns:
@@ -95,7 +119,8 @@ def match_profiles(
                 matched_locus_ids.append(locus)
             else:
                 mismatched.append(locus)
-                distance += delta
+                if not numeric[profile_index, locus_indexes[locus]]:
+                    distance += delta
             locus_differences.append(f"{locus}={round(delta, 6)}")
             distribution = probability_by_locus.get(locus, {})
             if distribution:

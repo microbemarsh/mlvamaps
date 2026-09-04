@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import copy
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from . import __version__
 from .assembly_call import run_assembly_call
-from .concurrency import DEFAULT_THREADS
+from .concurrency import DEFAULT_THREADS, resolve_threads
 from .io import open_text, write_tsv
 from .myoga_export import export_myoga
 from .pipeline import run_call
@@ -32,6 +35,20 @@ FASTA_SUFFIXES = (
     ".fas.gz",
 )
 BATCH_OUTPUT_DIRECTORY = "batch_summary"
+
+
+def _batch_allocation(total_threads: int, job_count: int) -> tuple[int, int]:
+    """Return bounded sample workers and native threads per active sample."""
+    total = resolve_threads(total_threads)
+    memory_limit = int(os.environ.get("MLVAMAPS_MAX_CONCURRENT_SAMPLES", "4"))
+    workers = max(1, min(job_count, total, max(1, memory_limit)))
+    return workers, max(1, total // workers)
+
+
+def _args_with_threads(args: argparse.Namespace, threads: int) -> argparse.Namespace:
+    cloned = copy.copy(args)
+    cloned.threads = threads
+    return cloned
 
 
 def _sample_output_dir(output_root: Path, sample_id: str) -> Path:
@@ -1218,7 +1235,8 @@ def _read_manifest(path: str | Path) -> list[dict[str, str]]:
     if duplicates:
         raise ValueError("manifest sample_id values must be unique: " + ", ".join(duplicates))
     base = manifest_path.parent
-    for row in rows:
+    pending: list[tuple[int, dict[str, str], Path, Path | None, Path, object]] = []
+    for row_index, row in enumerate(rows):
         for field in ("reads1", "reads2"):
             value = row.get(field, "")
             if value in ("", "."):
@@ -1295,7 +1313,8 @@ def _run_short_batch(
     except ValueError as exc:
         parser.error(str(exc))
     batch_outdir.mkdir(parents=True, exist_ok=True)
-    for row in rows:
+    pending: list[tuple[int, dict[str, str], Path, Path | None, Path, object]] = []
+    for row_index, row in enumerate(rows):
         sample_id = row["sample_id"]
         sample_outdir = _sample_output_dir(output_root, sample_id)
         summary_path = sample_outdir / "sample_summary.tsv"
@@ -1316,25 +1335,33 @@ def _run_short_batch(
                 continue
         reads1 = Path(row["reads1"])
         reads2 = Path(row["reads2"]) if row.get("reads2") else None
-        try:
-            if not reads1.is_file():
-                raise ValueError(f"reads1 does not exist: {reads1}")
-            if reads2 is not None and not reads2.is_file():
-                raise ValueError(f"reads2 does not exist: {reads2}")
-            print(f"Processing Illumina sample {sample_id}")
-            result = _run_short_input(
-                args,
-                reads1,
-                reads2,
-                sample_outdir,
-                sample_id,
-                _metadata_for_manifest_row(row, by_sample, metadata_rows),
-            )
+        pending.append((row_index, row, reads1, reads2, sample_outdir, _metadata_for_manifest_row(row, by_sample, metadata_rows)))
+    workers, sample_threads = _batch_allocation(args.threads, len(pending))
+    print(f"Processing {len(pending)} Illumina sample(s) with {workers} worker(s), {sample_threads} thread(s) each")
+    completed = {}
+    def run_one(item):
+        index, row, reads1, reads2, sample_outdir, metadata = item
+        if not reads1.is_file():
+            raise ValueError(f"reads1 does not exist: {reads1}")
+        if reads2 is not None and not reads2.is_file():
+            raise ValueError(f"reads2 does not exist: {reads2}")
+        return index, _run_short_input(_args_with_threads(args, sample_threads), reads1, reads2, sample_outdir, row["sample_id"], metadata)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(run_one, item): item for item in pending}
+        for future in as_completed(futures):
+            item = futures[future]
+            index, row = item[0], item[1]
+            try:
+                _, result = future.result()
+                completed[index] = (result, {"sample_id": row["sample_id"], "status": "success", "message": ""})
+            except Exception as exc:
+                completed[index] = (None, {"sample_id": row["sample_id"], "status": "failed", "message": f"{type(exc).__name__}: {exc}"})
+                print(f"Sample {row['sample_id']} failed: {type(exc).__name__}: {exc}")
+    for index in sorted(completed):
+        result, status = completed[index]
+        statuses.append(status)
+        if result is not None:
             results.append(result)
-            statuses.append({"sample_id": sample_id, "status": "success", "message": ""})
-        except Exception as exc:
-            statuses.append({"sample_id": sample_id, "status": "failed", "message": f"{type(exc).__name__}: {exc}"})
-            print(f"Sample {sample_id} failed: {type(exc).__name__}: {exc}")
     write_tsv(statuses, batch_outdir / "batch_status.tsv", ["sample_id", "status", "message"])
     table_keys = {
         "calls": "calls.tsv",

@@ -97,6 +97,13 @@ def test_short_read_directory_cli_routes_pairs_to_batch(tmp_path, monkeypatch):
     assert [row["sample_id"] for row in observed["rows"]] == ["sample"]
 
 
+def test_batch_thread_allocation_is_bounded(monkeypatch):
+    monkeypatch.setenv("MLVAMAPS_MAX_CONCURRENT_SAMPLES", "3")
+    workers, per_sample = cli._batch_allocation(10, 20)
+    assert workers == 3
+    assert workers * per_sample <= 10
+
+
 def test_call_directory_dispatches_each_file_to_its_sample_outdir(
     tmp_path, monkeypatch
 ):

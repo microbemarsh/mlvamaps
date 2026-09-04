@@ -103,6 +103,64 @@ def test_combined_taxon_database_is_ready_for_default_call(tmp_path, monkeypatch
     assert args.taxon_identification is None
 
 
+def test_taxid_pipeline_finalizes_combined_resources_once(tmp_path, monkeypatch):
+    references = [TaxonReference("1", "one"), TaxonReference("2", "two")]
+    panel = tmp_path / "panel.csv"
+    panel.write_text("name,forward,reverse\nL1,AAA,CCC\n")
+    calls = {"mapping": 0, "phylogeny": 0}
+
+    def fake_prepare(reference, output, **kwargs):
+        output = Path(output)
+        genomes = output / "genomes"
+        genomes.mkdir(parents=True)
+        assembly = genomes / f"{reference.name}.fna"
+        assembly.write_text(">contig\nAAATTTCCC\n")
+        metadata = output / "metadata.tsv"
+        metadata.write_text(
+            "reference_id\tassembly_file\ttaxid\n"
+            f"{reference.name}\t{assembly}\t{reference.taxid}\n"
+        )
+        return {"outdir": output, "genomes": genomes, "metadata": metadata}
+
+    def fake_builder(**kwargs):
+        assert kwargs["finalize"] is False
+        output = Path(kwargs["outdir"])
+        database = output / "database"
+        database.mkdir(parents=True)
+        reference_id = output.parent.name
+        (database / "L1.fasta").write_text(f">{reference_id}\nAAATTTCCC\n")
+        (database / "reference_metadata.tsv").write_text(
+            "reference_id\ttaxid\n" f"{reference_id}\t1\n"
+        )
+        source = next(Path(kwargs["assemblies_dir"]).glob("*.fna"))
+        (database / "reference_assemblies.tsv").write_text(
+            "reference_id\tassembly_file\tassembly_sha256\n"
+            f"{reference_id}\t{source}\tdigest\n"
+        )
+        manifest = output / "manifest.json"
+        manifest.write_text("{}\n")
+        return {"outdir": output, "database": database, "manifest": manifest,
+                "status": "PARTIAL", "locus_summary_rows": []}
+
+    def fake_mapping(**kwargs):
+        calls["mapping"] += 1
+        return {}
+
+    def fake_phylogeny(*args, **kwargs):
+        calls["phylogeny"] += 1
+        Path(args[1]).mkdir(parents=True, exist_ok=True)
+        return {"phylogeny": Path(args[1])}
+
+    monkeypatch.setattr(pipeline, "prepare_taxon_reference", fake_prepare)
+    monkeypatch.setattr(pipeline, "build_reference_database", fake_builder)
+    monkeypatch.setattr(pipeline, "build_mapping_resources", fake_mapping)
+    monkeypatch.setattr(pipeline, "build_reference_phylogenies", fake_phylogeny)
+    # Preserve native-builder identity check while substituting a lightweight extractor.
+    result = build_taxon_references(references, panel, tmp_path / "out", builder=fake_builder)
+    assert result["database"] == tmp_path / "out"
+    assert calls == {"mapping": 1, "phylogeny": 1}
+
+
 def test_combined_taxon_database_rejects_cross_taxon_reference_collisions(
     tmp_path, monkeypatch
 ):

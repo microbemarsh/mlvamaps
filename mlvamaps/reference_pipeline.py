@@ -552,12 +552,17 @@ def build_combined_taxon_database(
     raxml_model: str = "DNA",
     minimap2_bin: str = "minimap2",
     deacon_bin: str = "deacon",
+    show_progress: bool = False,
 ) -> dict[str, Path]:
     """Merge taxon cohorts into the default database used for identification."""
     if len(references) != len(results):
         raise ValueError("Cannot combine taxon databases: reference/result counts differ")
 
     build_threads = resolve_threads(threads)
+    progress = ProgressReporter(enabled=show_progress)
+    progress.step(
+        f"Combining {len(references):,} taxon cohort(s) with {build_threads} worker(s)"
+    )
     root = Path(output).resolve()
     database = root / "database"
     phylogeny = root / "phylogeny"
@@ -581,7 +586,10 @@ def build_combined_taxon_database(
     assembly_rows: list[dict[str, str]] = []
     seen_reference_taxa: dict[str, str] = {}
 
-    for taxon, result in zip(references, results):
+    for taxon_number, (taxon, result) in enumerate(zip(references, results), start=1):
+        progress.step(
+            f"Merging taxon {taxon_number}/{len(references)}: {taxon.name} [taxid {taxon.taxid}]"
+        )
         source_database = Path(str(result["database"]))
         metadata_path = source_database / "reference_metadata.tsv"
         if not metadata_path.is_file():
@@ -657,29 +665,32 @@ def build_combined_taxon_database(
         records = records_by_locus[locus.locus_id]
         if records:
             write_fasta(records, database / f"{locus.locus_id}.fasta.gz")
-    mapping_paths = build_mapping_resources(
-        database_dir=database,
-        loci=loci,
-        assemblies=[
-            (str(row["reference_id"]), Path(str(row["assembly_file"])))
-            for row in assembly_rows
-        ],
-        panel_path=database / "reference_panel.tsv",
-        threads=build_threads,
-        minimap2_bin=minimap2_bin,
-        deacon_bin=deacon_bin,
-        progress=ProgressReporter(enabled=False),
-    )
-    paths = build_reference_phylogenies(
-        database,
-        phylogeny,
-        loci,
-        build_threads,
-        min_references=min_references_per_tree,
-        mafft_bin=mafft_bin,
-        raxml_ng_bin=raxml_ng_bin,
-        raxml_model=raxml_model,
-    )
+    with progress.phase("mapping and Deacon finalization", f"{len(assembly_rows):,} assemblies"):
+        mapping_paths = build_mapping_resources(
+            database_dir=database,
+            loci=loci,
+            assemblies=[
+                (str(row["reference_id"]), Path(str(row["assembly_file"])))
+                for row in assembly_rows
+            ],
+            panel_path=database / "reference_panel.tsv",
+            threads=build_threads,
+            minimap2_bin=minimap2_bin,
+            deacon_bin=deacon_bin,
+            progress=progress,
+        )
+    with progress.phase("phylogeny finalization", f"{len(loci):,} loci"):
+        paths = build_reference_phylogenies(
+            database,
+            phylogeny,
+            loci,
+            build_threads,
+            min_references=min_references_per_tree,
+            mafft_bin=mafft_bin,
+            raxml_ng_bin=raxml_ng_bin,
+            raxml_model=raxml_model,
+            progress=progress,
+        )
     manifest_path = root / "manifest.json"
     manifest_path.write_text(
         json.dumps(
@@ -740,7 +751,7 @@ def build_taxon_references(
     show_progress: bool = False,
     builder: Callable[..., dict[str, Any]] = build_reference_database,
 ) -> dict[str, Any]:
-    """Prepare and build one isolated mlvamaps database per taxid."""
+    """Extract each taxon independently, then finalize one combined database."""
     build_threads = resolve_threads(threads)
     progress = ProgressReporter(enabled=show_progress)
     progress.step(f"Global build threads: {build_threads}")
@@ -760,7 +771,10 @@ def build_taxon_references(
     results = []
     taxon_summary_rows: list[dict[str, Any]] = []
     locus_summary_rows: list[dict[str, Any]] = []
-    for reference in references:
+    for taxon_number, reference in enumerate(references, start=1):
+        progress.step(
+            f"Taxon {taxon_number}/{len(references)}: {reference.name} [taxid {reference.taxid}]"
+        )
         prepared = prepare_taxon_reference(
             reference,
             output / reference.name / "prepared",
@@ -788,6 +802,11 @@ def build_taxon_references(
             mafft_bin=mafft_bin,
             raxml_ng_bin=raxml_ng_bin,
             raxml_model=raxml_model,
+            **(
+                {"show_progress": show_progress, "finalize": False}
+                if builder is build_reference_database
+                else {}
+            ),
         )
         taxon_locus_rows = [
             {"taxid": reference.taxid, "taxon": reference.name, **row}
@@ -859,6 +878,7 @@ def build_taxon_references(
             raxml_model=raxml_model,
             minimap2_bin=minimap2_bin,
             deacon_bin=deacon_bin,
+            show_progress=show_progress,
         )
         if builder is build_reference_database
         else {"database": output, "phylogeny": output / "phylogeny"}

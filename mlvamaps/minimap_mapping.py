@@ -114,6 +114,34 @@ def run_minimap2_competitive(command: list[str], sam_path: str | Path) -> None:
         )
 
 
+def run_minimap2_competitive_bam(command: list[str], bam_path: str | Path) -> None:
+    """Stream minimap2 SAM directly through htslib into compressed BAM."""
+    bam_path = Path(bam_path)
+    bam_path.parent.mkdir(parents=True, exist_ok=True)
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+        assert process.stdout is not None
+        try:
+            with pysam.AlignmentFile(process.stdout, "r") as source, pysam.AlignmentFile(
+                str(bam_path), "wb", template=source
+            ) as output:
+                for alignment in source.fetch(until_eof=True):
+                    output.write(alignment)
+        except Exception:
+            process.kill()
+            process.wait()
+            bam_path.unlink(missing_ok=True)
+            raise
+        stderr = (process.stderr.read() if process.stderr is not None else b"").decode(
+            errors="replace"
+        )
+        returncode = process.wait()
+    if returncode:
+        bam_path.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"minimap2 competitive candidate mapping failed ({returncode}): {stderr.strip()}"
+        )
+
+
 def parse_candidate_alignments(
     sam_path: str | Path,
     contexts: list[CandidateContext],
@@ -188,3 +216,25 @@ def map_reads_to_candidates(
     )
     run_minimap2_competitive(command, sam_path)
     return parse_candidate_alignments(sam_path, contexts)
+
+
+def map_reads_to_candidates_bam(
+    reference: str | Path,
+    reads1: str | Path,
+    reads2: str | Path | None,
+    contexts: list[CandidateContext],
+    bam_path: str | Path,
+    threads: int,
+    technology: str,
+    executable: str = "minimap2",
+    max_secondary: int = 100,
+) -> list[CandidateAlignment]:
+    """Map without materializing text SAM; pysam/htslib decodes CIGAR and tags."""
+    resolved = shutil.which(executable) or (executable if Path(executable).is_file() else None)
+    if resolved is None:
+        raise RuntimeError(f"minimap2 executable {executable!r} was not found")
+    command = minimap2_competitive_command(
+        reference, reads1, reads2, threads, technology, resolved, max_secondary
+    )
+    run_minimap2_competitive_bam(command, bam_path)
+    return parse_candidate_alignments(bam_path, contexts)
