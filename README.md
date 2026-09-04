@@ -8,7 +8,9 @@ The main outputs are an MLVA fingerprint, per-locus calls and evidence, and a
 self-contained HTML report. Optional reference databases add sequence-aware
 matching and phylogenetic placement.
 
-<img width="1920" height="1200" alt="image" src="https://github.com/user-attachments/assets/ccb50fb1-20cc-4f49-8712-2cbccab17803" />
+<p align="center">
+  <img width="720" height="450" alt="image" src="https://github.com/user-attachments/assets/b99e3b14-3783-496a-a3ff-30791eff51db" />
+</p>
 
 There are three calling pathways:
 
