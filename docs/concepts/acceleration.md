@@ -35,9 +35,10 @@ Default threading policy:
   to use all available CPUs.
 - `0` means auto-detect available CPUs for mlvamaps workers.
 - Native backends receive an appropriate share of the resolved thread count.
-  The Sassy CLI adapter uses temporary FASTA inputs and runs each search with
-  one Sassy thread; assembly records can be distributed across mlvamaps worker
-  processes.
+  The Sassy CLI adapter batches all concrete panel primers for each assembly
+  contig and orientation into one search at the maximum mismatch threshold.
+  Lower mismatch rounds reuse those matches by edit cost. Each Sassy process
+  uses one thread while assemblies are distributed across mlvamaps workers.
 - Native mapping and phylogenetic tools receive an appropriate share of the
   resolved thread count. RAxML-NG is the exception: each process is pinned to
   one internal thread while independent locus jobs may run concurrently where

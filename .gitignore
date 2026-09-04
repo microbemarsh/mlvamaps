@@ -219,3 +219,6 @@ __marimo__/
 
 
 pytest.ini
+
+# macOS metadata
+.DS_Store

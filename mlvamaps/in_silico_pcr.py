@@ -382,6 +382,20 @@ def _record_product_rows(
         max_n_fraction,
     ) = task
     searcher = _new_searcher()
+    if hasattr(searcher, "prime"):
+        # The CLI backend can search all concrete primers together. Prime both
+        # orientations once at the maximum threshold; the legacy rounds below
+        # then filter cached matches by their reported edit cost.
+        patterns = {
+            concrete.encode("ascii")
+            for locus in loci
+            for primer in (locus.forward_primer, _reverse_complement(locus.reverse_primer))
+            for concrete in _expand_degenerate(primer)
+        }
+        original_bytes = original.upper().encode("ascii")
+        searcher.prime(patterns, original_bytes, max_errors)
+        if search_rc:
+            searcher.prime(patterns, _reverse_complement(original).encode("ascii"), max_errors)
     rows = []
     for locus in loci:
         rows.extend(
