@@ -14,6 +14,10 @@ Current backend policy:
   localization.
   mlvamaps owns deterministic IUPAC expansion, MLVA_finder-compatible strand
   fallback and product pairing, product-length constraints, and result selection.
+- Legacy calibrated panels that specify repeat-unit length, expected product
+  size, and nominal units but no concrete motif use the calibrated repeat
+  interval from each extracted real amplicon as their candidate sequence
+  template. No nucleotide motif is invented from the placeholder sequence.
 - `parasail` computes exact Needleman-Wunsch global tracebacks between each
   mapped read repeat and its diagnostic product-group representative.
 - `spoars` performs SIMD-accelerated partial-order assembly of complete reads

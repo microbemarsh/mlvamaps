@@ -184,6 +184,24 @@ def repeat_interval(sequence: str, locus: Locus) -> tuple[int, int]:
     return max(0, start), max(start, end)
 
 
+def _repeat_template(base: CandidateContext, locus: Locus) -> str:
+    """Return concrete sequence used to resize a reference repeat interval.
+
+    Legacy MLVA panels often provide repeat-unit length and product-size
+    calibration but no nucleotide motif. The primer reader represents that
+    known-length/unknown-sequence motif with ``N`` characters. For a reference
+    database, the calibrated repeat interval in the extracted real amplicon is
+    a better sequence template than inventing bases or rejecting the locus.
+    """
+    motif = locus.repeat_motif.upper()
+    if motif and not set(motif) - set("ACGT"):
+        return motif
+    observed_repeat = base.sequence[base.repeat_start:base.repeat_end].upper()
+    if observed_repeat and not set(observed_repeat) - set("ACGT"):
+        return observed_repeat
+    return ""
+
+
 def candidate_repeat_counts(
     locus: Locus,
     observed_states: Iterable[int | float | None],
@@ -371,13 +389,23 @@ def generate_candidate_contexts(
     for context in bases:
         observed[context.locus_id].append(context.repeat_count)
     collapsed: dict[tuple[str, str, int], dict[str, object]] = {}
+    unusable_reasons: dict[str, set[str]] = defaultdict(set)
     for base in bases:
         locus = loci_by_id[base.locus_id]
-        motif = locus.repeat_motif
-        if not motif or set(motif) - set("ACGT") or base.repeat_end <= base.repeat_start:
+        if base.repeat_unit_length <= 0:
+            unusable_reasons[base.locus_id].add("repeat-unit length is missing")
+            continue
+        if base.repeat_end <= base.repeat_start:
+            unusable_reasons[base.locus_id].add("repeat interval is empty")
+            continue
+        template = _repeat_template(base, locus)
+        if not template:
+            unusable_reasons[base.locus_id].add(
+                "neither the panel motif nor the observed repeat interval contains concrete DNA"
+            )
             continue
         for count in candidate_repeat_counts(locus, observed[base.locus_id], maximum, expansion):
-            repeat_sequence = (motif * math.ceil(max(count * base.repeat_unit_length, 1) / len(motif)))[
+            repeat_sequence = (template * math.ceil(max(count * base.repeat_unit_length, 1) / len(template)))[
                 : count * base.repeat_unit_length
             ]
             sequence = base.sequence[:base.repeat_start] + repeat_sequence + base.sequence[base.repeat_end:]
@@ -423,7 +451,16 @@ def generate_candidate_contexts(
             provenance_links=tuple(sorted(item["links"])),
         ))
     if not contexts:
-        raise ValueError("Candidate contexts do not encode usable discrete repeat-count states")
+        details = "; ".join(
+            f"{locus_id}: {', '.join(sorted(reasons))}"
+            for locus_id, reasons in sorted(unusable_reasons.items())
+        )
+        raise ValueError(
+            "Candidate contexts do not encode usable discrete repeat-count states. "
+            "Provide repeat_unit_length_bp (or a legacy calibrated locus name) and "
+            "real amplicons with a concrete calibrated repeat interval."
+            + (f" Affected loci: {details}" if details else "")
+        )
     return contexts
 
 

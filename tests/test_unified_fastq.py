@@ -61,6 +61,45 @@ def test_candidates_preserve_backgrounds_and_deduplicate_provenance(tmp_path):
     assert {context.observed_or_synthetic for context in contexts} == {"observed", "synthetic"}
 
 
+def test_calibrated_legacy_panel_uses_observed_repeat_sequence_as_template(tmp_path):
+    """An N placeholder denotes an unknown motif, not an unusable VNTR."""
+    locus = Locus(
+        "legacy_4bp_32bp_4U",
+        forward_primer="AAAA",
+        reverse_primer="CCCC",
+        repeat_motif="NNNN",
+        repeat_unit_length_bp=4,
+        expected_product_size_bp=32,
+        nominal_repeat_units=4,
+        expected_min_repeats=3,
+        expected_max_repeats=5,
+    )
+    database = tmp_path / "database"
+    database.mkdir()
+    observed = "AAAA" + "ATGC" * 4 + "GGGG" + "GGGG"
+    (database / f"{locus.locus_id}.fasta").write_text(f">R1\n{observed}\n")
+    (database / "reference_metadata.tsv").write_text(
+        "reference_id\ttaxon_id\ttaxon_name\nR1\t1\tone\n"
+    )
+
+    contexts = generate_candidate_contexts([locus], database, expansion=0)
+
+    assert [context.repeat_count for context in contexts] == [3, 4, 5]
+    assert next(context for context in contexts if context.repeat_count == 4).sequence == observed
+    assert all("N" not in context.sequence for context in contexts)
+
+
+def test_unusable_candidate_error_names_locus_and_missing_state(tmp_path):
+    locus = Locus("unconfigured", forward_primer="AAAA", reverse_primer="CCCC")
+    database = tmp_path / "database"
+    database.mkdir()
+    (database / "unconfigured.fasta").write_text(">R1\nAAAATTTTGGGG\n")
+
+    import pytest
+    with pytest.raises(ValueError, match="unconfigured: repeat-unit length is missing"):
+        generate_candidate_contexts([locus], database)
+
+
 def test_short_and_long_indexes_use_distinct_parameters(tmp_path, monkeypatch):
     commands = []
     executable = tmp_path / "minimap2"
