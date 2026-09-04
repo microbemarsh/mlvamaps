@@ -28,10 +28,11 @@ non-conflicting evidence, and configured bootstrap stability. FASTQ/Illumina
 calls require 90% locus recovery, three discriminatory loci, and 1.5 times the
 assembly margin. Missing loci are never interpreted as taxon absence.
 
-When species criteria fail, metadata columns `species_group`/`taxon_group`/`group`,
-`genus`, `family`, `order`, `class`, and `phylum` are considered in that order.
-The most specific value shared by the closest competitors is reported; otherwise
-the assignment is unresolved.
+When species criteria fail but comparable markers remain, the closest taxon and
+its combined-marker distance are still reported with
+`CLOSEST_TAXON_LOW_CONFIDENCE`. This is a nearest-database result, not a
+confident species assignment. `UNRESOLVED` is reserved for samples with no
+comparable taxon result.
 
 Outputs are summary, candidate, and locus-evidence TSVs plus
 `phylogeny/taxonomic_identification.json`.

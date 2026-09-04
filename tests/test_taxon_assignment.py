@@ -216,7 +216,7 @@ def test_discrimination_weights_ignore_shared_markers_and_weight_separating_mark
     assert weights["separating"] == pytest.approx(1.0)
 
 
-def test_automatic_identification_backs_off_to_metadata_group_on_close_competition():
+def test_automatic_identification_reports_closest_taxon_at_low_confidence():
     metadata = {
         reference: {**row, "species_group": "Shared group", "genus": "Shared"}
         for reference, row in _metadata().items()
@@ -228,9 +228,12 @@ def test_automatic_identification_backs_off_to_metadata_group_on_close_competiti
         expected_loci=3,
         bootstrap_replicates=40,
     )
-    assert result.summary["assignment"] == "Shared group"
-    assert result.summary["assignment_rank"] == "species_group"
-    assert result.summary["assignment_status"] == "SPECIES_UNRESOLVED"
+    assert result.summary["assignment"] == "Target taxon"
+    assert result.summary["assignment_taxon_id"] == "target"
+    assert result.summary["assignment_status"] == "CLOSEST_TAXON_LOW_CONFIDENCE"
+    assert result.summary["confidence"] == "LOW"
+    assert result.summary["closest_distance"] == result.evidence[0]["distance"]
+    assert result.summary["closest_distance"] < result.summary["runner_up_distance"]
 
 
 def test_fastq_requires_stronger_margin_than_assembly():
@@ -242,7 +245,7 @@ def test_fastq_requires_stronger_margin_than_assembly():
     assembly = assign_best_taxon(input_mode="assembly", **kwargs)
     fastq = assign_best_taxon(input_mode="fastq", **kwargs)
     assert assembly.summary["assignment_status"] == "SPECIES_ASSIGNED"
-    assert fastq.summary["assignment_status"] == "UNRESOLVED"
+    assert fastq.summary["assignment_status"] == "CLOSEST_TAXON_LOW_CONFIDENCE"
 
 
 def test_bootstrap_instability_with_conflicting_loci_withholds_species():
@@ -256,7 +259,7 @@ def test_bootstrap_instability_with_conflicting_loci_withholds_species():
         reference_metadata=_metadata(), expected_loci=2, minimum_loci=2,
         bootstrap_replicates=200, minimum_bootstrap_support=0.9,
     )
-    assert result.summary["assignment_status"] == "UNRESOLVED"
+    assert result.summary["assignment_status"] == "CLOSEST_TAXON_LOW_CONFIDENCE"
     assert float(result.summary["bootstrap_support"]) < 0.9
     assert result.summary["conflicting_loci"] == 1
 

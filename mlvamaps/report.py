@@ -41,6 +41,7 @@ def _automatic_taxon_identification_section(outdir: Path) -> str:
     status = str(row.get("assignment_status") or row.get("taxonomic_status", "INSUFFICIENT_EVIDENCE"))
     confidence = str(row.get("confidence") or ("HIGH" if status == "SUPPORTED" else "UNRESOLVED"))
     resolved = status in {"SUPPORTED", "SPECIES_ASSIGNED"}
+    closest_only = status == "CLOSEST_TAXON_LOW_CONFIDENCE"
     tone = "good" if resolved else "warn"
     assignment = row.get("assignment") or row.get("best_species") or row.get("best_taxon", "")
     assignment_rank = row.get("assignment_rank") or ("species" if resolved else "unresolved")
@@ -84,7 +85,12 @@ def _automatic_taxon_identification_section(outdir: Path) -> str:
         "</tr>" for item in locus_rows
     )
     explanation = ""
-    if not resolved:
+    if closest_only:
+        explanation = (
+            "This is the nearest taxon by combined marker distance, but the "
+            "evidence did not pass the confidence requirements for an assignment."
+        )
+    elif not resolved:
         explanation = (
             "The recovered MLVA markers support multiple taxa or do not provide "
             "enough stable discriminatory evidence for a species-level call."
@@ -100,9 +106,10 @@ def _automatic_taxon_identification_section(outdir: Path) -> str:
           {_metric_card("Loci recovered", f"{row.get('loci_recovered', row.get('informative_loci', ''))}/{row.get('expected_loci', '')}")}
           {_metric_card("Discriminatory support", f"{row.get('loci_supporting_assignment', '')}/{row.get('discriminative_loci_recovered', '')}", f"{row.get('conflicting_loci', '') or 0} conflicting")}
           {_metric_card("Runner-up", second_taxon or "Not available", f"relative margin {row.get('relative_margin', row.get('score_margin', ''))}")}
+          {_metric_card("Closest combined-marker distance", row.get("closest_distance", "Not available"), f"lower is closer; ranking score {row.get('taxon_score', 'not available')}")}
           {_metric_card("Bootstrap support", row.get("bootstrap_support", "Not available"), "stability, not probability")}
         </div>
-        {'' if resolved else _finding('warn', 'Species unresolved', f"Recommendation: interpret this sample at the {assignment_rank} level." if assignment_rank != 'unresolved' else 'No supported taxonomic rank is available.')}
+        {'' if resolved else _finding('warn', 'Closest taxon — low confidence' if closest_only else 'Species unresolved', f"Closest database result only; combined-marker distance {row.get('closest_distance', 'not available')}." if closest_only else (f"Recommendation: interpret this sample at the {assignment_rank} level." if assignment_rank != 'unresolved' else 'No supported taxonomic rank is available.'))}
         <details><summary>Closest taxa</summary><div class="table-scroll"><table>
           <thead><tr><th>Rank</th><th>Taxon</th><th>Distance</th><th>Similarity</th><th>Bootstrap wins</th></tr></thead>
           <tbody>{candidates_html}</tbody></table></div></details>

@@ -76,6 +76,7 @@ def test_unresolved_taxon_report_is_visually_explicit_and_optional_metrics_are_s
     [
         ("HIGH", "SPECIES_ASSIGNED", "HIGH CONFIDENCE"),
         ("MODERATE", "SPECIES_ASSIGNED", "MODERATE CONFIDENCE"),
+        ("LOW", "CLOSEST_TAXON_LOW_CONFIDENCE", "CLOSEST TAXON LOW CONFIDENCE"),
         ("LOW", "SPECIES_UNRESOLVED", "SPECIES UNRESOLVED"),
         ("UNRESOLVED", "UNRESOLVED", "UNRESOLVED"),
     ],
@@ -88,6 +89,21 @@ def test_taxon_report_renders_all_confidence_states(tmp_path, confidence, status
         f"sample\tTaxon result\tspecies\t{status}\t{confidence}\tTEST\n"
     )
     assert expected in _automatic_taxon_identification_section(tmp_path)
+
+
+def test_low_confidence_result_displays_closest_combined_marker_distance(tmp_path):
+    phylogeny = tmp_path / "phylogeny"
+    phylogeny.mkdir()
+    (phylogeny / "taxonomic_identification.tsv").write_text(
+        "sample_id\tassignment\tassignment_rank\tassignment_status\tconfidence\t"
+        "closest_distance\tstatus_reason\n"
+        "sample\tTaxon A\tspecies\tCLOSEST_TAXON_LOW_CONFIDENCE\tLOW\t0.125\tSMALL_MARGIN\n"
+    )
+
+    section = _automatic_taxon_identification_section(tmp_path)
+    assert "Taxon A" in section
+    assert "Closest taxon — low confidence" in section
+    assert "0.125" in section
 
 
 def test_taxon_assignment_section_labels_p_values_as_compatibility(tmp_path):

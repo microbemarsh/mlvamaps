@@ -559,55 +559,6 @@ def _aggregate_taxon_distances(
     return distances, nearest
 
 
-_BACKOFF_RANKS = (
-    ("species_group", ("species_group", "taxon_group", "group")),
-    ("genus", ("genus",)),
-    ("family", ("family",)),
-    ("order", ("order",)),
-    ("class", ("class", "taxonomic_class")),
-    ("phylum", ("phylum",)),
-)
-
-
-def _taxon_hierarchy(
-    metadata: Mapping[str, Mapping[str, str]], reference_taxon: Mapping[str, str]
-) -> dict[str, dict[str, str]]:
-    hierarchy: dict[str, dict[str, str]] = {}
-    for reference_id, taxon_id in reference_taxon.items():
-        row = metadata[reference_id]
-        values = hierarchy.setdefault(taxon_id, {})
-        for rank, aliases in _BACKOFF_RANKS:
-            value = next((str(row.get(alias, "")).strip() for alias in aliases if str(row.get(alias, "")).strip()), "")
-            if value:
-                previous = values.get(rank)
-                if previous and previous != value:
-                    values.pop(rank, None)
-                elif rank not in values:
-                    values[rank] = value
-        if "genus" not in values:
-            scientific_name = str(
-                row.get("species")
-                or row.get("organism_name")
-                or row.get("scientific_name")
-                or row.get("taxon_name")
-                or ""
-            ).strip()
-            words = scientific_name.split()
-            if len(words) >= 2 and words[0][0:1].isupper():
-                values["genus"] = words[0]
-    return hierarchy
-
-
-def _shared_backoff(
-    taxon_ids: Sequence[str], hierarchy: Mapping[str, Mapping[str, str]]
-) -> tuple[str, str]:
-    for rank, _aliases in _BACKOFF_RANKS:
-        values = {hierarchy.get(taxon_id, {}).get(rank, "") for taxon_id in taxon_ids}
-        if len(values) == 1 and "" not in values:
-            return next(iter(values)), rank
-    return "Unresolved", "unresolved"
-
-
 def _locus_taxon_distances(
     values: Mapping[str, Mapping[str, Mapping[str, Mapping[str, float]]]],
     loci: Sequence[str],
@@ -721,13 +672,13 @@ def assign_best_taxon(
         rng = random.Random(seed)
         for _replicate in range(bootstrap_replicates):
             selected = [rng.choice(scoring_loci) for _ in scoring_loci]
-            replicate_distances, _ = _aggregate_taxon_distances(
+            replicate_distances = _aggregate_bootstrap_joint_distances(
                 values, selected, taxa, k, weights
             )
             ordered = sorted(
-                (float(channels["joint"]), taxon_id)
-                for taxon_id, channels in replicate_distances.items()
-                if channels["joint"] is not None
+                (float(distance), taxon_id)
+                for taxon_id, distance in replicate_distances.items()
+                if distance is not None
             )
             if not ordered:
                 continue
@@ -868,14 +819,18 @@ def assign_best_taxon(
         assignment_rank = "species"
         assignment_status = "SPECIES_ASSIGNED"
         confidence = "HIGH" if bootstrap_support is not None and bootstrap_support >= 0.95 and not conflicting else "MODERATE"
+    elif best:
+        assignment_name = str(best.get("species") or best.get("taxon_id", ""))
+        assignment_id = str(best.get("taxon_id", ""))
+        assignment_rank = "species"
+        assignment_status = "CLOSEST_TAXON_LOW_CONFIDENCE"
+        confidence = "LOW"
     else:
-        contenders = [str(item.get("taxon_id", "")) for item in evidence[:2]]
-        assignment_name, assignment_rank = _shared_backoff(
-            contenders, _taxon_hierarchy(reference_metadata, reference_taxon)
-        )
+        assignment_name = "Unresolved"
+        assignment_rank = "unresolved"
         assignment_id = ""
-        assignment_status = "SPECIES_UNRESOLVED" if assignment_rank != "unresolved" else "UNRESOLVED"
-        confidence = "LOW" if assignment_rank != "unresolved" else "UNRESOLVED"
+        assignment_status = "UNRESOLVED"
+        confidence = "UNRESOLVED"
     summary = {
         "sample_id": sample_id,
         "best_taxon": best.get("taxon_id", ""),
@@ -929,6 +884,7 @@ def _aggregate_bootstrap_joint_distances(
     selected_loci: Sequence[str],
     taxa: Sequence[str],
     k: int,
+    locus_weights: Mapping[str, float] | None = None,
 ) -> dict[str, float | None]:
     """Aggregate only joint distances for a bootstrap replicate.
 
@@ -938,8 +894,9 @@ def _aggregate_bootstrap_joint_distances(
     """
     distances: dict[str, float | None] = {}
     locus_count = len(selected_loci)
+    weights = locus_weights or {}
     for taxon_id in taxa:
-        by_reference: dict[str, list[float]] = {}
+        by_reference: dict[str, list[tuple[str, float]]] = {}
         for locus_id in selected_loci:
             reference_values = (
                 locus_values.get(locus_id, {})
@@ -947,11 +904,13 @@ def _aggregate_bootstrap_joint_distances(
                 .get("joint", {})
             )
             for reference_id, value in reference_values.items():
-                by_reference.setdefault(reference_id, []).append(value)
+                by_reference.setdefault(reference_id, []).append((locus_id, value))
         complete = sorted(
-            sum(values) / locus_count
+            sum(value * weights.get(locus_id, 1.0) for locus_id, value in values)
+            / sum(weights.get(locus_id, 1.0) for locus_id, _value in values)
             for values in by_reference.values()
             if len(values) == locus_count
+            and sum(weights.get(locus_id, 1.0) for locus_id, _value in values) > 0
         )
         selected = complete[: min(k, len(complete))]
         distances[taxon_id] = (

@@ -26,34 +26,44 @@ def taxonomic_query_sequences(
 ) -> dict[str, str]:
     """Choose the best-supported reference-guided marker for each FASTQ call."""
     context_by_id = {context.candidate_id: context for context in contexts}
-    sequences: dict[str, str] = {}
-    for call in calls:
-        locus_id = str(call["locus"])
-        repeat_count = call.get("repeat_count", "")
-        if call.get("status") not in {"called", "low_coverage", "mixed"} or repeat_count == "":
+    eligible = {
+        str(call["locus"]): call["repeat_count"]
+        for call in calls
+        if call.get("status") in {"called", "low_coverage", "mixed"}
+        and call.get("repeat_count", "") != ""
+    }
+    scores: dict[str, dict[str, tuple[set[str], float]]] = {}
+    for row in evidence:
+        repeat_count = eligible.get(row.locus_id)
+        if (
+            repeat_count is None
+            or molecule_calls.get((row.locus_id, row.molecule_id)) != repeat_count
+            or row.candidate_id not in context_by_id
+            or (
+                row.technology == "illumina"
+                and float(row.metadata.get("background_alignment_margin", 0)) <= 0
+            )
+        ):
             continue
-        scores: dict[str, tuple[set[str], float]] = {}
-        for row in evidence:
-            if (
-                row.locus_id != locus_id
-                or molecule_calls.get((locus_id, row.molecule_id)) != repeat_count
-                or row.candidate_id not in context_by_id
-                or (
-                    row.technology == "illumina"
-                    and float(row.metadata.get("background_alignment_margin", 0)) <= 0
-                )
-            ):
-                continue
-            molecules, score = scores.setdefault(row.candidate_id, (set(), 0.0))
-            molecules.add(row.molecule_id)
-            scores[row.candidate_id] = (molecules, score + row.alignment_score)
-        if scores:
+        candidates = scores.setdefault(row.locus_id, {})
+        molecules, score = candidates.setdefault(row.candidate_id, (set(), 0.0))
+        molecules.add(row.molecule_id)
+        candidates[row.candidate_id] = (molecules, score + row.alignment_score)
+
+    sequences: dict[str, str] = {}
+    for locus_id, candidates in scores.items():
+        if candidates:
             ranked = sorted(
-                scores,
-                key=lambda item: (-len(scores[item][0]), -scores[item][1], item),
+                candidates,
+                key=lambda item: (
+                    -len(candidates[item][0]), -candidates[item][1], item
+                ),
             )
             candidate_id = ranked[0]
-            if len(ranked) > 1 and len(scores[ranked[0]][0]) == len(scores[ranked[1]][0]):
+            if (
+                len(ranked) > 1
+                and len(candidates[ranked[0]][0]) == len(candidates[ranked[1]][0])
+            ):
                 continue
             sequences[locus_id] = context_by_id[candidate_id].sequence
     return sequences
