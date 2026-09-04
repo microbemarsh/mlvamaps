@@ -51,6 +51,7 @@ reserved and cannot be used as a sample ID in a batch.
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
 | `common_locus_calls.tsv` | Technology-neutral FASTQ calls with probability, margin, molecule support, and explicit called/low-coverage/unresolved/ambiguous/mixed/not-found status. |
 | `molecule_candidate_evidence.tsv` | Optional detailed competitive-alignment and VNTR evidence for each molecule/candidate state; intended for validation rather than the default report. |
+| `candidate_mapping/candidate_alignments.bam` | Optional (`--keep-intermediates`) compressed competitive candidate alignments streamed from minimap2 through htslib. It is removed during normal operation; no text candidate SAM is produced. |
 
 Multi-taxon databases additionally produce the following under `phylogeny/`:
 

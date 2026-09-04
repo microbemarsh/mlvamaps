@@ -70,6 +70,11 @@ to different loci are discordant. Neither category is counted as unique support
 for multiple loci. Conventional MAPQ contributes to locus assignment but does
 not define allele confidence among intentionally similar repeat states.
 
+When database resources are available, the candidate FASTA, metadata,
+provenance, and `short.mmi` index are reused directly. They are not copied or
+regenerated for every sample. Without a database, locally synthesized resources
+are written under the sample's `candidate_mapping/` directory.
+
 ## Direct VNTR inference
 
 Candidate alleles vary only in whole repeat units. Evidence includes unique
@@ -81,8 +86,10 @@ When `--database` is supplied, it must contain the versioned
 `competitive_mapping/candidate_metadata.tsv`, `candidate_contexts.fasta`, and
 technology-specific minimap2 indexes produced by the
 current reference builder. Older databases must be rebuilt rather than being
-silently reinterpreted. `--keep-intermediates` retains the filtered reads,
-candidate context bank and minimap2 SAM file.
+silently reinterpreted. minimap2 output is streamed through htslib rather than
+materialized as text SAM. `--keep-intermediates` retains the filtered reads and
+compressed `candidate_mapping/candidate_alignments.bam`; with a database, the
+candidate bank and index continue to reside in the database.
 
 ## Exact, interval, and presence evidence
 
@@ -167,11 +174,24 @@ missing sample is recorded in `results/batch_summary/batch_status.tsv` without
 stopping the rest.
 Successful sample directories resume by default; use `--force` to recompute.
 Combined standard, sample-summary, and MYOGA tables are written at the batch
-root's clearly scoped `batch_summary/` directory. Samples are processed
-sequentially so a process never retains all batch
-Within a sample, FASTQ/QC streams in bounded chunks and minimap2 performs the
-multithreaded competitive alignment. Progress messages report QC, indexing,
-mapping, and inference unless `--quiet` is selected.
+root's clearly scoped `batch_summary/` directory.
+
+Independent samples run concurrently under one global `--threads` budget. The
+number of active samples is the minimum of sample count, available threads, and
+a memory-aware cap of four. Each sample receives an equal integer share of the
+budget, and the allocated total never exceeds `--threads`. Set a lower cap for
+large samples or memory-constrained nodes:
+
+```bash
+export MLVAMAPS_MAX_CONCURRENT_SAMPLES=2
+mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads \
+  --database reference_build -o results -t 32
+```
+
+Completion order does not change combined output order. Within each sample,
+FASTQ/QC streams in bounded chunks and minimap2 performs the allocated
+multithreaded alignment. Progress reports sample/worker allocation and stage
+transitions unless `--quiet` is selected.
 
 For Slurm arrays, split the manifest by row while preserving its header and run
 one manifest shard per task into separate output roots. Merge the resulting TSV

@@ -109,7 +109,7 @@ input contract, decision semantics, and validation requirements.
 | `--manifest` | None | Failure-isolated batch TSV. |
 | `--sample-metadata` | None | CSV/TSV joined by sample ID. |
 | `--force` | Off | Rerun already-successful manifest samples. |
-| `--keep-intermediates` | Off | Retain minimap2 candidate-mapping alignments. |
+| `--keep-intermediates` | Off | Retain compressed `candidate_mapping/candidate_alignments.bam`; normal candidate mapping does not write text SAM. |
 | `--short-min-mapq` | `0` | Locus-assignment aid only; allele competition retains low-MAPQ alternatives. |
 | `--short-min-spanning-pairs` | `2` | Opposite-flank pairs required as decisive geometry evidence. |
 | `--short-confidence-threshold` | `0.8` | Minimum normalized candidate score for a call. |
@@ -117,6 +117,9 @@ input contract, decision semantics, and validation requirements.
 Separate mates are supported. Interleaved data are not guessed or accepted.
 Directory discovery is non-recursive, uses the shared prefix as `sample_id`,
 and rejects any discovered prefix that is missing mate 1 or mate 2.
+Directory and manifest samples run with bounded concurrency. The default maximum
+is four active samples and can be lowered with
+`MLVAMAPS_MAX_CONCURRENT_SAMPLES`; `--threads` remains the total CPU budget.
 
 | Option | Default | Meaning |
 | --- | --- | --- |

@@ -56,13 +56,21 @@ This stage returns:
 
 ## 3. Recruit reads competitively to loci
 
-The long-read algorithm builds a competitive reference bank for
-every panel locus and allowed repeat allele, then maps all retained reads
-against that bank in one minimap2 operation. Complete products from
-`--recruitment-database` (or `--database`) are preferred. The dedicated option
-does not activate phylogenetic placement. When no database product exists, a
-rich panel can generate a recorded synthetic product from its primers, flanks,
-motif, and repeat range.
+The long-read algorithm maps retained reads against all panel loci and allowed
+repeat alleles in one competitive minimap2 operation. With `--database`, it
+reuses the completed database's candidate FASTA, metadata, provenance, and
+`long.mmi` index. Candidate resources are not regenerated per sample. Complete
+products from `--recruitment-database` (or `--database`) are preferred for the
+additional recruitment path; the dedicated option does not activate
+phylogenetic placement. Without a database, a rich panel can generate a
+recorded, bounded synthetic candidate bank from primers, flanks, motif, and
+repeat range.
+
+minimap2 SAM is streamed to htslib instead of being written as a text
+intermediate. htslib decodes flags, CIGAR operations, and required tags and
+writes compressed BAM. The BAM is deleted in normal operation and retained as
+`candidate_mapping/candidate_alignments.bam` only when the applicable
+intermediate/debug option requests alignments.
 
 Mapped evidence is separated into:
 

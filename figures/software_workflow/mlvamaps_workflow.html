@@ -23,10 +23,10 @@
 <body>
   <main>
     <p class="eyebrow">Architecture · scientific workflow</p>
-    <h1>Technology-specific evidence converges on shared MLVA locus calls</h1>
+    <h1>Build once, reuse across technology-specific MLVA calls</h1>
     <svg viewBox="0 0 1120 792" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="mlvamaps-workflow-title mlvamaps-workflow-desc">
       <title id="mlvamaps-workflow-title">mlvamaps workflow overview</title>
-      <desc id="mlvamaps-workflow-desc">Genome assemblies, Illumina reads, and accurate long or amplicon reads use distinct evidence pathways that converge on common locus calls, MLVA fingerprints, and multi-locus reference-enabled taxon assignment; a second branch builds reusable single- and multi-taxon reference databases.</desc>
+      <desc id="mlvamaps-workflow-desc">Taxon cohorts retain amplicons and quality control before one combined database finalization; assemblies and FASTQ samples reuse shared PCR and candidate resources to produce compatible locus calls and taxon evidence under one global thread budget.</desc>
       <defs>
         <style>
           .zone { fill:#f2f4f3; fill-opacity:.58; stroke:#aebbb7; stroke-width:1; }
@@ -92,25 +92,25 @@
       <!-- Primer panel -->
       <rect class="input" x="56" y="72" width="172" height="56" rx="4"/>
       <text class="tag" x="72" y="91">SHARED INPUT</text>
-      <text class="title" x="72" y="112">primer.csv</text>
+      <text class="title" x="72" y="108">primer.csv</text>
       <text class="sub-small" x="236" y="112">locus · forward · reverse</text>
 
       <!-- Three technology-specific pathways -->
       <rect class="node" x="56" y="152" width="280" height="72" rx="4"/>
       <text class="tag" x="72" y="171">GENOME ASSEMBLY</text>
-      <text class="title-small" x="72" y="192">Sassy in silico PCR</text>
+      <text class="title-small" x="72" y="192">Shared Sassy batch PCR</text>
       <text class="sub-small" x="72" y="209">primer-bounded products → length → calibrated repeats</text>
 
       <rect class="node" x="56" y="240" width="280" height="72" rx="4"/>
       <text class="tag" x="72" y="259">PAIRED-END ILLUMINA FASTQ</text>
-      <text class="title-small" x="72" y="280">Competitive minimap2 contexts</text>
-      <text class="sub-small" x="72" y="297">span/junction · pair geometry · repeat indels · molecules</text>
+      <text class="title" x="72" y="301">minimap2 → htslib evidence</text>
+      <text class="sub" x="72" y="321">cached short.mmi · molecule/state reduction</text>
 
       <rect class="node" x="56" y="328" width="280" height="96" rx="4"/>
       <text class="tag" x="72" y="347">ACCURATE LONG / AMPLICON FASTQ</text>
-      <text class="title-small" x="72" y="368">Competitive minimap2 contexts</text>
-      <text class="sub-small" x="72" y="385">direct molecules · spans · repeat indels</text>
-      <text class="sub-small" x="72" y="402">shared allele caller → optional SPOARS confirmation</text>
+      <text class="title" x="72" y="393">minimap2 → htslib evidence</text>
+      <text class="sub" x="72" y="413">cached long.mmi · temporary compressed BAM</text>
+      <text class="sub" x="72" y="433">direct molecules → shared allele inference</text>
 
       <!-- Shared calls -->
       <rect class="focal" x="428" y="248" width="208" height="136" rx="6"/>
@@ -138,8 +138,8 @@
 
       <rect class="node" x="232" y="516" width="140" height="72" rx="4"/>
       <text class="tag" x="248" y="536">NCBI DATASETS</text>
-      <text class="title-small" x="248" y="558">Per-taxon cohorts</text>
-      <text class="sub-small" x="248" y="576">genomes + metadata</text>
+      <text class="title-small" x="248" y="558">Taxon cohorts</text>
+      <text class="sub-small" x="248" y="576">amplicons + QC only</text>
 
       <rect class="node" x="404" y="508" width="144" height="88" rx="4"/>
       <text class="tag" x="420" y="528">LOCUS RECOVERY</text>
@@ -148,16 +148,17 @@
       <text class="sub-small" x="420" y="584">amplifiability summary</text>
 
       <rect class="node" x="580" y="508" width="160" height="84" rx="4"/>
-      <text class="tag" x="596" y="528">PER-LOCUS REFERENCES</text>
-      <text class="title-small" x="596" y="550">MAFFT alignment</text>
-      <text class="sub-small" x="596" y="568">RAxML-NG phylogeny</text>
-      <text class="sub-small" x="596" y="584">repeat-aware sequences</text>
+      <text class="tag" x="596" y="528">FINALIZE ONCE</text>
+      <text class="title-small" x="596" y="550">candidate bank + .mmi</text>
+      <text class="sub-small" x="596" y="568">Deacon index + locus trees</text>
+      <text class="sub-small" x="596" y="584">RAxML-NG fixed at 1 thread</text>
 
       <rect class="database" x="544" y="612" width="216" height="104" rx="6"/>
       <text class="tag" x="564" y="634">REUSABLE REFERENCE DATABASE</text>
       <text class="title" x="564" y="658">Combined multi-taxon</text>
       <text class="title" x="564" y="677">mlvamaps database</text>
-      <text class="sub-small" x="564" y="696">locus contexts · alignments · trees · taxon metadata</text>
+      <text class="sub-small" x="564" y="696">candidates · indexes · real loci</text>
+      <text class="sub-small" x="564" y="710">trees · metadata · provenance</text>
 
       <!-- Reference-enabled analysis -->
       <rect class="node" x="828" y="164" width="244" height="216" rx="6"/>
@@ -179,12 +180,12 @@
 
       <rect class="input" x="828" y="548" width="244" height="104" rx="4"/>
       <text class="tag" x="848" y="572">DATABASE ALSO SUPPORTS CALLING</text>
-      <text class="sub" x="848" y="596">Illumina: versioned locus contexts</text>
-      <text class="sub" x="848" y="618">Long reads: recruitment products</text>
-      <text class="sub-small" x="848" y="638">panel-only calling remains available when supported</text>
+      <text class="sub" x="848" y="596">FASTQ: cached candidates + indexes</text>
+      <text class="sub" x="848" y="618">minimap2 pipe → htslib → BAM</text>
+      <text class="sub-small" x="848" y="638">no text candidate SAM in normal operation</text>
 
-      <text class="note" x="828" y="688">Closely related taxa can be distinguished when the</text>
-      <text class="note" x="828" y="704">primer panel and reference cohorts are informative.</text>
+      <text class="note" x="828" y="688">One global thread budget supports bounded concurrent</text>
+      <text class="note" x="828" y="704">samples and deterministic combined output ordering.</text>
 
     </svg>
   </main>

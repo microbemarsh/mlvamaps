@@ -168,9 +168,12 @@ Multi-taxon builds write:
 - `taxon_reference_summary.tsv`: one row per taxon;
 - `taxon_locus_amplifiability.tsv`: one row per taxon and locus, suitable for
   compatibility heatmaps;
-- one isolated reference database per taxon; and
+- one isolated extraction/QC work area per taxon; and
 - a combined top-level database containing all taxa for automatic taxon
   identification.
+
+Candidate indexes, the Deacon index, and phylogenies are built once from the
+merged cohort, including when `taxids.csv` contains only one taxon.
 
 A locus is amplifiable when at least one examined genome produces an amplicon
 retained by the normal primer-matching and filtering rules. Valid amplicons that
@@ -202,6 +205,8 @@ have reproducible provenance.
 
 See the [reference-building guide](docs/workflows/reference-building.md) for
 local assemblies, metadata, resuming downloads, and output interpretation.
+See the [workflow architecture](docs/workflows/architecture.md) for resource
+reuse, streamed candidate mapping, and batch thread allocation.
 
 ## Common next steps
 

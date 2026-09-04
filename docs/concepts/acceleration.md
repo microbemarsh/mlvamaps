@@ -6,8 +6,9 @@ possible, and avoid generic fuzzy-string packages for core matching.
 Current backend policy:
 
 - `minimap2` performs competitive alignment of both Illumina and long reads
-  against versioned candidate allele contexts; `pysam` parses all retained
-  primary and secondary alignments.
+  against versioned candidate allele contexts. Its SAM stream is decoded by
+  `pysam`/htslib and, only when retained, stored as compressed BAM rather than
+  materialized as text SAM.
 - The Bioconda `sassy>=0.2.2` command-line tool is the Rust/SIMD search engine
   used by in silico PCR, paired-primer FASTQ assignment, and bounded flank
   localization.
@@ -41,3 +42,7 @@ Default threading policy:
   resolved thread count. RAxML-NG is the exception: each process is pinned to
   one internal thread while independent locus jobs may run concurrently where
   the workflow supports it.
+- Illumina directory and manifest runs divide the global budget among bounded
+  concurrent samples. The default cap is four active samples and can be lowered
+  with `MLVAMAPS_MAX_CONCURRENT_SAMPLES` when memory, rather than CPUs, is the
+  limiting resource.

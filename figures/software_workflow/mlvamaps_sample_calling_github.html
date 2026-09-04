@@ -15,10 +15,10 @@
 </head>
 <body>
   <main>
-    <h1>Three sample types, MLVA calling, and taxon identification</h1>
+    <h1>One database, shared evidence, bounded sample execution</h1>
     <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="sample-github-title sample-github-desc">
-      <title id="sample-github-title">mlvamaps sample calling pathways</title>
-      <desc id="sample-github-desc">A primer panel guides distinct assembly, Illumina, and accurate long-read or amplicon workflows; optional Deacon screening retains target-like FASTQ reads, and common locus calls support an MLVA fingerprint and reference-enabled taxon identification.</desc>
+      <title id="sample-github-title">mlvamaps shared sample calling architecture</title>
+      <desc id="sample-github-desc">Assembly and FASTQ inputs reuse a completed database, converge on compatible locus calls, and produce deterministic outputs under one bounded global thread budget.</desc>
       <defs>
         <style>
           .node{fill:#fff;stroke:#4f625d;stroke-width:1.2}.input{fill:#f2f4f3;stroke:#71807c;stroke-width:1.1}.focal{fill:#eaf4f3;stroke:#2b7a78;stroke-width:1.8}.output{fill:#fff;stroke:#18211f;stroke-width:1.5}
@@ -42,33 +42,33 @@
 
       <!-- Primer panel -->
       <rect class="input" x="72" y="56" width="176" height="72" rx="4"/>
-      <text class="tag" x="92" y="79">SHARED PRIMER PANEL</text>
-      <text class="name" x="92" y="104">primer.csv</text>
-      <text class="sub" x="92" y="119">locus · forward · reverse</text>
+      <text class="tag" x="92" y="79">SHARED PANEL + DATABASE</text>
+      <text class="name" x="92" y="104">candidates + indexes</text>
+      <text class="sub" x="92" y="119">built once · reused per sample</text>
 
       <!-- Calling pathways -->
       <rect class="node" x="72" y="156" width="288" height="92" rx="4"/>
       <text class="tag" x="92" y="178">GENOME ASSEMBLY</text>
-      <text class="name" x="92" y="204">Sassy in silico PCR</text>
+      <text class="name" x="92" y="204">Shared Sassy batch PCR</text>
       <text class="sub" x="92" y="224">primer-bounded product → length → repeat count</text>
 
       <rect class="node" x="72" y="288" width="288" height="92" rx="4"/>
       <text class="tag" x="92" y="310">PAIRED-END ILLUMINA FASTQ · DEACON OPTIONAL</text>
-      <text class="name" x="92" y="336">Competitive minimap2 mapping</text>
-      <text class="sub" x="92" y="356">target-like reads → spanning · junction · pair evidence</text>
+      <text class="name" x="92" y="336">minimap2 → htslib evidence</text>
+      <text class="sub" x="92" y="356">cached short.mmi → molecule/state reduction</text>
 
       <rect class="node" x="72" y="420" width="288" height="92" rx="4"/>
       <text class="tag" x="92" y="442">LONG / AMPLICON FASTQ · DEACON OPTIONAL</text>
-      <text class="name" x="92" y="468">minimap2 recruitment</text>
-      <text class="sub" x="92" y="488">direct molecules → shared inference → optional SPOARS</text>
+      <text class="name" x="92" y="468">minimap2 → htslib evidence</text>
+      <text class="sub" x="92" y="488">cached long.mmi → temporary compressed BAM</text>
 
       <!-- Convergence and output -->
       <rect class="focal" x="456" y="254" width="224" height="160" rx="6"/>
-      <text class="tag2" x="476" y="278">SHARED ALLELE INFERENCE</text>
+      <text class="tag2" x="476" y="278">SHARED LOCUS RESULT CONTRACT</text>
       <text class="name" x="476" y="308">Common locus calls</text>
       <line x1="476" y1="322" x2="660" y2="322" stroke="#9fc5c3"/>
       <text class="sub" x="476" y="344">locus · repeat count</text>
-      <text class="sub" x="476" y="366">call status · confidence/evidence</text>
+      <text class="sub" x="476" y="366">confidence · ambiguity · mixture</text>
       <text class="sub" x="476" y="388">locus sequence, when resolved</text>
 
       <rect class="output" x="724" y="254" width="200" height="160" rx="4"/>
@@ -80,8 +80,12 @@
       <text class="name" x="744" y="392">Taxon identification</text>
       <text class="sub" x="744" y="407">weighted evidence across loci</text>
 
-      <text class="note" x="456" y="446">Locus detection can remain unresolved;</text>
-      <text class="note" x="456" y="462">missing repeat counts are not imputed.</text>
+      <text class="note" x="456" y="446">No text candidate SAM in normal operation;</text>
+      <text class="note" x="456" y="462">missing repeat counts remain explicit.</text>
+
+      <rect class="node" x="456" y="500" width="468" height="58" rx="4"/>
+      <text class="tag" x="476" y="521">GLOBAL THREAD BUDGET</text>
+      <text class="sub" x="476" y="542">bounded concurrent samples · isolated outputs · deterministic combine</text>
     </svg>
   </main>
 </body>

@@ -1,6 +1,9 @@
 # Assembly workflow
 
 The assembly path accepts FASTA assemblies and can optionally add read support.
+It uses the same Sassy-backed batch in-silico PCR implementation used during
+reference extraction and for FASTQ-derived local consensus products; there is
+no separate assembly-only primer-matching algorithm.
 
 ```bash
 mlvamaps call -p primers.tsv -i assembly.fasta -o results
@@ -55,6 +58,11 @@ though only the selected product supplies the locus repeat-count call.
 The regression suite includes a self-contained MLVA_finder oracle covering
 perfect and mismatched primers, strict half-unit rounding, multiple FASTA
 records, and parallel PCR execution.
+
+When a directory of assemblies is supplied, samples have isolated output
+directories and are combined in deterministic filename order. See
+[workflow architecture](architecture.md) for the global thread-budget and
+sample-identity rules.
 
 ## 2. Estimate repeat count
 

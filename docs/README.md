@@ -6,6 +6,7 @@ path, intermediate stage, output, and interpretation boundary.
 
 ## Workflows
 
+- [Architecture and resource flow](workflows/architecture.md)
 - [Accurate long-read and amplicon FASTQ](workflows/fastq.md)
 - [Paired/single-end Illumina sequencing](workflows/illumina.md)
 - [Genome assemblies and optional read support](workflows/assembly.md)

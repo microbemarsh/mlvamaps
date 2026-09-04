@@ -28,18 +28,39 @@ mlvamaps build-reference -i assemblies/ --metadata metadata.tsv \
   --panel primer.csv --output mlvamaps_db --threads 32
 ```
 
-## Internal stages
+## Extract, merge, finalize
 
-The command fetches references, extracts real primer-bounded loci, summarizes
-amplifiability, builds real-reference MAFFT/RAxML-NG assets, generates bounded
-candidate repeat states, deduplicates identical sequence hypotheses, builds
-short- and long-read minimap2 indexes, builds a Deacon index from complete real
-genomes, and finally writes `manifest.json`.
+Reference construction deliberately separates taxon-local extraction from
+database-wide finalization.
 
-`--threads` sets the overall build budget and remains available to parallel
-extraction, MAFFT, and other threaded stages. RAxML-NG reference-tree searches
-are safely run with one internal thread per process; users do not need to reduce
-the entire build to `--threads 1`.
+1. **Prepare each taxon.** NCBI packages and normalized metadata are retained in
+   the taxon's work directory.
+2. **Extract each taxon.** The shared Sassy-backed PCR engine examines assemblies
+   and retains real primer-bounded amplicons, product-selection evidence, and
+   amplifiability QC. It does not build taxon-local candidate indexes, a Deacon
+   index, or taxon-local phylogenies.
+3. **Merge real observations.** Amplicons, metadata, and source-assembly records
+   are merged by locus. A reference identifier present in multiple taxon cohorts
+   is an error rather than a silent many-to-one merge. Metadata for references
+   without any usable locus is excluded from the callable database while the
+   taxon's failure remains visible in summary QC.
+4. **Finalize once.** The merged database generates one deduplicated candidate
+   bank, one short-read index, one long-read index, one broad Deacon index, and
+   one set of real-reference phylogenies.
+
+A single `--taxid` follows exactly the same coordinator path and is finalized
+once. Local `-i ASSEMBLIES --metadata ...` input is already one cohort and is
+also finalized once.
+
+Unless `--quiet` is selected, progress output identifies the current taxon,
+assembly extraction counts, phase, locus counts, worker counts, and elapsed
+phase time. This is intended to make a cluster run diagnosable without a
+profiler.
+
+`--threads` is the overall build CPU budget. Extraction workers do not exceed
+that budget. RAxML-NG is always invoked with one internal thread; users should
+not reduce the whole build to one thread merely to protect short-locus RAxML-NG
+runs.
 
 Candidate generation uses `expected_min_repeats` and `expected_max_repeats`
 when explicitly supplied. Otherwise it conservatively uses observed calibrated
@@ -76,6 +97,24 @@ combined Deacon index includes all requested real genomes, so recruitment does
 not preselect one taxon. Real locus FASTAs and phylogenies never contain
 synthetic candidate alleles. Candidate prevalence is metadata rather than
 duplicated mapping evidence.
+
+The isolated taxon directories are extraction and QC artifacts, not standalone
+fully indexed databases. The supported call target is the completed top-level
+database.
+
+## Candidate and recruitment strategy
+
+Candidate generation starts from distinct observed locus backgrounds before
+expanding bounded whole-repeat states. Identical locus/sequence/state hypotheses
+are collapsed to one candidate while `candidate_provenance.tsv` retains all
+source reference, taxon, sequence, and background links. Candidate identifiers
+are stable within the completed build, and calls reuse these files rather than
+regenerating them.
+
+The Deacon reference contains the requested cohort's real source genomes and
+excludes synthetic candidate alleles. This broad combined strategy avoids
+preselecting one taxon before metagenomic recruitment. The source assembly table
+and build manifest provide the retained source identifiers and checksums.
 
 Use the completed build directly:
 
