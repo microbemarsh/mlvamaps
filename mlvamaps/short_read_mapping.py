@@ -30,6 +30,7 @@ from .profile_matching import (
     build_fingerprint,
     match_profiles,
     profile_match_locus_rows,
+    sequence_reference_match_rows,
 )
 from .sequence import revcomp
 
@@ -361,6 +362,15 @@ def run_mapping_short_read_call(
     short_min_mapping_quality: int,
     short_min_spanning_pairs: int, short_confidence_threshold: float,
     short_max_candidate_repeat_count: int, short_consider_secondary: bool,
+    mafft_bin: str, raxml_ng_bin: str, epa_ng_bin: str, raxml_model: str,
+    phylogeny_snp_weight: float, phylogeny_repeat_weight: float,
+    reference_metadata_path: str | None, target_taxon_id: str | None,
+    taxon_calibration_path: str | None, taxon_alpha: float | None,
+    taxon_min_loci: int | None, taxon_min_locus_fraction: float,
+    taxon_bootstrap_replicates: int, taxon_min_bootstrap_support: float,
+    taxon_max_mean_placement_entropy: float | None,
+    taxon_min_median_placement_lwr: float | None,
+    taxon_identification: bool | None, taxon_k: int, taxon_minimum_margin: float,
     show_progress: bool = True,
 ) -> dict[str, Path]:
     """Run competitive minimap2 mapping and emit established output views."""
@@ -502,9 +512,57 @@ def run_mapping_short_read_call(
     write_tsv(probabilistic, output / "mlva_fingerprint_probabilistic.tsv",
               ["sample_id", "locus_id", "repeat_count", "posterior_probability"])
     matches = match_profiles(sample_id, fingerprint[0], profiles, allele_rows=allele_rows)
-    write_tsv(matches, output / "profile_matches.tsv", MATCH_FIELDS)
     write_tsv(profile_match_locus_rows(sample_id, fingerprint[0], profiles, matches, allele_rows),
               output / "profile_match_loci.tsv", PROFILE_MATCH_LOCUS_FIELDS)
+
+    phylogeny_paths: dict[str, Path] = {}
+    if database_path:
+        from .phylogeny import run_phylogenetic_placement
+
+        query_sequences = dict(read_fasta(unified_paths["taxonomic_query_sequences"]))
+        if show_progress:
+            print(
+                f"[{sample_id}] Matching {len(query_sequences):,} Illumina marker "
+                "sequence(s) against the reference database"
+            )
+        phylogeny_paths = run_phylogenetic_placement(
+            query_sequences, database_path, output, sample_id, loci, thread_count,
+            mafft_bin=mafft_bin, raxml_ng_bin=raxml_ng_bin, epa_ng_bin=epa_ng_bin,
+            raxml_model=raxml_model, snp_weight=phylogeny_snp_weight,
+            repeat_weight=phylogeny_repeat_weight,
+            reference_metadata_path=reference_metadata_path,
+            target_taxon_id=target_taxon_id,
+            taxon_calibration_path=taxon_calibration_path, taxon_alpha=taxon_alpha,
+            taxon_min_loci=taxon_min_loci,
+            taxon_min_locus_fraction=taxon_min_locus_fraction,
+            taxon_bootstrap_replicates=taxon_bootstrap_replicates,
+            taxon_min_bootstrap_support=taxon_min_bootstrap_support,
+            taxon_max_mean_placement_entropy=taxon_max_mean_placement_entropy,
+            taxon_min_median_placement_lwr=taxon_min_median_placement_lwr,
+            taxon_identification=taxon_identification, taxon_k=taxon_k,
+            taxon_minimum_margin=taxon_minimum_margin, input_mode="illumina",
+            locus_quality={
+                str(row["locus_id"]): {
+                    "depth": row["primary_read_depth"],
+                    "consensus_strength": row["allele_confidence"],
+                    "status": row["status"],
+                }
+                for row in calls
+            },
+        )
+    phylogenetic_rows = (
+        read_profiles(phylogeny_paths["combined_marker_matches"])
+        if phylogeny_paths else []
+    )
+    closest_reference_bands = (
+        read_profiles(phylogeny_paths["closest_reference_bands"])
+        if phylogeny_paths else []
+    )
+    write_tsv(
+        matches + sequence_reference_match_rows(phylogenetic_rows),
+        output / "profile_matches.tsv",
+        MATCH_FIELDS,
+    )
 
     qc_values = dict(counters)
     qc_values.update({
@@ -578,8 +636,12 @@ def run_mapping_short_read_call(
                        "confidence_threshold": short_confidence_threshold,
                        "maximum_candidate_repeat_count": short_max_candidate_repeat_count,
                        "secondary_alignments": short_consider_secondary}}, indent=2, sort_keys=True) + "\n")
-    write_report(output, sample_id, allele_rows, loci, matches, profiles,
-                 presence_rows=recruitment, local_assembly_rows=[], short_read_rows=calls)
+    write_report(
+        output, sample_id, allele_rows, loci, matches, profiles,
+        phylogenetic_rows=phylogenetic_rows,
+        closest_reference_bands=closest_reference_bands,
+        presence_rows=recruitment, local_assembly_rows=[], short_read_rows=calls,
+    )
     report_path = output / "report.html"
     report_path.write_text(report_path.read_text().replace(
         "MLVA analysis report", "MLVA analysis report · Method: competitive minimap2 shared inference", 1
@@ -602,5 +664,6 @@ def run_mapping_short_read_call(
         "short_read_recruitment": output / "short_read_recruitment_summary.tsv",
         "short_read_mapping": output / "short_read_mapping_evidence.tsv",
         "run_metadata": output / "short_read_run_metadata.json",
+        **phylogeny_paths,
         **unified_paths,
     }

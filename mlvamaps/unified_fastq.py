@@ -11,11 +11,52 @@ from .allele_inference import (
     infer_alleles,
 )
 from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
-from .io import write_tsv
+from .io import write_fasta, write_tsv
 from .long_read_evidence import extract_long_read_evidence
 from .minimap_mapping import map_reads_to_candidates_bam
 from .models import Locus
 from .short_read_evidence import extract_short_read_evidence
+
+
+def taxonomic_query_sequences(
+    calls: list[dict[str, object]],
+    evidence: list[CandidateEvidence],
+    molecule_calls: dict[tuple[str, str], int | float],
+    contexts: list[CandidateContext],
+) -> dict[str, str]:
+    """Choose the best-supported reference-guided marker for each FASTQ call."""
+    context_by_id = {context.candidate_id: context for context in contexts}
+    sequences: dict[str, str] = {}
+    for call in calls:
+        locus_id = str(call["locus"])
+        repeat_count = call.get("repeat_count", "")
+        if call.get("status") not in {"called", "low_coverage", "mixed"} or repeat_count == "":
+            continue
+        scores: dict[str, tuple[set[str], float]] = {}
+        for row in evidence:
+            if (
+                row.locus_id != locus_id
+                or molecule_calls.get((locus_id, row.molecule_id)) != repeat_count
+                or row.candidate_id not in context_by_id
+                or (
+                    row.technology == "illumina"
+                    and float(row.metadata.get("background_alignment_margin", 0)) <= 0
+                )
+            ):
+                continue
+            molecules, score = scores.setdefault(row.candidate_id, (set(), 0.0))
+            molecules.add(row.molecule_id)
+            scores[row.candidate_id] = (molecules, score + row.alignment_score)
+        if scores:
+            ranked = sorted(
+                scores,
+                key=lambda item: (-len(scores[item][0]), -scores[item][1], item),
+            )
+            candidate_id = ranked[0]
+            if len(ranked) > 1 and len(scores[ranked[0]][0]) == len(scores[ranked[1]][0]):
+                continue
+            sequences[locus_id] = context_by_id[candidate_id].sequence
+    return sequences
 
 
 def run_unified_fastq_inference(
@@ -84,6 +125,12 @@ def run_unified_fastq_inference(
         evidence_path,
         EVIDENCE_FIELDS,
     )
+    taxonomic_queries = outdir / "taxonomic_query_sequences.fasta"
+    if database_path:
+        write_fasta(
+            taxonomic_query_sequences(calls, evidence, molecule_calls, contexts).items(),
+            taxonomic_queries,
+        )
     if not keep_alignments:
         bam.unlink(missing_ok=True)
     return calls, evidence, molecule_calls, {
@@ -92,6 +139,7 @@ def run_unified_fastq_inference(
         "candidate_contexts": paths["fasta"],
         "candidate_metadata": paths["metadata"],
         "candidate_provenance": paths["provenance"],
+        **({"taxonomic_query_sequences": taxonomic_queries} if database_path else {}),
         **({"candidate_alignments": bam} if keep_alignments else {}),
     }
 

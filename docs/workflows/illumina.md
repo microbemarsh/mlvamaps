@@ -91,15 +91,19 @@ materialized as text SAM. `--keep-intermediates` retains the filtered reads and
 compressed `candidate_mapping/candidate_alignments.bam`; with a database, the
 candidate bank and index continue to reside in the database.
 
-## Exact, interval, and presence evidence
+## Automatic taxon identification
 
-With `--database`, primer-bounded products from a successful local assembly,
-merged pair, or boundary-spanning read are eligible for fixed-tree reference
-placement. The resulting sequence-reference rankings are written under
-`phylogeny/`, appended to `profile_matches.tsv`, and shown as **Closest
-Reference Genomes** in `report.html`. Partial and presence-only evidence is not
-placed: mapping to a recruitment target establishes locus evidence but is not a
-substitute for a complete query marker.
+With a multi-taxon `--database`, mlvamaps automatically identifies the closest
+supported taxon. For each called locus, the reference background supported by
+the most independent Illumina molecules supplies the marker sequence for the
+same fixed-tree placement and repeat/SNP taxon classifier used by assemblies
+and long reads. No target taxid or calibration file is required. Results are
+written under `phylogeny/`, appended to `profile_matches.tsv`, and shown in
+`report.html`. Mixed, low-quality, sparse, or conflicting loci remain subject
+to the stricter FASTQ ambiguity and recovery thresholds; presence-only loci are
+not treated as taxonomic evidence.
+
+## Exact, interval, and presence evidence
 
 Each contig, merged pair, and original read is evaluated with the same panel
 anchors and assembly-calibrated repeat convention used elsewhere in mlvamaps.

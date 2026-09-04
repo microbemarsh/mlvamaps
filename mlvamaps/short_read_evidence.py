@@ -74,6 +74,18 @@ def extract_short_read_evidence(
 
     for (molecule, locus_id, repeat), rows in grouped.items():
         best = max(rows, key=lambda row: (row.alignment_score, row.alignment_identity))
+        scores_by_candidate: dict[str, float] = {}
+        for row in rows:
+            scores_by_candidate[row.candidate_id] = max(
+                scores_by_candidate.get(row.candidate_id, -math.inf), row.alignment_score
+            )
+        alternatives = [
+            score for candidate_id, score in scores_by_candidate.items()
+            if candidate_id != best.candidate_id
+        ]
+        background_margin = (
+            best.alignment_score - max(alternatives) if alternatives else math.inf
+        )
         context = context_by_id[best.candidate_id]
         left = any(row.reference_start < context.repeat_start < row.reference_end for row in rows)
         right = any(row.reference_start < context.repeat_end < row.reference_end for row in rows)
@@ -97,6 +109,9 @@ def extract_short_read_evidence(
             "direct_product" if measured is not None else "complete_vntr_span" if full
             else "repeat_boundary" if left or right else "pair_geometry" if geometry
             else "generic_locus_mapping",
-            {"repeat_indel_observed_delta": indel_delta},
+            {
+                "repeat_indel_observed_delta": indel_delta,
+                "background_alignment_margin": background_margin,
+            },
         ))
     return evidence
