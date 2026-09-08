@@ -23,14 +23,14 @@ def test_short_read_wrapper_forwards_automatic_taxon_options(monkeypatch):
     monkeypatch.setattr("mlvamaps.short_read_mapping.run_mapping_short_read_call", fake_call)
     run_short_read_call(
         "r1.fastq", "r2.fastq", "panel.tsv", "out", "sample",
-        database_path="multi-taxon-db", taxon_identification=True, taxon_k=5,
-        taxon_minimum_margin=0.2,
+        database_path="multi-taxon-db", taxon_identification=True, taxon_min_loci=5,
+        classification_repeat_scale=0.2,
     )
 
     assert observed["database_path"] == "multi-taxon-db"
     assert observed["taxon_identification"] is True
-    assert observed["taxon_k"] == 5
-    assert observed["taxon_minimum_margin"] == 0.2
+    assert observed["taxon_min_loci"] == 5
+    assert observed["classification_repeat_scale"] == 0.2
 
 
 def _write_fastq(path: Path, records: list[tuple[str, str]], quality: str = "I") -> None:

@@ -693,16 +693,3 @@ def read_pcr_results(stats_path: str | Path, products_path: str | Path) -> list[
             start, end = coordinates[amplicon_id]
             rows.append({**row, "original_start": start, "original_end": end})
     return rows
-
-
-# Temporary source-compatible aliases for callers built against mlvamaps 0.1.
-# They no longer invoke or require the Amplirust executable.
-AMPLIRUST_TSV_FIELDS = PCR_TSV_FIELDS
-write_amplirust_primers = write_primer_pairs
-run_amplirust = run_in_silico_pcr
-run_amplirust_loci = run_in_silico_pcr_loci
-read_amplirust_results = read_pcr_results
-
-
-def build_amplirust_command(*_args, **_kwargs):
-    raise RuntimeError("Amplirust was replaced by mlvamaps' built-in Sassy-backed PCR engine")

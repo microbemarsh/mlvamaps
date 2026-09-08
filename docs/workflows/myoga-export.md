@@ -72,13 +72,6 @@ repeat_distance     = repeat_distance_raw / |Cij|
 
 The default tree metric is `repeat`, the mean absolute repeat-count difference.
 Use `--distance categorical` for the proportion of differing shared alleles.
-The existing combined-marker normalization in `mlvamaps` scales query/reference
-repeat differences by dispersion in a supplied reference database. That scale
-cannot be recovered reliably from ordinary completed sample results, so this
-export does not invent or silently reuse a dataset-derived replacement in its
-default repeat-only mode. The explicitly requested combined-marker mode below
-uses a documented dataset-derived scale.
-
 A pair is supported by default when it shares at least one exact call
 (`--min-pairwise-loci 1`); the default `--min-pairwise-fraction 0` adds no
 fractional completeness requirement. The fractional denominator, when a
@@ -91,62 +84,6 @@ distance. Before tree construction it repeatedly removes the sample with the
 most unsupported relationships, then the fewest callable loci and natural
 sample order as deterministic tie breaks, until the retained distance matrix is
 complete. These removals are reported as `INSUFFICIENT_PAIRWISE_OVERLAP`.
-
-## Optional per-locus SNP and combined-marker trees
-
-Use the opt-in mode when retained sequence artifacts are available:
-
-```bash
-mlvamaps export-myoga \
-  --results results/ \
-  --metadata metadata.tsv \
-  --combined-markers \
-  --loci panel.tsv \
-  --phylogeny-snp-weight 1 \
-  --phylogeny-repeat-weight 1 \
-  -t 32 \
-  -o global_mlva/
-```
-
-`--loci` is unnecessary when every usable locus already has the repeat-masked
-`phylogeny/LOCUS/query.fasta.gz` written by a prior `--database` analysis. The
-exporter prefers that exact precomputed SNP sequence. Otherwise it uses the
-selected `calls.tsv:evidence` product from `assembly_amplicons.fasta.gz`, or a
-unique compatible product from `local_assembly_pcr/matches.tsv` or
-`local_locus_products.fasta.gz`, and masks it with the original rich panel.
-The exact assembly evidence identifier is authoritative; fallback products
-must agree with the final called product size and be sequence-unique. A
-sequence whose VNTR tract cannot be bounded is rejected rather than
-allowing repeat-length gaps into the SNP model. Every decision is recorded in
-`combined_marker_sequence_status.tsv`.
-
-Exact duplicate SNP sequences are collapsed before inference. A locus with at
-least four SNP haplotypes is aligned with MAFFT and inferred with RAxML-NG;
-two or three haplotypes use their aligned pairwise SNP distances, and an
-invariant locus has SNP distance zero. The resulting haplotype distance is
-expanded back to all sample tips, so duplicate samples remain present at zero
-SNP distance in `locus_trees/LOCUS/samples.tree`.
-
-For locus `l`, the retrospective export uses:
-
-```text
-snp_scale_l = median positive patristic distance among SNP haplotypes
-snp_component_ijl = patristic_distance_ijl / snp_scale_l
-
-repeat_scale_l = max(population standard deviation of accepted repeat counts, 0.5)
-repeat_component_ijl = abs(repeat_il - repeat_jl) / repeat_scale_l
-
-combined_distance_ij = mean over shared accepted loci of
-    (snp_weight * snp_component_ijl + repeat_weight * repeat_component_ijl)
-```
-
-The scale falls back to `1` when a locus has no positive SNP distance. A mean,
-not a sum, prevents pairs with more shared loci from becoming artificially
-more distant. The same pairwise overlap thresholds used by the repeat-only
-export apply. Unsupported relationships are left missing, and samples are
-removed deterministically until the combined matrix is complete. Use
-`combined_marker_nj.tree` with `combined_marker_metadata.tsv`; their sample IDs
-match exactly.
 
 ## Metadata and geography
 
@@ -179,22 +116,6 @@ global_mlva/
 └── export_summary.txt
 ```
 
-With `--combined-markers`, the directory also contains:
-
-```text
-locus_trees/LOCUS/
-    samples.repeat_masked.aligned.fasta
-    haplotypes.raxml.tree        # loci with >=3 SNP haplotypes
-    samples.tree
-combined_marker_sequence_status.tsv
-locus_tree_status.tsv
-locus_snp_distances.tsv
-combined_marker_pairwise_distances.tsv
-combined_marker_distance_matrix.tsv
-combined_marker_nj.tree
-combined_marker_metadata.tsv
-```
-
 `mlva_calls_long.tsv` and `mlva_profiles.tsv` contain the final tree samples.
 The pairwise long table also retains threshold-passing samples subsequently
 removed for insufficient overlap, making those decisions auditable. The square
@@ -211,11 +132,6 @@ This is an **MLVA relatedness tree**, not a whole-genome phylogeny or a
 nucleotide-substitution model. Repeat homoplasy, locus-specific mutation rates,
 missing-data overlap, and the small number of MLVA loci limit evolutionary
 interpretation.
-
-The combined tree is likewise a repeat-aware multilocus marker relatedness
-tree, not a whole-genome phylogeny. Its dataset-derived normalization makes it
-appropriate for relationships within this export, but distances should not be
-compared numerically across independently normalized exports.
 
 Existing batch `myoga_samples.csv` and `myoga_loci.csv` outputs remain
 unchanged for backward compatibility. The retrospective exporter is separate

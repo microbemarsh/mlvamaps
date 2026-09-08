@@ -36,7 +36,6 @@ from .profile_matching import (
     profile_match_locus_rows,
     sequence_reference_match_rows,
 )
-from .phylogeny import run_phylogenetic_placement
 from .primers import LEGACY_NAME_RE, read_loci_or_primers
 from .report import write_assembly_report
 
@@ -313,10 +312,6 @@ def pcr_rows_to_products(
             }
         )
     return products
-
-
-# Source compatibility for the mlvamaps 0.1 API.
-amplirust_rows_to_products = pcr_rows_to_products
 
 
 def build_minimap2_command(
@@ -827,32 +822,13 @@ def run_assembly_call(
     threads: int = DEFAULT_THREADS,
     minimap2_preset: str | None = None,
     minimap2_bin: str = "minimap2",
-    amplirust_bin: str = "amplirust",
-    mafft_bin: str = "mafft",
-    raxml_ng_bin: str = "raxml-ng",
-    epa_ng_bin: str = "epa-ng",
-    dnadiff_bin: str = "dnadiff",
-    raxml_model: str = "DNA",
-    phylogeny_snp_weight: float = 1.0,
-    phylogeny_repeat_weight: float = 1.0,
     reference_metadata_path: str | None = None,
-    target_taxon_id: str | None = None,
-    taxon_calibration_path: str | None = None,
-    taxon_alpha: float | None = None,
     taxon_min_loci: int | None = None,
-    taxon_min_locus_fraction: float = 0.8,
-    taxon_bootstrap_replicates: int = 200,
-    taxon_min_bootstrap_support: float = 0.9,
-    taxon_max_mean_placement_entropy: float | None = None,
-    taxon_min_median_placement_lwr: float | None = None,
     taxon_identification: bool | None = None,
-    taxon_k: int = 3,
-    taxon_minimum_margin: float = 0.1,
     show_progress: bool = False,
     missing_locus_min_depth: float = 3.0,
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 1.0,
-    phylogenetics: bool = False,
     classification_repeat_scale: float = 1.0,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
@@ -984,8 +960,8 @@ def run_assembly_call(
         sample_id,
         assembly_round_tolerance,
     )
-    phylogeny_paths: dict[str, Path] = {}
-    phylogenetic_rows: list[dict] = []
+    classification_paths: dict[str, Path] = {}
+    reference_rows: list[dict] = []
     closest_reference_bands: list[dict] = []
     if database_path:
         product_by_id = {product["product_id"]: product for product in products}
@@ -997,51 +973,8 @@ def run_assembly_call(
         progress.step(
             "Classifying assembly VNTR sequences and repeat counts"
         )
-        if phylogenetics:
-            phylogeny_paths = run_phylogenetic_placement(
-                query_sequences,
-                database_path,
-                outdir_path,
-                sample_id,
-                loci,
-                thread_count,
-                mafft_bin=mafft_bin,
-                raxml_ng_bin=raxml_ng_bin,
-                epa_ng_bin=epa_ng_bin,
-                raxml_model=raxml_model,
-                snp_weight=phylogeny_snp_weight,
-                repeat_weight=phylogeny_repeat_weight,
-                missing_locus_min_depth=missing_locus_min_depth,
-                missing_locus_min_fraction=missing_locus_min_fraction,
-                missing_locus_penalty=missing_locus_penalty,
-                reference_metadata_path=reference_metadata_path,
-                progress=progress,
-                query_assembly_path=assembly_path,
-                dnadiff_bin=dnadiff_bin,
-                target_taxon_id=target_taxon_id,
-                taxon_calibration_path=taxon_calibration_path,
-                taxon_alpha=taxon_alpha,
-                taxon_min_loci=taxon_min_loci,
-                taxon_min_locus_fraction=taxon_min_locus_fraction,
-                taxon_bootstrap_replicates=taxon_bootstrap_replicates,
-                taxon_min_bootstrap_support=taxon_min_bootstrap_support,
-                taxon_max_mean_placement_entropy=taxon_max_mean_placement_entropy,
-                taxon_min_median_placement_lwr=taxon_min_median_placement_lwr,
-                taxon_identification=False,
-                taxon_k=taxon_k,
-                taxon_minimum_margin=taxon_minimum_margin,
-                input_mode="assembly",
-                locus_quality={
-                    str(row.get("locus_id", "")): {
-                        "depth": row.get("read_depth", ""),
-                        "consensus_strength": row.get("allele_confidence", ""),
-                        "status": row.get("status", ""),
-                    }
-                    for row in call_rows
-                },
-            )
         from .mapping_classification import run_mapping_classification
-        phylogeny_paths.update(run_mapping_classification(
+        classification_paths.update(run_mapping_classification(
             database_path=database_path, loci=loci, outdir=outdir_path, sample_id=sample_id,
             query_sequences=query_sequences, sample_mode="isolate",
             threads=thread_count, minimap2_bin=minimap2_bin,
@@ -1049,17 +982,17 @@ def run_assembly_call(
             query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in call_rows if row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},
             reference_metadata_path=reference_metadata_path,
             taxon_identification=taxon_identification, minimum_loci=taxon_min_loci or 2,
-            repeat_scale=classification_repeat_scale, legacy_phylogenetics=phylogenetics,
+            repeat_scale=classification_repeat_scale,
             missing_locus_min_depth=missing_locus_min_depth,
             missing_locus_min_fraction=missing_locus_min_fraction,
             missing_locus_penalty=missing_locus_penalty,
         ))
-        phylogenetic_rows = read_profiles(phylogeny_paths["combined_marker_matches"])
+        reference_rows = read_profiles(classification_paths["mapping_reference_matches"])
         closest_reference_bands = read_profiles(
-            phylogeny_paths["closest_reference_bands"]
+            classification_paths["closest_reference_bands"]
         )
     output_match_rows = match_rows + sequence_reference_match_rows(
-        phylogenetic_rows
+        reference_rows
     )
     write_tsv(output_match_rows, profile_matches_path, MATCH_FIELDS)
     progress.step("Writing HTML report")
@@ -1071,7 +1004,7 @@ def run_assembly_call(
         match_rows,
         profiles,
         loci,
-        phylogenetic_rows,
+        reference_rows,
         closest_reference_bands,
     )
     progress.step(f"Done. Main calls: {calls_path}")
@@ -1089,5 +1022,5 @@ def run_assembly_call(
         "profile_match_loci": profile_match_loci_path,
         "report": outdir_path / "report.html",
         **legacy_paths,
-        **phylogeny_paths,
+        **classification_paths,
     }

@@ -38,15 +38,14 @@ database-wide finalization.
 2. **Extract each taxon.** The shared Sassy-backed PCR engine examines assemblies
    and retains real primer-bounded amplicons, product-selection evidence, and
    amplifiability QC. It does not build taxon-local candidate indexes, a Deacon
-   index, or taxon-local phylogenies.
+   index.
 3. **Merge real observations.** Amplicons, metadata, and source-assembly records
    are merged by locus. A reference identifier present in multiple taxon cohorts
    is an error rather than a silent many-to-one merge. Metadata for references
    without any usable locus is excluded from the callable database while the
    taxon's failure remains visible in summary QC.
 4. **Finalize once.** The merged database generates one deduplicated candidate
-   bank, one short-read index, one long-read index, one broad Deacon index, and
-   one set of real-reference phylogenies.
+   bank, one short-read index, one long-read index, and one broad Deacon index.
 
 A single `--taxid` follows exactly the same coordinator path and is finalized
 once. Local `-i ASSEMBLIES --metadata ...` input is already one cohort and is
@@ -58,9 +57,7 @@ phase time. This is intended to make a cluster run diagnosable without a
 profiler.
 
 `--threads` is the overall build CPU budget. Extraction workers do not exceed
-that budget. RAxML-NG is always invoked with one internal thread; users should
-not reduce the whole build to one thread merely to protect short-locus RAxML-NG
-runs.
+that budget. Native tools receive the budget allocated to their active stage.
 
 Candidate generation uses `expected_min_repeats` and `expected_max_repeats`
 when explicitly supplied. Otherwise it conservatively uses observed calibrated
@@ -86,7 +83,6 @@ mlvamaps_db/
 │   └── deacon/
 │       ├── reference_genomes.fasta
 │       └── target_recruitment.idx
-├── phylogeny/
 ├── reference_build_manifest.tsv
 └── reference_locus_amplifiability.tsv
 ```
@@ -94,7 +90,7 @@ mlvamaps_db/
 Multi-taxon builds retain isolated taxon work directories and write
 `taxon_reference_summary.tsv` plus `taxon_locus_amplifiability.tsv`. The
 combined Deacon index includes all requested real genomes, so recruitment does
-not preselect one taxon. Real locus FASTAs and phylogenies never contain
+not preselect one taxon. Real locus FASTAs never contain
 synthetic candidate alleles. Candidate prevalence is metadata rather than
 duplicated mapping evidence.
 

@@ -142,46 +142,18 @@ Profile locus names must match the panel. Empty values are skipped during
 comparison. Profile rows from different MLVA schemes should not be mixed unless
 their locus definitions and repeat-number conventions are compatible.
 
-## Phylogenetic sequence database
+## Reference sequence database
 
-`--database PATH` enables EPA-ng fixed-tree query placement independently of
-the MLVA profile table. Prefer the top-level directory produced by
-`mlvamaps build-reference` (or its `database/` subdirectory): mlvamaps then
-reuses the saved reference alignment, RAxML-NG tree, and selected model for
-each locus. It runs MAFFT only to add the query without changing reference
-coordinates, followed by EPA-ng placement.
+`--database PATH` enables alignment-based reference comparison. Supply the
+completed directory produced by `mlvamaps build-reference` or its `database/`
+subdirectory. The saved panel, observed locus FASTAs, reference metadata,
+competitive candidate indexes and recruitment resources are reused.
 
-Because each locus contains only one short query, mlvamaps parallelizes EPA-ng
-across callable loci. The `--threads` CPU budget is divided among the concurrent
-placement processes; with at least as many loci as CPUs, each process gets one
-native thread.
-
-Sequence-only databases remain supported and build missing reference trees on
-demand. Their recommended layout is one FASTA per locus in a directory;
-each filename stem must exactly match the panel locus and each FASTA header is
-the reference identifier:
-
-```text
-reference_sequences/
-  VNTR_01.fasta
-  VNTR_02.fasta
-```
-
-A long-form TSV with `reference_id`, `locus_id`, and `sequence` columns is also
-accepted. A single FASTA can be used when every header contains exactly one
-panel locus, for example `>REFERENCE_1|VNTR_01`.
-
-Use the same reference identifiers across locus files. Only references present
-at every successfully placed query locus are included in the summed-distance
-ranking, preventing incomplete references from receiving artificially small
-totals.
-
-For repeat-aware phylogenetic analysis, rich panels should provide both flank
-sequences and repeat-unit length or motif. mlvamaps uses the flanks to remove
-the tandem-repeat tract from the SNP-tree alignment while retaining its repeat
-count and unit haplotype as explicit marker features. Motif-run detection is a
-fallback when flanks are unavailable; sequences that cannot be bounded remain
-unmasked and are labelled as such in the output.
+Reference identifiers are shared across locus files. Identical observed
+amplicons share a mapping target while retaining every compatible reference ID.
+Partial reference profiles remain explicit in the model. A rich panel can
+describe repeat-unit length, motif and flanks; retained observed sequences
+provide both nucleotide and repeat-length evidence.
 
 An optional `--reference-metadata` TSV or CSV can associate references with
 space, time, and source information:

@@ -5,153 +5,44 @@ from mlvamaps.report import (
     _automatic_taxon_identification_section,
     _assembly_gel_svg,
     _gel_svg,
-    _phylogenetic_warning_html,
-    _taxon_assignment_section,
     write_assembly_report,
     write_report,
 )
 
 
-def test_automatic_taxon_identification_is_reported(tmp_path):
-    phylogeny = tmp_path / "phylogeny"
-    phylogeny.mkdir()
-    (phylogeny / "taxonomic_identification.tsv").write_text(
-        "sample_id\tbest_taxon\tbest_species\ttaxon_score\tsecond_best_taxon\t"
-        "second_best_score\tscore_margin\tinformative_loci\texpected_loci\t"
-        "locus_recovery_fraction\ttaxonomic_status\tstatus_reason\n"
-        "sample\t1392\tBacillus anthracis\t0.9\t1396\t0.7\t0.2\t6\t6\t1.0\t"
-        "SUPPORTED\tNEAREST_TAXON_SEPARATED\n"
+@pytest.mark.parametrize("status", [
+    "SUPPORTED", "CLOSEST_REFERENCE_LOW_CONFIDENCE", "AMBIGUOUS_REFERENCES",
+    "MIXED_REFERENCES", "INSUFFICIENT_EVIDENCE",
+])
+def test_alignment_taxon_report_renders_current_statuses(tmp_path, status):
+    classification = tmp_path / "classification"
+    classification.mkdir()
+    (classification / "classification.json").write_text('{"method": "mapping_em"}')
+    (classification / "taxonomic_identification_evidence.tsv").write_text(
+        "rank\treference_id\tspecies\tmodel_support\n1\tR1\tTaxon one\t0.95\n"
     )
-    (phylogeny / "taxonomic_identification_evidence.tsv").write_text(
-        "sample_id\ttaxon_id\tspecies\trank\tscore\tdistance\treferences_compared\t"
-        "informative_loci\tlocus_recovery_fraction\tis_best_taxon\n"
-        "sample\t1392\tBacillus anthracis\t1\t0.9\t0.1\t3\t6\t1.0\tyes\n"
-        "sample\t1396\tBacillus cereus\t2\t0.7\t0.4\t3\t6\t1.0\tno\n"
+    (classification / "taxonomic_identification.tsv").write_text(
+        "sample_id\tassignment\tassignment_status\tmodel_support\tinformative_loci\texpected_loci\n"
+        f"sample\tTaxon one\t{status}\t0.95\t3\t4\n"
     )
-
     section = _automatic_taxon_identification_section(tmp_path)
-
-    assert "Automatic Taxonomic Identification" in section
-    assert "Bacillus anthracis" in section
-    assert "SUPPORTED" in section
-    assert "Bacillus cereus" in section
-    assert "not a posterior probability" in section
-
-
-def test_taxon_assignment_section_includes_automatic_result_without_calibration(tmp_path):
-    phylogeny = tmp_path / "phylogeny"
-    phylogeny.mkdir()
-    (phylogeny / "taxonomic_identification.tsv").write_text(
-        "sample_id\tbest_taxon\tbest_species\ttaxon_score\tsecond_best_taxon\t"
-        "second_best_score\tscore_margin\tinformative_loci\texpected_loci\t"
-        "locus_recovery_fraction\ttaxonomic_status\tstatus_reason\n"
-        "sample\t1\tTaxon one\t0.8\t2\t0.75\t0.05\t4\t5\t0.8\tAMBIGUOUS\t"
-        "TAXON_DISTANCE_MARGIN_BELOW_THRESHOLD\n"
-    )
-
-    section = _taxon_assignment_section(tmp_path)
-
     assert "Taxon one" in section
-    assert "AMBIGUOUS" in section
-    assert "Calibrated Target-Taxon Assignment" not in section
+    assert status.replace("_", " ") in section
+    assert "not a calibrated species probability" in section
+    assert "Aggregate taxon distance" not in section
 
 
-def test_unresolved_taxon_report_is_visually_explicit_and_optional_metrics_are_safe(tmp_path):
-    phylogeny = tmp_path / "phylogeny"
-    phylogeny.mkdir()
-    (phylogeny / "taxonomic_identification.tsv").write_text(
-        "sample_id\tassignment\tassignment_rank\tassignment_status\tconfidence\t"
-        "closest_taxon\trunner_up_taxon\texpected_loci\tloci_recovered\tstatus_reason\n"
-        "sample\tShared group\tspecies_group\tSPECIES_UNRESOLVED\tLOW\tTaxon A\tTaxon B\t5\t4\tSMALL_MARGIN\n"
+def test_reports_ignore_stale_legacy_identification(tmp_path):
+    legacy = tmp_path / "phylogeny"
+    legacy.mkdir()
+    (legacy / "taxonomic_identification.tsv").write_text(
+        "sample_id\tassignment\tassignment_status\nold\tOld taxon\tSUPPORTED\n"
     )
-    section = _automatic_taxon_identification_section(tmp_path)
-    assert "Shared group" in section
-    assert "SPECIES UNRESOLVED" in section
-    assert "Species unresolved" in section
-    assert "How this assignment was calculated" in section
+    (legacy / "taxon_assignment.tsv").write_text("decision\nPOSITIVE\n")
+    assert _automatic_taxon_identification_section(tmp_path) == ""
 
 
-@pytest.mark.parametrize(
-    "confidence,status,expected",
-    [
-        ("HIGH", "SPECIES_ASSIGNED", "HIGH CONFIDENCE"),
-        ("MODERATE", "SPECIES_ASSIGNED", "MODERATE CONFIDENCE"),
-        ("LOW", "CLOSEST_TAXON_LOW_CONFIDENCE", "CLOSEST TAXON LOW CONFIDENCE"),
-        ("LOW", "SPECIES_UNRESOLVED", "SPECIES UNRESOLVED"),
-        ("UNRESOLVED", "UNRESOLVED", "UNRESOLVED"),
-    ],
-)
-def test_taxon_report_renders_all_confidence_states(tmp_path, confidence, status, expected):
-    phylogeny = tmp_path / "phylogeny"
-    phylogeny.mkdir()
-    (phylogeny / "taxonomic_identification.tsv").write_text(
-        "sample_id\tassignment\tassignment_rank\tassignment_status\tconfidence\tstatus_reason\n"
-        f"sample\tTaxon result\tspecies\t{status}\t{confidence}\tTEST\n"
-    )
-    assert expected in _automatic_taxon_identification_section(tmp_path)
-
-
-def test_low_confidence_result_labels_aggregate_taxon_distance(tmp_path):
-    phylogeny = tmp_path / "phylogeny"
-    phylogeny.mkdir()
-    (phylogeny / "taxonomic_identification.tsv").write_text(
-        "sample_id\tassignment\tassignment_rank\tassignment_status\tconfidence\t"
-        "closest_distance\tstatus_reason\n"
-        "sample\tTaxon A\tspecies\tCLOSEST_TAXON_LOW_CONFIDENCE\tLOW\t0.125\tSMALL_MARGIN\n"
-    )
-
-    section = _automatic_taxon_identification_section(tmp_path)
-    assert "Taxon A" in section
-    assert "Closest taxon — low confidence" in section
-    assert "0.125" in section
-    assert "Aggregate taxon distance" in section
-    assert "Closest combined-marker distance" not in section
-
-
-def test_taxon_assignment_section_labels_p_values_as_compatibility(tmp_path):
-    phylogeny = tmp_path / "phylogeny"
-    phylogeny.mkdir()
-    fields = [
-        "decision",
-        "decision_reason",
-        "target_taxon_id",
-        "target_taxon_name",
-        "target_joint_p_value",
-        "best_alternative_taxon_id",
-        "best_alternative_taxon_name",
-        "best_alternative_joint_p_value",
-        "target_bootstrap_support",
-        "callable_loci",
-        "qc_status",
-        "qc_flags",
-    ]
-    values = [
-        "POSITIVE",
-        "TARGET_UNIQUELY_SUPPORTED",
-        "1392",
-        "Bacillus anthracis",
-        "0.95",
-        "1396",
-        "Bacillus cereus",
-        "0.01",
-        "0.98",
-        "6",
-        "PASS",
-        "",
-    ]
-    (phylogeny / "taxon_assignment.tsv").write_text(
-        "\t".join(fields) + "\n" + "\t".join(values) + "\n"
-    )
-
-    section = _taxon_assignment_section(tmp_path)
-
-    assert "Calibrated Target-Taxon Assignment" in section
-    assert "POSITIVE" in section
-    assert "compatibility p=0.95" in section
-    assert "not posterior probabilities" in section
-
-
-def test_gels_prefer_exact_phylogenetic_reference_amplicon_sizes():
+def test_gels_prefer_observed_reference_amplicon_sizes():
     loci = [
         Locus(
             locus_id="VNTR_01",
@@ -221,36 +112,13 @@ def test_gels_prefer_exact_phylogenetic_reference_amplicon_sizes():
     assert ">PROFILE_R1<" not in assembly_gel
 
 
-def test_phylogenetic_warning_explains_exact_match_override():
-    warning = _phylogenetic_warning_html(
-        [
-            {
-                "reference_id": "R1",
-                "ranking_warning": "EXACT_MATCH_OVERRIDES_PLACEMENT",
-            }
-        ]
-    )
-    assert "Exact-match placement warning" in warning
-    assert "R1" in warning
-    assert "likelihood-weighted placement distance" in warning
-
-
 def test_reports_prioritize_sample_findings_and_remove_novelty(tmp_path):
     locus = Locus(locus_id="L1", repeat_motif="AT")
-    phylogenetic_rows = [
-        {
-            "rank": "1",
-            "reference_id": "R1",
-            "match_status": "EXACT_AMPLICON_MATCH",
-            "combined_marker_distance": "0.00000000",
-            "whole_genome_exact_match": "yes",
-            "whole_genome_snps": "0",
-            "whole_genome_indel_bases": "0",
-            "whole_genome_align_fraction_ref": "100.00000000",
-            "whole_genome_align_fraction_query": "100.00000000",
-            "tie_break_status": "APPLIED",
-        }
-    ]
+    reference_rows = [{
+        "rank": "1", "reference_id": "R1", "match_type": "mapping_reference",
+        "match_status": "MAPPING_LIKELIHOOD", "log_likelihood": "0",
+        "locus_balanced_fraction": "0.99",
+    }]
     write_report(
         tmp_path / "reads",
         "sample",
@@ -264,7 +132,7 @@ def test_reports_prioritize_sample_findings_and_remove_novelty(tmp_path):
             }
         ],
         [locus],
-        phylogenetic_rows=phylogenetic_rows,
+        reference_rows=reference_rows,
         local_assembly_rows=[
             {
                 "locus_id": "L1",
@@ -297,7 +165,7 @@ def test_reports_prioritize_sample_findings_and_remove_novelty(tmp_path):
         ],
         [{"locus_id": "L1", "product_size_bp": "100"}],
         loci=[locus],
-        phylogenetic_rows=phylogenetic_rows,
+        reference_rows=reference_rows,
     )
 
     for report_path in (
@@ -307,8 +175,10 @@ def test_reports_prioritize_sample_findings_and_remove_novelty(tmp_path):
         report = report_path.read_text()
         assert "Sample Overview" in report
         assert "Closest Reference Genomes" in report
-        assert "Exact whole-genome match" in report
-        assert "Technical marker-distance components" in report
+        assert "Alignment likelihood; model support 0.99" in report
+        assert "Exact whole-genome match" not in report
+        assert "Technical marker-distance components" not in report
+        assert "Joint log likelihood" in report
         assert "Novelty" not in report
     fastq_report = (tmp_path / "reads" / "report.html").read_text()
     assert "FASTQ Local Assembly Concordance" in fastq_report

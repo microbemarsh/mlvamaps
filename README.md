@@ -5,14 +5,14 @@ amplicon reads, and genome assemblies. It uses a user-supplied primer panel, so
 no organism or typing scheme is hard-coded.
 
 The main outputs are an MLVA fingerprint, per-locus calls and evidence, and a
-self-contained HTML report. Optional reference databases add sequence-aware
-matching and phylogenetic placement.
+self-contained HTML report. Reference databases add alignment-based reference support using nucleotide
+variation and VNTR repeat-length evidence.
 
 <p align="center">
-  <img width="720" height="450" alt="image" src="https://github.com/user-attachments/assets/b99e3b14-3783-496a-a3ff-30791eff51db" />
+  <img width="960" alt="Alignment-based workflow: assembly products and FASTQ molecules align to observed references for isolate support or EM mixture inference." src="figures/software_workflow/mlvamaps_sample_calling_github.png" />
 </p>
 
-There are three calling pathways:
+Assembly and FASTQ inputs retain their own evidence-recovery paths:
 
 - **Genome assemblies:** Sassy-backed, primer-directed in silico PCR recovers
   candidate amplicons; the assembly caller applies MLVA_finder-compatible
@@ -34,13 +34,21 @@ evidence is extracted from these alignments and integrated by a shared
 locus-level allele inference framework. minimap2 supplies competing alignments;
 it does not by itself determine the MLVA allele.
 
-Reference classification now uses original VNTR mapping likelihoods, including
-repeat-length evidence, with EM for mixed samples. It also writes a Newick MLVA
-profile-similarity `.tree` when enough repeat calls are available. Multi-sample
-profile trees remain available through `export-myoga`. Sequence phylogenetics
-is an additional analysis enabled with `--phylogenetics`; it is not required
-for classification or repeat-profile trees. See
-[mapping classification and profile trees](docs/concepts/mapping-classification.md).
+Reference typing uses one Emu-inspired alignment-likelihood framework:
+Sassy-recovered assembly amplicons are aligned to observed reference loci with
+Parasail; FASTQ molecules are competitively aligned to observed reference
+amplicons with minimap2. Nucleotide mismatches and repeat-length disagreement
+both contribute. Assemblies use isolate support; mixed read samples use EM.
+This is an independent implementation; the Emu package is not required.
+
+Sassy-backed assembly PCR, MLVA_finder-compatible repeat counts and tables,
+recovered amplicons, and read SNP evidence remain available. Assembly runs with
+a database also retain reference-relative mismatch counts, repeat differences,
+and alignment CIGARs in `classification/assembly_reference_evidence.tsv`.
+
+Optional repeat-profile trees visualize sample similarity and do not determine
+reference classification. See [alignment-based classification](docs/concepts/mapping-classification.md)
+and [migration to the emu workflow](docs/workflows/emu-migration.md).
 
 ## Install
 
@@ -182,14 +190,13 @@ Multi-taxon builds write:
 - a combined top-level database containing all taxa for automatic taxon
   identification.
 
-Candidate indexes, the Deacon index, and phylogenies are built once from the
+Candidate indexes and the Deacon index are built once from the
 merged cohort, including when `taxids.csv` contains only one taxon.
 
 A locus is amplifiable when at least one examined genome produces an amplicon
-retained by the normal primer-matching and filtering rules. Valid amplicons that
-are too few for `--min-references-per-tree` remain amplifiable and are reported
-as `INSUFFICIENT_REFERENCES`. Taxa with no usable loci are recorded, skip tree
-building, and do not stop later taxa.
+retained by the normal primer-matching and filtering rules. Any retained reference amplicon remains available for comparison, including
+loci represented by a single genome. Taxa with no usable loci are recorded
+and do not stop later taxa.
 
 Use a built database during calling:
 

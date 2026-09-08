@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import gzip
 import re
 from pathlib import Path
 
@@ -9,18 +8,11 @@ import numpy as np
 import pytest
 
 import mlvamaps.cli as cli
-from mlvamaps.myoga_export import (
-    SampleCalls,
-    calculate_pairwise_distances,
-    export_myoga,
-    read_export_metadata,
-)
-from mlvamaps.combined_marker_export import recover_masked_sequences
-from mlvamaps.models import Locus
-from mlvamaps.phylogeny import (
+from mlvamaps.myoga_export import calculate_pairwise_distances, export_myoga, read_export_metadata
+from mlvamaps.profile_tree import neighbor_joining_tree_from_matrix
+from newick_helpers import (
     _parse_newick,
     _tip_patristic_distance_matrix,
-    neighbor_joining_tree_from_matrix,
 )
 
 
@@ -650,7 +642,6 @@ def test_export_myoga_cli_routes_all_options(monkeypatch, capsys):
             "distance_matrix": Path(outdir) / "mlva_distance_matrix.tsv",
             "tree": Path(outdir) / "mlva_nj.tree",
             "summary": Path(outdir) / "export_summary.tsv",
-            "combined_marker_tree": Path(outdir) / "combined_marker_nj.tree",
         }
 
     monkeypatch.setattr(cli, "export_myoga", fake_export)
@@ -660,10 +651,7 @@ def test_export_myoga_cli_routes_all_options(monkeypatch, capsys):
             "--metadata-id", "run", "--latitude", "lat", "--longitude", "lon",
             "--min-callable-fraction", "0.75", "--min-callable-loci", "3",
             "--min-pairwise-loci", "2", "--min-pairwise-fraction", "0.6",
-            "--distance", "categorical", "--combined-markers", "--loci", "panel.tsv",
-            "--phylogeny-snp-weight", "2", "--phylogeny-repeat-weight", "3",
-            "-t", "4", "--mafft-bin", "mafft-x", "--raxml-ng-bin", "raxml-x",
-            "--raxml-model", "GTR+G", "--force", "-o", "export",
+            "--distance", "categorical", "--force", "-o", "export",
         ]
     ) == 0
     assert observed == {
@@ -678,19 +666,11 @@ def test_export_myoga_cli_routes_all_options(monkeypatch, capsys):
         "min_pairwise_loci": 2,
         "min_pairwise_fraction": 0.6,
         "distance": "categorical",
-        "combined_markers": True,
-        "loci_path": "panel.tsv",
-        "snp_weight": 2.0,
-        "repeat_weight": 3.0,
-        "threads": 4,
-        "mafft_bin": "mafft-x",
-        "raxml_ng_bin": "raxml-x",
-        "raxml_model": "GTR+G",
         "force": True,
     }
     stream = capsys.readouterr().out
     assert "Wrote MLVA relatedness tree" in stream
-    assert "Wrote combined SNP/repeat relatedness tree" in stream
+    assert "combined SNP/repeat" not in stream
 
 
 def test_export_myoga_cli_defaults_to_relaxed_completeness_thresholds():
@@ -710,204 +690,6 @@ def test_export_myoga_cli_defaults_to_relaxed_completeness_thresholds():
     assert args.min_callable_loci == 0
     assert args.min_pairwise_loci == 1
     assert args.min_pairwise_fraction == 0
-
-
-def _write_gzip_fasta(path: Path, name: str, sequence: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with gzip.open(path, "wt") as handle:
-        handle.write(f">{name}\n{sequence}\n")
-
-
-def _fake_export_mafft(tmp_path: Path) -> Path:
-    executable = tmp_path / "mafft"
-    executable.write_text(
-        """#!/usr/bin/env python3
-import pathlib, sys
-if '--version' in sys.argv:
-    print('v7.0', file=sys.stderr)
-    raise SystemExit(0)
-print(pathlib.Path(sys.argv[-1]).read_text().rstrip())
-"""
-    )
-    executable.chmod(0o755)
-    return executable
-
-
-def _fake_export_raxml(tmp_path: Path) -> Path:
-    executable = tmp_path / "raxml-ng"
-    executable.write_text(
-        """#!/usr/bin/env python3
-import pathlib, sys
-if '--version' in sys.argv:
-    print('RAxML-NG v1.2.2')
-    raise SystemExit(0)
-args = sys.argv[1:]
-prefix = args[args.index('--prefix') + 1]
-msa = pathlib.Path(args[args.index('--msa') + 1])
-names = [line[1:].split()[0] for line in msa.read_text().splitlines() if line.startswith('>')]
-pathlib.Path(prefix + '.raxml.bestTree').write_text(
-    '(' + ','.join(f'{name}:0.1' for name in names) + ');\\n'
-)
-pathlib.Path(prefix + '.raxml.bestModel').write_text('GTR+G\\n')
-"""
-    )
-    executable.chmod(0o755)
-    return executable
-
-
-def test_combined_marker_export_reuses_precomputed_masked_queries(tmp_path):
-    results = tmp_path / "results"
-    metadata = tmp_path / "metadata.tsv"
-    metadata.write_text(
-        "shared_identifier\tlatitude\tlongitude\n"
-        "S1\t1\t2\nS2\t3\t4\nS3\t5\t6\n"
-    )
-    for sample_id, repeat, sequence in (
-        ("S1", 1, "AAAA"),
-        ("S2", 2, "AAAT"),
-        ("S3", 1, "AAAA"),
-    ):
-        path = _write_calls(results, sample_id, {"L1": repeat})
-        _write_gzip_fasta(
-            path.parent / "phylogeny" / "L1" / "query.fasta.gz",
-            f"QUERY__{sample_id}",
-            sequence,
-        )
-    output = tmp_path / "export"
-
-    result = export_myoga(
-        results,
-        metadata,
-        output,
-        combined_markers=True,
-        mafft_bin=str(_fake_export_mafft(tmp_path)),
-    )
-
-    assert result["combined_marker_tree"] == output / "combined_marker_nj.tree"
-    status = _read_tsv(output / "locus_tree_status.tsv")
-    assert status[0]["status"] == "TWO_HAPLOTYPE_DISTANCE"
-    pairs = {
-        (row["sample_1"], row["sample_2"]): row
-        for row in _read_tsv(output / "combined_marker_pairwise_distances.tsv")
-    }
-    assert pairs[("S1", "S2")]["mean_normalized_snp_distance"] == "1.00000000"
-    assert pairs[("S1", "S2")]["mean_normalized_repeat_distance"] == "2.00000000"
-    assert pairs[("S1", "S2")]["combined_marker_distance"] == "3.00000000"
-    assert pairs[("S1", "S3")]["combined_marker_distance"] == "0.00000000"
-    assert {
-        row["sample_id"] for row in _read_tsv(output / "combined_marker_metadata.tsv")
-    } == {"S1", "S2", "S3"}
-
-
-def test_combined_marker_export_uses_distances_for_three_snp_haplotypes(tmp_path):
-    results = tmp_path / "results"
-    metadata = tmp_path / "metadata.tsv"
-    metadata.write_text(
-        "shared_identifier\tlatitude\tlongitude\n"
-        "S1\t1\t2\nS2\t3\t4\nS3\t5\t6\n"
-    )
-    for sample_id, sequence in (("S1", "AAAA"), ("S2", "AAAT"), ("S3", "AATT")):
-        path = _write_calls(results, sample_id, {"L1": 1})
-        _write_gzip_fasta(
-            path.parent / "phylogeny" / "L1" / "query.fasta.gz",
-            f"QUERY__{sample_id}",
-            sequence,
-        )
-    output = tmp_path / "export"
-
-    export_myoga(
-        results,
-        metadata,
-        output,
-        combined_markers=True,
-        mafft_bin=str(_fake_export_mafft(tmp_path)),
-        raxml_ng_bin="missing-raxml-ng",
-    )
-
-    status = _read_tsv(output / "locus_tree_status.tsv")[0]
-    assert status["status"] == "THREE_HAPLOTYPE_DISTANCE"
-    assert status["snp_haplotypes"] == "3"
-    assert not (output / "locus_trees" / "L1" / "haplotypes.raxml.tree").exists()
-    distances = {
-        (row["sample_1"], row["sample_2"]): row["snp_patristic_distance"]
-        for row in _read_tsv(output / "locus_snp_distances.tsv")
-    }
-    assert distances == {
-        ("S1", "S2"): "0.25000000",
-        ("S1", "S3"): "0.50000000",
-        ("S2", "S3"): "0.25000000",
-    }
-    tree = (output / "locus_trees" / "L1" / "samples.tree").read_text()
-    tips = set(re.findall(r"'([^']+)'", tree))
-    assert tips == {"S1", "S2", "S3"}
-
-
-def test_combined_marker_export_runs_raxml_for_four_snp_haplotypes(tmp_path):
-    results = tmp_path / "results"
-    metadata = tmp_path / "metadata.tsv"
-    metadata.write_text(
-        "shared_identifier\tlatitude\tlongitude\n"
-        "S1\t1\t2\nS2\t3\t4\nS3\t5\t6\nS4\t7\t8\n"
-    )
-    for sample_id, sequence in (
-        ("S1", "AAAA"),
-        ("S2", "AAAT"),
-        ("S3", "AATT"),
-        ("S4", "ATTT"),
-    ):
-        path = _write_calls(results, sample_id, {"L1": 1})
-        _write_gzip_fasta(
-            path.parent / "phylogeny" / "L1" / "query.fasta.gz",
-            f"QUERY__{sample_id}",
-            sequence,
-        )
-    output = tmp_path / "export"
-
-    export_myoga(
-        results,
-        metadata,
-        output,
-        combined_markers=True,
-        mafft_bin=str(_fake_export_mafft(tmp_path)),
-        raxml_ng_bin=str(_fake_export_raxml(tmp_path)),
-    )
-
-    status = _read_tsv(output / "locus_tree_status.tsv")[0]
-    assert status["status"] == "RAXML_NG"
-    assert status["snp_haplotypes"] == "4"
-    assert (output / "locus_trees" / "L1" / "haplotypes.raxml.tree").is_file()
-
-
-def test_retained_assembly_evidence_is_masked_with_rich_panel(tmp_path):
-    sample_dir = tmp_path / "results" / "S1"
-    calls_path = _write_calls(tmp_path / "results", "S1", {"L1": 2})
-    rows = _read_tsv(calls_path)
-    rows[0]["evidence"] = "L1|contig|+|1-14"
-    with calls_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=CALL_FIELDS, delimiter="\t")
-        writer.writeheader()
-        writer.writerows(rows)
-    _write_gzip_fasta(
-        sample_dir / "assembly_amplicons.fasta.gz",
-        "L1|contig|+|1-14",
-        "AAAGGATATCCGGG",
-    )
-    sample = SampleCalls("S1", calls_path, rows, ["L1"])
-    locus = Locus(
-        locus_id="L1",
-        forward_primer="AAA",
-        reverse_primer="CCC",
-        left_flank_sequence="GG",
-        right_flank_sequence="CC",
-        repeat_motif="AT",
-        repeat_unit_length_bp=2,
-    )
-
-    recovered, statuses = recover_masked_sequences([sample], ["L1"], {"L1": locus})
-
-    assert recovered[("S1", "L1")].sequence == "AAAGGCCGGG"
-    assert recovered[("S1", "L1")].masking_method == "flank_bounded"
-    assert statuses[0]["status"] == "RECOVERED"
 
 
 def test_neighbor_joining_preserves_quoted_sample_ids_exactly():

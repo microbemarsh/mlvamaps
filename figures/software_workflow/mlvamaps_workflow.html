@@ -1,193 +1,92 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>mlvamaps workflow overview</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    html, body { margin: 0; background: #fcfcfa; color: #18211f; }
-    body { font-family: Arial, Helvetica, sans-serif; padding: 24px; }
-    main { width: min(1120px, 100%); margin: 0 auto; }
-    .eyebrow { margin: 0 0 6px; color: #4f625d; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
-    h1 { margin: 0 0 18px; font-size: 28px; line-height: 1.15; font-weight: 600; }
-    svg { display: block; width: 100%; height: auto; background: #fcfcfa; }
-    @media print {
-      @page { size: A4 landscape; margin: 8mm; }
-      body { padding: 0; }
-      .eyebrow, h1 { display: none; }
-      main { width: 100%; }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mlvamaps alignment workflow</title>
+<style>html,body{margin:0;background:#fcfcfa}svg{display:block;max-width:100%;height:auto}@media print{@page{size:1120px 792px;margin:0}}</style>
 </head>
 <body>
-  <main>
-    <p class="eyebrow">Architecture · scientific workflow</p>
-    <h1>Build once, reuse across technology-specific MLVA calls</h1>
-    <svg viewBox="0 0 1120 792" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="mlvamaps-workflow-title mlvamaps-workflow-desc">
-      <title id="mlvamaps-workflow-title">mlvamaps workflow overview</title>
-      <desc id="mlvamaps-workflow-desc">Taxon cohorts retain amplicons and quality control before one combined database finalization; assemblies and FASTQ samples reuse shared PCR and candidate resources to produce compatible locus calls and taxon evidence under one global thread budget.</desc>
-      <defs>
-        <style>
-          .zone { fill:#f2f4f3; fill-opacity:.58; stroke:#aebbb7; stroke-width:1; }
-          .node { fill:#ffffff; stroke:#4f625d; stroke-width:1.2; }
-          .input { fill:#f2f4f3; stroke:#71807c; stroke-width:1.1; }
-          .focal { fill:#eaf4f3; stroke:#2b7a78; stroke-width:1.8; }
-          .database { fill:#edf2f4; stroke:#315f78; stroke-width:1.4; }
-          .output { fill:#ffffff; stroke:#18211f; stroke-width:1.4; }
-          .edge { fill:none; stroke:#4f625d; stroke-width:1.4; marker-end:url(#arrow); }
-          .edge-accent { fill:none; stroke:#2b7a78; stroke-width:1.8; marker-end:url(#arrow-accent); }
-          .edge-db { fill:none; stroke:#315f78; stroke-width:1.5; marker-end:url(#arrow-db); }
-          .edge-optional { fill:none; stroke:#71807c; stroke-width:1.1; stroke-dasharray:5 4; marker-end:url(#arrow); }
-          .zone-label { fill:#4f625d; font:700 10px Arial,Helvetica,sans-serif; letter-spacing:.12em; }
-          .title { fill:#18211f; font:700 15px Arial,Helvetica,sans-serif; }
-          .title-small { fill:#18211f; font:700 13px Arial,Helvetica,sans-serif; }
-          .sub { fill:#4f625d; font:11px Arial,Helvetica,sans-serif; }
-          .sub-small { fill:#4f625d; font:10px Arial,Helvetica,sans-serif; }
-          .tag { fill:#315f78; font:700 9px Arial,Helvetica,sans-serif; letter-spacing:.06em; }
-          .tag-teal { fill:#2b7a78; font:700 9px Arial,Helvetica,sans-serif; letter-spacing:.06em; }
-          .edge-label { fill:#4f625d; font:10px Arial,Helvetica,sans-serif; }
-          .note { fill:#4f625d; font:italic 10px Arial,Helvetica,sans-serif; }
-        </style>
-        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4f625d"/></marker>
-        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#2b7a78"/></marker>
-        <marker id="arrow-db" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#315f78"/></marker>
-      </defs>
-
-      <rect width="1120" height="792" fill="#fcfcfa"/>
-
-      <!-- Grouping zones -->
-      <rect class="zone" x="28" y="44" width="752" height="408" rx="8"/>
-      <rect x="48" y="36" width="142" height="18" fill="#fcfcfa"/>
-      <text class="zone-label" x="56" y="49">A · SAMPLE CALLING</text>
-
-      <rect class="zone" x="28" y="492" width="752" height="256" rx="8"/>
-      <rect x="48" y="484" width="238" height="18" fill="#fcfcfa"/>
-      <text class="zone-label" x="56" y="497">B · REFERENCE DATABASE CONSTRUCTION</text>
-
-      <rect class="zone" x="808" y="44" width="284" height="704" rx="8"/>
-      <rect x="828" y="36" width="210" height="18" fill="#fcfcfa"/>
-      <text class="zone-label" x="836" y="49">REFERENCE-ENABLED ANALYSIS</text>
-
-      <!-- Arrows drawn before nodes -->
-      <path d="M 56 100 H 40 V 376" fill="none" stroke="#71807c" stroke-width="1.1" stroke-dasharray="5 4"/>
-      <line class="edge-optional" x1="40" y1="188" x2="56" y2="188"/>
-      <line class="edge-optional" x1="40" y1="276" x2="56" y2="276"/>
-      <line class="edge-optional" x1="40" y1="376" x2="56" y2="376"/>
-      <path class="edge" d="M 336 188 H 428"/>
-      <path class="edge" d="M 336 276 H 396 Q 404 276 404 284 V 298 Q 404 306 412 306 H 428"/>
-      <path class="edge" d="M 336 376 H 396 Q 404 376 404 368 V 346 Q 404 338 412 338 H 428"/>
-      <path class="edge-accent" d="M 636 316 H 688"/>
-      <path class="edge-db" d="M 760 636 H 796 Q 804 636 804 628 V 360 Q 804 352 812 352 H 828"/>
-      <path class="edge-db" d="M 760 668 H 796 Q 804 668 804 660 V 608 Q 804 600 812 600 H 828"/>
-      <path class="edge-accent" d="M 636 300 H 784 Q 792 300 792 292 V 228 Q 792 220 800 220 H 828"/>
-      <path class="edge-accent" d="M 950 380 V 412"/>
-
-      <path class="edge" d="M 196 552 H 232"/>
-      <path class="edge" d="M 372 552 H 404"/>
-      <path class="edge" d="M 548 552 H 580"/>
-      <path class="edge-db" d="M 660 592 V 612"/>
-      <path class="edge-optional" d="M 142 128 V 500 Q 142 508 134 508 H 126 V 516"/>
-
-      <!-- Primer panel -->
-      <rect class="input" x="56" y="72" width="172" height="56" rx="4"/>
-      <text class="tag" x="72" y="91">SHARED INPUT</text>
-      <text class="title" x="72" y="108">primer.csv</text>
-      <text class="sub-small" x="236" y="112">locus · forward · reverse</text>
-
-      <!-- Three technology-specific pathways -->
-      <rect class="node" x="56" y="152" width="280" height="72" rx="4"/>
-      <text class="tag" x="72" y="171">GENOME ASSEMBLY</text>
-      <text class="title-small" x="72" y="192">Shared Sassy batch PCR</text>
-      <text class="sub-small" x="72" y="209">primer-bounded products → length → calibrated repeats</text>
-
-      <rect class="node" x="56" y="240" width="280" height="72" rx="4"/>
-      <text class="tag" x="72" y="259">PAIRED-END ILLUMINA FASTQ</text>
-      <text class="title" x="72" y="301">minimap2 → htslib evidence</text>
-      <text class="sub" x="72" y="321">cached short.mmi · molecule/state reduction</text>
-
-      <rect class="node" x="56" y="328" width="280" height="96" rx="4"/>
-      <text class="tag" x="72" y="347">ACCURATE LONG / AMPLICON FASTQ</text>
-      <text class="title" x="72" y="393">minimap2 → htslib evidence</text>
-      <text class="sub" x="72" y="413">cached long.mmi · temporary compressed BAM</text>
-      <text class="sub" x="72" y="433">direct molecules → shared allele inference</text>
-
-      <!-- Shared calls -->
-      <rect class="focal" x="428" y="248" width="208" height="136" rx="6"/>
-      <text class="tag-teal" x="448" y="270">SHARED ALLELE INFERENCE</text>
-      <text class="title" x="448" y="294">Common locus calls</text>
-      <line x1="448" y1="306" x2="616" y2="306" stroke="#9fc5c3" stroke-width="1"/>
-      <text class="sub" x="448" y="326">locus · repeat count</text>
-      <text class="sub" x="448" y="346">call status · confidence/evidence</text>
-      <text class="sub" x="448" y="366">locus sequence, when resolved</text>
-
-      <rect class="output" x="688" y="272" width="72" height="88" rx="4"/>
-      <text class="tag" x="700" y="292">OUTPUT</text>
-      <text class="title-small" x="700" y="316">MLVA</text>
-      <text class="title-small" x="700" y="333">fingerprint</text>
-      <text class="sub-small" x="700" y="350">sample × loci</text>
-
-      <text class="note" x="428" y="408">Detection may remain presence-only or unresolved;</text>
-      <text class="note" x="428" y="422">a repeat count is reported only when evidence supports it.</text>
-
-      <!-- Reference construction -->
-      <rect class="input" x="56" y="516" width="140" height="72" rx="4"/>
-      <text class="tag" x="72" y="536">INPUTS</text>
-      <text class="title-small" x="72" y="558">taxids.csv</text>
-      <text class="sub-small" x="72" y="576">+ primer.csv</text>
-
-      <rect class="node" x="232" y="516" width="140" height="72" rx="4"/>
-      <text class="tag" x="248" y="536">NCBI DATASETS</text>
-      <text class="title-small" x="248" y="558">Taxon cohorts</text>
-      <text class="sub-small" x="248" y="576">amplicons + QC only</text>
-
-      <rect class="node" x="404" y="508" width="144" height="88" rx="4"/>
-      <text class="tag" x="420" y="528">LOCUS RECOVERY</text>
-      <text class="title-small" x="420" y="550">Sassy extraction</text>
-      <text class="sub-small" x="420" y="568">multiple-product QC</text>
-      <text class="sub-small" x="420" y="584">amplifiability summary</text>
-
-      <rect class="node" x="580" y="508" width="160" height="84" rx="4"/>
-      <text class="tag" x="596" y="528">FINALIZE ONCE</text>
-      <text class="title-small" x="596" y="550">candidate bank + .mmi</text>
-      <text class="sub-small" x="596" y="568">Deacon index + locus trees</text>
-      <text class="sub-small" x="596" y="584">RAxML-NG fixed at 1 thread</text>
-
-      <rect class="database" x="544" y="612" width="216" height="104" rx="6"/>
-      <text class="tag" x="564" y="634">REUSABLE REFERENCE DATABASE</text>
-      <text class="title" x="564" y="658">Combined multi-taxon</text>
-      <text class="title" x="564" y="677">mlvamaps database</text>
-      <text class="sub-small" x="564" y="696">candidates · indexes · real loci</text>
-      <text class="sub-small" x="564" y="710">trees · metadata · provenance</text>
-
-      <!-- Reference-enabled analysis -->
-      <rect class="node" x="828" y="164" width="244" height="216" rx="6"/>
-      <text class="tag" x="848" y="188">COMMON CALLS + DATABASE</text>
-      <text class="title" x="848" y="216">Multi-locus comparison</text>
-      <line x1="848" y1="230" x2="1052" y2="230" stroke="#c3ccc9"/>
-      <text class="sub" x="848" y="254">Reference comparison</text>
-      <text class="sub-small" x="848" y="271">repeat-count distance + sequence evidence</text>
-      <text class="sub" x="848" y="298">Locus sequence placement</text>
-      <text class="sub-small" x="848" y="315">MAFFT query alignment → EPA-ng</text>
-      <text class="sub" x="848" y="342">Weighted evidence across loci</text>
-      <text class="sub-small" x="848" y="359">recovery · discrimination · bootstrap stability</text>
-
-      <rect class="focal" x="828" y="412" width="244" height="100" rx="6"/>
-      <text class="tag-teal" x="848" y="436">FINAL REFERENCE-ENABLED RESULT</text>
-      <text class="title" x="848" y="462">Taxon assignment</text>
-      <text class="sub" x="848" y="483">assignment status + confidence/evidence</text>
-      <text class="sub-small" x="848" y="500">not a single nearest-hit lookup</text>
-
-      <rect class="input" x="828" y="548" width="244" height="104" rx="4"/>
-      <text class="tag" x="848" y="572">DATABASE ALSO SUPPORTS CALLING</text>
-      <text class="sub" x="848" y="596">FASTQ: cached candidates + indexes</text>
-      <text class="sub" x="848" y="618">minimap2 pipe → htslib → BAM</text>
-      <text class="sub-small" x="848" y="638">no text candidate SAM in normal operation</text>
-
-      <text class="note" x="828" y="688">One global thread budget supports bounded concurrent</text>
-      <text class="note" x="828" y="704">samples and deterministic combined output ordering.</text>
-
-    </svg>
-  </main>
+<main>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="792" viewBox="0 0 1120 792" role="img" aria-labelledby="mlvamaps_workflow-title mlvamaps_workflow-desc">
+<title id="mlvamaps_workflow-title">Alignment-based mlvamaps workflow</title>
+<desc id="mlvamaps_workflow-desc">Parasail compares known-locus assembly products end-to-end against every reference at that locus, while minimap2 locates FASTQ molecules among reference targets; both feed one reference likelihood model.</desc>
+<defs>
+<marker id="mlvamaps_workflow-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+<polygon points="0 0,8 3,0 6" fill="#4f625d"/>
+</marker>
+<marker id="mlvamaps_workflow-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+<polygon points="0 0,8 3,0 6" fill="#2b7a78"/>
+</marker>
+<marker id="mlvamaps_workflow-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+<polygon points="0 0,8 3,0 6" fill="#2e5aa8"/>
+</marker>
+</defs>
+<rect width="1120" height="792" fill="#fcfcfa"/>
+<g font-family="Arial, Helvetica, sans-serif" transform="scale(1.1666666666666667 1.0)">
+<text x="40" y="36" font-size="12" font-weight="600" fill="#4f625d">MLVAMAPS  /  EMU BRANCH</text>
+<text x="40" y="76" font-size="32" font-weight="600" fill="#18211f">Alignment-based reference support</text>
+<text x="40" y="104" font-size="16" font-weight="400" fill="#4f625d">Observed sequence evidence + VNTR repeat-length agreement</text>
+<path d="M 296,192 H 336" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_workflow-arrow)"/>
+<path d="M 624,192 H 664" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_workflow-arrow)"/>
+<rect x="40" y="140" width="256" height="112" rx="8" fill="#f2f4f3" stroke="#71807c" stroke-width="1.5"/>
+<text x="56" y="168" font-size="18" font-weight="600" fill="#18211f">Reference genomes</text>
+<text x="56" y="192" font-size="14" font-weight="400" fill="#4f625d">Local or taxon cohorts</text>
+<text x="56" y="214" font-size="14" font-weight="400" fill="#4f625d">Primer-directed extraction + QC</text>
+<rect x="336" y="140" width="288" height="112" rx="8" fill="#ffffff" stroke="#71807c" stroke-width="1.5"/>
+<text x="352" y="168" font-size="18" font-weight="600" fill="#18211f">Merged reference database</text>
+<text x="352" y="192" font-size="14" font-weight="400" fill="#4f625d">Observed locus amplicons</text>
+<text x="352" y="214" font-size="14" font-weight="400" fill="#4f625d">Reference IDs + taxon metadata</text>
+<rect x="664" y="140" width="256" height="112" rx="8" fill="#ffffff" stroke="#71807c" stroke-width="1.5"/>
+<text x="680" y="168" font-size="18" font-weight="600" fill="#18211f">Build once, reuse</text>
+<text x="680" y="192" font-size="14" font-weight="400" fill="#4f625d">Candidate bank + minimap2 indexes</text>
+<text x="680" y="214" font-size="14" font-weight="400" fill="#4f625d">Broad Deacon recruitment index</text>
+<text x="40" y="284" font-size="12" font-weight="600" fill="#4f625d">WITH A DATABASE  /  TWO INPUT PATHS</text>
+<path d="M 296,388 H 344" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_workflow-arrow)"/>
+<path d="M 624,388 H 664" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_workflow-arrow)"/>
+<path d="M 296,532 H 344" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_workflow-arrow)"/>
+<path d="M 624,532 H 664" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_workflow-arrow)"/>
+<path d="M 792,588 V 620" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_workflow-arrow)"/>
+<path d="M 344,660 H 296" fill="none" stroke="#4f625d" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#mlvamaps_workflow-arrow)"/>
+<rect x="40" y="332" width="256" height="112" rx="8" fill="#f2f4f3" stroke="#71807c" stroke-width="1.5"/>
+<text x="56" y="360" font-size="18" font-weight="600" fill="#18211f">Assembly FASTA</text>
+<text x="56" y="384" font-size="14" font-weight="400" fill="#4f625d">Sassy in silico PCR</text>
+<text x="56" y="406" font-size="14" font-weight="400" fill="#4f625d">Oriented products; locus known</text>
+<rect x="344" y="332" width="280" height="112" rx="8" fill="#ffffff" stroke="#71807c" stroke-width="1.5"/>
+<text x="360" y="360" font-size="18" font-weight="600" fill="#18211f">Parasail · global alignment</text>
+<text x="360" y="384" font-size="14" font-weight="400" fill="#4f625d">End-to-end product comparison</text>
+<text x="360" y="406" font-size="14" font-weight="400" fill="#4f625d">Every reference at the known locus</text>
+<text x="360" y="428" font-size="14" font-weight="400" fill="#4f625d">Observed reference amplicons only</text>
+<rect x="40" y="476" width="256" height="112" rx="8" fill="#f2f4f3" stroke="#71807c" stroke-width="1.5"/>
+<text x="56" y="504" font-size="18" font-weight="600" fill="#18211f">Sequencing FASTQ</text>
+<text x="56" y="528" font-size="14" font-weight="400" fill="#4f625d">Illumina, ONT or HiFi</text>
+<text x="56" y="550" font-size="14" font-weight="400" fill="#4f625d">Molecules need reference mapping</text>
+<rect x="344" y="476" width="280" height="112" rx="8" fill="#ffffff" stroke="#71807c" stroke-width="1.5"/>
+<text x="360" y="504" font-size="18" font-weight="600" fill="#18211f">minimap2 · read mapping</text>
+<text x="360" y="528" font-size="14" font-weight="400" fill="#4f625d">Locate reads among reference targets</text>
+<text x="360" y="550" font-size="14" font-weight="400" fill="#4f625d">Retain reported competing alignments</text>
+<text x="360" y="572" font-size="14" font-weight="400" fill="#4f625d">Observed reference amplicons only</text>
+<rect x="664" y="332" width="256" height="256" rx="8" fill="#eaf4f3" stroke="#2b7a78" stroke-width="1.5"/>
+<text x="680" y="360" font-size="18" font-weight="600" fill="#18211f">Shared reference model</text>
+<text x="680" y="384" font-size="14" font-weight="400" fill="#4f625d">Sequence + repeat evidence</text>
+<text x="680" y="406" font-size="14" font-weight="400" fill="#4f625d">Molecule-aware scoring</text>
+<text x="680" y="428" font-size="14" font-weight="400" fill="#4f625d">
+</text>
+<text x="680" y="450" font-size="14" font-weight="400" fill="#4f625d">Isolate: joint reference support</text>
+<text x="680" y="472" font-size="14" font-weight="400" fill="#4f625d">Metagenome: EM fractions</text>
+<text x="680" y="494" font-size="14" font-weight="400" fill="#4f625d">
+</text>
+<text x="680" y="516" font-size="14" font-weight="400" fill="#4f625d">Ambiguity stays explicit</text>
+<rect x="344" y="620" width="576" height="80" rx="8" fill="#eaf4f3" stroke="#2b7a78" stroke-width="1.5"/>
+<text x="360" y="648" font-size="18" font-weight="600" fill="#18211f">Calls, fingerprints + reference evidence</text>
+<text x="360" y="672" font-size="14" font-weight="400" fill="#4f625d">Ranked reference groups, support status and HTML report</text>
+<rect x="40" y="620" width="256" height="80" rx="8" fill="#f2f4f3" stroke="#aebbb7" stroke-width="1.5" stroke-dasharray="4 4"/>
+<text x="56" y="648" font-size="18" font-weight="600" fill="#18211f">Optional profile tree</text>
+<text x="56" y="672" font-size="14" font-weight="400" fill="#4f625d">Repeat-profile similarity only</text>
+<text x="40" y="732" font-size="14" font-weight="400" fill="#4f625d">Allele calling runs alongside typing: assembly sizing or FASTQ candidate mapping.</text>
+<text x="40" y="756" font-size="14" font-weight="400" fill="#4f625d">Independent Emu-inspired model. EM fractions describe marker evidence, not organism abundance.</text>
+</g>
+</svg>
+</main>
 </body>
 </html>

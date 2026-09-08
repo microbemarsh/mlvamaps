@@ -93,15 +93,17 @@ candidate bank and index continue to reside in the database.
 
 ## Automatic taxon identification
 
-With a multi-taxon `--database`, mlvamaps automatically identifies the closest
-supported taxon. For each called locus, the reference background supported by
-the most independent Illumina molecules supplies the marker sequence for the
-same fixed-tree placement and repeat/SNP taxon classifier used by assemblies
-and long reads. No target taxid or calibration file is required. Results are
-written under `phylogeny/`, appended to `profile_matches.tsv`, and shown in
-`report.html`. Mixed, low-quality, sparse, or conflicting loci remain subject
-to the stricter FASTQ ambiguity and recovery thresholds; presence-only loci are
-not treated as taxonomic evidence.
+With `--database`, the original retained molecules are aligned competitively
+against observed reference amplicons. Sequence mismatches and resolvable
+repeat-length differences contribute to the shared alignment-likelihood model.
+Isolate mode combines evidence for one reference source; metagenome mode uses
+EM to estimate reference-component support. Taxon labels annotate reference
+groups without pooling their support.
+
+Results are written under `classification/`, appended to `profile_matches.tsv`,
+and shown in `report.html`. Sequence evidence can remain informative when a
+repeat count is unresolved. Low-support and indistinguishable references remain
+explicit. See [mapping classification](../concepts/mapping-classification.md).
 
 ## Exact, interval, and presence evidence
 

@@ -44,7 +44,7 @@ reserved and cannot be used as a sample ID in a batch.
 | `calls.tsv` | Compact per-locus result shared by FASTQ and assembly modes. |
 | `mlva_fingerprint.tsv` | Wide sample-by-locus repeat-count fingerprint. |
 | `mlva_fingerprint_probabilistic.tsv` | Long-form calls with confidence values. |
-| `profile_matches.tsv` | Complete machine-readable match table corresponding to the HTML results. Rows are labeled `mlva_profile` for direct repeat-profile comparisons and `sequence_reference` for combined marker references. Includes every ranked match, metadata, distances, comparison counts, and source-specific SNP/repeat fields. Header-only only when neither `--profiles` nor `--database` supplies reference matches. |
+| `profile_matches.tsv` | Complete machine-readable match table corresponding to the HTML results. Rows are labeled `mlva_profile` for direct repeat-profile comparisons and `mapping_reference` for alignment-based references. Includes every ranked match, metadata, distances, comparison counts, and source-specific support fields. Header-only only when neither `--profiles` nor `--database` supplies reference matches. |
 | `profile_match_loci.tsv` | Long-form profile comparison with one row per profile and locus, including query/profile alleles, absolute difference, match status, and profile-allele probability. |
 | `report.html` | Self-contained interpretation report with sample findings, locus-quality flags, FASTQ SPOARS/assembly-PCR concordance, gel evidence, profile matches, closest reference genomes, and technical tables. |
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
@@ -52,27 +52,6 @@ reserved and cannot be used as a sample ID in a batch.
 | `common_locus_calls.tsv` | Technology-neutral FASTQ calls with probability, margin, molecule support, and explicit called/low-coverage/unresolved/ambiguous/mixed/not-found status. |
 | `molecule_candidate_evidence.tsv` | Optional detailed competitive-alignment and VNTR evidence for each molecule/candidate state; intended for validation rather than the default report. |
 | `candidate_mapping/candidate_alignments.bam` | Optional (`--keep-intermediates`) compressed competitive candidate alignments streamed from minimap2 through htslib. It is removed during normal operation; no text candidate SAM is produced. |
-
-Multi-taxon databases additionally produce the following under `phylogeny/`:
-
-The report's taxonomic identification uses the weighted aggregate taxon ranking
-from `taxonomic_identification.tsv`. Its aggregate distance is distinct from the
-individual reference distances in `combined_marker_matches.tsv`.
-
-| File | Meaning |
-| --- | --- |
-| `taxonomic_identification.tsv` | Backward-compatible summary columns plus assignment rank/status, categorical confidence, closest and runner-up distances, margins, locus support, bootstrap stability, and input mode. |
-| `taxonomic_identification_evidence.tsv` | Ranked candidate taxa with distance, similarity (not probability), and bootstrap winner fraction. |
-| `taxonomic_identification_loci.tsv` | Per-locus recovery, taxonomic weight, favored taxon, support/conflict state, and available FASTQ depth/consensus evidence. |
-| `taxonomic_identification.json` | Complete versioned machine-readable assignment, candidate, and locus evidence object. |
-
-Illumina calls additionally always write `sample_summary.tsv`,
-`myoga_samples.csv`, and `myoga_loci.csv`.
-
-Mapping mode also writes `short_read_mapping_evidence.tsv` (state, support,
-spanning/junction/CIGAR evidence, MAPQ, candidates, and context provenance) and
-`short_read_run_metadata.json` (versions, thresholds, database, and insert-size
-estimate).
 
 ## Dataset-level MYOGA export outputs
 
@@ -91,31 +70,13 @@ rerunning sample analysis:
 | `samples_excluded.tsv` | Tree exclusions and non-fatal geography exclusions with reason codes and details. |
 | `export_summary.tsv`, `export_summary.txt` | Machine- and human-readable discovery, filtering, overlap, and output totals. |
 
-With `export-myoga --combined-markers`, the export additionally writes:
-
-| File | Meaning |
-| --- | --- |
-| `combined_marker_sequence_status.tsv` | Per-sample/locus recovery source, masking method, and explicit reason when no safe sequence was usable. |
-| `locus_tree_status.tsv` | Per-locus sample and SNP-haplotype counts, inference method, scale, alignment, and tree path. |
-| `locus_trees/LOCUS/samples.tree` | Sample-tip locus tree derived from the repeat-masked SNP tree distance; identical SNP haplotypes are restored as zero-distance tips. |
-| `locus_snp_distances.tsv` | Per-locus pairwise patristic SNP and repeat distances, locus scales, normalized components, and weighted locus distance. |
-| `combined_marker_pairwise_distances.tsv` | Component means, shared-locus counts, weights, combined distances, and overlap status for each sample pair. |
-| `combined_marker_distance_matrix.tsv` | Complete combined-marker matrix after deterministic overlap pruning. |
-| `combined_marker_nj.tree` | Neighbor-joining tree from the combined marker matrix. |
-| `combined_marker_metadata.tsv` | Metadata restricted to exactly the combined-tree tips. |
-
-See the [MYOGA export workflow](../workflows/myoga-export.md) for formulas and
-filter behavior.
-
 ## Reference builder outputs
 
 | File | Meaning |
 | --- | --- |
 | `database/LOCUS.fasta.gz` | Gzip-compressed unmasked reference amplicons accepted by `--database`. |
 | `database/reference_metadata.tsv` | Metadata normalized to a `reference_id` key. |
-| `database/reference_sequence_index.tsv` | Canonical amplicon, repeat-masked SNP, and complete marker SHA-256 keys used by the default exact-match fast path. |
-| `database/taxon_locus_discrimination.tsv` | Build-time per-locus taxonomic weight, normalized information gain, reference coverage, and supporting counts. |
-| `database/reference_assemblies.tsv` | Reference-ID, source-assembly path, and canonical whole-genome SHA-256 used for assembly-query tie breaking. |
+| `database/reference_assemblies.tsv` | Reference-ID, source-assembly path, and canonical whole-genome SHA-256 retained for source provenance. |
 | `database/competitive_mapping/candidate_contexts.fasta` | Unique observed or synthetic repeat-state sequence hypotheses used for competitive FASTQ mapping. |
 | `database/competitive_mapping/candidate_metadata.tsv` | Stable candidate IDs, repeat coordinates/states, background IDs, taxon data, and observed/synthetic status. |
 | `database/competitive_mapping/candidate_provenance.tsv` | Candidate-to-reference, taxon, and background relationships retained after sequence deduplication. |
@@ -126,61 +87,7 @@ filter behavior.
 | `manifest.json` | Completed schema-2.0 database manifest with checksums, versions, parameters, and asset paths. |
 | `reference_build_manifest.tsv` | Per-reference/locus product counts, selected product, primer errors, and exclusion status. |
 | `reference_locus_amplifiability.tsv` | Per-locus retained amplicon and genome counts, amplifiable percentage, and `NO_AMPLICONS`, `INSUFFICIENT_REFERENCES`, or `BUILT` tree status. |
-| `phylogeny/LOCUS.tree` | Portable Newick SNP tree for the locus. |
-| `phylogeny/LOCUS/references.aligned.fasta.gz` | Repeat-masked MAFFT alignment used for tree inference. |
-| `phylogeny/LOCUS/reference.mlvamaps.raxml.log` | Full RAxML-NG output for every attempted thread count. |
-| `phylogeny/reference_tree_status.tsv` | Tree completion or insufficient-reference status for every panel locus. |
-| `phylogeny/reference_marker_components.tsv` | Retained repeat measurements and the masking method for each reference marker. |
-| `phylogeny/reference_haplotype_groups.tsv` | Mapping from every reference ID to the representative repeat-masked SNP haplotype used as a tree tip. Identical SNP haplotypes are collapsed when at least two distinct haplotypes remain. |
 | `myoga_metadata.csv` | Metadata with a `genome_id` column matching Newick tip labels. |
-
-## Optional phylogenetic placement outputs
-
-When `--database` is supplied, `phylogeny/` contains one directory per reference
-locus. Each directory has the raw references, fixed MAFFT reference alignment,
-RAxML-NG tree/model artifacts, and—when a query locus
-was callable—the query FASTA, MAFFT `--add --keeplength` alignment, query-only
-aligned FASTA, and EPA-ng `epa_result.jplace`. Artifacts from a reference-build
-database are copied without rerunning RAxML-NG. For sequence-only databases
-that lack reusable trees, RAxML-NG selects a
-model independently for each locus from its `DNA` set; this can be changed with
-`--raxml-model`. EPA-ng consumes the optimized
-RAxML-NG `.bestModel` file and places the query without changing the reference
-topology. Callable loci are placed concurrently within the `--threads` CPU
-budget. Post-placement patristic matrices, cross-locus SNP/repeat aggregation,
-and neighbor joining use NumPy's compiled C/BLAS kernels rather than Python
-reference-pair loops. Summed matching distances combine the placement
-pendant/distal lengths
-with the RAxML-NG reference-tree branch lengths. The output retains both the
-highest-likelihood-weight placement distance and the expected distance across
-all candidate placements, weighted by normalized likelihood weight ratios.
-Ranking uses the likelihood-weighted sum and reports its gap to the next
-reference.
-
-Before launching alignment or placement, mlvamaps checks the persistent sequence
-index. A query matching the same reference or tied reference group at every
-configured panel locus is reported with zero distance and status
-`EXACT_AMPLICON_MATCH` or `EXACT_MARKER_MATCH`; MAFFT, RAxML-NG, and EPA-ng are
-skipped for that query. Every primer set must be callable in the query and
-represented in the index. A missing or dropped-out locus disables the exact
-fast path, and the query continues through the alignment and EPA-ng workflow.
-
-| File | Meaning |
-| --- | --- |
-| `phylogeny/locus_status.tsv` | Whether each database locus received a query placement. |
-| `phylogeny/locus_phylogenetic_distances.tsv` | Best-placement and likelihood-weighted query-to-reference patristic distances, placement entropy, EPA-ng edge, likelihood weight, pendant length, and distal length. |
-| `phylogeny/phylogenetic_matches.tsv` | Complete references ranked by likelihood-weighted summed distance across all placed loci, with raw best-placement sums and rank gaps. |
-| `phylogeny/marker_components.tsv` | Query and reference repeat counts, repeat-unit haplotypes, masking coordinates, and SNP-sequence lengths. |
-| `phylogeny/locus_marker_distances.tsv` | Per-locus EPA/tree SNP distance, direct aligned SNP divergence, exact-match status, hybrid normalized SNP distance, and explicit repeat-count distance for every reference. |
-| `phylogeny/combined_marker_matches.tsv` | References ranked by the configurable weighted sum of identity-aware hybrid SNP and repeat distances. Exact assembly-query ties are secondarily ranked by canonical genome identity, MUMmer4 `dnadiff` SNPs, indel bases, and one-to-one aligned fraction without changing the marker distance. |
-| `phylogeny/whole_genome_dnadiff.tsv` | Interpreted whole-genome identity, SNP, indel, and alignment-coverage results for tied exact references. Individual MUMmer reports are retained under `phylogeny/dnadiff/`. |
-| `phylogeny/closest_reference_bands.tsv` | Exact per-locus amplicon sizes and repeat calls for the top combined-marker reference (or top SNP-tree match when repeat-aware ranking is unavailable), used for the reference lane in the generated gel. |
-| `phylogeny/combined_markers.tree` | MYOGA-compatible Newick neighbor-joining tree inferred from the combined normalized SNP-plus-repeat distance matrix. Tip labels are reference IDs plus the query sample ID. |
-| `phylogeny/taxonomic_identification.tsv` | Automatic sample-level nearest-taxon result (`SUPPORTED`, `AMBIGUOUS`, or `INSUFFICIENT_EVIDENCE`) when reference metadata contain `taxon_id`. |
-| `phylogeny/taxonomic_identification_evidence.tsv` | Ranked per-taxon distance, coverage-adjusted score, reference count, and informative-locus evidence. |
-| `phylogeny/taxon_assignment.tsv` | Optional calibrated `POSITIVE`, `NEGATIVE`, or `INDETERMINATE` target-taxon result, prediction set, compatibility p-values, bootstrap support, and QC. Written when `--target-taxon-id` and `--taxon-calibration` are supplied. |
-| `phylogeny/taxon_assignment_candidates.tsv` | Repeat, SNP, and joint distances, conformal nonconformity/p-values, acceptance state, and nearest references for every labeled taxon. |
-| `phylogeny/taxon_assignment_loci.tsv` | Per-locus target-versus-best-alternative marker distances, margin, placement uncertainty, and favored state. |
 
 ## Compact call columns
 
@@ -240,9 +147,10 @@ fields. Empty `repeat_count` plus populated `repeat_count_min` and
 `PRESENCE_ONLY` means detected but not sized.
 
 When Illumina mode receives `--database`, complete primer-bounded locus products
-also produce the standard `phylogeny/` reference-placement outputs. Their
+also produce the standard `classification/` reference-support outputs. Their
 ranked `sequence_reference` rows are appended to `profile_matches.tsv` and
-rendered in `report.html`. Unresolved loci are omitted from sequence placement.
+rendered in `report.html`. Informative alignments can contribute to reference
+support even when the repeat count is unresolved.
 
 | File | Meaning |
 | --- | --- |
@@ -331,41 +239,13 @@ backwards compatibility.
 | `PASS` | Product found and repeat count calculated. |
 | `NOT_FOUND` | No product was eligible for the historical assembly repeat-count rule. Candidate products can still appear in `assembly_amplicons.tsv` when repeat calibration is unavailable or the raw repeat count is 100 or greater. |
 
-### Coverage-gated missing-locus distance
+### Coverage-gated missing-locus evidence
 
-For read inputs, the default gate requires at least 80% of all panel loci to
-have at least 3 informative supporting molecules each. Existing competitive
-mapping supplies this depth proxy; it is not genome-wide base coverage. When
-the gate passes, each query locus explicitly marked `not_found` with zero
-support and no query sequence adds 1 distance unit to references with a
-recorded sequence at that locus. References without that sequence get no
-penalty. This is a missing-data heuristic, not confirmed biological absence;
-reference incompleteness can also influence the result.
-
-Low or unknown coverage adds no penalty and introduces no new taxon detection
-threshold. Detected-but-unresolved, ambiguous, and low-depth calls are never
-penalized as missing. Assembly inputs do not use this gate. Configure the
-thresholds with `--missing-locus-min-depth`, `--missing-locus-min-fraction`, and
-`--missing-locus-penalty`; setting the penalty to zero restores unpenalized
-scoring. The defaults are provisional heuristic settings, not calibrated
-absence probabilities.
-
-`combined_marker_matches.tsv` and sequence-reference rows in `profile_matches.tsv`
-report `missing_locus_penalty`, `penalized_missing_loci`,
-`missing_locus_gate_passed`, `well_covered_locus_fraction`, and the three settings
-(`missing_locus_min_depth`, `missing_locus_min_fraction`,
-`missing_locus_penalty_per_locus`). The combined distance and query tree distances
-include the penalty; SNP/repeat components and compared/exact locus counts
-remain measurements of observed loci. A penalized reference is not labeled an
-exact marker match. The HTML marker-component table also shows the penalty,
-affected loci, and gate result.
-
-Automatic taxon identification adds the same reference penalty divided by the
-number of scoring loci to each reference's mean joint distance before choosing
-the nearest references per taxon. Bootstrap replicates retain that fixed
-coverage evidence while resampling observed loci. Missing loci do not increase
-recovery, discriminative-locus counts, or supporting-locus counts. The separate
-calibrated target-taxon test retains its original calibrated scoring.
+When read coverage passes the configured gate, confidently undetected loci
+contribute a reference-specific log-likelihood penalty. This heuristic does not
+establish biological absence. Assembly inputs do not use this gate. The
+classification table records the settings, affected loci and penalty; these
+penalties never enter repeat-profile trees. See [the model](../concepts/mapping-classification.md).
 
 ## Mapping classification (default with a sequence database)
 
@@ -374,6 +254,8 @@ calibrated target-taxon test retains its original calibrated scoring.
 | `mapping_reference_matches.tsv` | Ranked reference groups with joint log likelihood, model weight, EM fraction, equivalent IDs and missing-locus penalty. |
 | `molecule_reference_likelihoods.tsv.gz` | Original per-molecule/reference log scores before the sample-level missing-locus penalty. |
 | `observed_reference_vntrs.fasta` and `observed_reference_metadata.tsv` | Actual observed mapping targets and their reference/locus membership; no synthetic alleles. |
+| `assembly_reference_evidence.tsv` and `query_amplicons.fasta` | Assembly-only reference-relative mismatch counts, CIGARs, repeat differences and observed query products. |
+| `closest_reference_bands.tsv` | Amplicon sizes and repeat counts for the leading reference, used in the report gel. |
 | `classification.json` | Error-rate estimates, coverage gate, penalties, grouped results and EM objective/convergence diagnostics. |
 | `taxonomic_identification.tsv` and `taxonomic_identification_evidence.tsv` | Closest-reference identification and ranked reference-group evidence, with equivalent reference IDs, optional taxon annotations and model support. Species support is not pooled. |
 | `mlva_profiles.tree` | Newick neighbor-joining tree of observed repeat profiles; no classification likelihoods or absence penalties enter it. |
@@ -385,10 +267,8 @@ The distance is negative joint log likelihood, not the legacy normalized
 SNP/repeat distance. In mixed mode rank follows the fitted component fraction,
 so distance alone need not be monotonic in rank. `equivalent_references` lists
 IDs the evidence cannot distinguish; `reference_id` is only a representative.
-For library compatibility, the result dictionary's `combined_marker_matches`
-key points to the mapping table. Legacy sequence-tree files are written only
-with `--phylogenetics`; use `mapping_reference_matches` to identify the new table
-explicitly. The old calibrated target test remains a separate output.
+Use the `mapping_reference_matches` result key; legacy combined-marker
+keys and phylogenetic typing outputs are removed.
 
 See [mapping classification and profile trees](../concepts/mapping-classification.md)
 for the likelihood model, defaults, interpretation, and multi-sample MYOGA export.

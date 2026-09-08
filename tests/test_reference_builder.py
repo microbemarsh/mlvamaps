@@ -10,7 +10,6 @@ import mlvamaps.reference_builder as reference_builder
 from mlvamaps.io import read_fasta
 from mlvamaps.reference_builder import build_reference_database
 
-from test_phylogeny import _fake_mafft, _fake_raxml_ng
 
 
 def _rows(path: Path, delimiter: str = "\t") -> list[dict[str, str]]:
@@ -115,16 +114,11 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
         metadata,
         tmp_path / "reference",
         threads=1,
-        min_references_per_tree=2,
-        mafft_bin=str(_fake_mafft(tmp_path)),
-        raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
     )
 
     assert len(list(read_fasta(result["database"] / "L1.fasta.gz"))) == 3
     assert len(list(read_fasta(result["database"] / "L2.fasta.gz"))) == 2
-    assert (result["phylogeny"] / "L1" / "reference_tree.nwk").exists()
-    assert (result["phylogeny"] / "L2" / "reference_tree.nwk").exists()
-    assert (result["phylogeny"] / "L1.tree").exists()
+    assert not (result["outdir"] / "phylogeny").exists()
     assert len(_rows(result["reference_assemblies"])) == 3
     assert _rows(result["reference_assemblies"])[0]["assembly_sha256"]
     manifest = _rows(result["build_qc"])
@@ -153,9 +147,8 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
         "long": {"k": 11, "w": 5},
         "short": {"k": 21, "w": 11},
     }
-    assert build_manifest["phylogeny"]["sequence_type"] == (
-        "real_observed_locus_sequences_only"
-    )
+    assert build_manifest["classification"]["method"] == "mapping_em"
+    assert "phylogeny" not in build_manifest
     locus_summary = _rows(result["locus_amplifiability"])
     assert list(locus_summary[0]) == reference_builder.REFERENCE_LOCUS_AMPLIFIABILITY_FIELDS
     assert [(row["locus_id"], row["valid_amplicons"], row["amplifiable"]) for row in locus_summary] == [
@@ -163,7 +156,7 @@ def test_build_reference_database_from_assemblies_and_metadata(tmp_path, monkeyp
         ("L2", "2", "TRUE"),
     ]
     assert [row["percent_genomes_amplifiable"] for row in locus_summary] == ["100.0", "66.7"]
-    assert {row["tree_status"] for row in locus_summary} == {"BUILT"}
+    assert {row["reference_status"] for row in locus_summary} == {"BUILT"}
 
 
 def test_empty_reference_database_skips_phylogeny_and_preserves_qc_outputs(
@@ -172,10 +165,7 @@ def test_empty_reference_database_skips_phylogeny_and_preserves_qc_outputs(
     assemblies, primers, metadata = _reference_inputs(tmp_path)
     _mock_empty_extraction(monkeypatch)
 
-    def unexpected_phylogeny(*args, **kwargs):
-        pytest.fail("phylogeny construction must not run without locus FASTAs")
 
-    monkeypatch.setattr(reference_builder, "build_reference_phylogenies", unexpected_phylogeny)
 
     result = build_reference_database(
         assemblies,
@@ -187,7 +177,7 @@ def test_empty_reference_database_skips_phylogeny_and_preserves_qc_outputs(
     )
 
     assert result["status"] == "NO_USABLE_LOCI"
-    assert result["phylogeny"] is None
+    assert "phylogeny" not in result
     assert not list(result["database"].glob("*.fasta*"))
     assert result["manifest"].is_file()
     assert result["metadata"].is_file()
@@ -201,15 +191,15 @@ def test_empty_reference_database_skips_phylogeny_and_preserves_qc_outputs(
             "genomes_failing_product_constraints": "1",
         "percent_genomes_amplifiable": "0.0",
         "amplifiable": "FALSE",
-        "tree_status": "NO_AMPLICONS",
+        "reference_status": "NO_AMPLICONS",
     }
     assert (
-        "No usable reference amplicons were recovered; skipping phylogeny construction."
+        "No usable reference amplicons were recovered"
         in capsys.readouterr().err
     )
 
 
-def test_unexpected_phylogeny_failure_is_not_swallowed(tmp_path, monkeypatch):
+def test_unexpected_mapping_resource_failure_is_not_swallowed(tmp_path, monkeypatch):
     assemblies, primers, metadata = _reference_inputs(tmp_path)
     _mock_empty_extraction(monkeypatch)
     monkeypatch.setattr(
@@ -228,12 +218,12 @@ def test_unexpected_phylogeny_failure_is_not_swallowed(tmp_path, monkeypatch):
         ],
     )
 
-    def fail_phylogeny(*args, **kwargs):
-        raise RuntimeError("unrelated tree failure")
+    def fail_mapping(*args, **kwargs):
+        raise RuntimeError("unrelated mapping failure")
 
-    monkeypatch.setattr(reference_builder, "build_reference_phylogenies", fail_phylogeny)
 
-    with pytest.raises(RuntimeError, match="unrelated tree failure"):
+    monkeypatch.setattr(reference_builder, "build_mapping_resources", fail_mapping)
+    with pytest.raises(RuntimeError, match="unrelated mapping failure"):
         build_reference_database(
             assemblies,
             primers,
@@ -243,7 +233,7 @@ def test_unexpected_phylogeny_failure_is_not_swallowed(tmp_path, monkeypatch):
         )
 
 
-def test_valid_amplicon_below_tree_minimum_remains_amplifiable(tmp_path, monkeypatch):
+def test_single_reference_amplicon_is_available_for_classification(tmp_path, monkeypatch):
     assemblies, primers, metadata = _reference_inputs(tmp_path)
     _mock_empty_extraction(monkeypatch)
     monkeypatch.setattr(
@@ -261,11 +251,6 @@ def test_valid_amplicon_below_tree_minimum_remains_amplifiable(tmp_path, monkeyp
             }
         ],
     )
-    monkeypatch.setattr(
-        reference_builder,
-        "build_reference_phylogenies",
-        lambda *args, **kwargs: {"phylogeny": Path(args[1])},
-    )
 
     result = build_reference_database(
         assemblies,
@@ -273,14 +258,13 @@ def test_valid_amplicon_below_tree_minimum_remains_amplifiable(tmp_path, monkeyp
         metadata,
         tmp_path / "reference",
         threads=1,
-        min_references_per_tree=3,
     )
 
     row = _rows(result["locus_amplifiability"])[0]
     assert row["valid_amplicons"] == "1"
     assert row["amplifiable"] == "TRUE"
-    assert row["tree_status"] == "INSUFFICIENT_REFERENCES"
-    assert result["status"] == "PARTIAL"
+    assert row["reference_status"] == "BUILT"
+    assert result["status"] == "BUILT"
 
 
 def test_cli_exposes_reference_builder():
@@ -298,12 +282,12 @@ def test_cli_exposes_reference_builder():
         ]
     )
     assert args.multiple_products == "exclude"
-    assert args.min_references_per_tree == 3
-    assert args.raxml_model == "DNA"
+    assert not hasattr(args, "min_references_per_tree")
+    assert not hasattr(args, "raxml_model")
     assert args.quiet is False
 
 
-def test_reference_build_keeps_global_threads_but_pins_raxml_in_manifest(
+def test_reference_build_keeps_global_threads_for_mapping_resources(
     tmp_path, monkeypatch
 ):
     assemblies, primers, metadata = _reference_inputs(tmp_path)
@@ -323,20 +307,16 @@ def test_reference_build_keeps_global_threads_but_pins_raxml_in_manifest(
         observed["mapping_threads"] = kwargs["threads"]
         return {}
 
-    def fake_phylogeny(database, outdir, loci, threads, **kwargs):
-        observed["phylogeny_threads"] = threads
-        return {"phylogeny": Path(outdir)}
 
     monkeypatch.setattr(reference_builder, "build_mapping_resources", fake_resources)
-    monkeypatch.setattr(reference_builder, "build_reference_phylogenies", fake_phylogeny)
     result = build_reference_database(
         assemblies, primers, metadata, tmp_path / "reference", threads=32
     )
 
-    assert observed == {"mapping_threads": 32, "phylogeny_threads": 32}
+    assert observed == {"mapping_threads": 32}
     manifest = json.loads(result["manifest"].read_text())
     assert manifest["build_threads"] == 32
-    assert manifest["phylogeny"]["raxml_ng_threads_per_process"] == 1
+    assert "phylogeny" not in manifest
 
 
 def test_cli_help_lists_only_supported_commands(capsys):
@@ -345,7 +325,7 @@ def test_cli_help_lists_only_supported_commands(capsys):
     with pytest.raises(SystemExit, match="0"):
         build_parser().parse_args(["--help"])
     help_text = capsys.readouterr().out
-    assert "{call,export-myoga,build-reference,calibrate-taxa}" in help_text
+    assert "{call,export-myoga,build-reference}" in help_text
 
 
 def test_build_reference_accepts_primers_and_taxids_spelling():
@@ -411,9 +391,6 @@ def test_reference_extraction_uses_multiple_processes_and_reports_progress(
         metadata,
         tmp_path / "reference",
         threads=2,
-        min_references_per_tree=2,
-        mafft_bin=str(_fake_mafft(tmp_path)),
-        raxml_ng_bin=str(_fake_raxml_ng(tmp_path)),
         show_progress=True,
     )
 
@@ -421,4 +398,4 @@ def test_reference_extraction_uses_multiple_processes_and_reports_progress(
     progress = capsys.readouterr().err
     assert "with 2 worker(s)" in progress
     assert "Extracted assemblies: 2/2 (100.0%)" in progress
-    assert "Processed tree loci: 1/1 (100.0%)" in progress
+    assert "Processed tree loci" not in progress

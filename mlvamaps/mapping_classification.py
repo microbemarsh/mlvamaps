@@ -20,11 +20,67 @@ from .candidate_contexts import CandidateContext, repeat_interval
 from .io import write_fasta, write_tsv
 from .minimap_mapping import map_reads_to_candidates_bam
 from .models import Locus
-from .phylogeny import (
-    MISSING_LOCUS_FIELDS, _coverage_gated_missing_loci,
-    read_reference_metadata, read_sequence_database,
-)
+from .reference_database import read_reference_metadata, read_sequence_database
 from .repeat_calibration import assembly_equivalent_product_allele, repeat_unit_length
+
+MISSING_LOCUS_FIELDS = [
+    "missing_locus_penalty",
+    "penalized_missing_loci",
+    "missing_locus_gate_passed",
+    "well_covered_locus_fraction",
+    "missing_locus_min_depth",
+    "missing_locus_min_fraction",
+    "missing_locus_penalty_per_locus",
+]
+
+
+def _coverage_gated_missing_loci(
+    requested_loci: set[str],
+    query_sequences: dict[str, str],
+    locus_quality: dict[str, dict[str, object]] | None,
+    input_mode: str,
+    min_depth: float,
+    min_fraction: float,
+    penalty: float,
+) -> tuple[set[str], dict]:
+    """Use molecule support as a coverage proxy, never as confirmed absence."""
+    if not math.isfinite(min_depth) or min_depth <= 0:
+        raise ValueError("Missing-locus minimum depth must be finite and positive")
+    if not math.isfinite(min_fraction) or not 0 < min_fraction <= 1:
+        raise ValueError("Missing-locus minimum fraction must be in (0, 1]")
+    if not math.isfinite(penalty) or penalty < 0:
+        raise ValueError("Missing-locus penalty must be finite and non-negative")
+    covered = set()
+    missing = set()
+    if input_mode in {"fastq", "illumina"}:
+        for locus_id in requested_loci:
+            quality = (locus_quality or {}).get(locus_id, {})
+            status = str(quality.get("detection_status", quality.get("status", ""))).lower()
+            try:
+                depth = float(quality.get("depth", ""))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(depth) or depth < 0:
+                continue
+            if status == "not_found":
+                if depth == 0 and not query_sequences.get(locus_id):
+                    missing.add(locus_id)
+            elif depth >= min_depth and status in {
+                "called", "pass", "low_coverage", "low_depth", "ambiguous",
+                "mixed", "multiple_variants", "detected_unresolved",
+                "present_count_unknown", "present",
+            }:
+                covered.add(locus_id)
+    fraction = len(covered) / len(requested_loci) if requested_loci else 0.0
+    passed = fraction >= min_fraction
+    return (missing if passed and penalty > 0 else set()), {
+        "missing_locus_gate_passed": "yes" if passed else "no",
+        "well_covered_locus_fraction": f"{fraction:.6f}",
+        "missing_locus_min_depth": min_depth,
+        "missing_locus_min_fraction": min_fraction,
+        "missing_locus_penalty_per_locus": penalty,
+    }
+
 
 _CS = re.compile(r":(\d+)|=([A-Za-z]+)|\*([A-Za-z]{2})|\+([A-Za-z]+)|-([A-Za-z]+)")
 _CIGAR = re.compile(r"(\d+)([MIDNSHP=X])")
@@ -318,7 +374,6 @@ def run_mapping_classification(
     missing_locus_min_depth=3.0, missing_locus_min_fraction=0.8,
     missing_locus_penalty=1.0, keep_alignments=False,
     query_repeat_counts=None,
-    legacy_phylogenetics=False,
 ):
     output = Path(outdir) / "classification"
     output.mkdir(parents=True, exist_ok=True)
@@ -345,6 +400,28 @@ def run_mapping_classification(
             bam.unlink(missing_ok=True)
     else:
         alignments = _assembly_alignments(query_sequences or {}, contexts)
+        # Keep the observed products and reference-relative evidence reviewable
+        # independently of the final reference ranking.
+        write_fasta(sorted((query_sequences or {}).items()), output / "query_amplicons.fasta")
+        context_by_id = {context.candidate_id: context for context in contexts}
+        assembly_evidence = []
+        for alignment in alignments:
+            context = context_by_id[alignment.candidate_id]
+            statistics = alignment_statistics(alignment, context)
+            assembly_evidence.append({
+                "locus_id": alignment.locus_id,
+                "reference_ids": ";".join(members[alignment.candidate_id]),
+                "candidate_id": alignment.candidate_id,
+                "query_repeat_count": (query_repeat_counts or {}).get(alignment.locus_id, ""),
+                "reference_repeat_count": context.repeat_count,
+                "cigar": alignment.cigar,
+                **statistics,
+            })
+        write_tsv(assembly_evidence, output / "assembly_reference_evidence.tsv", [
+            "locus_id", "reference_ids", "candidate_id", "query_repeat_count",
+            "reference_repeat_count", "cigar", "matches", "mismatches",
+            "insertions", "deletions", "outside_bases", "repeat_delta",
+        ])
     likelihoods, errors = molecule_log_likelihoods(alignments, contexts, members, repeat_scale)
     reference_loci = defaultdict(set)
     for context in contexts:
@@ -400,13 +477,15 @@ def run_mapping_classification(
     bands_path = output / "closest_reference_bands.tsv"
     write_tsv(bands, bands_path, ["reference_id", "locus_id", "product_size_bp", "repeat_count"])
     paths = {"classification": output, "mapping_reference_matches": match_path,
-        "combined_marker_matches": match_path, "closest_reference_bands": bands_path,
+        "closest_reference_bands": bands_path,
         "mapping_likelihoods": likelihood_path}
+    if reads1 is None:
+        paths["assembly_reference_evidence"] = output / "assembly_reference_evidence.tsv"
+        paths["classification_query_amplicons"] = output / "query_amplicons.fasta"
     paths.update(write_profile_tree(
         contexts, members, query_repeat_counts or {}, matches, sample_id, output, metadata,
     ))
     diagnostics.update({"method": "mapping_em", "error_rates": errors,
-        "legacy_phylogenetics": legacy_phylogenetics,
         "repeat_scale": repeat_scale, "unclassified_fraction": unknown_fraction,
         "coverage_gate": gate, "reference_penalties": penalties, "groups": groups})
     summary_path = output / "classification.json"
@@ -474,7 +553,7 @@ def write_profile_tree(contexts, members, query_counts, matches, sample_id, outp
     No EM weights or inferred absences enter these pairwise distances. Larger
     sample collections use the existing export-myoga shared-overlap workflow.
     """
-    from .phylogeny import neighbor_joining_tree_from_matrix
+    from .profile_tree import neighbor_joining_tree_from_matrix
 
     called = {}
     for locus, value in query_counts.items():

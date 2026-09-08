@@ -21,14 +21,6 @@ mlvamaps export-myoga --results results/ --metadata metadata.tsv \
 | `--min-pairwise-loci COUNT` | `1` | Required shared exact-call count for a supported pair. |
 | `--min-pairwise-fraction FRACTION` | `0` | No fractional completeness requirement; pairs must still share at least `--min-pairwise-loci` exact calls. |
 | `--distance {repeat,categorical}` | `repeat` | Metric used for the square matrix and relatedness tree; both remain in the pairwise table. |
-| `--combined-markers` | off | Also recover accepted amplicons, infer per-locus repeat-masked SNP trees, and write a combined SNP/repeat tree. |
-| `--loci TSV` | unset | Original rich locus panel used to mask retained amplicons when precomputed masked queries are absent. |
-| `--phylogeny-snp-weight FLOAT` | `1.0` | Weight of normalized per-locus SNP-tree distance in the combined marker distance. |
-| `--phylogeny-repeat-weight FLOAT` | `1.0` | Weight of normalized per-locus repeat distance in the combined marker distance. |
-| `-t`, `--threads` | `32` | MAFFT/RAxML-NG CPU budget for combined-marker inference; `0` uses all CPUs. |
-| `--mafft-bin` | `mafft` | MAFFT executable used for retrospective locus alignments. |
-| `--raxml-ng-bin` | `raxml-ng` | RAxML-NG executable used when a locus has at least four SNP haplotypes. |
-| `--raxml-model` | `DNA` | RAxML-NG model or model-selection set. |
 | `-o`, `--output DIR` | required | Export directory. |
 | `--force` | off | Replace existing export files. |
 
@@ -47,22 +39,18 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `-i`, `--input` | Required | Input FASTA/FASTQ path or directory; `sr` selects paired/single Illumina input. |
 | `-o`, `--output`, `--outdir` | `results` | Output directory. |
 | `--sample-id` | Input filename | Sample identifier. |
-| `-t`, `--threads` | `32` | CPU budget shared across concurrent EPA-ng locus workers; `0` uses all CPUs. |
+| `-t`, `--threads` | `32` | Overall CPU budget shared across active workers; `0` uses all CPUs. |
 | `--quiet` | Off | Suppress live progress. |
 | `--max-primer-mismatches` | `2` | Maximum edit distance allowed independently for each primer during Sassy-backed paired-primer detection. Searches proceed through error rounds 0 to this value. |
 | `--profiles` | None | Known MLVA profile TSV. |
-| `--database` | None | Reference-build directory whose fixed trees are reused, or a sequence-only database built on demand. |
+| `--database` | None | Completed reference-build directory containing observed amplicons and mapping assets. |
 | `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
-| `--raxml-model` | `DNA` | Model-selection set when a sequence-only database requires new locus trees; ignored for reusable trees. |
-| `--phylogenetics` | Off | Also run legacy sequence phylogenetics; mapping classification and profile `.tree` output do not require it. |
 | `--classification-repeat-scale` | `1.0` | Repeat-count discrepancy scale in mapping log likelihoods, in repeat units. |
-| `--phylogeny-snp-weight` | `1.0` | Weight of normalized SNP-tree distance in combined marker ranking. |
-| `--phylogeny-repeat-weight` | `1.0` | Weight of normalized tandem-repeat distance in combined marker ranking. |
 | `--missing-locus-min-depth` | `3.0` | Minimum informative molecule support at a locus to count toward the coverage gate (read inputs only). |
 | `--missing-locus-min-fraction` | `0.8` | Required fraction of all panel loci meeting that depth, in `(0, 1]`. |
-| `--missing-locus-penalty` | `1.0` | Added combined distance per undetected query locus recorded in a reference once the gate passes; `0` disables. |
+| `--missing-locus-penalty` | `1.0` | Log-likelihood penalty per undetected query locus recorded in a reference once the gate passes; `0` disables. |
 
-## MLVA-only target-taxon assignment
+## Alignment-based reference assignment
 
 Reference identification runs automatically with `--database`; taxon metadata
 are optional annotations. Classification uses observed-reference mapping likelihoods
@@ -71,33 +59,8 @@ likelihoods for one source; `--sample-mode metagenome` (the historical default)
 uses EM. `--no-taxon-identification` disables identification summaries while retaining
 reference ranking. `--taxon-min-loci` overrides the default two-locus requirement
 for model-supported classification; low-confidence candidates remain visible.
-The nearest-reference `--taxon-k` and the older bootstrap/recovery thresholds
-are not used by the mapping classifier. See
-[mapping classification](../concepts/mapping-classification.md).
-
-The following target-specific conformal mode is retained as an advanced,
-backward-compatible validation utility:
-
-Target assignment requires `--phylogenetics`, `--database`, `--target-taxon-id`, and
-`--taxon-calibration`. The reference metadata must label both target and
-near-neighbor references with `taxon_id`.
-
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `--target-taxon-id ID` | None | Taxon label to test. |
-| `--taxon-calibration JSON` | None | Signed, versioned conformal calibration artifact. |
-| `--taxon-alpha` | Artifact value | Prediction-set significance level. |
-| `--taxon-min-loci` | Artifact value | Minimum callable loci. |
-| `--taxon-min-locus-fraction` | `0.8` | Minimum panel fraction callable against every candidate taxon. |
-| `--taxon-bootstrap-replicates` | `200` | Deterministic informative-locus bootstrap replicates. |
-| `--taxon-min-bootstrap-support` | `0.90` | Winner fraction required for automatic species assignment and target-favoring fraction required for `POSITIVE`. |
-| `--taxon-max-placement-entropy` | None | Optional maximum mean EPA-ng placement entropy. |
-| `--taxon-min-placement-lwr` | None | Optional minimum median best-placement LWR. |
-
-Build an artifact from audited leave-one-reference-out marker distances with
-`mlvamaps calibrate-taxa`. See
-[MLVA-only target-taxon assignment](../concepts/taxon-assignment.md) for the
-input contract, decision semantics, and validation requirements.
+See [mapping classification](../concepts/mapping-classification.md) for the
+model and [migration](../workflows/emu-migration.md) for removed options.
 
 ## FASTQ filtering
 
@@ -156,16 +119,8 @@ summary under `taxon_screen/`.
 Accurate long-read input competitively maps retained reads to database or
 synthetic locus products, records presence independently from genotype, and
 uses primer pairing as a specificity fallback. `--recruitment-database` uses canonical
-products from a reference build without also requesting phylogenetic
-placement.
-
-## Deprecated clustering compatibility
-
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `--min-cluster-size` | `1` | Ignored compatibility option; mapping groups retain low-depth evidence. |
-| `--cluster-min-identity` | `0.97` | Ignored compatibility option; FASTQ sequence clustering is no longer used. |
-| `--vsearch-bin` | `vsearch` | Ignored compatibility option retained for older command lines. |
+products from a reference build without also requesting reference
+classification.
 
 ## Variant mixture estimation
 
@@ -230,21 +185,17 @@ retain the original detection uncertainty.
 ## External executable overrides
 
 - `--minimap2-bin`
-- `--mafft-bin`
-- `--raxml-ng-bin`
-- `--epa-ng-bin`
+- `--deacon-bin`
 
 These options are useful for testing, containers, and installations whose
 executables are not on the default `PATH`. Sassy is resolved from `PATH`; set
-the `SASSY_BIN` environment variable when its executable is elsewhere. The
-hidden legacy executable option is retained only for command-line compatibility
-and does not select or invoke another primer-search tool.
+the `SASSY_BIN` environment variable when its executable is elsewhere.
 
 ## Reference database builder
 
 `mlvamaps build-reference --taxids-csv taxids.csv -p PANEL.csv -o OUT`
 downloads references, extracts every locus, writes amplifiability summaries,
-builds real-reference MAFFT/RAxML-NG assets, generates deduplicated competitive
+generates deduplicated competitive
 allele contexts, builds short- and long-read minimap2 indexes, and creates a
 broad real-genome Deacon recruitment index. Local assemblies remain supported
 with `-i DIR --metadata metadata.csv`. The `-p` option auto-detects minimal
@@ -254,13 +205,5 @@ primer lists and rich locus panels.
 | --- | --- | --- |
 | `--multiple-products` | `exclude` | For equally best products, exclude the assembly/locus pair, choose the deterministic best candidate, or fail. |
 | `--max-primer-mismatches` | `2` | Maximum Sassy-backed edit distance allowed independently for each primer. |
-| `--min-references-per-tree` | `3` | Minimum references required to infer a locus tree. |
-| `-t`, `--threads` | `32` | Overall build CPU budget, including parallel assembly extraction and MAFFT; `0` uses all CPUs. Each RAxML-NG process uses one internal thread for reliable short-locus inference. |
+| `-t`, `--threads` | `32` | Overall build CPU budget, including parallel assembly extraction and mapping indexes; `0` uses all CPUs. |
 | `--quiet` | off | Suppress per-assembly and per-locus progress updates. |
-| `--raxml-model` | `DNA` | Model-selection set used independently for each reference tree. |
-
-RAxML-NG 2.x selects a nucleotide model independently for each locus from the
-default `DNA` model set. Pass an explicit model such as `--raxml-model GTR+G`
-for reproducibility or compatibility with older RAxML-NG releases. Model
-choice cannot resolve references whose retained SNP sequences are exactly
-identical.

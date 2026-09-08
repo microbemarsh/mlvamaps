@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import csv
-import inspect
-import shutil
-from pathlib import Path
 
 import pytest
 
@@ -11,7 +8,7 @@ from mlvamaps import sequence
 from mlvamaps.bayesian_caller import call_loci
 from mlvamaps.assembly_call import (
     _primer_match_display,
-    amplirust_rows_to_products,
+    pcr_rows_to_products,
     assembly_call_rows,
     build_minimap2_command,
     legacy_amplicon_bounds,
@@ -21,19 +18,18 @@ from mlvamaps.assembly_call import (
     run_minimap2_depth,
 )
 from mlvamaps.calling import legacy_round_repeat_count
-from mlvamaps.cli import build_parser, main
+from mlvamaps.cli import build_parser
 from mlvamaps.alignment import alignment_metrics
-from mlvamaps.in_silico_pcr import build_amplirust_command, expected_amplicon_bounds, write_amplirust_primers
+from mlvamaps.in_silico_pcr import expected_amplicon_bounds, write_primer_pairs
 from mlvamaps.io import read_loci
 from mlvamaps.mapping import (
     build_minimap2_map_command,
     parse_minimap2_sam,
 )
 from mlvamaps.mixture import estimate_variant_mixtures
-from mlvamaps.models import Locus, ReadPrediction, ReadRecord, RepeatFeature
+from mlvamaps.models import Locus, ReadPrediction, RepeatFeature
 from mlvamaps.ml_classifier import predict_read_alleles
 from mlvamaps.pipeline import run_call
-from mlvamaps.primers import read_primer_pairs
 from mlvamaps.profile_matching import (
     match_profiles,
     sequence_reference_match_rows,
@@ -105,7 +101,8 @@ def test_sequence_reference_matches_are_available_in_profile_match_schema():
                 "sample_id": "sample",
                 "reference_id": "REF_A",
                 "rank": "1",
-                "combined_marker_distance": "0.125",
+                "distance": "0.125",
+                "locus_balanced_fraction": 0.75,
                 "total_normalized_snp_distance": "0.1",
                 "total_repeat_count_distance": "0.5",
                 "compared_loci": "4",
@@ -117,7 +114,7 @@ def test_sequence_reference_matches_are_available_in_profile_match_schema():
         ]
     )
 
-    assert rows[0]["match_type"] == "sequence_reference"
+    assert rows[0]["match_type"] == "mapping_reference"
     assert rows[0]["profile_id"] == "REF_A"
     assert rows[0]["reference_id"] == "REF_A"
     assert rows[0]["distance"] == "0.125"
@@ -150,57 +147,6 @@ def make_repeat_feature(read_id, sequence, repeat_count=4):
     )
 
 
-def write_fake_amplirust(tmp_path):
-    executable = tmp_path / "amplirust"
-    executable.write_text(
-        """#!/usr/bin/env python3
-import csv, pathlib, sys
-args = sys.argv[1:]
-def value(flag): return args[args.index(flag) + 1]
-def rc(seq): return seq.translate(str.maketrans('ACGT', 'TGCA'))[::-1]
-records = []
-name = None
-parts = []
-for line in pathlib.Path(value('--input')).read_text().splitlines():
-    if line.startswith('>'):
-        if name is not None: records.append((name, ''.join(parts)))
-        name = line[1:].split()[0]; parts = []
-    else: parts.append(line.strip())
-if name is not None: records.append((name, ''.join(parts)))
-with pathlib.Path(value('--primers')).open() as handle:
-    primers = list(csv.DictReader(handle))
-products = []
-for reference, original in records:
-    case = 0
-    for primer in primers:
-        for strand, sequence in [('+', original), ('-', rc(original))]:
-            fwd = sequence.find(primer['forward'])
-            rev_seq = rc(primer['reverse'])
-            rev = sequence.find(rev_seq, fwd + len(primer['forward'])) if fwd >= 0 else -1
-            if fwd < 0 or rev < 0: continue
-            end = rev + len(rev_seq); full_len = end - fwd
-            min_len = int(value('--min-len')); max_len = int(value('--max-len'))
-            if not min_len <= full_len <= max_len: continue
-            case += 1
-            start0, end0 = (fwd, end) if strand == '+' else (len(original) - end, len(original) - fwd)
-            suffix = '_rc' if strand == '-' else ''
-            amplicon_id = f"{reference}:{primer['name']}{suffix}:{case}"
-            product = sequence[fwd:end]
-            if product.count('N') / len(product) > float(value('--max-n-fraction')): continue
-            products.append((amplicon_id, reference, primer['name'], product, full_len, fwd, rev, strand, start0, end0, len(primer['forward']), len(rev_seq)))
-            break
-with pathlib.Path(value('--output')).open('w') as fasta:
-    for row in products:
-        fasta.write(f'>{row[0]}\\tpos={row[8]}-{row[9]}\\tstrand={row[7]}\\tlen={row[4]}\\n{row[3]}\\n')
-header = 'amplicon_id\treference_id\tsource_file\tprimer_name\tproduct_len\tfull_len\tfwd_start\tfwd_end\tfwd_mismatches\tfwd_identity\tfwd_cigar\trev_start\trev_end\trev_mismatches\trev_identity\trev_cigar\tstrand\tis_circular_wrap\tproduct_seq\\n'
-with pathlib.Path(value('--tsv')).open('w') as stats:
-    stats.write(header)
-    for row in products:
-        stats.write(f'{row[0]}\t{row[1]}\tfake.fa\t{row[2]}\t{len(row[3])}\t{row[4]}\t{row[5]}\t{row[5] + row[10]}\t0\t1.0\t{row[10]}=\t{row[6]}\t{row[6] + row[11]}\t0\t1.0\t{row[11]}=\t{row[7]}\tfalse\t{row[3]}\\n')
-"""
-    )
-    executable.chmod(0o755)
-    return executable
 
 
 def test_parasail_global_alignment_retains_indels_and_substitutions():
@@ -332,30 +278,18 @@ def test_dropout_is_reported(tmp_path):
     assert easy_calls["VNTR_01"]["present"] == "no"
 
 
-def test_legacy_amplirust_primer_export_and_removed_command(tmp_path):
+def test_primer_export_and_expected_bounds(tmp_path):
     loci_path, _profiles = write_panel(tmp_path)
     loci = read_loci(loci_path)
-    primers = write_amplirust_primers(loci, tmp_path / "amplirust_primers.csv")
+    primers = write_primer_pairs(loci, tmp_path / "primer_pairs.csv")
     primer_rows = list(csv.DictReader(primers.open()))
     assert primer_rows[0] == {"name": "VNTR_01", "forward": "ACGTTGCAAC", "reverse": "TGCATGCAAA"}
     assert expected_amplicon_bounds(loci) == (30, 90)
 
-    with pytest.raises(RuntimeError, match="replaced by mlvamaps"):
-        build_amplirust_command(
-            input_path="assembly.fasta",
-            primers_path=primers,
-            output_fasta=tmp_path / "products.fasta",
-            stats_tsv=tmp_path / "stats.tsv",
-            min_len=30,
-            max_len=90,
-            max_errors=3,
-            circular=True,
-        )
 
 
 
 def test_assembly_call_from_primer_products(tmp_path):
-    amplirust = write_fake_amplirust(tmp_path)
     primers = tmp_path / "primers.tsv"
     primers.write_text(
         "locus_id\tforward_primer\treverse_primer\trepeat_unit_length_bp\texpected_product_size_bp\tnominal_repeat_units\n"
@@ -382,7 +316,6 @@ def test_assembly_call_from_primer_products(tmp_path):
         sample_id="ASM1",
         alignments_path=str(sam),
         profiles_path=str(profiles),
-        amplirust_bin=str(amplirust),
     )
 
     calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
@@ -466,7 +399,7 @@ def test_legacy_rounding_and_mismatch_round_product_selection():
     assert row["status"] == "PASS"
 
 
-def test_amplirust_products_use_mlva_finder_size_formula_for_primer_indels():
+def test_pcr_products_use_mlva_finder_size_formula_for_primer_indels():
     locus = Locus(
         locus_id="VNTR",
         forward_primer="AAAA",
@@ -492,7 +425,7 @@ def test_amplirust_products_use_mlva_finder_size_formula_for_primer_indels():
         "product_seq": "A" * 20,
     }
 
-    product = amplirust_rows_to_products(
+    product = pcr_rows_to_products(
         [row], [locus], "sample", enforce_locus_bounds=False
     )[0]
 
@@ -535,7 +468,6 @@ def test_legacy_selection_uses_last_matching_contig_and_forward_precedence():
 
 
 def test_assembly_call_allows_n_bases_inside_legacy_product(tmp_path):
-    amplirust = write_fake_amplirust(tmp_path)
     primers = tmp_path / "primers.tsv"
     primers.write_text(
         "locus_id\tforward_primer\treverse_primer\trepeat_unit_length_bp\t"
@@ -551,7 +483,6 @@ def test_assembly_call_allows_n_bases_inside_legacy_product(tmp_path):
         primers_path=str(primers),
         outdir=str(tmp_path / "results"),
         sample_id="sample",
-        amplirust_bin=str(amplirust),
     )
 
     call = read_tsv(result["calls"])[0]
@@ -717,7 +648,6 @@ def test_read_predictor_retains_unrounded_measurement():
 
 
 def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
-    amplirust = write_fake_amplirust(tmp_path)
     primers = tmp_path / "primers.tsv"
     primers.write_text(
         "locus_id\tforward_primer\treverse_primer\trepeat_unit_length_bp\texpected_product_size_bp\tnominal_repeat_units\n"
@@ -731,7 +661,6 @@ def test_assembly_report_uses_default_band_intensity_without_depth(tmp_path):
         primers_path=str(primers),
         outdir=str(tmp_path / "assembly_no_depth"),
         sample_id="ASM_NO_DEPTH",
-        amplirust_bin=str(amplirust),
     )
     report = result["report"].read_text()
     assert "uniform default intensity" in report
@@ -754,7 +683,6 @@ def test_cli_has_conventional_output_and_thread_options():
     )
     assert default_call_args.outdir == "results"
     assert default_call_args.threads == 32
-    assert default_call_args.min_cluster_size == 1
     assert default_call_args.min_qscore == 15.0
     assert default_call_args.sample_mode == "metagenome"
     assert default_call_args.recruitment_preset is None
@@ -764,10 +692,7 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.recruitment_database is None
     assert default_call_args.min_secondary_reads == 2
     assert default_call_args.max_confidence_depth == 25.0
-    assert default_call_args.cluster_min_identity == 0.97
     assert default_call_args.min_mixture_fraction == 0.01
-    assert default_call_args.vsearch_bin == "vsearch"
-    assert default_call_args.amplirust_bin == "amplirust"
     assert default_call_args.minimap2_bin == "minimap2"
     assert default_call_args.no_locus_mapping is False
     assert default_call_args.min_mapping_quality == 0
@@ -776,31 +701,7 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.min_snp_alternate_reads == 2
     assert default_call_args.min_snp_frequency == 0.2
     assert default_call_args.max_primer_mismatches == 2
-    assert default_call_args.raxml_model == "DNA"
-
-    compatibility_args = parser.parse_args(
-        [
-            "call",
-            "-p",
-            "primers.tsv",
-            "-i",
-            "sample.fastq.gz",
-            "--min-cluster-size",
-            "99",
-            "--cluster-min-identity",
-            "0.5",
-            "--vsearch-bin",
-            "/missing/vsearch",
-        ]
-    )
-    assert compatibility_args.min_cluster_size == 99
-    assert compatibility_args.cluster_min_identity == 0.5
-    assert compatibility_args.vsearch_bin == "/missing/vsearch"
-    assert {
-        "min_cluster_size",
-        "cluster_min_identity",
-        "vsearch_bin",
-    }.isdisjoint(inspect.signature(run_call).parameters)
+    assert not hasattr(default_call_args, "phylogenetics")
 
     with pytest.raises(SystemExit):
         parser.parse_args(

@@ -64,14 +64,8 @@ def test_combined_taxon_database_is_ready_for_default_call(tmp_path, monkeypatch
         _write_taxon_database(tmp_path / "a", "R1", "AAATTTCCC", "1", "Species one"),
         _write_taxon_database(tmp_path / "b", "R2", "AAAGGGCCC", "2", "Species two"),
     ]
-    observed = {}
 
-    def fake_phylogeny(database, phylogeny, loci, threads, **kwargs):
-        observed.update(database=database, phylogeny=phylogeny, loci=loci, threads=threads)
-        Path(phylogeny).mkdir(parents=True)
-        return {"phylogeny": Path(phylogeny)}
 
-    monkeypatch.setattr(pipeline, "build_reference_phylogenies", fake_phylogeny)
     output = tmp_path / "combined"
     combined = build_combined_taxon_database(
         [TaxonReference("1", "taxon_one"), TaxonReference("2", "taxon_two")],
@@ -93,7 +87,8 @@ def test_combined_taxon_database_is_ready_for_default_call(tmp_path, monkeypatch
         "R1",
         "R2",
     ]
-    assert observed["database"] == combined["database"]
+    assert not (output / "phylogeny").exists()
+    assert json.loads(combined["manifest"].read_text())["classification"]["method"] == "mapping_em"
 
     args = cli.build_parser().parse_args(
         ["call", "-i", "sample.fasta", "--database", str(output)]
@@ -107,7 +102,7 @@ def test_taxid_pipeline_finalizes_combined_resources_once(tmp_path, monkeypatch)
     references = [TaxonReference("1", "one"), TaxonReference("2", "two")]
     panel = tmp_path / "panel.csv"
     panel.write_text("name,forward,reverse\nL1,AAA,CCC\n")
-    calls = {"mapping": 0, "phylogeny": 0}
+    calls = {"mapping": 0}
 
     def fake_prepare(reference, output, **kwargs):
         output = Path(output)
@@ -146,19 +141,14 @@ def test_taxid_pipeline_finalizes_combined_resources_once(tmp_path, monkeypatch)
         calls["mapping"] += 1
         return {}
 
-    def fake_phylogeny(*args, **kwargs):
-        calls["phylogeny"] += 1
-        Path(args[1]).mkdir(parents=True, exist_ok=True)
-        return {"phylogeny": Path(args[1])}
 
     monkeypatch.setattr(pipeline, "prepare_taxon_reference", fake_prepare)
     monkeypatch.setattr(pipeline, "build_reference_database", fake_builder)
     monkeypatch.setattr(pipeline, "build_mapping_resources", fake_mapping)
-    monkeypatch.setattr(pipeline, "build_reference_phylogenies", fake_phylogeny)
     # Preserve native-builder identity check while substituting a lightweight extractor.
     result = build_taxon_references(references, panel, tmp_path / "out", builder=fake_builder)
     assert result["database"] == tmp_path / "out"
-    assert calls == {"mapping": 1, "phylogeny": 1}
+    assert calls == {"mapping": 1}
 
 
 def test_combined_taxon_database_rejects_cross_taxon_reference_collisions(
@@ -170,7 +160,6 @@ def test_combined_taxon_database_rejects_cross_taxon_reference_collisions(
         _write_taxon_database(tmp_path / "a", "R1", "AAATTTCCC", "1", "Species one"),
         _write_taxon_database(tmp_path / "b", "R1", "AAAGGGCCC", "2", "Species two"),
     ]
-    monkeypatch.setattr(pipeline, "build_reference_phylogenies", lambda *args, **kwargs: {})
 
     with pytest.raises(ValueError, match="occurs in both taxon"):
         build_combined_taxon_database(
@@ -193,11 +182,6 @@ def test_combined_taxon_database_excludes_metadata_without_usable_loci(
         tmp_path / "b", "R2", "AAAGGGCCC", "2", "Species two"
     )
     Path(unusable["database"], "L1.fasta").unlink()
-    monkeypatch.setattr(
-        pipeline,
-        "build_reference_phylogenies",
-        lambda database, phylogeny, *args, **kwargs: {"phylogeny": Path(phylogeny)},
-    )
 
     combined = build_combined_taxon_database(
         [TaxonReference("1", "taxon_one"), TaxonReference("2", "taxon_two")],
@@ -475,18 +459,18 @@ def test_multi_taxon_amplifiability_summaries_and_console(tmp_path, monkeypatch,
             "taxon_a": [
                 {"locus_id": "L1", "genomes_examined": 10, "genomes_with_valid_amplicon": 10,
                  "valid_amplicons": 10, "percent_genomes_amplifiable": 100.0,
-                 "amplifiable": "TRUE", "tree_status": "BUILT"},
+                 "amplifiable": "TRUE", "reference_status": "BUILT"},
                 {"locus_id": "L2", "genomes_examined": 10, "genomes_with_valid_amplicon": 8,
                  "valid_amplicons": 8, "percent_genomes_amplifiable": 80.0,
-                 "amplifiable": "TRUE", "tree_status": "BUILT"},
+                 "amplifiable": "TRUE", "reference_status": "BUILT"},
             ],
             "taxon_b": [
                 {"locus_id": "L1", "genomes_examined": 4, "genomes_with_valid_amplicon": 2,
                  "valid_amplicons": 2, "percent_genomes_amplifiable": 50.0,
-                 "amplifiable": "TRUE", "tree_status": "INSUFFICIENT_REFERENCES"},
+                 "amplifiable": "TRUE", "reference_status": "BUILT"},
                 {"locus_id": "L2", "genomes_examined": 4, "genomes_with_valid_amplicon": 0,
                  "valid_amplicons": 0, "percent_genomes_amplifiable": 0.0,
-                 "amplifiable": "FALSE", "tree_status": "NO_AMPLICONS"},
+                 "amplifiable": "FALSE", "reference_status": "NO_AMPLICONS"},
             ],
         }[output.parent.name]
         return {
@@ -534,7 +518,7 @@ def test_quiet_taxon_build_suppresses_console_summary(tmp_path, monkeypatch, cap
             "locus_summary_rows": [
                 {"locus_id": "L1", "genomes_examined": 1, "genomes_with_valid_amplicon": 1,
                  "valid_amplicons": 1, "percent_genomes_amplifiable": 100.0,
-                 "amplifiable": "TRUE", "tree_status": "INSUFFICIENT_REFERENCES"}
+                 "amplifiable": "TRUE", "reference_status": "BUILT"}
             ],
         }
 

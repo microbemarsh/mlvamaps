@@ -29,9 +29,8 @@ Current backend policy:
   evidence has already entered shared allele inference.
 - `minimap2` also maps accurate reads to extracted assembly products for depth
   support. `pysam` handles existing SAM/BAM support supplied by the user.
-- MUMmer4 `dnadiff` performs exact whole-genome alignments only when an assembly
-  query has tied exact marker matches. Independent tied-reference comparisons
-  share the configured worker pool.
+- `parasail` also aligns Sassy-derived assembly products to observed reference
+  loci for the alignment-based classifier.
 
 Default threading policy:
 
@@ -43,10 +42,7 @@ Default threading policy:
   contig and orientation into one search at the maximum mismatch threshold.
   Lower mismatch rounds reuse those matches by edit cost. Each Sassy process
   uses one thread while assemblies are distributed across mlvamaps workers.
-- Native mapping and phylogenetic tools receive an appropriate share of the
-  resolved thread count. RAxML-NG is the exception: each process is pinned to
-  one internal thread while independent locus jobs may run concurrently where
-  the workflow supports it.
+- Native mapping tools receive an appropriate share of the resolved thread count.
 - Illumina directory and manifest runs divide the global budget among bounded
   concurrent samples. The default cap is four active samples and can be lowered
   with `MLVAMAPS_MAX_CONCURRENT_SAMPLES` when memory, rather than CPUs, is the
