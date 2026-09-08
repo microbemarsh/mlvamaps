@@ -207,7 +207,7 @@ database; bounded contexts are then synthesized from its primers, flanks,
 repeat motif, expected range, and observed database states when available.
 
 For a multi-taxid build, that command automatically loads the saved panel and
-taxon metadata, then writes the taxon assignment. No separate panel,
+taxon metadata, then identifies the closest reference IDs with taxon annotations. No separate panel,
 target taxid, calibration artifact, or taxon-identification flag is required.
 Databases that predate schema 2.0 must be rebuilt with the current
 `mlvamaps build-reference` so all competitive-mapping and recruitment assets

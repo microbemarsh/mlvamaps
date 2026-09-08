@@ -72,13 +72,29 @@ not penalized even if the allele caller had no call. The penalty is subtracted
 once from each reference's joint log score; in mixture mode it is distributed
 across the weighted observations. It is not evidence of confirmed absence.
 
-A model-supported single taxon requires support of at least 0.9, convergence,
-at least two catalog taxa for comparison, and two observed loci by default (`--taxon-min-loci` overrides the locus count).
-Multiple taxa with at least 0.05 fraction in metagenome mode are reported as
-`MIXED_TAXA`. Mixtures of distant VNTR loci can also be indistinguishable from an unrepresented mosaic profile without molecule linkage. These are model summaries, not calibrated species
-probabilities. Below the support requirement the closest candidate remains
-visible, with low confidence. References that fit poorly can lose to the
-unclassified component; unmapped input reads are outside the fitted matrix.
+Identification follows the highest-ranked **reference group**, using exactly the
+same order and support as `mapping_reference_matches.tsv`. Support is never
+summed across a species to choose the identification. The `assignment` is the
+reference ID, or all equivalent IDs when the evidence cannot distinguish them;
+taxon names and IDs are annotations only. Reference identification works without
+taxon metadata. The evidence table has one row per reference group.
+
+A model-supported unique reference requires support of at least 0.9, convergence,
+at least two catalog references for comparison, and two observed loci by default
+(`--taxon-min-loci` overrides the locus count). A strongly supported group of
+indistinguishable references is `AMBIGUOUS_REFERENCES`, even when all its members
+have the same taxon label. Multiple reference groups with at least 0.05 fraction
+in metagenome mode are `MIXED_REFERENCES`, including mixtures within one species;
+the headline still names the highest-ranked group, with other components listed
+in the evidence table. Below the support requirement the closest group remains
+visible as `CLOSEST_REFERENCE_LOW_CONFIDENCE`. No observations produce
+`INSUFFICIENT_EVIDENCE` and an unresolved assignment.
+
+These are model summaries, not calibrated identification probabilities. Mixtures
+of distant VNTR loci can also be indistinguishable from an unrepresented mosaic
+profile without molecule linkage. The unclassified fraction measures the explicit
+background component; ambiguity between named references is represented by the
+listed equivalent IDs. Unmapped input reads are outside the fitted matrix.
 
 The legacy `--taxon-k`, locus discrimination weights, bootstrap thresholds,
 SNP/repeat phylogenetic weights, and recovery-fraction thresholds do not enter

@@ -375,7 +375,7 @@ calibrated target-taxon test retains its original calibrated scoring.
 | `molecule_reference_likelihoods.tsv.gz` | Original per-molecule/reference log scores before the sample-level missing-locus penalty. |
 | `observed_reference_vntrs.fasta` and `observed_reference_metadata.tsv` | Actual observed mapping targets and their reference/locus membership; no synthetic alleles. |
 | `classification.json` | Error-rate estimates, coverage gate, penalties, grouped results and EM objective/convergence diagnostics. |
-| `taxonomic_identification.tsv` and `taxonomic_identification_evidence.tsv` | Model-supported, low-confidence, mixed, or unclassified taxon summaries. |
+| `taxonomic_identification.tsv` and `taxonomic_identification_evidence.tsv` | Closest-reference identification and ranked reference-group evidence, with equivalent reference IDs, optional taxon annotations and model support. Species support is not pooled. |
 | `mlva_profiles.tree` | Newick neighbor-joining tree of observed repeat profiles; no classification likelihoods or absence penalties enter it. |
 | `mlva_profile_distances.tsv` and `mlva_profile_tree_metadata.tsv` | Distance matrix and metadata whose IDs match the tree tips. |
 | `mlva_profile_tree_status.tsv` | Locus set, distance definition, and explicit reason when no profile tree is available. |

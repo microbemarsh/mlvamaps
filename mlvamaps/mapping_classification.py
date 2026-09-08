@@ -30,7 +30,7 @@ _CS = re.compile(r":(\d+)|=([A-Za-z]+)|\*([A-Za-z]{2})|\+([A-Za-z]+)|-([A-Za-z]+
 _CIGAR = re.compile(r"(\d+)([MIDNSHP=X])")
 UNKNOWN = "__unclassified__"
 MATCH_FIELDS = [
-    "sample_id", "match_type", "reference_id", "equivalent_references", "taxon_id",
+    "sample_id", "match_type", "reference_id", "equivalent_references", "taxon_id", "taxon_name",
     "rank", "distance", "log_likelihood", "model_weight", "locus_balanced_fraction",
     "compared_loci", "match_status", *MISSING_LOCUS_FIELDS,
 ]
@@ -327,8 +327,6 @@ def run_mapping_classification(
         raise ValueError("Minimum classification loci must be positive")
     metadata_path = reference_metadata_path or (root / "reference_metadata.tsv" if root.is_dir() else None)
     metadata = read_reference_metadata(metadata_path) if reference_metadata_path or (metadata_path and Path(metadata_path).is_file()) else {}
-    if taxon_identification is True and not any(row.get("taxon_id") or row.get("taxid") for row in metadata.values()):
-        raise ValueError("--taxon-identification requires reference taxon metadata")
     fasta = output / "observed_reference_vntrs.fasta"
     write_fasta(((c.candidate_id, c.sequence) for c in contexts), fasta)
     write_tsv(({"candidate_id": c.candidate_id, "locus_id": c.locus_id,
@@ -368,7 +366,6 @@ def run_mapping_classification(
     } for (locus, molecule), scores in likelihoods.items() for reference, score in scores.items()),
         likelihood_path, ["locus_id", "molecule_id", "reference_id", "log_likelihood"])
     matches = []
-    taxon_scores = defaultdict(float)
     unknown_fraction = 0.0 if groups else 1.0
     for group in groups:
         refs = group["references"]
@@ -376,15 +373,15 @@ def run_mapping_classification(
             unknown_fraction += group["locus_balanced_fraction"]
             continue
         taxa = {str(metadata.get(ref, {}).get("taxon_id") or metadata.get(ref, {}).get("taxid") or "") for ref in refs}
-        if len(taxa) == 1 and "" not in taxa:
-            taxon_scores[next(iter(taxa))] += group["locus_balanced_fraction"]
-        else:
-            unknown_fraction += group["locus_balanced_fraction"]
         reference = refs[0]
         matches.append({
             "sample_id": sample_id, "match_type": "mapping_reference",
             "reference_id": reference, "equivalent_references": ";".join(refs),
-            "taxon_id": ";".join(sorted(taxa - {""})), "rank": len(matches) + 1,
+            "taxon_id": ";".join(sorted(taxa - {""})),
+            "taxon_name": "; ".join(sorted({
+                str(metadata.get(ref, {}).get("taxon_name") or metadata.get(ref, {}).get("species")
+                    or metadata.get(ref, {}).get("organism_name") or "") for ref in refs
+            } - {""})), "rank": len(matches) + 1,
             "distance": -group["log_likelihood"], **{key: value for key, value in group.items() if key != "references"},
             "compared_loci": len(detected),
             "match_status": "EQUIVALENT_REFERENCES" if len(refs) > 1 else "MAPPING_LIKELIHOOD",
@@ -419,29 +416,40 @@ def run_mapping_classification(
     # older result in the same output directory cannot become the new report.
     write_tsv([], output / "taxonomic_identification.tsv", ["sample_id", "method"])
     write_tsv([], output / "taxonomic_identification_evidence.tsv", ["taxon_id"])
-    if taxon_identification is not False and metadata:
-        ordered = sorted(taxon_scores, key=lambda taxon: (-taxon_scores[taxon], taxon))
-        names = {str(row.get("taxon_id") or row.get("taxid")): row.get("taxon_name") or row.get("species") or row.get("organism_name") or str(row.get("taxon_id") or row.get("taxid")) for row in metadata.values()}
-        best_taxon = ordered[0] if ordered else ""
-        best_support = taxon_scores.get(best_taxon, 0.0)
-        catalog_taxa = {str(metadata.get(ref, {}).get("taxon_id") or metadata.get(ref, {}).get("taxid") or "") for ref in reference_loci} - {""}
-        status = "SUPPORTED" if best_support >= 0.9 and len(detected) >= minimum_loci and diagnostics["converged"] and len(catalog_taxa) > 1 else "CLOSEST_TAXON_LOW_CONFIDENCE" if best_taxon else "INSUFFICIENT_EVIDENCE"
-        if sample_mode == "metagenome" and sum(score >= 0.05 for score in taxon_scores.values()) > 1:
-            status = "MIXED_TAXA"
+    if taxon_identification is not False:
+        best = matches[0] if matches else {}
+        best_support = best.get("locus_balanced_fraction", 0.0)
+        best_refs = best.get("equivalent_references", "")
+        best_taxa = {str(metadata.get(ref, {}).get("taxon_id") or metadata.get(ref, {}).get("taxid") or "")
+                     for ref in best_refs.split(";")} if best_refs else set()
+        best_taxon = next(iter(best_taxa)) if len(best_taxa) == 1 and "" not in best_taxa else ""
+        # Identification follows the same reference ranking as the match table.
+        # Taxon annotations never pool support or change the winning reference.
+        status = "INSUFFICIENT_EVIDENCE"
+        if best:
+            status = "CLOSEST_REFERENCE_LOW_CONFIDENCE"
+            if best_support >= 0.9 and len(detected) >= minimum_loci and diagnostics["converged"] and len(reference_loci) > 1:
+                status = "SUPPORTED" if ";" not in best_refs else "AMBIGUOUS_REFERENCES"
+            if sample_mode == "metagenome" and sum(row["locus_balanced_fraction"] >= 0.05 for row in matches) > 1:
+                status = "MIXED_REFERENCES"
         summary = {"sample_id": sample_id, "method": "mapping_em", "sample_mode": sample_mode,
-            "best_taxon": best_taxon, "best_species": names.get(best_taxon, ""),
-            "assignment": "; ".join(names[t] for t in ordered if taxon_scores[t] >= 0.05) if status == "MIXED_TAXA" else names.get(best_taxon, "Unresolved"), "assignment_status": status,
-            "assignment_rank": "taxon" if status == "SUPPORTED" else "unresolved",
+            "reference_id": best.get("reference_id", ""), "equivalent_references": best_refs,
+            "best_taxon": best_taxon, "best_species": best.get("taxon_name", "") if best_taxon else "",
+            "assignment": best_refs or "Unresolved", "assignment_status": status,
+            "assignment_rank": "reference" if status == "SUPPORTED" else "unresolved",
             "confidence": "MODEL_SUPPORTED" if status == "SUPPORTED" else "LOW",
             "model_support": best_support, "unclassified_fraction": unknown_fraction,
             "informative_loci": len(detected), "expected_loci": len(loci),
-            "loci_recovered": len(detected), "closest_reference": matches[0]["reference_id"] if matches else "",
+            "loci_recovered": len(detected), "closest_reference": best.get("reference_id", ""),
             "status_reason": "MAPPING_LIKELIHOOD_SUPPORT" if status == "SUPPORTED" else "AMBIGUOUS_OR_INSUFFICIENT_MAPPING_EVIDENCE"}
         taxon_path = output / "taxonomic_identification.tsv"
         write_tsv([summary], taxon_path, list(summary))
         evidence_path = output / "taxonomic_identification_evidence.tsv"
-        write_tsv(({"sample_id": sample_id, "rank": i + 1, "taxon_id": t, "species": names.get(t, t), "model_support": taxon_scores[t]} for i, t in enumerate(ordered)), evidence_path,
-            ["sample_id", "rank", "taxon_id", "species", "model_support"])
+        write_tsv(({"sample_id": sample_id, "rank": row["rank"],
+                    "reference_id": row["reference_id"], "equivalent_references": row["equivalent_references"],
+                    "taxon_id": row["taxon_id"], "species": row["taxon_name"],
+                    "model_support": row["locus_balanced_fraction"]} for row in matches), evidence_path,
+            ["sample_id", "rank", "reference_id", "equivalent_references", "taxon_id", "species", "model_support"])
         paths.update(taxonomic_identification=taxon_path, taxonomic_identification_evidence=evidence_path)
     return paths
 

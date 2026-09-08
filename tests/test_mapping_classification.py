@@ -219,7 +219,7 @@ def test_real_minimap_low_coverage_and_mixture(tmp_path):
     fractions = {row["reference_id"]: float(row["locus_balanced_fraction"]) for row in matches}
     assert fractions["A"] == pytest.approx(0.7, abs=0.03)
     assert fractions["B"] == pytest.approx(0.3, abs=0.03)
-    assert read_tsv(result["taxonomic_identification"])[0]["assignment_status"] == "MIXED_TAXA"
+    assert read_tsv(result["taxonomic_identification"])[0]["assignment_status"] == "MIXED_REFERENCES"
 
 
 def test_repeat_sequence_changes_with_equal_length_are_not_erased():
@@ -252,8 +252,11 @@ def test_mapping_report_and_profile_match_export_keep_new_score_semantics(tmp_pa
     assert "Technical marker-distance components" not in report
 
 
-def test_ambiguous_reference_group_does_not_force_a_taxon(tmp_path):
+@pytest.mark.parametrize("same_taxon", [False, True])
+def test_ambiguous_reference_group_does_not_force_a_reference(tmp_path, same_taxon):
     root, loci = database(tmp_path)
+    if same_taxon:
+        (root / "reference_metadata.tsv").write_text("reference_id\ttaxon_id\ttaxon_name\nA\t1\tTaxon A\nB\t1\tTaxon A\n")
     for locus in loci:
         (root / f"{locus.locus_id}.fasta").write_text(
             ">A\nACGTTGAGACCTAA\n>B\nACGTTGAGACCTAA\n"
@@ -261,8 +264,10 @@ def test_ambiguous_reference_group_does_not_force_a_taxon(tmp_path):
     result = run_mapping_classification(database_path=root, loci=loci, outdir=tmp_path / "out",
         sample_id="sample", query_sequences={l.locus_id: "ACGTTGAGACCTAA" for l in loci})
     summary = read_tsv(result["taxonomic_identification"])[0]
-    assert summary["assignment_status"] == "INSUFFICIENT_EVIDENCE"
-    assert float(summary["unclassified_fraction"]) == pytest.approx(1)
+    assert summary["assignment_status"] == "AMBIGUOUS_REFERENCES"
+    assert summary["assignment"] == "A;B"
+    assert summary["best_taxon"] == ("1" if same_taxon else "")
+    assert float(summary["unclassified_fraction"]) < 0.01
     assert read_tsv(result["mapping_reference_matches"])[0]["equivalent_references"] == "A;B"
 
 
@@ -297,3 +302,55 @@ def test_coverage_penalty_is_reference_specific_and_applied_once(tmp_path, monke
     assert float(matches["B"]["log_likelihood"]) == 0
     assert float(matches["A"]["missing_locus_penalty"]) == 1
     assert float(matches["B"]["missing_locus_penalty"]) == 0
+
+
+@pytest.mark.parametrize("sample_mode", ["isolate", "metagenome"])
+def test_identification_follows_reference_not_species_total(tmp_path, monkeypatch, sample_mode):
+    from mlvamaps.report import write_assembly_report
+
+    root, loci = database(tmp_path)
+    for locus in loci:
+        with (root / f"{locus.locus_id}.fasta").open("a") as handle:
+            handle.write(">C\nACGTTGAGAGACCTAA\n")
+    (root / "reference_metadata.tsv").write_text(
+        "reference_id\ttaxon_id\ttaxon_name\nA\t1\tTaxon A\nB\t2\tTaxon B\nC\t2\tTaxon B\n")
+    if sample_mode == "isolate":
+        likelihoods = {(locus.locus_id, locus.locus_id): {
+            "A": np.log(0.4) / 3, "B": np.log(0.35) / 3,
+            "C": np.log(0.25) / 3, UNKNOWN: -100,
+        } for locus in loci}
+    else:
+        likelihoods = {(locus.locus_id, str(i)): {
+            ref: 0.0 if ref == source else -100.0 for ref in ("A", "B", "C", UNKNOWN)
+        } for locus in loci for i, source in enumerate(["A"] * 4 + ["B"] * 3 + ["C"] * 3)}
+    monkeypatch.setattr("mlvamaps.mapping_classification.molecule_log_likelihoods",
+                        lambda *args: (likelihoods, {}))
+    result = run_mapping_classification(database_path=root, loci=loci, outdir=tmp_path / "out",
+        sample_id="sample", sample_mode=sample_mode)
+    matches = read_tsv(result["mapping_reference_matches"])
+    summary = read_tsv(result["taxonomic_identification"])[0]
+    evidence = read_tsv(result["taxonomic_identification_evidence"])
+    assert summary["assignment"] == summary["reference_id"] == summary["closest_reference"] == matches[0]["reference_id"] == "A"
+    assert summary["best_taxon"] == "1"
+    assert float(summary["model_support"]) == pytest.approx(0.4)
+    assert [r["reference_id"] for r in evidence] == [r["reference_id"] for r in matches]
+    assert sum(float(r["model_support"]) for r in evidence if r["taxon_id"] == "2") == pytest.approx(0.6)
+    assert summary["assignment_status"] == ("MIXED_REFERENCES" if sample_mode == "metagenome" else "CLOSEST_REFERENCE_LOW_CONFIDENCE")
+    write_assembly_report(tmp_path / "out", "sample", [], [], loci=loci, phylogenetic_rows=matches)
+    report = (tmp_path / "out" / "report.html").read_text()
+    assert '<div class="taxon-call">A</div>' in report
+    assert "<th>Reference IDs</th><th>Taxon annotation</th>" in report
+    assert "support is never summed across a species" in report
+
+
+def test_reference_identification_without_taxon_metadata(tmp_path):
+    root, loci = database(tmp_path)
+    (root / "reference_metadata.tsv").unlink()
+    result = run_mapping_classification(database_path=root, loci=loci, outdir=tmp_path / "out",
+        sample_id="sample", taxon_identification=True,
+        query_sequences={l.locus_id: "ACGTTGAGACCTAA" for l in loci})
+    summary = read_tsv(result["taxonomic_identification"])[0]
+    assert summary["assignment"] == "A"
+    assert summary["best_taxon"] == summary["best_species"] == ""
+    assert summary["assignment_status"] == "SUPPORTED"
+    assert float(summary["unclassified_fraction"]) < 0.01

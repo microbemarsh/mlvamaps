@@ -64,11 +64,11 @@ files. Directory discovery is non-recursive, and each file is written beneath
 
 ## MLVA-only target-taxon assignment
 
-Taxon assignment runs automatically when `--database` resolves to metadata
-containing `taxon_id`. Classification uses observed-reference mapping likelihoods
+Reference identification runs automatically with `--database`; taxon metadata
+are optional annotations. Classification uses observed-reference mapping likelihoods
 and explicit repeat-length evidence. `--sample-mode isolate` combines locus
 likelihoods for one source; `--sample-mode metagenome` (the historical default)
-uses EM. `--no-taxon-identification` disables taxon summaries while retaining
+uses EM. `--no-taxon-identification` disables identification summaries while retaining
 reference ranking. `--taxon-min-loci` overrides the default two-locus requirement
 for model-supported classification; low-confidence candidates remain visible.
 The nearest-reference `--taxon-k` and the older bootstrap/recovery thresholds

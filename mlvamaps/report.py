@@ -1827,7 +1827,9 @@ def _mapping_identification_section(outdir: Path) -> str:
     with evidence.open(newline="") as handle:
         candidates = list(csv.DictReader(handle, delimiter="\t"))
     table = "".join(
-        f"<tr><td>{_safe(item.get('rank', ''))}</td><td>{_safe(item.get('species', ''))}</td>"
+        f"<tr><td>{_safe(item.get('rank', ''))}</td>"
+        f"<td>{_safe(item.get('equivalent_references') or item.get('reference_id', ''))}</td>"
+        f"<td>{_safe(item.get('species') or item.get('taxon_id', ''))}</td>"
         f"<td>{_safe(item.get('model_support', ''))}</td></tr>" for item in candidates[:10]
     )
     return f"""
@@ -1838,10 +1840,10 @@ def _mapping_identification_section(outdir: Path) -> str:
         <div class="summary">
           {_metric_card('Observed loci', f"{row.get('loci_recovered', '')}/{row.get('expected_loci', '')}")}
           {_metric_card('Model support', row.get('model_support', ''))}
-          {_metric_card('Unclassified or taxonomically ambiguous', row.get('unclassified_fraction', ''))}
+          {_metric_card('Unclassified mapping fraction', row.get('unclassified_fraction', ''))}
         </div>
-        <p class="section-intro">Competing molecule alignments are combined across VNTR loci with explicit repeat-length evidence. Mixed samples use EM to allocate ambiguous mappings. Support is conditional on the reference catalog and model; it is not a calibrated species probability or an organism abundance estimate.</p>
-        <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Taxon</th><th>Model support</th></tr></thead><tbody>{table}</tbody></table></div>
+        <p class="section-intro">Identification uses the highest-ranked reference group shown in Closest Reference Genomes. Reference IDs are the result; taxon names are annotations, and support is never summed across a species. Multiple IDs in one group are indistinguishable with the available evidence. Competing molecule alignments are combined across VNTR loci with explicit repeat-length evidence. Mixed samples use EM to allocate ambiguous mappings. Support is conditional on the reference catalog and model; it is not a calibrated species probability or an organism abundance estimate.</p>
+        <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Reference IDs</th><th>Taxon annotation</th><th>Model support / EM fraction</th></tr></thead><tbody>{table}</tbody></table></div>
       </section>
 """
 
