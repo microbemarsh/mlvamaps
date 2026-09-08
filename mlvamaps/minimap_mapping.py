@@ -145,6 +145,7 @@ def run_minimap2_competitive_bam(command: list[str], bam_path: str | Path) -> No
 def parse_candidate_alignments(
     sam_path: str | Path,
     contexts: list[CandidateContext],
+    include_unknown_repeats: bool = False,
 ) -> list[CandidateAlignment]:
     context_by_id = {context.candidate_id: context for context in contexts}
     rows: list[CandidateAlignment] = []
@@ -154,7 +155,7 @@ def parse_candidate_alignments(
                 continue
             reference_name = sam.get_reference_name(alignment.reference_id)
             context = context_by_id.get(reference_name)
-            if context is None or context.repeat_count is None:
+            if context is None or (context.repeat_count is None and not include_unknown_repeats):
                 continue
             molecule_id, named_mate = normalize_read_id(alignment.query_name)
             mate = 1 if alignment.is_read1 else 2 if alignment.is_read2 else named_mate
@@ -228,6 +229,8 @@ def map_reads_to_candidates_bam(
     technology: str,
     executable: str = "minimap2",
     max_secondary: int = 100,
+    include_unknown_repeats: bool = False,
+    retain_all_competitors: bool = False,
 ) -> list[CandidateAlignment]:
     """Map without materializing text SAM; pysam/htslib decodes CIGAR and tags."""
     resolved = shutil.which(executable) or (executable if Path(executable).is_file() else None)
@@ -236,5 +239,8 @@ def map_reads_to_candidates_bam(
     command = minimap2_competitive_command(
         reference, reads1, reads2, threads, technology, resolved, max_secondary
     )
+    if retain_all_competitors:
+        position = command.index("-t")
+        command[position:position] = ["-p", "0"]
     run_minimap2_competitive_bam(command, bam_path)
-    return parse_candidate_alignments(bam_path, contexts)
+    return parse_candidate_alignments(bam_path, contexts, include_unknown_repeats)

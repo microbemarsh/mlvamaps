@@ -366,3 +366,29 @@ the nearest references per taxon. Bootstrap replicates retain that fixed
 coverage evidence while resampling observed loci. Missing loci do not increase
 recovery, discriminative-locus counts, or supporting-locus counts. The separate
 calibrated target-taxon test retains its original calibrated scoring.
+
+## Mapping classification (default with a sequence database)
+
+| File under `classification/` | Meaning |
+| --- | --- |
+| `mapping_reference_matches.tsv` | Ranked reference groups with joint log likelihood, model weight, EM fraction, equivalent IDs and missing-locus penalty. |
+| `molecule_reference_likelihoods.tsv.gz` | Original per-molecule/reference log scores before the sample-level missing-locus penalty. |
+| `observed_reference_vntrs.fasta` and `observed_reference_metadata.tsv` | Actual observed mapping targets and their reference/locus membership; no synthetic alleles. |
+| `classification.json` | Error-rate estimates, coverage gate, penalties, grouped results and EM objective/convergence diagnostics. |
+| `taxonomic_identification.tsv` and `taxonomic_identification_evidence.tsv` | Model-supported, low-confidence, mixed, or unclassified taxon summaries. |
+| `mlva_profiles.tree` | Newick neighbor-joining tree of observed repeat profiles; no classification likelihoods or absence penalties enter it. |
+| `mlva_profile_distances.tsv` and `mlva_profile_tree_metadata.tsv` | Distance matrix and metadata whose IDs match the tree tips. |
+| `mlva_profile_tree_status.tsv` | Locus set, distance definition, and explicit reason when no profile tree is available. |
+
+Mapping results appear as `match_type=mapping_reference` in `profile_matches.tsv`.
+The distance is negative joint log likelihood, not the legacy normalized
+SNP/repeat distance. In mixed mode rank follows the fitted component fraction,
+so distance alone need not be monotonic in rank. `equivalent_references` lists
+IDs the evidence cannot distinguish; `reference_id` is only a representative.
+For library compatibility, the result dictionary's `combined_marker_matches`
+key points to the mapping table. Legacy sequence-tree files are written only
+with `--phylogenetics`; use `mapping_reference_matches` to identify the new table
+explicitly. The old calibrated target test remains a separate output.
+
+See [mapping classification and profile trees](../concepts/mapping-classification.md)
+for the likelihood model, defaults, interpretation, and multi-sample MYOGA export.

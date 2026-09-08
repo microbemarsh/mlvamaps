@@ -190,6 +190,7 @@ ALLELE_FIELDS = [
 ]
 
 MATCH_FIELDS = [
+    "equivalent_references", "log_likelihood", "model_weight", "locus_balanced_fraction",
     "sample_id",
     "match_type",
     "rank",
@@ -433,6 +434,8 @@ def run_call(
     missing_locus_min_depth: float = 3.0,
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 1.0,
+    phylogenetics: bool = False,
+    classification_repeat_scale: float = 1.0,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
@@ -912,53 +915,69 @@ def run_call(
     closest_reference_bands: list[dict] = []
     if database_path:
         progress.step(
-            "Placing MAFFT-aligned queries with EPA-ng using reusable reference trees when available"
+            "Classifying original VNTR evidence against observed reference sequences"
         )
-        phylogeny_paths = run_phylogenetic_placement(
-            {
-                locus_id: str(measurement["product_sequence"])
-                for locus_id, measurement in primary_product_measurements.items()
-                if measurement.get("product_sequence")
-            },
-            database_path,
-            outdir_path,
-            sample_id,
-            loci,
-            thread_count,
-            mafft_bin=mafft_bin,
-            raxml_ng_bin=raxml_ng_bin,
-            epa_ng_bin=epa_ng_bin,
-            raxml_model=raxml_model,
-            snp_weight=phylogeny_snp_weight,
-            repeat_weight=phylogeny_repeat_weight,
+        if phylogenetics:
+            phylogeny_paths = run_phylogenetic_placement(
+                {
+                    locus_id: str(measurement["product_sequence"])
+                    for locus_id, measurement in primary_product_measurements.items()
+                    if measurement.get("product_sequence")
+                },
+                database_path,
+                outdir_path,
+                sample_id,
+                loci,
+                thread_count,
+                mafft_bin=mafft_bin,
+                raxml_ng_bin=raxml_ng_bin,
+                epa_ng_bin=epa_ng_bin,
+                raxml_model=raxml_model,
+                snp_weight=phylogeny_snp_weight,
+                repeat_weight=phylogeny_repeat_weight,
+                missing_locus_min_depth=missing_locus_min_depth,
+                missing_locus_min_fraction=missing_locus_min_fraction,
+                missing_locus_penalty=missing_locus_penalty,
+                reference_metadata_path=reference_metadata_path,
+                progress=progress,
+                target_taxon_id=target_taxon_id,
+                taxon_calibration_path=taxon_calibration_path,
+                taxon_alpha=taxon_alpha,
+                taxon_min_loci=taxon_min_loci,
+                taxon_min_locus_fraction=taxon_min_locus_fraction,
+                taxon_bootstrap_replicates=taxon_bootstrap_replicates,
+                taxon_min_bootstrap_support=taxon_min_bootstrap_support,
+                taxon_max_mean_placement_entropy=taxon_max_mean_placement_entropy,
+                taxon_min_median_placement_lwr=taxon_min_median_placement_lwr,
+                taxon_identification=False,
+                taxon_k=taxon_k,
+                taxon_minimum_margin=taxon_minimum_margin,
+                input_mode="fastq",
+                locus_quality={
+                    str(row.get("locus_id", "")): {
+                        "depth": row.get("primary_read_depth", row.get("read_depth", "")),
+                        "consensus_strength": row.get("allele_confidence", ""),
+                        "status": row.get("status", ""),
+                        "detection_status": unified_by_locus.get(str(row["locus_id"]), {}).get("status", ""),
+                    }
+                    for row in simple_call_rows
+                },
+            )
+        from .mapping_classification import run_mapping_classification
+        phylogeny_paths.update(run_mapping_classification(
+            database_path=database_path, loci=loci, outdir=outdir_path, sample_id=sample_id,
+            reads1=outdir_path / "filtered_reads.fastq.gz", technology=preset if filtered_reads else "hifi",
+            sample_mode=sample_mode,
+            threads=thread_count, minimap2_bin=minimap2_bin,
+            locus_quality={str(row["locus"]): {"depth": row["molecule_support"], "status": row["status"]} for row in unified_calls},
+            query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in simple_call_rows if row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},
+            reference_metadata_path=reference_metadata_path,
+            taxon_identification=taxon_identification, minimum_loci=taxon_min_loci or 2,
+            repeat_scale=classification_repeat_scale, legacy_phylogenetics=phylogenetics,
             missing_locus_min_depth=missing_locus_min_depth,
             missing_locus_min_fraction=missing_locus_min_fraction,
             missing_locus_penalty=missing_locus_penalty,
-            reference_metadata_path=reference_metadata_path,
-            progress=progress,
-            target_taxon_id=target_taxon_id,
-            taxon_calibration_path=taxon_calibration_path,
-            taxon_alpha=taxon_alpha,
-            taxon_min_loci=taxon_min_loci,
-            taxon_min_locus_fraction=taxon_min_locus_fraction,
-            taxon_bootstrap_replicates=taxon_bootstrap_replicates,
-            taxon_min_bootstrap_support=taxon_min_bootstrap_support,
-            taxon_max_mean_placement_entropy=taxon_max_mean_placement_entropy,
-            taxon_min_median_placement_lwr=taxon_min_median_placement_lwr,
-            taxon_identification=taxon_identification,
-            taxon_k=taxon_k,
-            taxon_minimum_margin=taxon_minimum_margin,
-            input_mode="fastq",
-            locus_quality={
-                str(row.get("locus_id", "")): {
-                    "depth": row.get("primary_read_depth", row.get("read_depth", "")),
-                    "consensus_strength": row.get("allele_confidence", ""),
-                    "status": row.get("status", ""),
-                    "detection_status": unified_by_locus.get(str(row["locus_id"]), {}).get("status", ""),
-                }
-                for row in simple_call_rows
-            },
-        )
+        ))
         phylogenetic_rows = read_profiles(phylogeny_paths["combined_marker_matches"])
         closest_reference_bands = read_profiles(
             phylogeny_paths["closest_reference_bands"]

@@ -1,6 +1,11 @@
-# Automatic MLVA taxon assignment
+# Legacy phylogenetic MLVA taxon assignment
 
-When `mlvamaps call` receives a reference database whose
+The default classifier is now [mapping-based](mapping-classification.md). The
+methods below describe retained legacy APIs and calibrated target testing;
+`--phylogenetics` is required for the latter. They are not the default mapping
+classification decision rules.
+
+Historically, when `mlvamaps call` receives a reference database whose
 `reference_metadata.tsv` contains `taxon_id`, it automatically ranks all
 annotated taxa. No calibration artifact or requested target is needed. Use
 `--no-taxon-identification` to disable this behavior, or

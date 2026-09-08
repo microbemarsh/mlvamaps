@@ -335,7 +335,8 @@ def test_manifest_batch_layout_resumes_from_sample_directory(tmp_path, monkeypat
 
     assert cli.main(command) == 0
     assert cli.main(command) == 0
-    assert calls == ["sample1", "sample2"]
+    # Worker start order is unspecified; each sample must run exactly once.
+    assert sorted(calls) == ["sample1", "sample2"]
     with (results / "batch_summary" / "batch_status.tsv").open() as handle:
         statuses = [row["status"] for row in csv.DictReader(handle, delimiter="\t")]
     assert statuses == ["skipped_success", "skipped_success"]
@@ -390,3 +391,33 @@ def test_call_forwards_missing_locus_settings(tmp_path, monkeypatch):
     assert observed["missing_locus_min_depth"] == 4
     assert observed["missing_locus_min_fraction"] == 0.75
     assert observed["missing_locus_penalty"] == 0.5
+
+
+def test_batch_reruns_legacy_classification_and_resumes_new_tables(tmp_path, monkeypatch):
+    reads = tmp_path / "reads.fastq"
+    reads.write_text("@r\nACGT\n+\nIIII\n")
+    parser = cli.build_parser()
+    args = parser.parse_args(["call", "-i", "sr", "--database", "catalog", "-o", str(tmp_path / "results")])
+    outdir = cli._sample_output_dir(Path(args.outdir), "sample")
+    _fake_short_result(outdir, "sample")
+    calls = []
+
+    def fake_run(args, reads1, reads2, outdir, sample_id, metadata):
+        calls.append(sample_id)
+        classification = outdir / "classification"
+        classification.mkdir(exist_ok=True)
+        (classification / "mapping_reference_matches.tsv").write_text("sample_id\treference_id\nsample\tA\n")
+        (classification / "classification.json").write_text('{"method": "mapping_em"}')
+        (classification / "taxonomic_identification.tsv").write_text("sample_id\tbest_taxon\nsample\t1\n")
+        (classification / "taxonomic_identification_evidence.tsv").write_text("sample_id\ttaxon_id\nsample\t1\n")
+        result = _fake_short_result(outdir, sample_id)
+        result.update(taxonomic_identification=classification / "taxonomic_identification.tsv")
+        return result
+
+    monkeypatch.setattr(cli, "_run_short_input", fake_run)
+    rows = [{"sample_id": "sample", "reads1": str(reads)}]
+    cli._run_short_batch(args, parser, rows)
+    cli._run_short_batch(args, parser, rows)
+    assert calls == ["sample"]
+    with (Path(args.outdir) / "batch_summary" / "taxonomic_identification.tsv").open() as handle:
+        assert next(csv.DictReader(handle, delimiter="\t"))["best_taxon"] == "1"

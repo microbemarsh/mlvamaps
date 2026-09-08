@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import html
+import json
 import math
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +31,8 @@ def _finding(kind: str, title: str, detail: str) -> str:
 
 
 def _automatic_taxon_identification_section(outdir: Path) -> str:
+    if (outdir / "classification" / "classification.json").is_file():
+        return _mapping_identification_section(outdir)
     path = outdir / "phylogeny" / "taxonomic_identification.tsv"
     if not path.is_file():
         return ""
@@ -124,6 +127,9 @@ def _automatic_taxon_identification_section(outdir: Path) -> str:
 
 def _taxon_assignment_section(outdir: Path) -> str:
     automatic_section = _automatic_taxon_identification_section(outdir)
+    mapping_details = outdir / "classification" / "classification.json"
+    if mapping_details.is_file() and not json.loads(mapping_details.read_text()).get("legacy_phylogenetics"):
+        return automatic_section
     path = outdir / "phylogeny" / "taxon_assignment.tsv"
     if not path.is_file():
         return automatic_section
@@ -162,6 +168,8 @@ def _taxon_assignment_section(outdir: Path) -> str:
 
 
 def _closest_reference_detail(row: dict) -> str:
+    if row.get("match_type") == "mapping_reference":
+        return f"Mapping likelihood; model support {row.get('locus_balanced_fraction', '')}"
     if row.get("whole_genome_exact_match") == "yes":
         return "Exact whole-genome match"
     if row.get("whole_genome_snps") not in ("", None):
@@ -1243,6 +1251,8 @@ def write_report(
         </details>
       </section>
 """
+    if phylogenetic_rows and phylogenetic_rows[0].get("match_type") == "mapping_reference":
+        phylogenetic_section = _taxon_assignment_section(outdir) + _mapping_reference_section(phylogenetic_rows, outdir)
     mixture_overview_section = ""
     mixture_detail_section = ""
     if mixture_rows:
@@ -1650,6 +1660,9 @@ def write_assembly_report(
       </section>
 """
 
+    if phylogenetic_rows and phylogenetic_rows[0].get("match_type") == "mapping_reference":
+        phylogenetic_section = _taxon_assignment_section(outdir) + _mapping_reference_section(phylogenetic_rows, outdir)
+
     html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -1799,3 +1812,57 @@ def write_assembly_report(
 </html>
 """
     (outdir / "report.html").write_text(html)
+
+
+def _mapping_identification_section(outdir: Path) -> str:
+    path = outdir / "classification" / "taxonomic_identification.tsv"
+    if not path.is_file():
+        return ""
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(handle, delimiter="\t"))
+    if not rows:
+        return ""
+    row = rows[0]
+    evidence = path.with_name("taxonomic_identification_evidence.tsv")
+    with evidence.open(newline="") as handle:
+        candidates = list(csv.DictReader(handle, delimiter="\t"))
+    table = "".join(
+        f"<tr><td>{_safe(item.get('rank', ''))}</td><td>{_safe(item.get('species', ''))}</td>"
+        f"<td>{_safe(item.get('model_support', ''))}</td></tr>" for item in candidates[:10]
+    )
+    return f"""
+      <section class="report-section" aria-label="Automatic Taxonomic Identification">
+        <h2>Taxonomic identification</h2>
+        <div class="taxon-call">{_safe(row.get('assignment', 'Unresolved'))}</div>
+        <p>{_safe(row.get('assignment_status', '').replace('_', ' '))}</p>
+        <div class="summary">
+          {_metric_card('Observed loci', f"{row.get('loci_recovered', '')}/{row.get('expected_loci', '')}")}
+          {_metric_card('Model support', row.get('model_support', ''))}
+          {_metric_card('Unclassified or taxonomically ambiguous', row.get('unclassified_fraction', ''))}
+        </div>
+        <p class="section-intro">Competing molecule alignments are combined across VNTR loci with explicit repeat-length evidence. Mixed samples use EM to allocate ambiguous mappings. Support is conditional on the reference catalog and model; it is not a calibrated species probability or an organism abundance estimate.</p>
+        <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Taxon</th><th>Model support</th></tr></thead><tbody>{table}</tbody></table></div>
+      </section>
+"""
+
+
+def _mapping_reference_section(rows: list[dict], outdir: Path) -> str:
+    table = "".join(
+        f"<tr><td>{_safe(row.get('rank', ''))}</td><td>{_safe(row.get('equivalent_references') or row.get('reference_id', ''))}</td>"
+        f"<td>{_safe(row.get('log_likelihood', ''))}</td><td>{_safe(row.get('locus_balanced_fraction', ''))}</td>"
+        f"<td>{_safe(row.get('missing_locus_penalty', ''))}</td></tr>" for row in rows[:20]
+    )
+    tree_link = (
+        '<p><a href="classification/mlva_profiles.tree">Download MLVA profile tree (.tree)</a> · '
+        '<a href="classification/mlva_profile_tree_metadata.tsv">Tree metadata</a></p>'
+        if (outdir / 'classification' / 'mlva_profiles.tree').is_file() else
+        '<p>No query/reference profile tree: fewer than two shared callable loci or no complete reference profile.</p>'
+    )
+    return f"""
+      <section class="report-section"><h2>Closest Reference Genomes</h2>
+        <p class="section-intro">Original mapping evidence determines reference support. Indistinguishable references share a component; the first ID is only its representative.</p>
+        <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Reference group</th><th>Joint log likelihood</th><th>Model support / EM fraction</th><th>Missing-locus penalty</th></tr></thead><tbody>{table}</tbody></table></div>
+        {tree_link}
+        <p class="section-intro">The tree compares observed repeat-count profiles over a common locus set. It represents MLVA similarity, not an evolutionary phylogeny. EM scores and inferred absences do not enter its distances.</p>
+      </section>
+"""

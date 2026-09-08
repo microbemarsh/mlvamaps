@@ -375,6 +375,8 @@ def run_mapping_short_read_call(
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 1.0,
     show_progress: bool = True,
+    phylogenetics: bool = False,
+    classification_repeat_scale: float = 1.0,
 ) -> dict[str, Path]:
     """Run competitive minimap2 mapping and emit established output views."""
     # Lazy imports avoid a module cycle with the shared Illumina helpers.
@@ -522,40 +524,55 @@ def run_mapping_short_read_call(
     if database_path:
         from .phylogeny import run_phylogenetic_placement
 
-        query_sequences = dict(read_fasta(unified_paths["taxonomic_query_sequences"]))
+        query_sequences = dict(read_fasta(unified_paths["taxonomic_query_sequences"])) if phylogenetics else {}
         if show_progress:
             print(
-                f"[{sample_id}] Matching {len(query_sequences):,} Illumina marker "
-                "sequence(s) against the reference database"
+                f"[{sample_id}] Classifying Illumina molecules against observed reference VNTRs"
             )
-        phylogeny_paths = run_phylogenetic_placement(
-            query_sequences, database_path, output, sample_id, loci, thread_count,
-            mafft_bin=mafft_bin, raxml_ng_bin=raxml_ng_bin, epa_ng_bin=epa_ng_bin,
-            raxml_model=raxml_model, snp_weight=phylogeny_snp_weight,
-            repeat_weight=phylogeny_repeat_weight,
+        if phylogenetics:
+            phylogeny_paths = run_phylogenetic_placement(
+                query_sequences, database_path, output, sample_id, loci, thread_count,
+                mafft_bin=mafft_bin, raxml_ng_bin=raxml_ng_bin, epa_ng_bin=epa_ng_bin,
+                raxml_model=raxml_model, snp_weight=phylogeny_snp_weight,
+                repeat_weight=phylogeny_repeat_weight,
+                missing_locus_min_depth=missing_locus_min_depth,
+                missing_locus_min_fraction=missing_locus_min_fraction,
+                missing_locus_penalty=missing_locus_penalty,
+                reference_metadata_path=reference_metadata_path,
+                target_taxon_id=target_taxon_id,
+                taxon_calibration_path=taxon_calibration_path, taxon_alpha=taxon_alpha,
+                taxon_min_loci=taxon_min_loci,
+                taxon_min_locus_fraction=taxon_min_locus_fraction,
+                taxon_bootstrap_replicates=taxon_bootstrap_replicates,
+                taxon_min_bootstrap_support=taxon_min_bootstrap_support,
+                taxon_max_mean_placement_entropy=taxon_max_mean_placement_entropy,
+                taxon_min_median_placement_lwr=taxon_min_median_placement_lwr,
+                taxon_identification=False, taxon_k=taxon_k,
+                taxon_minimum_margin=taxon_minimum_margin, input_mode="illumina",
+                locus_quality={
+                    str(row["locus_id"]): {
+                        "depth": row["primary_read_depth"],
+                        "consensus_strength": row["allele_confidence"],
+                        "status": row["status"],
+                    }
+                    for row in calls
+                },
+            )
+        from .mapping_classification import run_mapping_classification
+        phylogeny_paths.update(run_mapping_classification(
+            database_path=database_path, loci=loci, outdir=output, sample_id=sample_id,
+            reads1=filtered1, reads2=filtered2 if reads2_path else None, technology="illumina",
+            sample_mode=sample_mode,
+            threads=thread_count, minimap2_bin=minimap2_bin,
+            locus_quality={str(row["locus"]): {"depth": row["molecule_support"], "status": row["status"]} for row in common_calls},
+            query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in calls if row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},
+            reference_metadata_path=reference_metadata_path,
+            taxon_identification=taxon_identification, minimum_loci=taxon_min_loci or 2,
+            repeat_scale=classification_repeat_scale, legacy_phylogenetics=phylogenetics,
             missing_locus_min_depth=missing_locus_min_depth,
             missing_locus_min_fraction=missing_locus_min_fraction,
             missing_locus_penalty=missing_locus_penalty,
-            reference_metadata_path=reference_metadata_path,
-            target_taxon_id=target_taxon_id,
-            taxon_calibration_path=taxon_calibration_path, taxon_alpha=taxon_alpha,
-            taxon_min_loci=taxon_min_loci,
-            taxon_min_locus_fraction=taxon_min_locus_fraction,
-            taxon_bootstrap_replicates=taxon_bootstrap_replicates,
-            taxon_min_bootstrap_support=taxon_min_bootstrap_support,
-            taxon_max_mean_placement_entropy=taxon_max_mean_placement_entropy,
-            taxon_min_median_placement_lwr=taxon_min_median_placement_lwr,
-            taxon_identification=taxon_identification, taxon_k=taxon_k,
-            taxon_minimum_margin=taxon_minimum_margin, input_mode="illumina",
-            locus_quality={
-                str(row["locus_id"]): {
-                    "depth": row["primary_read_depth"],
-                    "consensus_strength": row["allele_confidence"],
-                    "status": row["status"],
-                }
-                for row in calls
-            },
-        )
+        ))
     phylogenetic_rows = (
         read_profiles(phylogeny_paths["combined_marker_matches"])
         if phylogeny_paths else []

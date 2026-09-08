@@ -54,6 +54,8 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `--database` | None | Reference-build directory whose fixed trees are reused, or a sequence-only database built on demand. |
 | `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
 | `--raxml-model` | `DNA` | Model-selection set when a sequence-only database requires new locus trees; ignored for reusable trees. |
+| `--phylogenetics` | Off | Also run legacy sequence phylogenetics; mapping classification and profile `.tree` output do not require it. |
+| `--classification-repeat-scale` | `1.0` | Repeat-count discrepancy scale in mapping log likelihoods, in repeat units. |
 | `--phylogeny-snp-weight` | `1.0` | Weight of normalized SNP-tree distance in combined marker ranking. |
 | `--phylogeny-repeat-weight` | `1.0` | Weight of normalized tandem-repeat distance in combined marker ranking. |
 | `--missing-locus-min-depth` | `3.0` | Minimum informative molecule support at a locus to count toward the coverage gate (read inputs only). |
@@ -62,17 +64,21 @@ files. Directory discovery is non-recursive, and each file is written beneath
 
 ## MLVA-only target-taxon assignment
 
-Taxon assignment runs automatically when `--database` resolves to
-metadata containing `taxon_id`. `--taxon-k` (default 3) controls the nearest
-references averaged per taxon, `--taxon-minimum-margin` (default 0.1) controls
-best/second separation (FASTQ requires 1.5 times this margin), and
-`--no-taxon-identification` disables it. The
-existing locus count and fraction options gate insufficient evidence.
+Taxon assignment runs automatically when `--database` resolves to metadata
+containing `taxon_id`. Classification uses observed-reference mapping likelihoods
+and explicit repeat-length evidence. `--sample-mode isolate` combines locus
+likelihoods for one source; `--sample-mode metagenome` (the historical default)
+uses EM. `--no-taxon-identification` disables taxon summaries while retaining
+reference ranking. `--taxon-min-loci` overrides the default two-locus requirement
+for model-supported classification; low-confidence candidates remain visible.
+The nearest-reference `--taxon-k` and the older bootstrap/recovery thresholds
+are not used by the mapping classifier. See
+[mapping classification](../concepts/mapping-classification.md).
 
 The following target-specific conformal mode is retained as an advanced,
 backward-compatible validation utility:
 
-Target assignment requires `--database`, `--target-taxon-id`, and
+Target assignment requires `--phylogenetics`, `--database`, `--target-taxon-id`, and
 `--taxon-calibration`. The reference metadata must label both target and
 near-neighbor references with `taxon_id`.
 

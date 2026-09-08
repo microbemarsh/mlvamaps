@@ -12,7 +12,7 @@ class CandidateAlignment:
     mate: int | None
     locus_id: str
     candidate_id: str
-    repeat_count: int | float
+    repeat_count: int | float | None
     reference_id: str
     alignment_score: float
     mapping_quality: int

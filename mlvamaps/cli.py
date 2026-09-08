@@ -251,6 +251,10 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         parser.error("--missing-locus-min-fraction must be in (0, 1]")
     if not math.isfinite(args.missing_locus_penalty) or args.missing_locus_penalty < 0:
         parser.error("--missing-locus-penalty must be finite and non-negative")
+    if not math.isfinite(args.classification_repeat_scale) or args.classification_repeat_scale <= 0:
+        parser.error("--classification-repeat-scale must be finite and positive")
+    if args.target_taxon_id and not args.phylogenetics:
+        parser.error("--target-taxon-id uses the legacy calibrated test and requires --phylogenetics")
     _resolve_panel_option(parser, args)
     database = Path(args.database).resolve() if args.database else None
     legacy_multi_taxon_build = bool(
@@ -633,6 +637,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="RAxML-NG nucleotide model for locus trees (default: %(default)s)",
     )
     call.add_argument(
+        "--phylogenetics", action="store_true",
+        help="Also run legacy sequence phylogenetics; mapping classification and MLVA .tree output do not require this",
+    )
+    call.add_argument(
+        "--classification-repeat-scale", type=_positive_float, default=1.0,
+        help="Repeat-count difference scale in mapping likelihoods, in repeat units (default: %(default)s)",
+    )
+    call.add_argument(
         "--phylogeny-snp-weight",
         type=_nonnegative_float,
         default=1.0,
@@ -675,7 +687,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--taxon-min-loci",
         type=_positive_int,
         default=None,
-        help=argparse.SUPPRESS,
+        help="Minimum observed loci for model-supported mapping classification (default: 2)",
     )
     call.add_argument(
         "--taxon-min-locus-fraction",
@@ -687,13 +699,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--taxon-bootstrap-replicates",
         type=_positive_int,
         default=200,
-        help="Deterministic informative-locus bootstrap replicates for taxon stability (default: %(default)s)",
+        help="Legacy phylogenetic taxon-test bootstrap replicates (default: %(default)s)",
     )
     call.add_argument(
         "--taxon-min-bootstrap-support",
         type=_fraction,
         default=0.9,
-        help="Minimum bootstrap winner fraction for species assignment (default: %(default)s)",
+        help="Legacy phylogenetic taxon-test minimum bootstrap support (default: %(default)s)",
     )
     call.add_argument(
         "--taxon-max-placement-entropy",
@@ -1069,6 +1081,8 @@ def _run_single_input(
             missing_locus_min_depth=args.missing_locus_min_depth,
             missing_locus_min_fraction=args.missing_locus_min_fraction,
             missing_locus_penalty=args.missing_locus_penalty,
+            phylogenetics=args.phylogenetics,
+            classification_repeat_scale=args.classification_repeat_scale,
             reference_metadata_path=args.reference_metadata,
             target_taxon_id=args.target_taxon_id,
             taxon_calibration_path=args.taxon_calibration,
@@ -1117,10 +1131,15 @@ def _run_single_input(
             print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
         print(f"Wrote report to {result['report']}")
         if args.database:
-            print(f"Wrote per-locus trees to {result['phylogeny']}")
-            print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
-            print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
-            print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
+            if "phylogeny" in result:
+                print(f"Wrote per-locus trees to {result['phylogeny']}")
+            if "phylogenetic_matches" in result:
+                print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
+            print(f"Wrote reference matches to {result['combined_marker_matches']}")
+            if "mlva_profile_tree" in result:
+                print(f"Wrote MLVA profile tree to {result['mlva_profile_tree']}")
+            if "combined_marker_tree" in result:
+                print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
             if "taxon_assignment" in result:
                 print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
             if "taxonomic_identification" in result:
@@ -1153,6 +1172,8 @@ def _run_single_input(
         missing_locus_min_depth=args.missing_locus_min_depth,
         missing_locus_min_fraction=args.missing_locus_min_fraction,
         missing_locus_penalty=args.missing_locus_penalty,
+        phylogenetics=args.phylogenetics,
+        classification_repeat_scale=args.classification_repeat_scale,
         reference_metadata_path=args.reference_metadata,
         target_taxon_id=args.target_taxon_id,
         taxon_calibration_path=args.taxon_calibration,
@@ -1176,10 +1197,15 @@ def _run_single_input(
         print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
     print(f"Wrote report to {result['report']}")
     if args.database:
-        print(f"Wrote per-locus trees to {result['phylogeny']}")
-        print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
-        print(f"Wrote combined repeat/SNP matches to {result['combined_marker_matches']}")
-        print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
+        if "phylogeny" in result:
+            print(f"Wrote per-locus trees to {result['phylogeny']}")
+        if "phylogenetic_matches" in result:
+            print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
+        print(f"Wrote reference matches to {result['combined_marker_matches']}")
+        if "mlva_profile_tree" in result:
+            print(f"Wrote MLVA profile tree to {result['mlva_profile_tree']}")
+        if "combined_marker_tree" in result:
+            print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
         if "taxon_assignment" in result:
             print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
         if "taxonomic_identification" in result:
@@ -1230,6 +1256,8 @@ def _run_short_input(
         missing_locus_min_depth=args.missing_locus_min_depth,
         missing_locus_min_fraction=args.missing_locus_min_fraction,
         missing_locus_penalty=args.missing_locus_penalty,
+        phylogenetics=args.phylogenetics,
+        classification_repeat_scale=args.classification_repeat_scale,
         reference_metadata_path=args.reference_metadata,
         target_taxon_id=args.target_taxon_id,
         taxon_calibration_path=args.taxon_calibration,
@@ -1250,6 +1278,10 @@ def _run_short_input(
     print(f"Wrote locus recruitment to {result['short_read_recruitment']}")
     print(f"Wrote minimap2-derived mapping evidence to {result['short_read_mapping']}")
     print(f"Wrote MYOGA metadata to {result['myoga_samples']}")
+    if "mapping_reference_matches" in result:
+        print(f"Wrote mapping reference matches to {result['mapping_reference_matches']}")
+    if "mlva_profile_tree" in result:
+        print(f"Wrote MLVA profile tree to {result['mlva_profile_tree']}")
     if "taxon_assignment" in result:
         print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
     if "taxonomic_identification" in result:
@@ -1365,7 +1397,14 @@ def _run_short_batch(
         sample_id = row["sample_id"]
         sample_outdir = _sample_output_dir(output_root, sample_id)
         summary_path = sample_outdir / "sample_summary.tsv"
-        if summary_path.exists() and not args.force:
+        classification_ready = not (args.database or args.recruitment_database) or (
+            sample_outdir / "classification" / "mapping_reference_matches.tsv"
+        ).is_file() and (
+            sample_outdir / "classification" / "classification.json"
+        ).is_file() and summary_path.is_file() and summary_path.stat().st_mtime_ns >= (
+            sample_outdir / "classification" / "classification.json"
+        ).stat().st_mtime_ns
+        if summary_path.exists() and not args.force and classification_ready:
             summary_rows = _read_table(summary_path)
             if summary_rows and summary_rows[0].get("run_status") == "success":
                 statuses.append({"sample_id": sample_id, "status": "skipped_success", "message": "existing successful result; use --force to rerun"})
@@ -1378,6 +1417,15 @@ def _run_short_batch(
                     "sample_summary": summary_path,
                     "myoga_samples": sample_outdir / "myoga_samples.csv",
                     "myoga_loci": sample_outdir / "myoga_loci.csv",
+                    **{
+                        key: sample_outdir / "classification" / filename
+                        for key, filename in (
+                            ("taxonomic_identification", "taxonomic_identification.tsv"),
+                            ("taxonomic_identification_evidence", "taxonomic_identification_evidence.tsv"),
+                            ("mapping_reference_matches", "mapping_reference_matches.tsv"),
+                        )
+                        if (sample_outdir / "classification" / filename).is_file()
+                    },
                 })
                 continue
         reads1 = Path(row["reads1"])
@@ -1423,6 +1471,7 @@ def _run_short_batch(
         "taxonomic_identification": "taxonomic_identification.tsv",
         "taxonomic_identification_evidence": "taxonomic_identification_evidence.tsv",
         "taxonomic_identification_loci": "taxonomic_identification_loci.tsv",
+        "mapping_reference_matches": "mapping_reference_matches.tsv",
     }
     for key, filename in table_keys.items():
         _combine_tables(

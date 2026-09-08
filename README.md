@@ -34,6 +34,14 @@ evidence is extracted from these alignments and integrated by a shared
 locus-level allele inference framework. minimap2 supplies competing alignments;
 it does not by itself determine the MLVA allele.
 
+Reference classification now uses original VNTR mapping likelihoods, including
+repeat-length evidence, with EM for mixed samples. It also writes a Newick MLVA
+profile-similarity `.tree` when enough repeat calls are available. Multi-sample
+profile trees remain available through `export-myoga`. Sequence phylogenetics
+is an additional analysis enabled with `--phylogenetics`; it is not required
+for classification or repeat-profile trees. See
+[mapping classification and profile trees](docs/concepts/mapping-classification.md).
+
 ## Install
 
 ### Conda/Miniforge (recommended)

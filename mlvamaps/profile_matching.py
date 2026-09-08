@@ -182,7 +182,7 @@ def sequence_reference_match_rows(rows: list[dict]) -> list[dict]:
         rank = source.get("rank", fallback_rank)
         compared = _numeric_count(source.get("compared_loci"))
         exact = _numeric_count(source.get("exact_marker_loci"))
-        distance = source.get("combined_marker_distance") or source.get(
+        distance = source.get("distance") if source.get("match_type") == "mapping_reference" else source.get("combined_marker_distance") or source.get(
             "total_likelihood_weighted_snp_distance", ""
         )
         metadata = ";".join(
@@ -193,7 +193,7 @@ def sequence_reference_match_rows(rows: list[dict]) -> list[dict]:
         row.update(
             {
                 "sample_id": source.get("sample_id", ""),
-                "match_type": "sequence_reference",
+                "match_type": source.get("match_type", "sequence_reference"),
                 "profile_id": reference_id,
                 "best_profile_id": reference_id,
                 "reference_id": reference_id,
