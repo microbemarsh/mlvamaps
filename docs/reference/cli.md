@@ -1,6 +1,8 @@
 # CLI options and thresholds
 
-Run `mlvamaps call --help` for the complete parser-generated reference.
+Run `mlvamaps call --help` for essential options, or `mlvamaps call --advanced`
+for the complete parser-generated reference. Advanced options remain usable
+without the `--advanced` flag.
 
 ## Completed-results MYOGA export
 

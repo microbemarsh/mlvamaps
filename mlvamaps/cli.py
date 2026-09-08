@@ -5,6 +5,7 @@ import csv
 import copy
 import math
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -306,7 +307,7 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         parser.error("call requires -i INPUT")
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mlvamaps",
         description="Simple MLVA/VNTR calling from primers plus FASTQ, FASTA, or an input directory",
@@ -318,6 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
         "call",
         help="Call VNTRs from primers plus FASTQ/FASTA files or a directory",
         epilog=(
+            "Use mlvamaps call --advanced for all options.\n\n"
             "Examples:\n"
             "  mlvamaps call -p primers.tsv -i sample.fastq.gz\n"
             "  mlvamaps call -p primers.tsv -i assembly.fasta\n"
@@ -640,6 +642,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write read- and locus-level mapping versus measurement audit TSVs",
     )
+
+    call.add_argument("--advanced", action="help", help="Show all options and exit")
+    if not advanced:
+        basic_options = {
+            "help", "advanced", "input_path", "reads1", "reads2", "short_reads",
+            "manifest", "panel_path", "database", "outdir", "sample_id",
+            "sample_mode", "threads", "quiet",
+        }
+        for action in call._actions:
+            if action.dest not in basic_options:
+                action.help = argparse.SUPPRESS
 
     export = subparsers.add_parser(
         "export-myoga",
@@ -1232,7 +1245,8 @@ def _batch_analysis_path(input_path: str, outdir: str) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser(advanced="--advanced" in argv)
     args = parser.parse_args(argv)
     if args.command == "export-myoga":
         try:
