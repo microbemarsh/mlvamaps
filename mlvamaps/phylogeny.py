@@ -105,6 +105,16 @@ LOCUS_MARKER_DISTANCE_FIELDS = [
     "placement_entropy",
 ]
 
+MISSING_LOCUS_FIELDS = [
+    "missing_locus_penalty",
+    "penalized_missing_loci",
+    "missing_locus_gate_passed",
+    "well_covered_locus_fraction",
+    "missing_locus_min_depth",
+    "missing_locus_min_fraction",
+    "missing_locus_penalty_per_locus",
+]
+
 COMBINED_MARKER_FIELDS = [
     "sample_id",
     "reference_id",
@@ -117,6 +127,7 @@ COMBINED_MARKER_FIELDS = [
     "snp_weight",
     "repeat_weight",
     "combined_marker_distance",
+    *MISSING_LOCUS_FIELDS,
     "compared_loci",
     "repeat_compared_loci",
     "exact_snp_loci",
@@ -1551,6 +1562,7 @@ def _write_exact_match_outputs(
     dnadiff_result_path: Path | None = None,
     dnadiff_available: bool = False,
     dnadiff_applicable: bool = False,
+    missing_locus_info: dict | None = None,
 ) -> dict[str, Path]:
     """Write normal placement outputs for a deterministic indexed identity hit."""
     whole_genome_metrics = whole_genome_metrics or {}
@@ -1732,6 +1744,9 @@ def _write_exact_match_outputs(
                 "snp_weight": f"{snp_weight:.6f}",
                 "repeat_weight": f"{repeat_weight:.6f}",
                 "combined_marker_distance": "0.00000000",
+                **(missing_locus_info or {}),
+                "missing_locus_penalty": "0.00000000",
+                "penalized_missing_loci": "",
                 "compared_loci": len(locus_ids),
                 "repeat_compared_loci": sum(
                     query_components[locus_id].repeat_count_raw is not None
@@ -1859,6 +1874,7 @@ def _add_taxon_assignment_outputs(
     input_mode: str = "assembly",
     locus_quality: dict[str, dict[str, object]] | None = None,
     locus_weights: dict[str, float] | None = None,
+    reference_penalties: dict[str, float] | None = None,
 ) -> dict[str, Path]:
     reference_taxa, _taxon_names = _reference_taxa(reference_metadata)
     automatic_enabled = taxon_identification is not False and bool(reference_taxa)
@@ -1879,6 +1895,7 @@ def _add_taxon_assignment_outputs(
             bootstrap_replicates=bootstrap_replicates,
             minimum_bootstrap_support=min_bootstrap_support,
             locus_quality=locus_quality,
+            reference_penalties=reference_penalties,
         )
         output = paths["phylogeny"]
         summary_path = output / "taxonomic_identification.tsv"
@@ -1973,6 +1990,54 @@ def _read_tsv_dicts(path: str | Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle, delimiter="\t"))
 
 
+def _coverage_gated_missing_loci(
+    requested_loci: set[str],
+    query_sequences: dict[str, str],
+    locus_quality: dict[str, dict[str, object]] | None,
+    input_mode: str,
+    min_depth: float,
+    min_fraction: float,
+    penalty: float,
+) -> tuple[set[str], dict]:
+    """Use molecule support as a coverage proxy, never as confirmed absence."""
+    if not math.isfinite(min_depth) or min_depth <= 0:
+        raise ValueError("Missing-locus minimum depth must be finite and positive")
+    if not math.isfinite(min_fraction) or not 0 < min_fraction <= 1:
+        raise ValueError("Missing-locus minimum fraction must be in (0, 1]")
+    if not math.isfinite(penalty) or penalty < 0:
+        raise ValueError("Missing-locus penalty must be finite and non-negative")
+    covered = set()
+    missing = set()
+    if input_mode in {"fastq", "illumina"}:
+        for locus_id in requested_loci:
+            quality = (locus_quality or {}).get(locus_id, {})
+            status = str(quality.get("detection_status", quality.get("status", ""))).lower()
+            try:
+                depth = float(quality.get("depth", ""))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(depth) or depth < 0:
+                continue
+            if status == "not_found":
+                if depth == 0 and not query_sequences.get(locus_id):
+                    missing.add(locus_id)
+            elif depth >= min_depth and status in {
+                "called", "pass", "low_coverage", "low_depth", "ambiguous",
+                "mixed", "multiple_variants", "detected_unresolved",
+                "present_count_unknown", "present",
+            }:
+                covered.add(locus_id)
+    fraction = len(covered) / len(requested_loci) if requested_loci else 0.0
+    passed = fraction >= min_fraction
+    return (missing if passed and penalty > 0 else set()), {
+        "missing_locus_gate_passed": "yes" if passed else "no",
+        "well_covered_locus_fraction": f"{fraction:.6f}",
+        "missing_locus_min_depth": min_depth,
+        "missing_locus_min_fraction": min_fraction,
+        "missing_locus_penalty_per_locus": penalty,
+    }
+
+
 def run_phylogenetic_placement(
     query_sequences: dict[str, str],
     database_path: str | Path,
@@ -2005,6 +2070,9 @@ def run_phylogenetic_placement(
     taxon_minimum_margin: float = 0.1,
     input_mode: str = "assembly",
     locus_quality: dict[str, dict[str, object]] | None = None,
+    missing_locus_min_depth: float = 3.0,
+    missing_locus_min_fraction: float = 0.8,
+    missing_locus_penalty: float = 1.0,
 ) -> dict[str, Path]:
     if snp_weight < 0 or repeat_weight < 0 or snp_weight + repeat_weight <= 0:
         raise ValueError("SNP and repeat weights must be non-negative with a positive total")
@@ -2014,6 +2082,10 @@ def run_phylogenetic_placement(
         else {}
     )
     requested_locus_ids = set(locus_by_id) if locus_by_id else set(locus_ids)
+    missing_loci, missing_locus_info = _coverage_gated_missing_loci(
+        requested_locus_ids, query_sequences, locus_quality, input_mode,
+        missing_locus_min_depth, missing_locus_min_fraction, missing_locus_penalty,
+    )
     sequence_database_path, reusable_phylogeny = _resolve_reference_database_layout(
         database_path
     )
@@ -2040,6 +2112,7 @@ def run_phylogenetic_placement(
         and exact_match_fast_path
         and target_taxon_id is None
         and not automatic_taxon_identification
+        and not missing_loci
     ):
         sequence_index_path: Path | None = (
             sequence_database_path / "reference_sequence_index.tsv"
@@ -2117,6 +2190,7 @@ def run_phylogenetic_placement(
                 dnadiff_result_path,
                 dnadiff_available,
                 query_assembly_path is not None,
+                missing_locus_info=missing_locus_info,
             )
             return _add_taxon_assignment_outputs(
                 exact_paths,
@@ -2143,6 +2217,15 @@ def run_phylogenetic_placement(
             )
     if references is None:
         references = read_sequence_database(sequence_database_path, requested_locus_ids)
+    missing_by_reference: dict[str, set[str]] = {}
+    for locus_id in sorted(missing_loci):
+        for reference_id, sequence in references.get(locus_id, []):
+            if sequence:
+                missing_by_reference.setdefault(reference_id, set()).add(locus_id)
+    reference_penalties = {
+        reference_id: len(loci) * missing_locus_penalty
+        for reference_id, loci in missing_by_reference.items()
+    }
     mafft = check_mafft(mafft_bin)
     epa_ng = check_epa_ng(epa_ng_bin)
     raxml_ng: str | None = None
@@ -2703,30 +2786,26 @@ def run_phylogenetic_placement(
         for reference_id, values in combined_totals.items()
         if int(values["repeat_loci"]) == len(required_repeat_loci)
     ]
-    combined_order = sorted(
-        eligible_combined_references,
-        key=lambda reference_id: (
-            snp_weight * float(combined_totals[reference_id]["normalized_snp"])
-            + repeat_weight
-            * float(combined_totals[reference_id]["normalized_repeat"]),
-            reference_id,
-        ),
-    )
     combined_rows: list[dict] = []
     combined_scores = {
         reference_id: (
             snp_weight * float(combined_totals[reference_id]["normalized_snp"])
             + repeat_weight
             * float(combined_totals[reference_id]["normalized_repeat"])
+            + reference_penalties.get(reference_id, 0.0)
         )
-        for reference_id in combined_order
+        for reference_id in eligible_combined_references
     }
+    combined_order = sorted(
+        combined_scores, key=lambda reference_id: (combined_scores[reference_id], reference_id)
+    )
     placement_only_scores = {
         reference_id: (
             snp_weight
             * float(combined_totals[reference_id]["placement_normalized_snp"])
             + repeat_weight
             * float(combined_totals[reference_id]["normalized_repeat"])
+            + reference_penalties.get(reference_id, 0.0)
         )
         for reference_id in combined_order
     }
@@ -2751,7 +2830,10 @@ def run_phylogenetic_placement(
         else:
             gap = ""
             relative_gap = ""
-        exact_marker_match = int(values["exact_marker_loci"]) == int(values["loci"])
+        exact_marker_match = (
+            int(values["exact_marker_loci"]) == int(values["loci"])
+            and not reference_penalties.get(reference_id, 0.0)
+        )
         ranking_warning = (
             "EXACT_MATCH_OVERRIDES_PLACEMENT"
             if exact_marker_match
@@ -2772,6 +2854,9 @@ def run_phylogenetic_placement(
                 "snp_weight": f"{snp_weight:.6f}",
                 "repeat_weight": f"{repeat_weight:.6f}",
                 "combined_marker_distance": f"{score:.8f}",
+                **missing_locus_info,
+                "missing_locus_penalty": f"{reference_penalties.get(reference_id, 0.0):.8f}",
+                "penalized_missing_loci": ",".join(sorted(missing_by_reference.get(reference_id, set()))),
                 "compared_loci": values["loci"],
                 "repeat_compared_loci": values["repeat_loci"],
                 "exact_snp_loci": values["exact_snp_loci"],
@@ -2921,6 +3006,9 @@ def run_phylogenetic_placement(
                 len(placed_loci),
                 force=locus_number == len(placed_loci),
             )
+    for index, reference_id in enumerate(reference_labels):
+        combined_matrix[-1, index] += reference_penalties.get(reference_id, 0.0)
+        combined_matrix[index, -1] += reference_penalties.get(reference_id, 0.0)
     np.fill_diagonal(combined_matrix, 0.0)
     combined_tree_path = output / "combined_markers.tree"
     if progress is not None:
@@ -2972,6 +3060,7 @@ def run_phylogenetic_placement(
         input_mode=input_mode,
         locus_quality=locus_quality,
         locus_weights=locus_weights or None,
+        reference_penalties=reference_penalties,
     )
 
 

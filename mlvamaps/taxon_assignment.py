@@ -508,6 +508,7 @@ def _aggregate_taxon_distances(
     taxa: Sequence[str],
     k: int,
     locus_weights: Mapping[str, float] | None = None,
+    reference_penalties: Mapping[str, float] | None = None,
 ) -> tuple[dict[str, dict[str, float | None]], dict[str, set[str]]]:
     """Aggregate each reference across loci, then average the k nearest."""
     weights = locus_weights or {locus_id: 1.0 for locus_id in selected_loci}
@@ -536,6 +537,10 @@ def _aggregate_taxon_distances(
                         / sum(
                             max(0.0, float(weights.get(locus_id, 1.0)))
                             for locus_id in selected_loci
+                        )
+                        + (
+                            (reference_penalties or {}).get(reference_id, 0.0)
+                            / len(selected_loci) if channel == "joint" else 0.0
                         ),
                         reference_id,
                     )
@@ -596,6 +601,7 @@ def assign_best_taxon(
     maximum_compatible_distance: float = 1.0,
     locus_quality: Mapping[str, Mapping[str, object]] | None = None,
     seed: int = 0,
+    reference_penalties: Mapping[str, float] | None = None,
 ) -> AutomaticTaxonAssignment:
     """Select the nearest annotated taxon using existing MLVA marker distances.
 
@@ -603,14 +609,18 @@ def assign_best_taxon(
     normalized marker distance is ``snp_weight * SNP + repeat_weight * repeat``.
     Each reference distance is the mean over those loci, and a taxon's distance
     is the mean of its nearest ``k`` complete references.  The reported score is
-    ``locus_recovery_fraction / (1 + taxon_distance)``.  Missing query loci are
-    therefore a confidence penalty and never evidence that a taxon is absent.
+    ``locus_recovery_fraction / (1 + taxon_distance)``.  Missing query loci
+    ordinarily affect confidence only. Optional coverage-gated reference
+    penalties add to the joint distance, divided by the number of scoring loci;
+    they do not add recovered loci or establish biological absence.
     A multi-taxon result is SUPPORTED only when locus thresholds pass and
     ``(second_distance - best_distance) / max(second_distance, 1e-12)`` meets
     ``minimum_relative_margin``.
     """
     if expected_loci < 1:
         raise ValueError("expected_loci must be at least 1")
+    if any(not math.isfinite(value) or value < 0 for value in (reference_penalties or {}).values()):
+        raise ValueError("Reference penalties must be finite and non-negative")
     if k < 1 or minimum_loci < 1:
         raise ValueError("k and minimum_loci must be at least 1")
     if not 0 <= minimum_locus_fraction <= 1:
@@ -655,7 +665,7 @@ def assign_best_taxon(
     discriminative = [locus_id for locus_id in informative if weights[locus_id] >= 0.05]
     scoring_loci = discriminative if discriminative else ([] if supplied_weights else informative)
     distances, nearest = _aggregate_taxon_distances(
-        values, scoring_loci, taxa, k, weights
+        values, scoring_loci, taxa, k, weights, reference_penalties
     )
     ranked = sorted(
         (
@@ -673,7 +683,7 @@ def assign_best_taxon(
         for _replicate in range(bootstrap_replicates):
             selected = [rng.choice(scoring_loci) for _ in scoring_loci]
             replicate_distances = _aggregate_bootstrap_joint_distances(
-                values, selected, taxa, k, weights
+                values, selected, taxa, k, weights, reference_penalties
             )
             ordered = sorted(
                 (float(distance), taxon_id)
@@ -885,6 +895,7 @@ def _aggregate_bootstrap_joint_distances(
     taxa: Sequence[str],
     k: int,
     locus_weights: Mapping[str, float] | None = None,
+    reference_penalties: Mapping[str, float] | None = None,
 ) -> dict[str, float | None]:
     """Aggregate only joint distances for a bootstrap replicate.
 
@@ -908,7 +919,8 @@ def _aggregate_bootstrap_joint_distances(
         complete = sorted(
             sum(value * weights.get(locus_id, 1.0) for locus_id, value in values)
             / sum(weights.get(locus_id, 1.0) for locus_id, _value in values)
-            for values in by_reference.values()
+            + (reference_penalties or {}).get(reference_id, 0.0) / locus_count
+            for reference_id, values in by_reference.items()
             if len(values) == locus_count
             and sum(weights.get(locus_id, 1.0) for locus_id, _value in values) > 0
         )

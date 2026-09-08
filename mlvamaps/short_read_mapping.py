@@ -371,6 +371,9 @@ def run_mapping_short_read_call(
     taxon_max_mean_placement_entropy: float | None,
     taxon_min_median_placement_lwr: float | None,
     taxon_identification: bool | None, taxon_k: int, taxon_minimum_margin: float,
+    missing_locus_min_depth: float = 3.0,
+    missing_locus_min_fraction: float = 0.8,
+    missing_locus_penalty: float = 1.0,
     show_progress: bool = True,
 ) -> dict[str, Path]:
     """Run competitive minimap2 mapping and emit established output views."""
@@ -530,6 +533,9 @@ def run_mapping_short_read_call(
             mafft_bin=mafft_bin, raxml_ng_bin=raxml_ng_bin, epa_ng_bin=epa_ng_bin,
             raxml_model=raxml_model, snp_weight=phylogeny_snp_weight,
             repeat_weight=phylogeny_repeat_weight,
+            missing_locus_min_depth=missing_locus_min_depth,
+            missing_locus_min_fraction=missing_locus_min_fraction,
+            missing_locus_penalty=missing_locus_penalty,
             reference_metadata_path=reference_metadata_path,
             target_taxon_id=target_taxon_id,
             taxon_calibration_path=taxon_calibration_path, taxon_alpha=taxon_alpha,

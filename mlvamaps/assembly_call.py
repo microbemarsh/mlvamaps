@@ -849,6 +849,9 @@ def run_assembly_call(
     taxon_k: int = 3,
     taxon_minimum_margin: float = 0.1,
     show_progress: bool = False,
+    missing_locus_min_depth: float = 3.0,
+    missing_locus_min_fraction: float = 0.8,
+    missing_locus_penalty: float = 1.0,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
@@ -1005,6 +1008,9 @@ def run_assembly_call(
             raxml_model=raxml_model,
             snp_weight=phylogeny_snp_weight,
             repeat_weight=phylogeny_repeat_weight,
+            missing_locus_min_depth=missing_locus_min_depth,
+            missing_locus_min_fraction=missing_locus_min_fraction,
+            missing_locus_penalty=missing_locus_penalty,
             reference_metadata_path=reference_metadata_path,
             progress=progress,
             query_assembly_path=assembly_path,

@@ -91,7 +91,7 @@ def test_taxon_report_renders_all_confidence_states(tmp_path, confidence, status
     assert expected in _automatic_taxon_identification_section(tmp_path)
 
 
-def test_low_confidence_result_displays_closest_combined_marker_distance(tmp_path):
+def test_low_confidence_result_labels_aggregate_taxon_distance(tmp_path):
     phylogeny = tmp_path / "phylogeny"
     phylogeny.mkdir()
     (phylogeny / "taxonomic_identification.tsv").write_text(
@@ -104,6 +104,8 @@ def test_low_confidence_result_displays_closest_combined_marker_distance(tmp_pat
     assert "Taxon A" in section
     assert "Closest taxon — low confidence" in section
     assert "0.125" in section
+    assert "Aggregate taxon distance" in section
+    assert "Closest combined-marker distance" not in section
 
 
 def test_taxon_assignment_section_labels_p_values_as_compatibility(tmp_path):

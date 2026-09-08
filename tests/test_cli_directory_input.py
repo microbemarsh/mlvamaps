@@ -357,3 +357,36 @@ def test_manifest_rejects_reserved_batch_summary_sample_id(tmp_path, capsys):
         )
 
     assert "reserved for batch aggregate outputs" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag, value", [
+    ("--missing-locus-min-depth", "nan"),
+    ("--missing-locus-min-depth", "0"),
+    ("--missing-locus-min-fraction", "1.1"),
+    ("--missing-locus-min-fraction", "0"),
+    ("--missing-locus-penalty", "inf"),
+    ("--missing-locus-penalty", "-1"),
+])
+def test_call_rejects_invalid_missing_locus_settings(flag, value, capsys):
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["call", flag, value])
+    assert flag in capsys.readouterr().err
+
+
+def test_call_forwards_missing_locus_settings(tmp_path, monkeypatch):
+    args = cli.build_parser().parse_args([
+        "call", "--missing-locus-min-depth", "4",
+        "--missing-locus-min-fraction", "0.75", "--missing-locus-penalty", "0.5",
+    ])
+    observed = {}
+
+    def fake_call(**kwargs):
+        observed.update(kwargs)
+        raise RuntimeError("captured call arguments")
+
+    monkeypatch.setattr(cli, "run_call", fake_call)
+    with pytest.raises(RuntimeError, match="captured call arguments"):
+        cli._run_single_input(args, tmp_path / "sample.fastq", tmp_path / "out", "sample")
+    assert observed["missing_locus_min_depth"] == 4
+    assert observed["missing_locus_min_fraction"] == 0.75
+    assert observed["missing_locus_penalty"] == 0.5

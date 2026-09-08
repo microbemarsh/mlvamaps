@@ -87,7 +87,7 @@ def _automatic_taxon_identification_section(outdir: Path) -> str:
     explanation = ""
     if closest_only:
         explanation = (
-            "This is the nearest taxon by combined marker distance, but the "
+            "This is the nearest taxon by weighted nearest-reference averages, but the "
             "evidence did not pass the confidence requirements for an assignment."
         )
     elif not resolved:
@@ -106,10 +106,10 @@ def _automatic_taxon_identification_section(outdir: Path) -> str:
           {_metric_card("Loci recovered", f"{row.get('loci_recovered', row.get('informative_loci', ''))}/{row.get('expected_loci', '')}")}
           {_metric_card("Discriminatory support", f"{row.get('loci_supporting_assignment', '')}/{row.get('discriminative_loci_recovered', '')}", f"{row.get('conflicting_loci', '') or 0} conflicting")}
           {_metric_card("Runner-up", second_taxon or "Not available", f"relative margin {row.get('relative_margin', row.get('score_margin', ''))}")}
-          {_metric_card("Closest combined-marker distance", row.get("closest_distance", "Not available"), f"lower is closer; ranking score {row.get('taxon_score', 'not available')}")}
+          {_metric_card("Aggregate taxon distance", row.get("closest_distance", "Not available"), f"lower is closer; ranking score {row.get('taxon_score', 'not available')}")}
           {_metric_card("Bootstrap support", row.get("bootstrap_support", "Not available"), "stability, not probability")}
         </div>
-        {'' if resolved else _finding('warn', 'Closest taxon — low confidence' if closest_only else 'Species unresolved', f"Closest database result only; combined-marker distance {row.get('closest_distance', 'not available')}." if closest_only else (f"Recommendation: interpret this sample at the {assignment_rank} level." if assignment_rank != 'unresolved' else 'No supported taxonomic rank is available.'))}
+        {'' if resolved else _finding('warn', 'Closest taxon — low confidence' if closest_only else 'Species unresolved', f"Closest aggregate taxon result only; aggregate distance {row.get('closest_distance', 'not available')}." if closest_only else (f"Recommendation: interpret this sample at the {assignment_rank} level." if assignment_rank != 'unresolved' else 'No supported taxonomic rank is available.'))}
         <details><summary>Closest taxa</summary><div class="table-scroll"><table>
           <thead><tr><th>Rank</th><th>Taxon</th><th>Distance</th><th>Similarity</th><th>Bootstrap wins</th></tr></thead>
           <tbody>{candidates_html}</tbody></table></div></details>
@@ -1203,6 +1203,9 @@ def write_report(
         f"<td>{_safe(row.get('total_placement_normalized_snp_distance', ''))}</td>"
         f"<td>{_safe(row.get('total_normalized_direct_snp_distance', ''))}</td>"
         f"<td>{_safe(row.get('total_normalized_repeat_distance', ''))}</td>"
+        f"<td>{_safe(row.get('missing_locus_penalty', ''))}</td>"
+        f"<td>{_safe(row.get('penalized_missing_loci', ''))}</td>"
+        f"<td>{_safe(row.get('missing_locus_gate_passed', ''))}</td>"
         f"<td>{_safe(row.get('compared_loci', ''))}</td>"
         f"<td>{_safe(row.get('exact_marker_loci', ''))}</td>"
         f"<td>{_safe(row.get('match_status', ''))}</td>"
@@ -1234,7 +1237,7 @@ def write_report(
           <summary>Technical marker-distance components</summary>
           <p class="terminal-note">EPA/tree, direct aligned-sequence, repeat, and tie-break components used to construct the ranking.</p>
           <div class="table-scroll"><table>
-            <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
+            <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Missing-locus penalty</th><th>Penalized loci</th><th>Coverage gate passed</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
             <tbody>{phylogenetic_table_rows}</tbody>
           </table></div>
         </details>
@@ -1606,6 +1609,9 @@ def write_assembly_report(
         f"<td>{_safe(row.get('total_placement_normalized_snp_distance', ''))}</td>"
         f"<td>{_safe(row.get('total_normalized_direct_snp_distance', ''))}</td>"
         f"<td>{_safe(row.get('total_normalized_repeat_distance', ''))}</td>"
+        f"<td>{_safe(row.get('missing_locus_penalty', ''))}</td>"
+        f"<td>{_safe(row.get('penalized_missing_loci', ''))}</td>"
+        f"<td>{_safe(row.get('missing_locus_gate_passed', ''))}</td>"
         f"<td>{_safe(row.get('compared_loci', ''))}</td>"
         f"<td>{_safe(row.get('exact_marker_loci', ''))}</td>"
         f"<td>{_safe(row.get('match_status', ''))}</td>"
@@ -1637,7 +1643,7 @@ def write_assembly_report(
           <summary>Technical marker-distance components</summary>
           <p class="terminal-note">EPA/tree, direct aligned-sequence, repeat, and tie-break components used to construct the ranking.</p>
           <div class="table-scroll"><table>
-            <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
+            <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Missing-locus penalty</th><th>Penalized loci</th><th>Coverage gate passed</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
             <tbody>{phylogenetic_table_rows}</tbody>
           </table></div>
         </details>

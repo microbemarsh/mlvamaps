@@ -27,7 +27,7 @@ from .profile_matching import (
     profile_match_locus_rows,
     sequence_reference_match_rows,
 )
-from .phylogeny import run_phylogenetic_placement
+from .phylogeny import MISSING_LOCUS_FIELDS, run_phylogenetic_placement
 from .progress import ProgressReporter
 from .primers import read_loci_or_primers
 from .qc import filter_reads
@@ -220,6 +220,7 @@ MATCH_FIELDS = [
     "snp_weight",
     "repeat_weight",
     "combined_marker_distance",
+    *MISSING_LOCUS_FIELDS,
     "repeat_compared_loci",
     "exact_snp_loci",
     "exact_marker_loci",
@@ -429,6 +430,9 @@ def run_call(
     taxon_screen_abs_threshold: int = 2,
     taxon_screen_rel_threshold: float = 0.01,
     deacon_bin: str = "deacon",
+    missing_locus_min_depth: float = 3.0,
+    missing_locus_min_fraction: float = 0.8,
+    missing_locus_penalty: float = 1.0,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
@@ -927,6 +931,9 @@ def run_call(
             raxml_model=raxml_model,
             snp_weight=phylogeny_snp_weight,
             repeat_weight=phylogeny_repeat_weight,
+            missing_locus_min_depth=missing_locus_min_depth,
+            missing_locus_min_fraction=missing_locus_min_fraction,
+            missing_locus_penalty=missing_locus_penalty,
             reference_metadata_path=reference_metadata_path,
             progress=progress,
             target_taxon_id=target_taxon_id,
@@ -947,6 +954,7 @@ def run_call(
                     "depth": row.get("primary_read_depth", row.get("read_depth", "")),
                     "consensus_strength": row.get("allele_confidence", ""),
                     "status": row.get("status", ""),
+                    "detection_status": unified_by_locus.get(str(row["locus_id"]), {}).get("status", ""),
                 }
                 for row in simple_call_rows
             },

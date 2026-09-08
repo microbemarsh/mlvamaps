@@ -18,7 +18,8 @@ from mlvamaps.taxon_assignment import (
 )
 
 
-def test_bootstrap_joint_aggregation_matches_full_aggregation():
+@pytest.mark.parametrize("penalties", [None, {"T1": 0.5, "N1": 1.0}])
+def test_bootstrap_joint_aggregation_matches_full_aggregation(penalties):
     taxa = ["target", "neighbor"]
     locus_values = {
         "L1": {
@@ -49,10 +50,10 @@ def test_bootstrap_joint_aggregation_matches_full_aggregation():
     selected_loci = ["L2", "L1", "L2"]
 
     full, _nearest = _aggregate_taxon_distances(
-        locus_values, selected_loci, taxa, k=2
+        locus_values, selected_loci, taxa, k=2, reference_penalties=penalties
     )
     bootstrap = _aggregate_bootstrap_joint_distances(
-        locus_values, selected_loci, taxa, k=2
+        locus_values, selected_loci, taxa, k=2, reference_penalties=penalties
     )
 
     assert bootstrap == {
@@ -584,3 +585,33 @@ def test_target_must_be_present_in_labeled_metadata():
             reference_metadata=_metadata(),
             calibration=_calibration(),
         )
+
+
+def test_coverage_gated_penalty_preserves_low_depth_taxon_identification():
+    from mlvamaps.phylogeny import _coverage_gated_missing_loci
+
+    kwargs = dict(
+        sample_id="sample", locus_marker_rows=_rows(0, 0, 0.02, 0.02, loci=4),
+        reference_metadata=_metadata(), expected_loci=5, input_mode="fastq",
+    )
+    baseline = assign_best_taxon(**kwargs)
+    quality = {f"L{i}": {"depth": 2, "status": "called"} for i in range(1, 5)}
+    quality["L5"] = {"depth": 0, "status": "not_found"}
+    missing, _info = _coverage_gated_missing_loci(set(quality), {}, quality, "fastq", 3, 0.8, 1)
+    low = assign_best_taxon(
+        **kwargs, reference_penalties={ref: len(missing) for ref in ("T1", "T2")},
+    )
+    assert low == baseline
+    assert low.summary["best_taxon"] == "target"
+
+    for i in range(1, 5):
+        quality[f"L{i}"]["depth"] = 3
+    missing, _info = _coverage_gated_missing_loci(set(quality), {}, quality, "fastq", 3, 0.8, 1)
+    high = assign_best_taxon(
+        **kwargs, reference_penalties={ref: len(missing) for ref in ("T1", "T2")},
+    )
+    assert high.summary["best_taxon"] == "neighbor"
+    assert high.evidence[0]["bootstrap_win_fraction"] == 1
+    assert high.evidence[0]["informative_loci"] == low.evidence[0]["informative_loci"] == 4
+    assert high.evidence[0]["locus_recovery_fraction"] == 0.8
+    assert next(row for row in high.evidence if row["taxon_id"] == "target")["distance"] == pytest.approx(0.25)

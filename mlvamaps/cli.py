@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import copy
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -244,6 +245,12 @@ def _resolve_panel_option(
 
 
 def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if not math.isfinite(args.missing_locus_min_depth) or args.missing_locus_min_depth <= 0:
+        parser.error("--missing-locus-min-depth must be finite and positive")
+    if not math.isfinite(args.missing_locus_min_fraction) or not 0 < args.missing_locus_min_fraction <= 1:
+        parser.error("--missing-locus-min-fraction must be in (0, 1]")
+    if not math.isfinite(args.missing_locus_penalty) or args.missing_locus_penalty < 0:
+        parser.error("--missing-locus-penalty must be finite and non-negative")
     _resolve_panel_option(parser, args)
     database = Path(args.database).resolve() if args.database else None
     legacy_multi_taxon_build = bool(
@@ -636,6 +643,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=_nonnegative_float,
         default=1.0,
         help="Weight for normalized tandem-repeat distance in combined marker ranking (default: %(default)s)",
+    )
+    call.add_argument(
+        "--missing-locus-min-depth", type=_positive_float, default=3.0,
+        help="Minimum supporting molecules per locus for the missing-locus gate (default: %(default)s)",
+    )
+    call.add_argument(
+        "--missing-locus-min-fraction", type=_positive_float, default=0.8,
+        help="Fraction of panel loci meeting missing-locus depth, in (0, 1] (default: %(default)s)",
+    )
+    call.add_argument(
+        "--missing-locus-penalty", type=_nonnegative_float, default=1.0,
+        help="Distance per undetected query locus present in a reference after the coverage gate passes; 0 disables (default: %(default)s)",
     )
     call.add_argument(
         "--target-taxon-id",
@@ -1047,6 +1066,9 @@ def _run_single_input(
             raxml_model=args.raxml_model,
             phylogeny_snp_weight=args.phylogeny_snp_weight,
             phylogeny_repeat_weight=args.phylogeny_repeat_weight,
+            missing_locus_min_depth=args.missing_locus_min_depth,
+            missing_locus_min_fraction=args.missing_locus_min_fraction,
+            missing_locus_penalty=args.missing_locus_penalty,
             reference_metadata_path=args.reference_metadata,
             target_taxon_id=args.target_taxon_id,
             taxon_calibration_path=args.taxon_calibration,
@@ -1128,6 +1150,9 @@ def _run_single_input(
         raxml_model=args.raxml_model,
         phylogeny_snp_weight=args.phylogeny_snp_weight,
         phylogeny_repeat_weight=args.phylogeny_repeat_weight,
+        missing_locus_min_depth=args.missing_locus_min_depth,
+        missing_locus_min_fraction=args.missing_locus_min_fraction,
+        missing_locus_penalty=args.missing_locus_penalty,
         reference_metadata_path=args.reference_metadata,
         target_taxon_id=args.target_taxon_id,
         taxon_calibration_path=args.taxon_calibration,
@@ -1202,6 +1227,9 @@ def _run_short_input(
         raxml_model=args.raxml_model,
         phylogeny_snp_weight=args.phylogeny_snp_weight,
         phylogeny_repeat_weight=args.phylogeny_repeat_weight,
+        missing_locus_min_depth=args.missing_locus_min_depth,
+        missing_locus_min_fraction=args.missing_locus_min_fraction,
+        missing_locus_penalty=args.missing_locus_penalty,
         reference_metadata_path=args.reference_metadata,
         target_taxon_id=args.target_taxon_id,
         taxon_calibration_path=args.taxon_calibration,

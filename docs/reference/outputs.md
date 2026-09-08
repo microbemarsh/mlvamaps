@@ -55,6 +55,10 @@ reserved and cannot be used as a sample ID in a batch.
 
 Multi-taxon databases additionally produce the following under `phylogeny/`:
 
+The report's taxonomic identification uses the weighted aggregate taxon ranking
+from `taxonomic_identification.tsv`. Its aggregate distance is distinct from the
+individual reference distances in `combined_marker_matches.tsv`.
+
 | File | Meaning |
 | --- | --- |
 | `taxonomic_identification.tsv` | Backward-compatible summary columns plus assignment rank/status, categorical confidence, closest and runner-up distances, margins, locus support, bootstrap stability, and input mode. |
@@ -326,3 +330,39 @@ backwards compatibility.
 | --- | --- |
 | `PASS` | Product found and repeat count calculated. |
 | `NOT_FOUND` | No product was eligible for the historical assembly repeat-count rule. Candidate products can still appear in `assembly_amplicons.tsv` when repeat calibration is unavailable or the raw repeat count is 100 or greater. |
+
+### Coverage-gated missing-locus distance
+
+For read inputs, the default gate requires at least 80% of all panel loci to
+have at least 3 informative supporting molecules each. Existing competitive
+mapping supplies this depth proxy; it is not genome-wide base coverage. When
+the gate passes, each query locus explicitly marked `not_found` with zero
+support and no query sequence adds 1 distance unit to references with a
+recorded sequence at that locus. References without that sequence get no
+penalty. This is a missing-data heuristic, not confirmed biological absence;
+reference incompleteness can also influence the result.
+
+Low or unknown coverage adds no penalty and introduces no new taxon detection
+threshold. Detected-but-unresolved, ambiguous, and low-depth calls are never
+penalized as missing. Assembly inputs do not use this gate. Configure the
+thresholds with `--missing-locus-min-depth`, `--missing-locus-min-fraction`, and
+`--missing-locus-penalty`; setting the penalty to zero restores unpenalized
+scoring. The defaults are provisional heuristic settings, not calibrated
+absence probabilities.
+
+`combined_marker_matches.tsv` and sequence-reference rows in `profile_matches.tsv`
+report `missing_locus_penalty`, `penalized_missing_loci`,
+`missing_locus_gate_passed`, `well_covered_locus_fraction`, and the three settings
+(`missing_locus_min_depth`, `missing_locus_min_fraction`,
+`missing_locus_penalty_per_locus`). The combined distance and query tree distances
+include the penalty; SNP/repeat components and compared/exact locus counts
+remain measurements of observed loci. A penalized reference is not labeled an
+exact marker match. The HTML marker-component table also shows the penalty,
+affected loci, and gate result.
+
+Automatic taxon identification adds the same reference penalty divided by the
+number of scoring loci to each reference's mean joint distance before choosing
+the nearest references per taxon. Bootstrap replicates retain that fixed
+coverage evidence while resampling observed loci. Missing loci do not increase
+recovery, discriminative-locus counts, or supporting-locus counts. The separate
+calibrated target-taxon test retains its original calibrated scoring.

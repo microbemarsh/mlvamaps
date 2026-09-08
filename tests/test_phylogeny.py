@@ -34,6 +34,62 @@ def _read_tsv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle, delimiter="\t"))
 
 
+@pytest.mark.parametrize("status", [
+    "detected_unresolved", "PRESENT_COUNT_UNKNOWN", "LOW_DEPTH", "ambiguous",
+    "LOCUS_DROPOUT", "", "not_found",
+])
+def test_missing_locus_gate_requires_explicit_undetected_status(status):
+    quality = {f"L{i}": {"depth": 3, "status": "called"} for i in range(4)}
+    quality["missing"] = {"depth": 0, "status": status}
+    missing, info = phylogeny_module._coverage_gated_missing_loci(
+        set(quality), {}, quality, "fastq", 3, 0.8, 1,
+    )
+    assert info["missing_locus_gate_passed"] == "yes"
+    assert missing == ({"missing"} if status == "not_found" else set())
+    # Long-read summary statuses merge both states; retain original detection
+    # evidence separately without changing the taxonomic QC status.
+    quality["missing"]["detection_status"] = status
+    quality["missing"]["status"] = "LOCUS_DROPOUT"
+    missing, _info = phylogeny_module._coverage_gated_missing_loci(
+        set(quality), {}, quality, "fastq", 3, 0.8, 1,
+    )
+    assert missing == ({"missing"} if status == "not_found" else set())
+
+
+@pytest.mark.parametrize("depth, mode, penalty, expected", [
+    (3, "illumina", 1, {"missing"}),
+    (2, "fastq", 1, set()),
+    ("", "fastq", 1, set()),
+    (float("nan"), "fastq", 1, set()),
+    (float("inf"), "fastq", 1, set()),
+    (3, "assembly", 1, set()),
+    (3, "fastq", 0, set()),
+])
+def test_missing_locus_gate_preserves_low_or_unknown_coverage(depth, mode, penalty, expected):
+    quality = {f"L{i}": {"depth": depth, "status": "called"} for i in range(4)}
+    quality["missing"] = {"depth": 0, "status": "not_found"}
+    missing, _info = phylogeny_module._coverage_gated_missing_loci(
+        set(quality), {}, quality, mode, 3, 0.8, penalty,
+    )
+    assert missing == expected
+    # The denominator is the entire panel, not just loci with usable calls.
+    missing, _info = phylogeny_module._coverage_gated_missing_loci(
+        set(quality) | {"unknown"}, {}, quality, mode, 3, 0.8, penalty,
+    )
+    assert not missing
+
+
+@pytest.mark.parametrize("min_depth, fraction, penalty", [
+    (0, 0.8, 1), (3, 0, 1), (3, 1.1, 1), (3, 0.8, -1),
+    (float("nan"), 0.8, 1), (3, float("inf"), 1), (3, 0.8, float("nan")),
+])
+def test_missing_locus_gate_rejects_invalid_settings(min_depth, fraction, penalty):
+    with pytest.raises(ValueError):
+        phylogeny_module._coverage_gated_missing_loci(
+            set(), {}, None, "fastq", min_depth, fraction, penalty,
+        )
+
+
 def _fake_mafft(tmp_path: Path) -> Path:
     executable = tmp_path / "mafft"
     executable.write_text(
@@ -770,3 +826,66 @@ def test_exact_marker_match_overrides_conflicting_epa_ranking(tmp_path):
     assert combined[0]["match_status"] == "EXACT_MARKER_MATCH"
     assert combined[0]["ranking_warning"] == "EXACT_MATCH_OVERRIDES_PLACEMENT"
     assert combined[1]["reference_id"] == "R2"
+
+
+def test_coverage_penalty_reranks_references_and_query_tree(tmp_path, monkeypatch):
+    loci = [Locus(
+        locus_id=f"L{i}", forward_primer="ACG", reverse_primer="TTA",
+        left_flank_sequence="TT", right_flank_sequence="CC",
+        repeat_motif="GA", repeat_unit_length_bp=2,
+        expected_min_repeats=1, expected_max_repeats=6,
+    ) for i in range(1, 6)]
+    query = "ACGTTGAGACCTAA"
+    database = tmp_path / "database"
+    database.mkdir()
+    for locus in loci:
+        other = "ACGTTGAGAGACCTAA" if locus.locus_id == "L1" else query
+        (database / f"{locus.locus_id}.fasta").write_text(
+            f">R1\n{query}\n" + (f">R2\n{other}\n" if locus.locus_id != "L5" else "")
+        )
+    sequences = {locus.locus_id: query for locus in loci[:4]}
+    kwargs = dict(
+        query_sequences=sequences, database_path=database, sample_id="sample",
+        locus_ids=loci, threads=1, mafft_bin=str(_fake_mafft(tmp_path)),
+        raxml_ng_bin=str(_fake_raxml_ng(tmp_path)), epa_ng_bin=str(_fake_epa_ng(tmp_path)),
+        repeat_weight=0.1, input_mode="fastq",
+    )
+    quality = {locus: {"depth": 2, "status": "called"} for locus in sequences}
+    quality["L5"] = {"depth": 0, "status": "not_found"}
+    low = run_phylogenetic_placement(
+        **kwargs, outdir=tmp_path / "low", locus_quality=quality, exact_match_fast_path=False,
+    )
+    low_rows = _read_tsv(low["combined_marker_matches"])
+    assert low_rows[0]["reference_id"] == "R1"
+    assert all(row["missing_locus_penalty"] == "0.00000000" for row in low_rows)
+    assert all(row["missing_locus_gate_passed"] == "no" for row in low_rows)
+
+    for locus in sequences:
+        quality[locus]["depth"] = 3
+    tree_inputs = []
+    original = phylogeny_module._neighbor_joining_tree_from_matrix
+
+    def capture(labels, distances):
+        tree_inputs.append((labels, distances.copy()))
+        return original(labels, distances)
+
+    monkeypatch.setattr(phylogeny_module, "_neighbor_joining_tree_from_matrix", capture)
+    high = run_phylogenetic_placement(
+        **kwargs, outdir=tmp_path / "high", locus_quality=quality,
+        # An indexed identity hit on observed loci must not bypass the penalty.
+        exact_match_fast_path=True,
+    )
+    high_rows = _read_tsv(high["combined_marker_matches"])
+    assert [row["reference_id"] for row in high_rows] == ["R2", "R1"]
+    by_reference = {row["reference_id"]: row for row in high_rows}
+    assert by_reference["R1"]["missing_locus_penalty"] == "1.00000000"
+    assert by_reference["R1"]["penalized_missing_loci"] == "L5"
+    assert by_reference["R1"]["match_status"] == "NON_EXACT"
+    assert by_reference["R2"]["missing_locus_penalty"] == "0.00000000"
+    assert all(row["compared_loci"] == "4" for row in high_rows)
+    labels, distances = tree_inputs[-1]
+    for reference, row in by_reference.items():
+        assert distances[labels.index(reference), labels.index("sample")] == pytest.approx(
+            float(row["combined_marker_distance"])
+        )
+    assert _read_tsv(high["closest_reference_bands"])[0]["reference_id"] == "R2"
