@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import html
-import json
 import math
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,209 +32,11 @@ def _finding(kind: str, title: str, detail: str) -> str:
 def _automatic_taxon_identification_section(outdir: Path) -> str:
     if (outdir / "classification" / "classification.json").is_file():
         return _mapping_identification_section(outdir)
-    path = outdir / "phylogeny" / "taxonomic_identification.tsv"
-    if not path.is_file():
-        return ""
-    with path.open(newline="") as handle:
-        rows = list(csv.DictReader(handle, delimiter="\t"))
-    if not rows:
-        return ""
-    row = rows[0]
-    status = str(row.get("assignment_status") or row.get("taxonomic_status", "INSUFFICIENT_EVIDENCE"))
-    confidence = str(row.get("confidence") or ("HIGH" if status == "SUPPORTED" else "UNRESOLVED"))
-    resolved = status in {"SUPPORTED", "SPECIES_ASSIGNED"}
-    closest_only = status == "CLOSEST_TAXON_LOW_CONFIDENCE"
-    tone = "good" if resolved else "warn"
-    assignment = row.get("assignment") or row.get("best_species") or row.get("best_taxon", "")
-    assignment_rank = row.get("assignment_rank") or ("species" if resolved else "unresolved")
-    second_taxon = row.get("runner_up_taxon") or row.get("second_best_taxon", "")
-    evidence_path = outdir / "phylogeny" / "taxonomic_identification_evidence.tsv"
-    evidence_rows = []
-    if evidence_path.is_file():
-        with evidence_path.open(newline="") as handle:
-            evidence_rows = list(csv.DictReader(handle, delimiter="\t"))
-        second = next(
-            (candidate for candidate in evidence_rows if candidate.get("rank") == "2"),
-            None,
-        )
-        if second:
-            second_taxon = second.get("species") or second.get("taxon_id", second_taxon)
-
-    candidates_html = "".join(
-        "<tr>"
-        f"<td>{_safe(candidate.get('rank', ''))}</td>"
-        f"<td>{_safe(candidate.get('species') or candidate.get('taxon_id', ''))}</td>"
-        f"<td>{_safe(candidate.get('distance', ''))}</td>"
-        f"<td>{_safe(candidate.get('compatibility', ''))}</td>"
-        f"<td>{_safe(candidate.get('bootstrap_win_fraction', ''))}</td>"
-        "</tr>"
-        for candidate in evidence_rows[:5]
-    )
-    loci_path = outdir / "phylogeny" / "taxonomic_identification_loci.tsv"
-    locus_rows = []
-    if loci_path.is_file():
-        with loci_path.open(newline="") as handle:
-            locus_rows = list(csv.DictReader(handle, delimiter="\t"))
-    loci_html = "".join(
-        "<tr>"
-        f"<td>{_safe(item.get('locus_id', ''))}</td>"
-        f"<td>{_safe(item.get('recovered', ''))}</td>"
-        f"<td>{_safe(item.get('taxonomic_weight', ''))}</td>"
-        f"<td>{_safe(item.get('favored_taxon', ''))}</td>"
-        f"<td>{_safe(item.get('depth', ''))}</td>"
-        f"<td>{_safe(item.get('consensus_strength', ''))}</td>"
-        f"<td>{'conflicts' if item.get('conflicts_with_assignment') == 'yes' else ('supports' if item.get('supports_assignment') == 'yes' else 'neutral')}</td>"
-        "</tr>" for item in locus_rows
-    )
-    explanation = ""
-    if closest_only:
-        explanation = (
-            "This is the nearest taxon by weighted nearest-reference averages, but the "
-            "evidence did not pass the confidence requirements for an assignment."
-        )
-    elif not resolved:
-        explanation = (
-            "The recovered MLVA markers support multiple taxa or do not provide "
-            "enough stable discriminatory evidence for a species-level call."
-        )
-    return f"""
-      <section class="report-section taxon-result {tone}" aria-label="Automatic Taxonomic Identification">
-        <h2>Taxonomic identification</h2>
-        <div class="taxon-call">{_safe(assignment or 'Unresolved')}</div>
-        <div class="taxon-badge {tone}">{_safe(confidence + ' CONFIDENCE' if resolved else status.replace('_', ' '))}</div>
-        {f'<p class="taxon-explanation">{_safe(explanation)}</p>' if explanation else ''}
-        <div class="summary">
-          {_metric_card("Rank", assignment_rank)}
-          {_metric_card("Loci recovered", f"{row.get('loci_recovered', row.get('informative_loci', ''))}/{row.get('expected_loci', '')}")}
-          {_metric_card("Discriminatory support", f"{row.get('loci_supporting_assignment', '')}/{row.get('discriminative_loci_recovered', '')}", f"{row.get('conflicting_loci', '') or 0} conflicting")}
-          {_metric_card("Runner-up", second_taxon or "Not available", f"relative margin {row.get('relative_margin', row.get('score_margin', ''))}")}
-          {_metric_card("Aggregate taxon distance", row.get("closest_distance", "Not available"), f"lower is closer; ranking score {row.get('taxon_score', 'not available')}")}
-          {_metric_card("Bootstrap support", row.get("bootstrap_support", "Not available"), "stability, not probability")}
-        </div>
-        {'' if resolved else _finding('warn', 'Closest taxon — low confidence' if closest_only else 'Species unresolved', f"Closest aggregate taxon result only; aggregate distance {row.get('closest_distance', 'not available')}." if closest_only else (f"Recommendation: interpret this sample at the {assignment_rank} level." if assignment_rank != 'unresolved' else 'No supported taxonomic rank is available.'))}
-        <details><summary>Closest taxa</summary><div class="table-scroll"><table>
-          <thead><tr><th>Rank</th><th>Taxon</th><th>Distance</th><th>Similarity</th><th>Bootstrap wins</th></tr></thead>
-          <tbody>{candidates_html}</tbody></table></div></details>
-        {f'<details><summary>Locus-level taxonomic evidence</summary><div class="table-scroll"><table><thead><tr><th>Locus</th><th>Recovered</th><th>Weight</th><th>Favored taxon</th><th>Depth</th><th>Consensus</th><th>Interpretation</th></tr></thead><tbody>{loci_html}</tbody></table></div></details>' if locus_rows else ''}
-        <details><summary>How this assignment was calculated</summary>
-          <p class="section-intro">Distances use database-calibrated locus discrimination weights. A species call requires compatibility with the closest taxon, separation from alternatives, sufficient informative and discriminatory loci, and stable locus-bootstrap support. FASTQ inputs use stricter recovery and margin requirements. Each similarity is not a posterior probability, and bootstrap stability is not one either.</p>
-          <p class="terminal-note">Status: {_safe(status)}; decision: {_safe(row.get('status_reason', ''))}; input mode: {_safe(row.get('input_mode', ''))}; absolute margin: {_safe(row.get('distance_margin', ''))}.</p>
-        </details>
-      </section>
-"""
-
-
-def _taxon_assignment_section(outdir: Path) -> str:
-    automatic_section = _automatic_taxon_identification_section(outdir)
-    mapping_details = outdir / "classification" / "classification.json"
-    if mapping_details.is_file() and not json.loads(mapping_details.read_text()).get("legacy_phylogenetics"):
-        return automatic_section
-    path = outdir / "phylogeny" / "taxon_assignment.tsv"
-    if not path.is_file():
-        return automatic_section
-    with path.open(newline="") as handle:
-        rows = list(csv.DictReader(handle, delimiter="\t"))
-    if not rows:
-        return automatic_section
-    row = rows[0]
-    decision = str(row.get("decision", "INDETERMINATE"))
-    tone = (
-        "good"
-        if decision == "POSITIVE"
-        else "warn"
-        if decision == "INDETERMINATE"
-        else ""
-    )
-    target = row.get("target_taxon_name") or row.get("target_taxon_id", "")
-    alternative = (
-        row.get("best_alternative_taxon_name")
-        or row.get("best_alternative_taxon_id", "")
-    )
-    calibrated_section = f"""
-      <section class="report-section">
-        <h2>Calibrated Target-Taxon Assignment</h2>
-        <p class="section-intro">This decision uses only MLVA repeat counts and repeat-masked marker phylogenetic placement. Conformal p-values measure compatibility with the labeled reference cohort; they are not posterior probabilities that the taxon is present.</p>
-        <div class="summary">
-          {_metric_card("Decision", decision, row.get("decision_reason", ""), tone)}
-          {_metric_card("Target", target, f"joint compatibility p={row.get('target_joint_p_value', '')}")}
-          {_metric_card("Best alternative", alternative, f"joint compatibility p={row.get('best_alternative_joint_p_value', '')}")}
-          {_metric_card("Locus bootstrap", row.get("target_bootstrap_support", ""), f"{row.get('callable_loci', '')} callable loci")}
-        </div>
-        {_finding("warn" if row.get("qc_status") != "PASS" else "info", "Assignment QC", row.get("qc_flags") or "PASS")}
-      </section>
-"""
-    return automatic_section + calibrated_section
+    return ""
 
 
 def _closest_reference_detail(row: dict) -> str:
-    if row.get("match_type") == "mapping_reference":
-        return f"Mapping likelihood; model support {row.get('locus_balanced_fraction', '')}"
-    if row.get("whole_genome_exact_match") == "yes":
-        return "Exact whole-genome match"
-    if row.get("whole_genome_snps") not in ("", None):
-        return (
-            f"{row.get('whole_genome_snps')} whole-genome SNPs; "
-            f"{row.get('whole_genome_align_fraction_query', '')}% query aligned"
-        )
-    if row.get("combined_marker_distance") not in ("", None):
-        return f"Marker distance {row.get('combined_marker_distance')}"
-    return "Closest ranked reference"
-
-
-def _reference_summary_rows(rows: list[dict]) -> str:
-    return "\n".join(
-        "<tr>"
-        f"<td>{_safe(row.get('rank', ''))}</td>"
-        f"<td>{_safe(row.get('reference_id', ''))}</td>"
-        f"<td>{_safe(row.get('match_status', ''))}</td>"
-        f"<td>{_safe(row.get('combined_marker_distance', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_exact_match', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_snps', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_indel_bases', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_align_fraction_ref', ''))} / "
-        f"{_safe(row.get('whole_genome_align_fraction_query', ''))}</td>"
-        f"<td>{_safe(row.get('collection_date', ''))}</td>"
-        f"<td>{_safe(row.get('location', ''))}</td>"
-        "</tr>"
-        for row in rows[:10]
-    )
-
-
-def _phylogenetic_warning_html(rows: list[dict]) -> str:
-    warned = [
-        str(row.get("reference_id", ""))
-        for row in rows
-        if row.get("ranking_warning") == "EXACT_MATCH_OVERRIDES_PLACEMENT"
-    ]
-    notices = []
-    if warned:
-        references = ", ".join(_safe(reference_id) for reference_id in warned)
-        notices.append(
-            '<div class="warning-banner"><strong>Exact-match placement warning:</strong> '
-            "direct sequence identity identified an exact database marker match that "
-            "EPA-ng's likelihood-weighted placement distance would have ranked below "
-            f"another reference. Identity-aware ranking was applied for: {references}.</div>"
-        )
-    tie_warning = next(
-        (
-            str(row.get("ranking_warning", ""))
-            for row in rows
-            if str(row.get("ranking_warning", "")).startswith("DNADIFF_TIE_BREAK_")
-        ),
-        "",
-    )
-    if tie_warning:
-        detail = (
-            "the reference build has no usable reference-assembly mapping"
-            if tie_warning == "DNADIFF_TIE_BREAK_UNAVAILABLE"
-            else "dnadiff did not return a result for every tied reference"
-        )
-        notices.append(
-            '<div class="warning-banner"><strong>Whole-genome tie-break warning:</strong> '
-            f"{detail}; exact marker matches remain tied where whole-genome evidence "
-            "is absent.</div>"
-        )
-    return "".join(notices)
+    return f"Alignment likelihood; model support {row.get('locus_balanced_fraction', '')}"
 
 
 def _called_count(value) -> int | float | None:
@@ -593,7 +394,7 @@ def _assembly_gel_svg(
     {"".join(band_svg)}
     {"".join(reference_svg)}
   </svg>
-  <figcaption>{depth_note} Closest-reference bands are drawn in magenta when a database placement or profile match is available. Hover or focus a band for locus details.</figcaption>
+  <figcaption>{depth_note} Closest-reference bands are drawn in magenta when a reference classification or profile match is available. Hover or focus a band for locus details.</figcaption>
 </figure>
 """
 
@@ -856,7 +657,7 @@ def write_report(
     mapping_rows: list[dict] | None = None,
     snp_rows: list[dict] | None = None,
     mixture_rows: list[dict] | None = None,
-    phylogenetic_rows: list[dict] | None = None,
+    reference_rows: list[dict] | None = None,
     closest_reference_bands: list[dict] | None = None,
     presence_rows: list[dict] | None = None,
     local_assembly_rows: list[dict] | None = None,
@@ -872,7 +673,7 @@ def write_report(
     mapping_rows = mapping_rows or []
     snp_rows = snp_rows or []
     mixture_rows = mixture_rows or []
-    phylogenetic_rows = phylogenetic_rows or []
+    reference_rows = reference_rows or []
     closest_reference_bands = closest_reference_bands or []
     presence_rows = presence_rows or []
     local_assembly_rows = local_assembly_rows or []
@@ -887,7 +688,7 @@ def write_report(
     )
     best_match = match_rows[0] if match_rows else {}
     best_profile = _best_profile(match_rows, profiles)
-    phylogenetic_best = phylogenetic_rows[0] if phylogenetic_rows else {}
+    reference_best = reference_rows[0] if reference_rows else {}
     total_loci = len(allele_rows)
     flagged = low_depth + dropout + multiple + sum(
         row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE"}
@@ -964,13 +765,12 @@ def write_report(
                 f"Distance {best_match.get('distance', '')}; confidence {best_match.get('confidence', '')}",
             )
         )
-    if phylogenetic_best.get("reference_id"):
+    if reference_best.get("reference_id"):
         summary_cards.append(
             _metric_card(
                 "Closest reference genome",
-                phylogenetic_best["reference_id"],
-                _closest_reference_detail(phylogenetic_best),
-                "good" if phylogenetic_best.get("whole_genome_exact_match") == "yes" else "",
+                reference_best["reference_id"],
+                _closest_reference_detail(reference_best),
             )
         )
     findings = []
@@ -1008,12 +808,12 @@ def write_report(
         )
     if not findings:
         findings.append(_finding("good", "Panel quality", "No locus-level review flags were detected."))
-    if phylogenetic_best.get("reference_id"):
+    if reference_best.get("reference_id"):
         findings.append(
             _finding(
                 "info",
                 "Reference interpretation",
-                f"{phylogenetic_best['reference_id']}: {_closest_reference_detail(phylogenetic_best)}",
+                f"{reference_best['reference_id']}: {_closest_reference_detail(reference_best)}",
             )
         )
     summary_html = "".join(summary_cards)
@@ -1201,58 +1001,9 @@ def write_report(
         </table></div>
       </section>
 """
-    reference_summary_rows = _reference_summary_rows(phylogenetic_rows)
-    phylogenetic_table_rows = "\n".join(
-        "<tr>"
-        f"<td>{_safe(row.get('rank', ''))}</td>"
-        f"<td>{_safe(row.get('reference_id', ''))}</td>"
-        f"<td>{_safe(row.get('combined_marker_distance', ''))}</td>"
-        f"<td>{_safe(row.get('total_normalized_snp_distance', ''))}</td>"
-        f"<td>{_safe(row.get('total_placement_normalized_snp_distance', ''))}</td>"
-        f"<td>{_safe(row.get('total_normalized_direct_snp_distance', ''))}</td>"
-        f"<td>{_safe(row.get('total_normalized_repeat_distance', ''))}</td>"
-        f"<td>{_safe(row.get('missing_locus_penalty', ''))}</td>"
-        f"<td>{_safe(row.get('penalized_missing_loci', ''))}</td>"
-        f"<td>{_safe(row.get('missing_locus_gate_passed', ''))}</td>"
-        f"<td>{_safe(row.get('compared_loci', ''))}</td>"
-        f"<td>{_safe(row.get('exact_marker_loci', ''))}</td>"
-        f"<td>{_safe(row.get('match_status', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_exact_match', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_snps', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_indel_bases', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_align_fraction_ref', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_align_fraction_query', ''))}</td>"
-        f"<td>{_safe(row.get('tie_break_status', ''))}</td>"
-        f"<td>{_safe(row.get('distance_gap_to_next', ''))}</td>"
-        f"<td>{_safe(row.get('collection_date', ''))}</td>"
-        f"<td>{_safe(row.get('location', ''))}</td>"
-        "</tr>"
-        for row in phylogenetic_rows[:10]
-    )
-    phylogenetic_section = _taxon_assignment_section(outdir)
-    if phylogenetic_rows:
-        phylogenetic_warning = _phylogenetic_warning_html(phylogenetic_rows)
-        phylogenetic_section += f"""
-      <section class="report-section">
-        <h2>Closest Reference Genomes</h2>
-        {phylogenetic_warning}
-        <p class="section-intro">Marker similarity identifies the candidate group. Exact assembly ties are resolved by canonical genome identity and MUMmer whole-genome SNP comparison.</p>
-        <div class="table-scroll"><table class="primary-table">
-          <thead><tr><th>Rank</th><th>Reference</th><th>Marker status</th><th>Marker distance</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Aligned % ref/query</th><th>Date</th><th>Location</th></tr></thead>
-          <tbody>{reference_summary_rows}</tbody>
-        </table></div>
-        <details>
-          <summary>Technical marker-distance components</summary>
-          <p class="terminal-note">EPA/tree, direct aligned-sequence, repeat, and tie-break components used to construct the ranking.</p>
-          <div class="table-scroll"><table>
-            <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Missing-locus penalty</th><th>Penalized loci</th><th>Coverage gate passed</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
-            <tbody>{phylogenetic_table_rows}</tbody>
-          </table></div>
-        </details>
-      </section>
-"""
-    if phylogenetic_rows and phylogenetic_rows[0].get("match_type") == "mapping_reference":
-        phylogenetic_section = _taxon_assignment_section(outdir) + _mapping_reference_section(phylogenetic_rows, outdir)
+    classification_section = _automatic_taxon_identification_section(outdir)
+    if reference_rows:
+        classification_section += _mapping_reference_section(reference_rows, outdir)
     mixture_overview_section = ""
     mixture_detail_section = ""
     if mixture_rows:
@@ -1429,7 +1180,7 @@ def write_report(
         {summary_html}
       </div>
       <div class="findings">{findings_html}</div>
-      {phylogenetic_section}
+      {classification_section}
       <h2>Individual Locus Repeat Counts</h2>
       <div class="chart-scroll">{repeat_count_plot}</div>
       {short_read_section}
@@ -1469,21 +1220,21 @@ def write_assembly_report(
     match_rows: list[dict] | None = None,
     profiles: list[dict] | None = None,
     loci: list[Locus] | None = None,
-    phylogenetic_rows: list[dict] | None = None,
+    reference_rows: list[dict] | None = None,
     closest_reference_bands: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     match_rows = match_rows or []
     profiles = profiles or []
-    phylogenetic_rows = phylogenetic_rows or []
+    reference_rows = reference_rows or []
     closest_reference_bands = closest_reference_bands or []
     present = sum(1 for row in call_rows if row.get("present") == "yes")
     not_found = sum(1 for row in call_rows if row.get("present") != "yes")
     with_depth = sum(1 for row in call_rows if _called_count(row.get("read_depth")))
     best_match = match_rows[0] if match_rows else {}
     best_profile = _best_profile(match_rows, profiles)
-    phylogenetic_best = phylogenetic_rows[0] if phylogenetic_rows else {}
+    reference_best = reference_rows[0] if reference_rows else {}
     gel = _assembly_gel_svg(
         sample_id,
         call_rows,
@@ -1513,13 +1264,12 @@ def write_assembly_report(
                 f"Distance {best_match.get('distance', '')}; confidence {best_match.get('confidence', '')}",
             )
         )
-    if phylogenetic_best.get("reference_id"):
+    if reference_best.get("reference_id"):
         summary_cards.append(
             _metric_card(
                 "Closest reference genome",
-                phylogenetic_best["reference_id"],
-                _closest_reference_detail(phylogenetic_best),
-                "good" if phylogenetic_best.get("whole_genome_exact_match") == "yes" else "",
+                reference_best["reference_id"],
+                _closest_reference_detail(reference_best),
             )
         )
     findings = []
@@ -1548,12 +1298,12 @@ def write_assembly_report(
         )
     if not findings:
         findings.append(_finding("good", "Panel quality", "All configured loci were recovered without call flags."))
-    if phylogenetic_best.get("reference_id"):
+    if reference_best.get("reference_id"):
         findings.append(
             _finding(
                 "info",
                 "Reference interpretation",
-                f"{phylogenetic_best['reference_id']}: {_closest_reference_detail(phylogenetic_best)}",
+                f"{reference_best['reference_id']}: {_closest_reference_detail(reference_best)}",
             )
         )
     summary_html = "".join(summary_cards)
@@ -1612,59 +1362,9 @@ def write_assembly_report(
         <tbody>{match_table_rows}</tbody>
       </table>
 """
-    reference_summary_rows = _reference_summary_rows(phylogenetic_rows)
-    phylogenetic_table_rows = "\n".join(
-        "<tr>"
-        f"<td>{_safe(row.get('rank', ''))}</td>"
-        f"<td>{_safe(row.get('reference_id', ''))}</td>"
-        f"<td>{_safe(row.get('combined_marker_distance', ''))}</td>"
-        f"<td>{_safe(row.get('total_normalized_snp_distance', ''))}</td>"
-        f"<td>{_safe(row.get('total_placement_normalized_snp_distance', ''))}</td>"
-        f"<td>{_safe(row.get('total_normalized_direct_snp_distance', ''))}</td>"
-        f"<td>{_safe(row.get('total_normalized_repeat_distance', ''))}</td>"
-        f"<td>{_safe(row.get('missing_locus_penalty', ''))}</td>"
-        f"<td>{_safe(row.get('penalized_missing_loci', ''))}</td>"
-        f"<td>{_safe(row.get('missing_locus_gate_passed', ''))}</td>"
-        f"<td>{_safe(row.get('compared_loci', ''))}</td>"
-        f"<td>{_safe(row.get('exact_marker_loci', ''))}</td>"
-        f"<td>{_safe(row.get('match_status', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_exact_match', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_snps', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_indel_bases', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_align_fraction_ref', ''))}</td>"
-        f"<td>{_safe(row.get('whole_genome_align_fraction_query', ''))}</td>"
-        f"<td>{_safe(row.get('tie_break_status', ''))}</td>"
-        f"<td>{_safe(row.get('distance_gap_to_next', ''))}</td>"
-        f"<td>{_safe(row.get('collection_date', ''))}</td>"
-        f"<td>{_safe(row.get('location', ''))}</td>"
-        "</tr>"
-        for row in phylogenetic_rows[:10]
-    )
-    phylogenetic_section = _taxon_assignment_section(outdir)
-    if phylogenetic_rows:
-        phylogenetic_warning = _phylogenetic_warning_html(phylogenetic_rows)
-        phylogenetic_section += f"""
-      <section class="report-section">
-        <h2>Closest Reference Genomes</h2>
-        {phylogenetic_warning}
-        <p class="section-intro">Marker similarity identifies the candidate group. Exact assembly ties are resolved by canonical genome identity and MUMmer whole-genome SNP comparison.</p>
-        <div class="table-scroll"><table class="primary-table">
-          <thead><tr><th>Rank</th><th>Reference</th><th>Marker status</th><th>Marker distance</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Aligned % ref/query</th><th>Date</th><th>Location</th></tr></thead>
-          <tbody>{reference_summary_rows}</tbody>
-        </table></div>
-        <details>
-          <summary>Technical marker-distance components</summary>
-          <p class="terminal-note">EPA/tree, direct aligned-sequence, repeat, and tie-break components used to construct the ranking.</p>
-          <div class="table-scroll"><table>
-            <thead><tr><th>Rank</th><th>Reference</th><th>Combined distance</th><th>Hybrid SNP</th><th>EPA/tree SNP</th><th>Direct SNP</th><th>Normalized repeat</th><th>Missing-locus penalty</th><th>Penalized loci</th><th>Coverage gate passed</th><th>Compared loci</th><th>Exact marker loci</th><th>Match status</th><th>Exact genome</th><th>WG SNPs</th><th>Indel bases</th><th>Ref AF</th><th>Query AF</th><th>Tie break</th><th>Gap to next</th><th>Date</th><th>Location</th></tr></thead>
-            <tbody>{phylogenetic_table_rows}</tbody>
-          </table></div>
-        </details>
-      </section>
-"""
-
-    if phylogenetic_rows and phylogenetic_rows[0].get("match_type") == "mapping_reference":
-        phylogenetic_section = _taxon_assignment_section(outdir) + _mapping_reference_section(phylogenetic_rows, outdir)
+    classification_section = _automatic_taxon_identification_section(outdir)
+    if reference_rows:
+        classification_section += _mapping_reference_section(reference_rows, outdir)
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -1788,7 +1488,7 @@ def write_assembly_report(
         {summary_html}
       </div>
       <div class="findings">{findings_html}</div>
-      {phylogenetic_section}
+      {classification_section}
       <h2>Individual Locus Repeat Counts</h2>
       <div class="chart-scroll">{repeat_count_plot}</div>
       <h2>Generated Gel</h2>

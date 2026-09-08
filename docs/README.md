@@ -16,7 +16,8 @@ path, intermediate stage, output, and interpretation boundary.
 ## Concepts
 
 - [Variant mixture abundance](concepts/variant-mixtures.md)
-- [Repeat-aware SNP placement and phylogeography](concepts/repeat-snp-phylogeography.md)
+- [Alignment-based classification and profile trees](concepts/mapping-classification.md)
+- [Migration to the emu workflow](workflows/emu-migration.md)
 - [Representative mapping and SNP evidence](concepts/representative-mapping.md)
 - [Allele calling and profiles](concepts/calling-and-profiles.md)
 - [Acceleration backends and threading](concepts/acceleration.md)

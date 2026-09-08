@@ -174,17 +174,14 @@ def match_profiles(
 
 
 def sequence_reference_match_rows(rows: list[dict]) -> list[dict]:
-    """Normalize combined-marker reference matches for profile_matches.tsv."""
+    """Normalize alignment-based reference support for profile_matches.tsv."""
     normalized = []
     for fallback_rank, source in enumerate(rows, start=1):
         row = dict(source)
         reference_id = str(source.get("reference_id", ""))
         rank = source.get("rank", fallback_rank)
         compared = _numeric_count(source.get("compared_loci"))
-        exact = _numeric_count(source.get("exact_marker_loci"))
-        distance = source.get("distance") if source.get("match_type") == "mapping_reference" else source.get("combined_marker_distance") or source.get(
-            "total_likelihood_weighted_snp_distance", ""
-        )
+        distance = source.get("distance", "")
         metadata = ";".join(
             f"{key}={source[key]}"
             for key in ("collection_date", "location", "source")
@@ -193,7 +190,7 @@ def sequence_reference_match_rows(rows: list[dict]) -> list[dict]:
         row.update(
             {
                 "sample_id": source.get("sample_id", ""),
-                "match_type": source.get("match_type", "sequence_reference"),
+                "match_type": "mapping_reference",
                 "profile_id": reference_id,
                 "best_profile_id": reference_id,
                 "reference_id": reference_id,
@@ -201,13 +198,11 @@ def sequence_reference_match_rows(rows: list[dict]) -> list[dict]:
                 "strain_id": "",
                 "metadata": metadata,
                 "distance": distance,
-                "matched_loci": exact,
+                "matched_loci": "",
                 "matched_locus_ids": "",
                 "mismatched_loci": "",
                 "uncompared_loci": "",
-                "confidence": (
-                    round(exact / compared, 6) if compared else 0.0
-                ),
+                "confidence": source.get("locus_balanced_fraction", ""),
                 "compared_loci": compared,
                 "mean_negative_log_likelihood": "",
                 "profile_probability_score": "",

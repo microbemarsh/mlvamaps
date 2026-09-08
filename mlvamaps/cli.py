@@ -21,7 +21,6 @@ from .reference_pipeline import (
 )
 from .sample_metadata import MYOGA_SAMPLE_FIELDS, metadata_by_sample, read_sample_metadata, write_csv
 from .short_reads import SAMPLE_SUMMARY_FIELDS, run_short_read_call
-from .taxon_assignment import run_taxon_calibration
 
 
 FASTQ_SUFFIXES = (".fastq", ".fq", ".fastq.gz", ".fq.gz")
@@ -253,8 +252,6 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         parser.error("--missing-locus-penalty must be finite and non-negative")
     if not math.isfinite(args.classification_repeat_scale) or args.classification_repeat_scale <= 0:
         parser.error("--classification-repeat-scale must be finite and positive")
-    if args.target_taxon_id and not args.phylogenetics:
-        parser.error("--target-taxon-id uses the legacy calibrated test and requires --phylogenetics")
     _resolve_panel_option(parser, args)
     database = Path(args.database).resolve() if args.database else None
     legacy_multi_taxon_build = bool(
@@ -293,12 +290,6 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         parser.error("--short-reads requires -i DIRECTORY, not -i sr")
     if not args.short_read_mode and (args.reads1 or args.reads2):
         parser.error("--fq1/--fq2 require the short-read selector: -i sr")
-    if bool(args.target_taxon_id) != bool(args.taxon_calibration):
-        parser.error(
-            "--target-taxon-id and --taxon-calibration must be provided together"
-        )
-    if args.target_taxon_id and not args.database:
-        parser.error("--target-taxon-id requires --database")
     if args.taxon_identification is True and not args.database:
         parser.error("--taxon-identification requires --database")
     if not args.loci and not args.primers and args.database:
@@ -394,7 +385,7 @@ def build_parser() -> argparse.ArgumentParser:
     call.add_argument("--profiles")
     call.add_argument(
         "--database",
-        help="Reference-build directory or per-locus sequence database for phylogenetic placement",
+        help="Reference-build directory for alignment-based reference classification",
     )
     taxon_toggle = call.add_mutually_exclusive_group()
     taxon_toggle.add_argument(
@@ -410,13 +401,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
     call.set_defaults(taxon_identification=None)
-    call.add_argument("--taxon-k", type=_positive_int, default=3, help=argparse.SUPPRESS)
-    call.add_argument(
-        "--taxon-minimum-margin",
-        type=_fraction,
-        default=0.1,
-        help="Minimum assembly best-versus-runner-up relative taxon distance margin; FASTQ requires 1.5x this value (default: %(default)s)",
-    )
     call.add_argument(
         "--reference-metadata",
         help="TSV/CSV with reference_id and optional date, coordinates, location, and source",
@@ -464,7 +448,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--recruitment-database",
         help=(
             "Reference-build directory supplying canonical locus products for "
-            "FASTQ recruitment without enabling phylogenetic placement"
+            "FASTQ recruitment without reference classification"
         ),
     )
     call.add_argument("--max-primer-mismatches", type=int, default=2)
@@ -562,18 +546,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     call.add_argument(
-        "--min-cluster-size",
-        type=_positive_int,
-        default=1,
-        help="Deprecated compatibility option; mapping groups retain low-depth evidence",
-    )
-    call.add_argument(
-        "--cluster-min-identity",
-        type=_fraction,
-        default=0.97,
-        help="Deprecated compatibility option; sequence clustering is no longer used",
-    )
-    call.add_argument(
         "--min-mixture-fraction",
         type=_fraction,
         default=0.01,
@@ -589,72 +561,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     call.add_argument(
-        "--vsearch-bin",
-        default="vsearch",
-        metavar="PATH",
-        help="Deprecated compatibility option; FASTQ grouping now uses read mapping",
-    )
-    call.add_argument(
-        "--amplirust-bin",
-        default="amplirust",
-        metavar="PATH",
-        help=argparse.SUPPRESS,
-    )
-    call.add_argument(
         "--minimap2-bin",
         default="minimap2",
         metavar="PATH",
         help="minimap2 executable for short-read recruitment, representative mapping, and assembly support (default: %(default)s)",
     )
     call.add_argument(
-        "--mafft-bin",
-        default="mafft",
-        metavar="PATH",
-        help="MAFFT executable for optional per-locus phylogenetic placement (default: %(default)s)",
-    )
-    call.add_argument(
-        "--raxml-ng-bin",
-        default="raxml-ng",
-        metavar="PATH",
-        help="RAxML-NG executable for maximum-likelihood locus trees (default: %(default)s)",
-    )
-    call.add_argument(
-        "--epa-ng-bin",
-        default="epa-ng",
-        metavar="PATH",
-        help="EPA-ng executable for fixed-tree query placement (default: %(default)s)",
-    )
-    call.add_argument(
-        "--dnadiff-bin",
-        default="dnadiff",
-        metavar="PATH",
-        help="MUMmer dnadiff executable for assembly whole-genome SNP tie breaking (default: %(default)s)",
-    )
-    call.add_argument(
-        "--raxml-model",
-        default="DNA",
-        metavar="MODEL",
-        help="RAxML-NG nucleotide model for locus trees (default: %(default)s)",
-    )
-    call.add_argument(
-        "--phylogenetics", action="store_true",
-        help="Also run legacy sequence phylogenetics; mapping classification and MLVA .tree output do not require this",
-    )
-    call.add_argument(
         "--classification-repeat-scale", type=_positive_float, default=1.0,
         help="Repeat-count difference scale in mapping likelihoods, in repeat units (default: %(default)s)",
-    )
-    call.add_argument(
-        "--phylogeny-snp-weight",
-        type=_nonnegative_float,
-        default=1.0,
-        help="Weight for normalized SNP-tree distance in combined marker ranking (default: %(default)s)",
-    )
-    call.add_argument(
-        "--phylogeny-repeat-weight",
-        type=_nonnegative_float,
-        default=1.0,
-        help="Weight for normalized tandem-repeat distance in combined marker ranking (default: %(default)s)",
     )
     call.add_argument(
         "--missing-locus-min-depth", type=_positive_float, default=3.0,
@@ -666,58 +580,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--missing-locus-penalty", type=_nonnegative_float, default=1.0,
-        help="Distance per undetected query locus present in a reference after the coverage gate passes; 0 disables (default: %(default)s)",
-    )
-    call.add_argument(
-        "--target-taxon-id",
-        help=argparse.SUPPRESS,
-    )
-    call.add_argument(
-        "--taxon-calibration",
-        metavar="JSON",
-        help=argparse.SUPPRESS,
-    )
-    call.add_argument(
-        "--taxon-alpha",
-        type=_fraction,
-        default=None,
-        help=argparse.SUPPRESS,
+        help="Log-likelihood penalty per undetected query locus present in a reference after the coverage gate passes; 0 disables (default: %(default)s)",
     )
     call.add_argument(
         "--taxon-min-loci",
         type=_positive_int,
         default=None,
         help="Minimum observed loci for model-supported mapping classification (default: 2)",
-    )
-    call.add_argument(
-        "--taxon-min-locus-fraction",
-        type=_fraction,
-        default=0.8,
-        help=argparse.SUPPRESS,
-    )
-    call.add_argument(
-        "--taxon-bootstrap-replicates",
-        type=_positive_int,
-        default=200,
-        help="Legacy phylogenetic taxon-test bootstrap replicates (default: %(default)s)",
-    )
-    call.add_argument(
-        "--taxon-min-bootstrap-support",
-        type=_fraction,
-        default=0.9,
-        help="Legacy phylogenetic taxon-test minimum bootstrap support (default: %(default)s)",
-    )
-    call.add_argument(
-        "--taxon-max-placement-entropy",
-        type=_nonnegative_float,
-        default=None,
-        help=argparse.SUPPRESS,
-    )
-    call.add_argument(
-        "--taxon-min-placement-lwr",
-        type=_fraction,
-        default=None,
-        help=argparse.SUPPRESS,
     )
     call.add_argument(
         "--no-locus-mapping",
@@ -778,9 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Discover completed mlvamaps samples, filter exact repeat-count profiles, "
             "join metadata, calculate shared-locus distances, and write a deterministic "
-            "neighbor-joining MLVA relatedness tree without rerunning calling. An "
-            "optional combined-marker mode reuses accepted amplicons to add per-locus "
-            "repeat-masked SNP trees."
+            "neighbor-joining MLVA profile-similarity tree without rerunning calling."
         ),
     )
     export.add_argument(
@@ -851,57 +718,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Distance used for the matrix and tree (default: %(default)s)",
     )
     export.add_argument(
-        "--combined-markers",
-        action="store_true",
-        help=(
-            "Also recover accepted amplicons, build repeat-masked per-locus SNP "
-            "trees, and write a combined SNP/repeat neighbor-joining tree"
-        ),
-    )
-    export.add_argument(
-        "--loci",
-        dest="export_loci",
-        metavar="TSV",
-        help=(
-            "Rich locus panel used to mask retained amplicons when reusable "
-            "phylogeny/query.fasta files are unavailable"
-        ),
-    )
-    export.add_argument(
-        "--phylogeny-snp-weight",
-        type=_nonnegative_float,
-        default=1.0,
-        help="Weight of normalized SNP-tree distance (default: %(default)s)",
-    )
-    export.add_argument(
-        "--phylogeny-repeat-weight",
-        type=_nonnegative_float,
-        default=1.0,
-        help="Weight of normalized repeat-count distance (default: %(default)s)",
-    )
-    export.add_argument(
-        "-t",
-        "--threads",
-        type=_nonnegative_int,
-        default=DEFAULT_THREADS,
-        help="MAFFT/RAxML-NG thread budget; 0 uses all CPUs (default: %(default)s)",
-    )
-    export.add_argument(
-        "--mafft-bin",
-        default="mafft",
-        help="MAFFT executable for combined-marker alignments (default: %(default)s)",
-    )
-    export.add_argument(
-        "--raxml-ng-bin",
-        default="raxml-ng",
-        help="RAxML-NG executable for combined-marker locus trees (default: %(default)s)",
-    )
-    export.add_argument(
-        "--raxml-model",
-        default="DNA",
-        help="RAxML-NG model or model-selection set (default: %(default)s)",
-    )
-    export.add_argument(
         "-o",
         "--output",
         "--outdir",
@@ -921,7 +737,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Build a complete reference database from local assemblies or NCBI taxids",
         description=(
             "Build the complete mlvamaps database: fetch references when needed, "
-            "extract real loci, summarize amplifiability, infer reference trees, "
+            "extract real loci, summarize amplifiability, "
             "generate competitive allele contexts, build short/long minimap2 "
             "indexes, and build broad Deacon recruitment assets."
         ),
@@ -987,12 +803,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Policy for assembly/locus pairs with multiple products (default: %(default)s)",
     )
     reference.add_argument(
-        "--min-references-per-tree",
-        type=_positive_int,
-        default=3,
-        help="Minimum extracted references required to infer a locus tree (default: %(default)s)",
-    )
-    reference.add_argument(
         "-t",
         "--threads",
         type=int,
@@ -1000,47 +810,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overall build parallelism (default: %(default)s; 0 auto-detects CPUs)",
     )
     reference.add_argument("--quiet", action="store_true", help="Suppress live progress updates")
-    reference.add_argument("--amplirust-bin", default="amplirust", help=argparse.SUPPRESS)
     reference.add_argument("--minimap2-bin", default="minimap2", help=argparse.SUPPRESS)
     reference.add_argument("--deacon-bin", default="deacon", help=argparse.SUPPRESS)
-    reference.add_argument("--mafft-bin", default="mafft")
-    reference.add_argument("--raxml-ng-bin", default="raxml-ng")
-    reference.add_argument(
-        "--raxml-model",
-        default="DNA",
-        help="RAxML-NG nucleotide model or model-selection set (default: %(default)s)",
-    )
-
-    calibrate = subparsers.add_parser(
-        "calibrate-taxa",
-        help="Build an MLVA-only conformal taxon calibration artifact",
-    )
-    calibrate.add_argument(
-        "--reference-distances",
-        required=True,
-        metavar="TSV",
-        help="Audited leave-one-reference-out per-locus marker distances",
-    )
-    calibrate.add_argument(
-        "--reference-metadata",
-        required=True,
-        metavar="TSV",
-        help="Reference metadata containing reference_id and taxon_id",
-    )
-    calibrate.add_argument(
-        "--sequence-index",
-        required=True,
-        metavar="TSV",
-        help="reference_sequence_index.tsv from the matching reference build",
-    )
-    calibrate.add_argument("--k", type=_positive_int, default=3)
-    calibrate.add_argument("--alpha", type=_fraction, default=0.05)
-    calibrate.add_argument("--snp-weight", type=_nonnegative_float, default=1.0)
-    calibrate.add_argument("--repeat-weight", type=_nonnegative_float, default=1.0)
-    calibrate.add_argument("--minimum-loci", type=_positive_int, default=3)
-    calibrate.add_argument(
-        "-o", "--output", "--outdir", dest="outdir", required=True
-    )
 
     return parser
 
@@ -1070,32 +841,14 @@ def _run_single_input(
             repeat_range_tolerance=args.repeat_range_tolerance,
             min_mixture_fraction=args.min_mixture_fraction,
             min_secondary_reads=args.min_secondary_reads,
-            amplirust_bin=args.amplirust_bin,
             minimap2_bin=args.minimap2_bin,
-            mafft_bin=args.mafft_bin,
-            raxml_ng_bin=args.raxml_ng_bin,
-            epa_ng_bin=args.epa_ng_bin,
-            raxml_model=args.raxml_model,
-            phylogeny_snp_weight=args.phylogeny_snp_weight,
-            phylogeny_repeat_weight=args.phylogeny_repeat_weight,
             missing_locus_min_depth=args.missing_locus_min_depth,
             missing_locus_min_fraction=args.missing_locus_min_fraction,
             missing_locus_penalty=args.missing_locus_penalty,
-            phylogenetics=args.phylogenetics,
             classification_repeat_scale=args.classification_repeat_scale,
             reference_metadata_path=args.reference_metadata,
-            target_taxon_id=args.target_taxon_id,
-            taxon_calibration_path=args.taxon_calibration,
-            taxon_alpha=args.taxon_alpha,
             taxon_min_loci=args.taxon_min_loci,
-            taxon_min_locus_fraction=args.taxon_min_locus_fraction,
-            taxon_bootstrap_replicates=args.taxon_bootstrap_replicates,
-            taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
-            taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
-            taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
             taxon_identification=args.taxon_identification,
-            taxon_k=args.taxon_k,
-            taxon_minimum_margin=args.taxon_minimum_margin,
             locus_mapping=not args.no_locus_mapping,
             min_mapping_quality=args.min_mapping_quality,
             min_base_quality=args.min_base_quality,
@@ -1131,17 +884,9 @@ def _run_single_input(
             print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
         print(f"Wrote report to {result['report']}")
         if args.database:
-            if "phylogeny" in result:
-                print(f"Wrote per-locus trees to {result['phylogeny']}")
-            if "phylogenetic_matches" in result:
-                print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
-            print(f"Wrote reference matches to {result['combined_marker_matches']}")
+            print(f"Wrote reference matches to {result['mapping_reference_matches']}")
             if "mlva_profile_tree" in result:
                 print(f"Wrote MLVA profile tree to {result['mlva_profile_tree']}")
-            if "combined_marker_tree" in result:
-                print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
-            if "taxon_assignment" in result:
-                print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
             if "taxonomic_identification" in result:
                 print(f"Wrote automatic taxonomic identification to {result['taxonomic_identification']}")
         return result
@@ -1161,32 +906,13 @@ def _run_single_input(
         threads=args.threads,
         minimap2_preset=args.minimap2_preset,
         minimap2_bin=args.minimap2_bin,
-        amplirust_bin=args.amplirust_bin,
-        mafft_bin=args.mafft_bin,
-        raxml_ng_bin=args.raxml_ng_bin,
-        epa_ng_bin=args.epa_ng_bin,
-        dnadiff_bin=args.dnadiff_bin,
-        raxml_model=args.raxml_model,
-        phylogeny_snp_weight=args.phylogeny_snp_weight,
-        phylogeny_repeat_weight=args.phylogeny_repeat_weight,
         missing_locus_min_depth=args.missing_locus_min_depth,
         missing_locus_min_fraction=args.missing_locus_min_fraction,
         missing_locus_penalty=args.missing_locus_penalty,
-        phylogenetics=args.phylogenetics,
         classification_repeat_scale=args.classification_repeat_scale,
         reference_metadata_path=args.reference_metadata,
-        target_taxon_id=args.target_taxon_id,
-        taxon_calibration_path=args.taxon_calibration,
-        taxon_alpha=args.taxon_alpha,
         taxon_min_loci=args.taxon_min_loci,
-        taxon_min_locus_fraction=args.taxon_min_locus_fraction,
-        taxon_bootstrap_replicates=args.taxon_bootstrap_replicates,
-        taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
-        taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
-        taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
         taxon_identification=args.taxon_identification,
-        taxon_k=args.taxon_k,
-        taxon_minimum_margin=args.taxon_minimum_margin,
         show_progress=not args.quiet,
     )
     print(f"Wrote easy MLVA calls to {result['calls']}")
@@ -1197,17 +923,9 @@ def _run_single_input(
         print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
     print(f"Wrote report to {result['report']}")
     if args.database:
-        if "phylogeny" in result:
-            print(f"Wrote per-locus trees to {result['phylogeny']}")
-        if "phylogenetic_matches" in result:
-            print(f"Wrote phylogenetic matches to {result['phylogenetic_matches']}")
-        print(f"Wrote reference matches to {result['combined_marker_matches']}")
+        print(f"Wrote reference matches to {result['mapping_reference_matches']}")
         if "mlva_profile_tree" in result:
             print(f"Wrote MLVA profile tree to {result['mlva_profile_tree']}")
-        if "combined_marker_tree" in result:
-            print(f"Wrote MYOGA-compatible tree to {result['combined_marker_tree']}")
-        if "taxon_assignment" in result:
-            print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
         if "taxonomic_identification" in result:
             print(f"Wrote automatic taxonomic identification to {result['taxonomic_identification']}")
     if args.reads_path or args.alignments_path:
@@ -1247,30 +965,13 @@ def _run_short_input(
         short_confidence_threshold=args.short_confidence_threshold,
         short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
         short_consider_secondary=not args.no_short_secondary_alignments,
-        mafft_bin=args.mafft_bin,
-        raxml_ng_bin=args.raxml_ng_bin,
-        epa_ng_bin=args.epa_ng_bin,
-        raxml_model=args.raxml_model,
-        phylogeny_snp_weight=args.phylogeny_snp_weight,
-        phylogeny_repeat_weight=args.phylogeny_repeat_weight,
         missing_locus_min_depth=args.missing_locus_min_depth,
         missing_locus_min_fraction=args.missing_locus_min_fraction,
         missing_locus_penalty=args.missing_locus_penalty,
-        phylogenetics=args.phylogenetics,
         classification_repeat_scale=args.classification_repeat_scale,
         reference_metadata_path=args.reference_metadata,
-        target_taxon_id=args.target_taxon_id,
-        taxon_calibration_path=args.taxon_calibration,
-        taxon_alpha=args.taxon_alpha,
         taxon_min_loci=args.taxon_min_loci,
-        taxon_min_locus_fraction=args.taxon_min_locus_fraction,
-        taxon_bootstrap_replicates=args.taxon_bootstrap_replicates,
-        taxon_min_bootstrap_support=args.taxon_min_bootstrap_support,
-        taxon_max_mean_placement_entropy=args.taxon_max_placement_entropy,
-        taxon_min_median_placement_lwr=args.taxon_min_placement_lwr,
         taxon_identification=args.taxon_identification,
-        taxon_k=args.taxon_k,
-        taxon_minimum_margin=args.taxon_minimum_margin,
         show_progress=not args.quiet,
     )
     print(f"Wrote conservative Illumina calls to {result['calls']}")
@@ -1282,8 +983,6 @@ def _run_short_input(
         print(f"Wrote mapping reference matches to {result['mapping_reference_matches']}")
     if "mlva_profile_tree" in result:
         print(f"Wrote MLVA profile tree to {result['mlva_profile_tree']}")
-    if "taxon_assignment" in result:
-        print(f"Wrote calibrated taxon assignment to {result['taxon_assignment']}")
     if "taxonomic_identification" in result:
         print(f"Wrote automatic taxonomic identification to {result['taxonomic_identification']}")
     print(f"Wrote report to {result['report']}")
@@ -1465,12 +1164,8 @@ def _run_short_batch(
         "profile_matches": "profile_matches.tsv",
         "profile_match_loci": "profile_match_loci.tsv",
         "sample_summary": "sample_summary.tsv",
-        "taxon_assignment": "taxon_assignment.tsv",
-        "taxon_assignment_candidates": "taxon_assignment_candidates.tsv",
-        "taxon_assignment_loci": "taxon_assignment_loci.tsv",
         "taxonomic_identification": "taxonomic_identification.tsv",
         "taxonomic_identification_evidence": "taxonomic_identification_evidence.tsv",
-        "taxonomic_identification_loci": "taxonomic_identification_loci.tsv",
         "mapping_reference_matches": "mapping_reference_matches.tsv",
     }
     for key, filename in table_keys.items():
@@ -1553,14 +1248,6 @@ def main(argv: list[str] | None = None) -> int:
                 min_pairwise_loci=args.min_pairwise_loci,
                 min_pairwise_fraction=args.min_pairwise_fraction,
                 distance=args.distance,
-                combined_markers=args.combined_markers,
-                loci_path=args.export_loci,
-                snp_weight=args.phylogeny_snp_weight,
-                repeat_weight=args.phylogeny_repeat_weight,
-                threads=args.threads,
-                mafft_bin=args.mafft_bin,
-                raxml_ng_bin=args.raxml_ng_bin,
-                raxml_model=args.raxml_model,
                 force=args.force,
             )
         except ValueError as exc:
@@ -1571,14 +1258,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote MLVA relatedness tree to {result['tree']}")
         else:
             print("No MLVA relatedness tree was written because no samples passed filtering")
-        if args.combined_markers:
-            if result["combined_marker_tree"]:
-                print(
-                    "Wrote combined SNP/repeat relatedness tree to "
-                    f"{result['combined_marker_tree']}"
-                )
-            else:
-                print("No combined SNP/repeat tree was written")
         print(f"Wrote export summary to {result['summary']}")
         return 0
     if args.command == "call":
@@ -1697,24 +1376,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"Wrote combined MLVA_finder analysis to {analysis_path}")
         return 0
-    if args.command == "calibrate-taxa":
-        try:
-            result = run_taxon_calibration(
-                reference_distances_path=args.reference_distances,
-                reference_metadata_path=args.reference_metadata,
-                sequence_index_path=args.sequence_index,
-                outdir=args.outdir,
-                k=args.k,
-                alpha=args.alpha,
-                snp_weight=args.snp_weight,
-                repeat_weight=args.repeat_weight,
-                minimum_loci=args.minimum_loci,
-            )
-        except ValueError as exc:
-            parser.error(str(exc))
-        print(f"Wrote taxon calibration to {result['calibration']}")
-        print(f"Wrote leave-one-out scores to {result['scores']}")
-        return 0
     if args.command == "build-reference":
         _resolve_panel_option(parser, args)
         if args.assemblies and not args.metadata:
@@ -1738,14 +1399,9 @@ def main(argv: list[str] | None = None) -> int:
                 download_retries=args.download_retries,
                 multiple_products=args.multiple_products,
                 max_primer_mismatches=args.max_primer_mismatches,
-                min_references_per_tree=args.min_references_per_tree,
                 threads=args.threads,
-                amplirust_bin=args.amplirust_bin,
                 minimap2_bin=args.minimap2_bin,
                 deacon_bin=args.deacon_bin,
-                mafft_bin=args.mafft_bin,
-                raxml_ng_bin=args.raxml_ng_bin,
-                raxml_model=args.raxml_model,
                 show_progress=not args.quiet,
             )
             if not args.quiet:
@@ -1762,22 +1418,14 @@ def main(argv: list[str] | None = None) -> int:
             outdir=args.outdir,
             multiple_products=args.multiple_products,
             max_primer_mismatches=args.max_primer_mismatches,
-            min_references_per_tree=args.min_references_per_tree,
             threads=args.threads,
-            amplirust_bin=args.amplirust_bin,
             minimap2_bin=args.minimap2_bin,
             deacon_bin=args.deacon_bin,
-            mafft_bin=args.mafft_bin,
-            raxml_ng_bin=args.raxml_ng_bin,
-            raxml_model=args.raxml_model,
             show_progress=not args.quiet,
         )
         print(f"Wrote per-locus reference database to {result['database']}")
         print(f"Wrote reference build QC to {result['manifest']}")
-        if result.get("phylogeny"):
-            print(f"Wrote per-locus reference trees to {result['phylogeny']}")
-        else:
-            print(f"Reference build completed with status {result['status']}; no trees were written")
+        print(f"Reference build completed with status {result['status']}")
         print(f"Wrote MYOGA metadata to {result['myoga_metadata']}")
         return 0
     parser.error("unknown command")

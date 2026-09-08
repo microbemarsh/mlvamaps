@@ -62,7 +62,7 @@ reuses the completed database's candidate FASTA, metadata, provenance, and
 `long.mmi` index. Candidate resources are not regenerated per sample. Complete
 products from `--recruitment-database` (or `--database`) are preferred for the
 additional recruitment path; the dedicated option does not activate
-phylogenetic placement. Without a database, a rich panel can generate a
+reference classification. Without a database, a rich panel can generate a
 recorded, bounded synthetic candidate bank from primers, flanks, motif, and
 repeat range.
 

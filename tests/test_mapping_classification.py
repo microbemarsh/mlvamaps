@@ -9,11 +9,11 @@ import pytest
 from mlvamaps.alignment_evidence import CandidateAlignment
 from mlvamaps.candidate_contexts import CandidateContext
 from mlvamaps.mapping_classification import (
-    UNKNOWN, alignment_statistics, molecule_log_likelihoods,
+    UNKNOWN, _coverage_gated_missing_loci, alignment_statistics, molecule_log_likelihoods,
     fit_reference_mixture, classify_molecules, run_mapping_classification,
 )
 from mlvamaps.models import Locus
-from mlvamaps.phylogeny import _parse_newick, _tip_patristic_distances
+from newick_helpers import _parse_newick, _tip_patristic_distances
 
 
 def context(name, count=4, locus="L1"):
@@ -144,11 +144,63 @@ def test_assembly_mapping_and_profile_tree_need_no_phylogenetic_executables(tmp_
     assert pairs[("A", "sample")] == pytest.approx(0)
     metadata = read_tsv(result["mlva_profile_tree_metadata"])
     assert {r["sample_id"] for r in metadata} == {"A", "B", "sample"}
+    evidence = read_tsv(result["assembly_reference_evidence"])
+    assert {row["query_repeat_count"] for row in evidence} == {"2"}
+    assert all(row["cigar"] for row in evidence)
+    assert all(float(row["repeat_delta"]) == 0 for row in evidence if row["reference_ids"] == "A")
+    assert all(float(row["repeat_delta"]) < 0 for row in evidence if row["reference_ids"] == "B")
+    assert "combined_marker_matches" not in result
     # Missing query calls are not imputed to zero merely to obtain a tree.
     no_tree = run_mapping_classification(database_path=root, loci=loci, outdir=tmp_path / "out",
         sample_id="sample", query_sequences={"L1": "ACGTTGAGACCTAA"}, query_repeat_counts={"L1": 2})
     assert "mlva_profile_tree" not in no_tree
     assert not result["mlva_profile_tree"].exists()
+
+
+def test_sassy_assembly_products_retain_repeat_and_sequence_evidence(tmp_path):
+    from mlvamaps.assembly_call import run_assembly_call
+
+    root, loci = database(tmp_path)
+    for locus in loci:
+        with (root / f"{locus.locus_id}.fasta").open("a") as handle:
+            # Same repeat length as A, with one nucleotide substitution.
+            handle.write(">C\nACGTTGGGACCTAA\n")
+    panel = tmp_path / "panel.tsv"
+    panel.write_text(
+        "locus_id\tforward_primer\treverse_primer\tleft_flank_sequence\t"
+        "right_flank_sequence\trepeat_motif\trepeat_unit_length_bp\n"
+        + "".join(f"{l.locus_id}\tACG\tTTA\tTT\tCC\tGA\t2\n" for l in loci)
+    )
+    assembly = tmp_path / "query.fasta"
+    assembly.write_text(">contig\nACGTTGAGACCTAA\n")
+    result = run_assembly_call(
+        str(assembly), str(panel), str(tmp_path / "assembly_out"), "query",
+        database_path=str(root), max_primer_mismatches=0, threads=1,
+    )
+    calls = read_tsv(result["calls"])
+    assert all(float(row["repeat_count"]) == 2 for row in calls)
+    assert result["amplicon_fasta"].is_file()
+    assert result["legacy_fingerprint"].is_file()
+    evidence = read_tsv(result["assembly_reference_evidence"])
+    assert all(int(row["mismatches"]) == 1 for row in evidence if row["reference_ids"] == "C")
+    assert all(float(row["repeat_delta"]) == 0 for row in evidence if row["reference_ids"] == "C")
+    assert {row["reference_ids"] for row in evidence} == {"A", "B", "C"}
+    assert read_tsv(result["mapping_reference_matches"])[0]["reference_id"] == "A"
+    assert not (result["outdir"] / "phylogeny").exists()
+
+
+@pytest.mark.parametrize("arguments", [
+    ["call", "--phylogenetics"],
+    ["call", "--phylogeny-snp-weight", "1"],
+    ["calibrate-taxa"],
+    ["build-reference", "-i", "assemblies", "-p", "panel", "--min-references-per-tree", "3"],
+    ["export-myoga", "--results", "r", "--metadata", "m", "-o", "out", "--combined-markers"],
+])
+def test_removed_typing_options_fail_explicitly(arguments):
+    from mlvamaps.cli import build_parser
+    with pytest.raises(SystemExit) as error:
+        build_parser().parse_args(arguments)
+    assert error.value.code == 2
 
 
 def test_raw_read_mapping_preserves_alternatives_and_low_coverage(tmp_path, monkeypatch):
@@ -244,7 +296,7 @@ def test_mapping_report_and_profile_match_export_keep_new_score_semantics(tmp_pa
     normalized = sequence_reference_match_rows(matches)
     assert normalized[0]["match_type"] == "mapping_reference"
     assert normalized[0]["distance"] == matches[0]["distance"]
-    write_assembly_report(tmp_path / "out", "sample", [], [], loci=loci, phylogenetic_rows=matches)
+    write_assembly_report(tmp_path / "out", "sample", [], [], loci=loci, reference_rows=matches)
     report = (tmp_path / "out" / "report.html").read_text()
     assert "Original mapping evidence" in report
     assert "classification/mlva_profiles.tree" in report
@@ -341,7 +393,7 @@ def test_identification_follows_reference_not_species_total(tmp_path, monkeypatc
     assert [r["reference_id"] for r in evidence] == [r["reference_id"] for r in matches]
     assert sum(float(r["model_support"]) for r in evidence if r["taxon_id"] == "2") == pytest.approx(0.6)
     assert summary["assignment_status"] == ("MIXED_REFERENCES" if sample_mode == "metagenome" else "CLOSEST_REFERENCE_LOW_CONFIDENCE")
-    write_assembly_report(tmp_path / "out", "sample", [], [], loci=loci, phylogenetic_rows=matches)
+    write_assembly_report(tmp_path / "out", "sample", [], [], loci=loci, reference_rows=matches)
     report = (tmp_path / "out" / "report.html").read_text()
     assert '<div class="taxon-call">Taxon A</div>' in report
     assert "Closest reference IDs" in report
@@ -361,3 +413,59 @@ def test_reference_identification_without_taxon_metadata(tmp_path):
     assert summary["best_taxon"] == summary["best_species"] == ""
     assert summary["assignment_status"] == "SUPPORTED"
     assert float(summary["unclassified_fraction"]) < 0.01
+
+
+@pytest.mark.parametrize("status", [
+    "detected_unresolved", "PRESENT_COUNT_UNKNOWN", "LOW_DEPTH", "ambiguous",
+    "LOCUS_DROPOUT", "", "not_found",
+])
+def test_missing_locus_gate_requires_explicit_undetected_status(status):
+    quality = {f"L{i}": {"depth": 3, "status": "called"} for i in range(4)}
+    quality["missing"] = {"depth": 0, "status": status}
+    missing, info = _coverage_gated_missing_loci(
+        set(quality), {}, quality, "fastq", 3, 0.8, 1,
+    )
+    assert info["missing_locus_gate_passed"] == "yes"
+    assert missing == ({"missing"} if status == "not_found" else set())
+    # Long-read summary statuses merge both states; retain original detection
+    # evidence separately without changing the taxonomic QC status.
+    quality["missing"]["detection_status"] = status
+    quality["missing"]["status"] = "LOCUS_DROPOUT"
+    missing, _info = _coverage_gated_missing_loci(
+        set(quality), {}, quality, "fastq", 3, 0.8, 1,
+    )
+    assert missing == ({"missing"} if status == "not_found" else set())
+
+
+@pytest.mark.parametrize("depth, mode, penalty, expected", [
+    (3, "illumina", 1, {"missing"}),
+    (2, "fastq", 1, set()),
+    ("", "fastq", 1, set()),
+    (float("nan"), "fastq", 1, set()),
+    (float("inf"), "fastq", 1, set()),
+    (3, "assembly", 1, set()),
+    (3, "fastq", 0, set()),
+])
+def test_missing_locus_gate_preserves_low_or_unknown_coverage(depth, mode, penalty, expected):
+    quality = {f"L{i}": {"depth": depth, "status": "called"} for i in range(4)}
+    quality["missing"] = {"depth": 0, "status": "not_found"}
+    missing, _info = _coverage_gated_missing_loci(
+        set(quality), {}, quality, mode, 3, 0.8, penalty,
+    )
+    assert missing == expected
+    # The denominator is the entire panel, not just loci with usable calls.
+    missing, _info = _coverage_gated_missing_loci(
+        set(quality) | {"unknown"}, {}, quality, mode, 3, 0.8, penalty,
+    )
+    assert not missing
+
+
+@pytest.mark.parametrize("min_depth, fraction, penalty", [
+    (0, 0.8, 1), (3, 0, 1), (3, 1.1, 1), (3, 0.8, -1),
+    (float("nan"), 0.8, 1), (3, float("inf"), 1), (3, 0.8, float("nan")),
+])
+def test_missing_locus_gate_rejects_invalid_settings(min_depth, fraction, penalty):
+    with pytest.raises(ValueError):
+        _coverage_gated_missing_loci(
+            set(), {}, None, "fastq", min_depth, fraction, penalty,
+        )

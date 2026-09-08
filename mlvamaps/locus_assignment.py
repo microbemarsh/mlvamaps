@@ -71,10 +71,6 @@ def assignments_from_pcr(
     return results
 
 
-# Source compatibility for the mlvamaps 0.1 API.
-assignments_from_amplirust = assignments_from_pcr
-
-
 def _assignment_from_candidates(
     read: ReadRecord,
     sample_id: str,

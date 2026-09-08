@@ -123,10 +123,6 @@ class CandidateContext:
         }
 
 
-# Compatibility alias while downstream integrations migrate terminology.
-LocusContext = CandidateContext
-
-
 def _database_root(database: str | Path | None) -> Path | None:
     if not database:
         return None
@@ -522,36 +518,3 @@ def write_candidate_contexts(contexts: list[CandidateContext], directory: str | 
         "provenance": provenance,
         "provenance_table": provenance_table,
     }
-
-
-# Compatibility API for the former short-read-only context module.
-def load_locus_contexts(loci: list[Locus], database_path: str | Path | None = None) -> list[CandidateContext]:
-    return _base_contexts(loci, database_path)
-
-
-def expand_candidate_contexts(
-    contexts: list[CandidateContext], loci: list[Locus], maximum: int = 100
-) -> list[CandidateContext]:
-    # Expand supplied contexts using the same bounded logic without a database.
-    loci_by_id = {locus.locus_id: locus for locus in loci}
-    observed: dict[str, list[int | float | None]] = defaultdict(list)
-    for context in contexts:
-        observed[context.locus_id].append(context.repeat_count)
-    expanded = []
-    seen = set()
-    for context in contexts:
-        locus = loci_by_id[context.locus_id]
-        for count in candidate_repeat_counts(locus, observed[context.locus_id], maximum, 0):
-            sequence = context.sequence[:context.repeat_start] + locus.repeat_motif * count + context.sequence[context.repeat_end:]
-            key = (context.locus_id, sequence, count)
-            if key in seen:
-                continue
-            seen.add(key)
-            expanded.append(replace(
-                context, candidate_id=f"candidate{len(expanded)+1:07d}", sequence=sequence,
-                repeat_count=count, repeat_end=context.repeat_start + len(locus.repeat_motif) * count,
-                expected_product_size_bp=len(sequence),
-            ))
-    if not expanded:
-        raise ValueError("Candidate contexts do not encode usable discrete repeat-count states")
-    return expanded

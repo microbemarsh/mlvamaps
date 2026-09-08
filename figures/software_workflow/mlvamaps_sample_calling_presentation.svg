@@ -1,67 +1,64 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="sample-presentation-title sample-presentation-desc">
-    <title id="sample-presentation-title">mlvamaps build-once sample calling architecture</title>
-    <desc id="sample-presentation-desc">Presentation diagram showing a completed database reused by assembly and FASTQ calls that converge on compatible locus results under one bounded global thread budget.</desc>
-    <defs>
-      <style>
-        .node{fill:#fff;stroke:#4f625d;stroke-width:1.5}.input{fill:#f2f4f3;stroke:#71807c;stroke-width:1.4}.focal{fill:#eaf4f3;stroke:#2b7a78;stroke-width:2.2}.output{fill:#fff;stroke:#18211f;stroke-width:1.8}
-        .edge{fill:none;stroke:#4f625d;stroke-width:1.8;marker-end:url(#arrow)}.guide{fill:none;stroke:#71807c;stroke-width:1.4;stroke-dasharray:7 5}.accent{fill:none;stroke:#2b7a78;stroke-width:2.4;marker-end:url(#arrow-accent)}
-        .kicker{fill:#4f625d;font:700 13px Arial,Helvetica,sans-serif;letter-spacing:.12em}.headline{fill:#18211f;font:700 32px Arial,Helvetica,sans-serif}.tag{fill:#315f78;font:700 11px Arial,Helvetica,sans-serif;letter-spacing:.07em}.tag2{fill:#2b7a78;font:700 11px Arial,Helvetica,sans-serif;letter-spacing:.07em}.name{fill:#18211f;font:700 18px Arial,Helvetica,sans-serif}.sub{fill:#4f625d;font:13px Arial,Helvetica,sans-serif}.note{fill:#4f625d;font:italic 13px Arial,Helvetica,sans-serif}
-      </style>
-      <marker id="arrow" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#4f625d"/></marker>
-      <marker id="arrow-accent" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0,9 3.5,0 7" fill="#2b7a78"/></marker>
-    </defs>
-    <rect width="1280" height="720" fill="#fcfcfa"/>
-    <text class="kicker" x="56" y="48">mlvamaps · SAMPLE CALLING</text>
-    <text class="headline" x="56" y="88">One database reused across every sample</text>
-
-    <!-- Connectors -->
-    <path class="guide" d="M176 164 H44 V530"/>
-    <line class="edge" x1="44" y1="274" x2="72" y2="274"/>
-    <line class="edge" x1="44" y1="410" x2="72" y2="410"/>
-    <line class="edge" x1="44" y1="546" x2="72" y2="546"/>
-    <path class="edge" d="M436 274 H500 Q508 274 508 282 V346 Q508 354 516 354 H548"/>
-    <line class="edge" x1="436" y1="410" x2="548" y2="410"/>
-    <path class="edge" d="M436 546 H500 Q508 546 508 538 V474 Q508 466 516 466 H548"/>
-    <line class="accent" x1="844" y1="410" x2="916" y2="410"/>
-
-    <rect class="input" x="72" y="124" width="208" height="80" rx="4"/>
-    <text class="tag" x="96" y="150">SHARED PANEL + DATABASE</text>
-    <text class="name" x="96" y="178">candidates + indexes</text>
-    <text class="sub" x="96" y="198">built once · reused per sample</text>
-
-    <rect class="node" x="72" y="226" width="364" height="96" rx="4"/>
-    <text class="tag" x="96" y="252">GENOME ASSEMBLY</text>
-    <text class="name" x="96" y="282">Shared Sassy batch PCR</text>
-    <text class="sub" x="96" y="306">primer-bounded product → length → calibrated repeat count</text>
-
-    <rect class="node" x="72" y="362" width="364" height="96" rx="4"/>
-    <text class="tag" x="96" y="388">PAIRED-END ILLUMINA FASTQ · DEACON OPTIONAL</text>
-    <text class="name" x="96" y="418">minimap2 → htslib evidence</text>
-    <text class="sub" x="96" y="442">cached short.mmi → molecule/state reduction</text>
-
-    <rect class="node" x="72" y="498" width="364" height="96" rx="4"/>
-    <text class="tag" x="96" y="524">LONG / AMPLICON FASTQ · DEACON OPTIONAL</text>
-    <text class="name" x="96" y="554">minimap2 → htslib evidence</text>
-    <text class="sub" x="96" y="578">cached long.mmi → temporary compressed BAM</text>
-
-    <rect class="focal" x="548" y="314" width="296" height="192" rx="6"/>
-    <text class="tag2" x="576" y="344">SHARED LOCUS RESULT CONTRACT</text>
-    <text class="name" x="576" y="378">Common locus calls</text>
-    <line x1="576" y1="394" x2="816" y2="394" stroke="#9fc5c3" stroke-width="1.2"/>
-    <text class="sub" x="576" y="422">locus · repeat count</text>
-    <text class="sub" x="576" y="450">confidence · ambiguity · mixture</text>
-    <text class="sub" x="576" y="478">locus sequence, when resolved</text>
-
-    <rect class="output" x="916" y="314" width="300" height="192" rx="4"/>
-    <text class="tag" x="944" y="344">OUTPUTS</text>
-    <text class="name" x="944" y="378">MLVA fingerprint</text>
-    <text class="sub" x="944" y="404">sample × locus repeat counts</text>
-    <line x1="944" y1="426" x2="1188" y2="426" stroke="#c3ccc9" stroke-width="1.2"/>
-    <text class="tag" x="944" y="452">REFERENCE-ENABLED</text>
-    <text class="name" x="944" y="482">Taxon identification</text>
-    <text class="sub" x="944" y="500">weighted evidence across recovered loci</text>
-
-    <text class="note" x="548" y="554">Directory samples share one global thread budget.</text>
-    <text class="note" x="548" y="576">Bounded concurrency preserves deterministic output order.</text>
-  </svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="mlvamaps_sample_calling_presentation-title mlvamaps_sample_calling_presentation-desc">
+<title id="mlvamaps_sample_calling_presentation-title">Alignment-based mlvamaps workflow</title>
+<desc id="mlvamaps_sample_calling_presentation-desc">Parasail compares known-locus assembly products end-to-end against every reference at that locus, while minimap2 locates FASTQ molecules among reference targets; both feed one reference likelihood model.</desc>
+<defs>
+<marker id="mlvamaps_sample_calling_presentation-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+<polygon points="0 0,8 3,0 6" fill="#4f625d"/>
+</marker>
+<marker id="mlvamaps_sample_calling_presentation-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+<polygon points="0 0,8 3,0 6" fill="#2b7a78"/>
+</marker>
+<marker id="mlvamaps_sample_calling_presentation-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+<polygon points="0 0,8 3,0 6" fill="#2e5aa8"/>
+</marker>
+</defs>
+<rect width="1280" height="720" fill="#fcfcfa"/>
+<g font-family="Arial, Helvetica, sans-serif" transform="scale(1.3333333333333333 1.2)">
+<text x="40" y="36" font-size="12" font-weight="600" fill="#4f625d">MLVAMAPS</text>
+<text x="40" y="76" font-size="32" font-weight="600" fill="#18211f">Alignment-based reference support</text>
+<text x="40" y="104" font-size="16" font-weight="400" fill="#4f625d">Observed sequence evidence + VNTR repeat-length agreement</text>
+<path d="M 296,196 H 344" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_sample_calling_presentation-arrow)"/>
+<path d="M 624,196 H 664" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_sample_calling_presentation-arrow)"/>
+<path d="M 296,340 H 344" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_sample_calling_presentation-arrow)"/>
+<path d="M 624,340 H 664" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_sample_calling_presentation-arrow)"/>
+<path d="M 792,396 V 428" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_sample_calling_presentation-arrow)"/>
+<path d="M 344,468 H 296" fill="none" stroke="#4f625d" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#mlvamaps_sample_calling_presentation-arrow)"/>
+<rect x="40" y="140" width="256" height="112" rx="8" fill="#f2f4f3" stroke="#71807c" stroke-width="1.5"/>
+<text x="56" y="168" font-size="18" font-weight="600" fill="#18211f">Assembly FASTA</text>
+<text x="56" y="192" font-size="14" font-weight="400" fill="#4f625d">Sassy in silico PCR</text>
+<text x="56" y="214" font-size="14" font-weight="400" fill="#4f625d">Oriented products; locus known</text>
+<rect x="344" y="140" width="280" height="112" rx="8" fill="#ffffff" stroke="#71807c" stroke-width="1.5"/>
+<text x="360" y="168" font-size="18" font-weight="600" fill="#18211f">Parasail · global alignment</text>
+<text x="360" y="192" font-size="14" font-weight="400" fill="#4f625d">End-to-end product comparison</text>
+<text x="360" y="214" font-size="14" font-weight="400" fill="#4f625d">Every reference at the known locus</text>
+<text x="360" y="236" font-size="14" font-weight="400" fill="#4f625d">Observed reference amplicons only</text>
+<rect x="40" y="284" width="256" height="112" rx="8" fill="#f2f4f3" stroke="#71807c" stroke-width="1.5"/>
+<text x="56" y="312" font-size="18" font-weight="600" fill="#18211f">Sequencing FASTQ</text>
+<text x="56" y="336" font-size="14" font-weight="400" fill="#4f625d">Illumina, ONT or HiFi</text>
+<text x="56" y="358" font-size="14" font-weight="400" fill="#4f625d">Molecules need reference mapping</text>
+<rect x="344" y="284" width="280" height="112" rx="8" fill="#ffffff" stroke="#71807c" stroke-width="1.5"/>
+<text x="360" y="312" font-size="18" font-weight="600" fill="#18211f">minimap2 · read mapping</text>
+<text x="360" y="336" font-size="14" font-weight="400" fill="#4f625d">Locate reads among reference targets</text>
+<text x="360" y="358" font-size="14" font-weight="400" fill="#4f625d">Retain reported competing alignments</text>
+<text x="360" y="380" font-size="14" font-weight="400" fill="#4f625d">Observed reference amplicons only</text>
+<rect x="664" y="140" width="256" height="256" rx="8" fill="#eaf4f3" stroke="#2b7a78" stroke-width="1.5"/>
+<text x="680" y="168" font-size="18" font-weight="600" fill="#18211f">Shared reference model</text>
+<text x="680" y="192" font-size="14" font-weight="400" fill="#4f625d">Sequence + repeat evidence</text>
+<text x="680" y="214" font-size="14" font-weight="400" fill="#4f625d">Molecule-aware scoring</text>
+<text x="680" y="236" font-size="14" font-weight="400" fill="#4f625d">
+</text>
+<text x="680" y="258" font-size="14" font-weight="400" fill="#4f625d">Isolate: joint reference support</text>
+<text x="680" y="280" font-size="14" font-weight="400" fill="#4f625d">Metagenome: EM fractions</text>
+<text x="680" y="302" font-size="14" font-weight="400" fill="#4f625d">
+</text>
+<text x="680" y="324" font-size="14" font-weight="400" fill="#4f625d">Ambiguity stays explicit</text>
+<rect x="344" y="428" width="576" height="80" rx="8" fill="#eaf4f3" stroke="#2b7a78" stroke-width="1.5"/>
+<text x="360" y="456" font-size="18" font-weight="600" fill="#18211f">Calls, fingerprints + reference evidence</text>
+<text x="360" y="480" font-size="14" font-weight="400" fill="#4f625d">Ranked reference groups, support status and HTML report</text>
+<rect x="40" y="428" width="256" height="80" rx="8" fill="#f2f4f3" stroke="#aebbb7" stroke-width="1.5" stroke-dasharray="4 4"/>
+<text x="56" y="456" font-size="18" font-weight="600" fill="#18211f">Optional profile tree</text>
+<text x="56" y="480" font-size="14" font-weight="400" fill="#4f625d">Repeat-profile similarity only</text>
+<text x="40" y="540" font-size="14" font-weight="400" fill="#4f625d">Parallel allele calling: assembly sizing or FASTQ candidate mapping.</text>
+</g>
+</svg>

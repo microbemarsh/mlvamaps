@@ -1,6 +1,6 @@
 # Mapping-based VNTR classification and profile trees
 
-`mlvamaps call --database DB` now uses original alignment evidence for reference
+`mlvamaps call --database DB` uses original alignment evidence for reference
 classification. It does not average the nearest reference distances within a
 taxon. The mixture calculation is inspired by
 [Emu's alignment-likelihood and EM approach](https://github.com/treangenlab/emu),
@@ -19,8 +19,12 @@ reference IDs. The classifier requests secondary competitors up to the number
 of targets, with minimap2's secondary score-ratio filter disabled; candidates
 that the mapper does not report are not assumed to have a measured alignment.
 
-For assemblies, primer-oriented observed products are aligned end-to-end to
-the corresponding reference loci using the existing parasail dependency.
+For assemblies, Sassy-backed in silico PCR recovers primer-oriented products.
+The selected observed products are aligned end-to-end to corresponding reference
+loci with Parasail. Each product contributes one locus observation. The reported
+repeat-count tables remain unchanged; reference-relative mismatch counts, CIGARs
+and repeat differences are retained in `assembly_reference_evidence.tsv`, with
+query sequences in `query_amplicons.fasta`, under `classification/`.
 
 For each retained alignment:
 
@@ -97,9 +101,8 @@ profile without molecule linkage. The unclassified fraction measures the explici
 background component; ambiguity between named references is represented by the
 listed equivalent IDs. Unmapped input reads are outside the fitted matrix.
 
-The legacy `--taxon-k`, locus discrimination weights, bootstrap thresholds,
-SNP/repeat phylogenetic weights, and recovery-fraction thresholds do not enter
-this classifier. Legacy calibrated target testing requires `--phylogenetics`.
+Distance-based ranking, phylogenetic placement, and calibrated target testing
+are not part of the typing workflow.
 
 ## Newick trees for MYOGA
 
@@ -138,8 +141,7 @@ The `.tree` files are Newick; MYOGA versions may additionally require a GGR
 file or a tree-only import mode. No synthetic Parsnp/GGR data is invented.
 
 MAFFT, RAxML-NG and EPA-ng are not required for mapping classification or these
-repeat-profile trees. `--phylogenetics` retains the older sequence-tree outputs
-as an additional analysis.
+repeat-profile trees. Reference builds and typing do not invoke sequence-tree tools.
 
 ## Validation and limits
 
@@ -152,8 +154,6 @@ they do not replace held-out, taxon-specific validation across sequencing
 technologies, missing-reference scenarios and uneven locus recovery.
 
 The likelihood matrix is currently dense, like the existing alignment evidence
-path. Large catalogs/high-depth inputs can require substantial memory. The
-legacy algorithms remain available for comparisons while this new classifier
-is validated on representative data.
+path. Large catalogs/high-depth inputs can require substantial memory. Held-out validation on representative data is still required.
 
 Manifest batches with only legacy classification outputs are rerun with the new classifier. Use `--force` when changing settings on already completed mapping-classification results.

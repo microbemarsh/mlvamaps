@@ -16,10 +16,8 @@ from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import open_text, read_fasta, write_fasta
 from .models import Locus
-from .phylogeny import (
-    RAXML_NG_THREADS_PER_PROCESS,
+from .reference_database import (
     REFERENCE_ASSEMBLY_FIELDS,
-    build_reference_phylogenies,
     canonical_assembly_digest,
 )
 from .primers import read_loci_or_primers
@@ -73,7 +71,6 @@ REFERENCE_BUILD_FIELDS = [
 REFERENCE_BUILD_STATUS_BUILT = "BUILT"
 REFERENCE_BUILD_STATUS_PARTIAL = "PARTIAL"
 REFERENCE_BUILD_STATUS_NO_USABLE_LOCI = "NO_USABLE_LOCI"
-REFERENCE_BUILD_STATUS_INSUFFICIENT_REFERENCES = "INSUFFICIENT_REFERENCES"
 
 REFERENCE_LOCUS_AMPLIFIABILITY_FIELDS = [
     "locus_id",
@@ -84,7 +81,7 @@ REFERENCE_LOCUS_AMPLIFIABILITY_FIELDS = [
     "genomes_failing_product_constraints",
     "percent_genomes_amplifiable",
     "amplifiable",
-    "tree_status",
+    "reference_status",
 ]
 
 
@@ -307,7 +304,6 @@ def _locus_amplifiability_rows(
     loci: list[Locus],
     records_by_locus: dict[str, list[tuple[str, str]]],
     genomes_examined: int,
-    min_references_per_tree: int,
     manifest_rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Summarize products retained by the existing extraction/QC policy."""
@@ -325,11 +321,9 @@ def _locus_amplifiability_rows(
             for row in locus_manifest
         )
         if valid_amplicons == 0:
-            tree_status = "NO_AMPLICONS"
-        elif valid_amplicons < min_references_per_tree:
-            tree_status = REFERENCE_BUILD_STATUS_INSUFFICIENT_REFERENCES
+            reference_status = "NO_AMPLICONS"
         else:
-            tree_status = REFERENCE_BUILD_STATUS_BUILT
+            reference_status = REFERENCE_BUILD_STATUS_BUILT
         rows.append(
             {
                 "locus_id": locus.locus_id,
@@ -344,7 +338,7 @@ def _locus_amplifiability_rows(
                     else 0.0
                 ),
                 "amplifiable": "TRUE" if valid_amplicons else "FALSE",
-                "tree_status": tree_status,
+                "reference_status": reference_status,
             }
         )
     return rows
@@ -396,14 +390,9 @@ def build_reference_database(
     loci_path: str | Path | None = None,
     multiple_products: str = "exclude",
     max_primer_mismatches: int = 2,
-    min_references_per_tree: int = 3,
     threads: int = DEFAULT_THREADS,
-    amplirust_bin: str = "amplirust",
     minimap2_bin: str = "minimap2",
     deacon_bin: str = "deacon",
-    mafft_bin: str = "mafft",
-    raxml_ng_bin: str = "raxml-ng",
-    raxml_model: str = "DNA",
     show_progress: bool = False,
     finalize: bool = True,
 ) -> dict[str, Any]:
@@ -415,8 +404,6 @@ def build_reference_database(
     """
     if multiple_products not in {"exclude", "best", "error"}:
         raise ValueError("multiple_products must be exclude, best, or error")
-    if min_references_per_tree < 2:
-        raise ValueError("min_references_per_tree must be at least 2")
     loci: list[Locus] = read_loci_or_primers(loci_path, None if loci_path else primers_path)
     if not loci:
         raise ValueError("Primer/locus panel contains no loci")
@@ -449,9 +436,6 @@ def build_reference_database(
         f"{len(loci):,} loci with {thread_count} worker(s)"
     )
     progress.step(f"Global build threads: {thread_count}")
-    progress.step(
-        f"RAxML-NG threads per process: {RAXML_NG_THREADS_PER_PROCESS}"
-    )
     output = Path(outdir)
     database_dir = output / "database"
     extraction_dir = output / "extraction"
@@ -608,7 +592,7 @@ def build_reference_database(
             )
     _write_tsv(manifest_rows, output / "reference_build_manifest.tsv", REFERENCE_BUILD_FIELDS)
     locus_summary_rows = _locus_amplifiability_rows(
-        loci, records_by_locus, len(matched), min_references_per_tree, manifest_rows
+        loci, records_by_locus, len(matched), manifest_rows
     )
     locus_summary_path = output / "reference_locus_amplifiability.tsv"
     _write_tsv(
@@ -622,35 +606,15 @@ def build_reference_database(
         writer.writeheader()
         writer.writerows(myoga_metadata)
 
-    tree_paths: dict[str, Path | None] = {}
-    if locus_fasta_paths and finalize:
-        progress.step(f"Phylogeny finalization: {len(locus_fasta_paths):,} candidate loci")
-        tree_paths = build_reference_phylogenies(
-            database_dir,
-            output / "phylogeny",
-            loci,
-            thread_count,
-            min_references=min_references_per_tree,
-            mafft_bin=mafft_bin,
-            raxml_ng_bin=raxml_ng_bin,
-            raxml_model=raxml_model,
-            progress=progress,
-        )
+    if not locus_fasta_paths:
+        build_status = REFERENCE_BUILD_STATUS_NO_USABLE_LOCI
+        progress.step("No usable reference amplicons were recovered")
+    else:
         build_status = (
             REFERENCE_BUILD_STATUS_BUILT
-            if all(row["tree_status"] == REFERENCE_BUILD_STATUS_BUILT for row in locus_summary_rows)
+            if all(row["amplifiable"] == "TRUE" for row in locus_summary_rows)
             else REFERENCE_BUILD_STATUS_PARTIAL
         )
-    elif not locus_fasta_paths:
-        build_status = REFERENCE_BUILD_STATUS_NO_USABLE_LOCI
-        tree_paths = {"phylogeny": None}
-        progress.step(
-            "No usable reference amplicons were recovered; skipping phylogeny construction."
-        )
-    else:
-        build_status = REFERENCE_BUILD_STATUS_PARTIAL
-        tree_paths = {"phylogeny": None}
-        progress.step("Extraction-only taxon stage complete; combined resources deferred")
     manifest_path = output / "manifest.json"
     manifest = {
         "schema_version": DATABASE_SCHEMA_VERSION,
@@ -685,14 +649,7 @@ def build_reference_database(
             "index": str(Path(candidate_paths["deacon_index"]).relative_to(output)) if candidate_paths else "",
             "parameters": DEACON_INDEX_PARAMETERS if candidate_paths else {},
         },
-        "phylogeny": {
-            "mafft_version": _tool_version(mafft_bin) if locus_fasta_paths and finalize else "",
-            "raxml_ng_version": _tool_version(raxml_ng_bin) if locus_fasta_paths and finalize else "",
-            "model": raxml_model,
-            "raxml_ng_threads_per_process": RAXML_NG_THREADS_PER_PROCESS,
-            "directory": "phylogeny",
-            "sequence_type": "real_observed_locus_sequences_only",
-        },
+        "classification": {"method": "mapping_em", "reference_sequences": "observed_amplicons"},
         "finalized": finalize,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -715,5 +672,4 @@ def build_reference_database(
         "locus_amplifiability": locus_summary_path,
         "locus_summary_rows": locus_summary_rows,
         "reference_assemblies": reference_assemblies_path,
-        **tree_paths,
     }

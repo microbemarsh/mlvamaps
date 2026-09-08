@@ -17,11 +17,7 @@ from typing import Any, Callable
 
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .io import read_fasta, write_fasta
-from .phylogeny import (
-    RAXML_NG_THREADS_PER_PROCESS,
-    REFERENCE_ASSEMBLY_FIELDS,
-    build_reference_phylogenies,
-)
+from .reference_database import REFERENCE_ASSEMBLY_FIELDS
 from .primers import read_loci_or_primers
 from .progress import ProgressReporter
 from .reference_builder import (
@@ -67,7 +63,6 @@ TAXON_REFERENCE_SUMMARY_FIELDS = [
     "loci_not_amplifiable",
     "percent_loci_amplifiable",
     "total_valid_amplicons",
-    "trees_built",
     "status",
 ]
 TAXON_LOCUS_AMPLIFIABILITY_FIELDS = [
@@ -81,7 +76,7 @@ TAXON_LOCUS_AMPLIFIABILITY_FIELDS = [
     "genomes_failing_product_constraints",
     "percent_genomes_amplifiable",
     "amplifiable",
-    "tree_status",
+    "reference_status",
 ]
 _ACCESSION_PATTERN = re.compile(r"(GC[AF]_\d+\.\d+)", re.IGNORECASE)
 _SAFE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
@@ -526,7 +521,6 @@ def _print_taxon_summary(summary: dict[str, Any], non_amplifiable: list[str]) ->
         f"({summary['percent_loci_amplifiable']:.1f}%)"
     )
     print(f"  Valid amplicons: {summary['total_valid_amplicons']:,}")
-    print(f"  Trees built: {summary['trees_built']:,}")
     print(f"  Status: {summary['status']}")
     if non_amplifiable:
         print(f"  Non-amplifiable loci: {', '.join(non_amplifiable)}")
@@ -545,11 +539,7 @@ def build_combined_taxon_database(
     output: str | Path,
     *,
     loci_path: str | Path | None = None,
-    min_references_per_tree: int = 3,
     threads: int = DEFAULT_THREADS,
-    mafft_bin: str = "mafft",
-    raxml_ng_bin: str = "raxml-ng",
-    raxml_model: str = "DNA",
     minimap2_bin: str = "minimap2",
     deacon_bin: str = "deacon",
     show_progress: bool = False,
@@ -565,7 +555,6 @@ def build_combined_taxon_database(
     )
     root = Path(output).resolve()
     database = root / "database"
-    phylogeny = root / "phylogeny"
     database.mkdir(parents=True, exist_ok=True)
     taxids_path = root / "taxids.csv"
     if not taxids_path.is_file():
@@ -679,18 +668,6 @@ def build_combined_taxon_database(
             deacon_bin=deacon_bin,
             progress=progress,
         )
-    with progress.phase("phylogeny finalization", f"{len(loci):,} loci"):
-        paths = build_reference_phylogenies(
-            database,
-            phylogeny,
-            loci,
-            build_threads,
-            min_references=min_references_per_tree,
-            mafft_bin=mafft_bin,
-            raxml_ng_bin=raxml_ng_bin,
-            raxml_model=raxml_model,
-            progress=progress,
-        )
     manifest_path = root / "manifest.json"
     manifest_path.write_text(
         json.dumps(
@@ -699,9 +676,6 @@ def build_combined_taxon_database(
                 "status": "complete",
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "build_threads": build_threads,
-                "phylogeny_threads": {
-                    "raxml_ng_threads_per_process": RAXML_NG_THREADS_PER_PROCESS,
-                },
                 "database": "database",
                 "taxids": [reference.taxid for reference in references],
                 "taxids_input": {
@@ -710,7 +684,7 @@ def build_combined_taxon_database(
                 },
                 "competitive_mapping": "database/competitive_mapping",
                 "deacon": "database/deacon",
-                "phylogeny": "phylogeny",
+                "classification": {"method": "mapping_em"},
             },
             indent=2,
             sort_keys=True,
@@ -719,10 +693,8 @@ def build_combined_taxon_database(
     )
     return {
         "database": database,
-        "phylogeny": phylogeny,
         "manifest": manifest_path,
         **mapping_paths,
-        **paths,
     }
 
 
@@ -740,14 +712,9 @@ def build_taxon_references(
     download_retries: int = 3,
     multiple_products: str = "exclude",
     max_primer_mismatches: int = 2,
-    min_references_per_tree: int = 3,
     threads: int = DEFAULT_THREADS,
-    amplirust_bin: str = "amplirust",
     minimap2_bin: str = "minimap2",
     deacon_bin: str = "deacon",
-    mafft_bin: str = "mafft",
-    raxml_ng_bin: str = "raxml-ng",
-    raxml_model: str = "DNA",
     show_progress: bool = False,
     builder: Callable[..., dict[str, Any]] = build_reference_database,
 ) -> dict[str, Any]:
@@ -755,9 +722,6 @@ def build_taxon_references(
     build_threads = resolve_threads(threads)
     progress = ProgressReporter(enabled=show_progress)
     progress.step(f"Global build threads: {build_threads}")
-    progress.step(
-        f"RAxML-NG threads per process: {RAXML_NG_THREADS_PER_PROCESS}"
-    )
     output = Path(outdir).resolve()
     output.mkdir(parents=True, exist_ok=True)
     taxids_path = output / "taxids.csv"
@@ -794,14 +758,9 @@ def build_taxon_references(
             outdir=database_outdir,
             multiple_products=multiple_products,
             max_primer_mismatches=max_primer_mismatches,
-            min_references_per_tree=min_references_per_tree,
             threads=build_threads,
-            amplirust_bin=amplirust_bin,
             minimap2_bin=minimap2_bin,
             deacon_bin=deacon_bin,
-            mafft_bin=mafft_bin,
-            raxml_ng_bin=raxml_ng_bin,
-            raxml_model=raxml_model,
             **(
                 {"show_progress": show_progress, "finalize": False}
                 if builder is build_reference_database
@@ -815,10 +774,9 @@ def build_taxon_references(
         locus_summary_rows.extend(taxon_locus_rows)
         loci_total = len(taxon_locus_rows)
         loci_amplifiable = sum(row["amplifiable"] == "TRUE" for row in taxon_locus_rows)
-        trees_built = sum(row["tree_status"] == REFERENCE_BUILD_STATUS_BUILT for row in taxon_locus_rows)
         if loci_amplifiable == 0:
             status = REFERENCE_BUILD_STATUS_NO_USABLE_LOCI
-        elif loci_amplifiable == loci_total and trees_built == loci_total:
+        elif loci_amplifiable == loci_total:
             status = REFERENCE_BUILD_STATUS_BUILT
         else:
             status = REFERENCE_BUILD_STATUS_PARTIAL
@@ -840,7 +798,6 @@ def build_taxon_references(
             "total_valid_amplicons": sum(
                 int(row["valid_amplicons"]) for row in taxon_locus_rows
             ),
-            "trees_built": trees_built,
             "status": status,
         }
         taxon_summary_rows.append(taxon_summary)
@@ -871,17 +828,13 @@ def build_taxon_references(
             primers_path,
             output,
             loci_path=loci_path,
-            min_references_per_tree=min_references_per_tree,
             threads=build_threads,
-            mafft_bin=mafft_bin,
-            raxml_ng_bin=raxml_ng_bin,
-            raxml_model=raxml_model,
             minimap2_bin=minimap2_bin,
             deacon_bin=deacon_bin,
             show_progress=show_progress,
         )
         if builder is build_reference_database
-        else {"database": output, "phylogeny": output / "phylogeny"}
+        else {"database": output}
     )
     taxon_summary_path = output / "taxon_reference_summary.tsv"
     locus_summary_path = output / "taxon_locus_amplifiability.tsv"
@@ -894,9 +847,6 @@ def build_taxon_references(
                 "schema_version": DATABASE_SCHEMA_VERSION,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "build_threads": build_threads,
-                "phylogeny_threads": {
-                    "raxml_ng_threads_per_process": RAXML_NG_THREADS_PER_PROCESS,
-                },
                 "taxids_input": {
                     "path": taxids_path.name,
                     "sha256": _sha256(taxids_path),
@@ -919,6 +869,5 @@ def build_taxon_references(
         "locus_amplifiability": locus_summary_path,
         "database": output,
         "combined_database": combined["database"],
-        "combined_phylogeny": combined["phylogeny"],
         "references": results,
     }

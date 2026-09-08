@@ -24,10 +24,6 @@ requirements:
   run:
     - python >=3.10
     - minimap2
-    - mafft
-    - raxml-ng
-    - epa-ng
-    - mummer4
     - ncbi-datasets-cli
     - deacon
     - numpy >=1.24
