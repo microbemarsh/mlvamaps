@@ -265,11 +265,14 @@ def test_ambiguous_reference_group_does_not_force_a_reference(tmp_path, same_tax
         sample_id="sample", query_sequences={l.locus_id: "ACGTTGAGACCTAA" for l in loci})
     summary = read_tsv(result["taxonomic_identification"])[0]
     assert summary["assignment_status"] == "AMBIGUOUS_REFERENCES"
-    assert summary["assignment"] == ("Taxon A" if same_taxon else "Ambiguous taxa: Taxon A; Taxon B")
+    assert summary["assignment"] == ("Taxon A" if same_taxon else "Ambiguous call: Taxon A")
     assert summary["equivalent_references"] == "A;B"
     assert summary["best_taxon"] == ("1" if same_taxon else "")
     assert float(summary["unclassified_fraction"]) < 0.01
     assert read_tsv(result["mapping_reference_matches"])[0]["equivalent_references"] == "A;B"
+    from mlvamaps.report import _automatic_taxon_identification_section
+
+    assert f'<div class="taxon-call">{summary["assignment"]}</div>' in _automatic_taxon_identification_section(tmp_path / "out")
 
 
 def test_zero_repeat_reference_is_a_measured_allele_not_missing_data():

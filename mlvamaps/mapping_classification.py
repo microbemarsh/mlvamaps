@@ -438,7 +438,12 @@ def run_mapping_classification(
         elif best:
             assignment = "Taxonomy unavailable"
             if len(best_taxa - {""}) > 1:
-                assignment = "Ambiguous taxa: " + (best.get("taxon_name") or best["taxon_id"])
+                closest_metadata = metadata.get(best["reference_id"], {})
+                closest_taxon = (closest_metadata.get("taxon_name") or closest_metadata.get("species")
+                                 or closest_metadata.get("organism_name")
+                                 or closest_metadata.get("taxon_id") or closest_metadata.get("taxid")
+                                 or "Taxonomy unavailable")
+                assignment = f"Ambiguous call: {closest_taxon}"
             elif best_taxa - {""}:
                 assignment = "Unresolved taxonomy (incomplete reference metadata)"
         summary = {"sample_id": sample_id, "method": "mapping_em", "sample_mode": sample_mode,
