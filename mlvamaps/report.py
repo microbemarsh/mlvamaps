@@ -599,12 +599,12 @@ def _assembly_gel_svg(
 
 
 _STATUS_COLORS = {
-    "PASS": "#62ff9b",
-    "LOW_DEPTH": "#ffc857",
-    "AMBIGUOUS": "#ff9f5f",
-    "MULTIPLE_VARIANTS": "#ff5fc8",
-    "OUT_OF_RANGE": "#ff6b6b",
-    "LOCUS_DROPOUT": "#64748b",
+    "PASS": "#56b4e9",
+    "LOW_DEPTH": "#e69f00",
+    "AMBIGUOUS": "#f0e442",
+    "MULTIPLE_VARIANTS": "#cc79a7",
+    "OUT_OF_RANGE": "#ff9f80",
+    "LOCUS_DROPOUT": "#a6b2bd",
 }
 
 
@@ -627,7 +627,7 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
     marks = []
     for index, (locus_id, count, raw, status) in enumerate(normalized):
         y = 42 + index * row_height
-        color = _STATUS_COLORS.get(status, "#8dd7aa")
+        color = _STATUS_COLORS.get(status, "#bdcbd6")
         width = 0 if count is None else (count / max(max_count, 1)) * plot_width
         exact = "NA" if count is None else f"{count} repeats"
         if raw not in ("", None) and str(raw) != str(count):
@@ -646,7 +646,7 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
     <desc>Exact repeat count at every panel locus, shown independently of amplicon SNP bands.</desc>
     {"".join(marks)}
   </svg>
-  <figcaption>Bar length represents repeat units, with the exact call (and raw assembly estimate when applicable) printed at right. Color indicates call status.</figcaption>
+  <figcaption>Bar length represents repeat units, with the exact call (and raw assembly estimate when applicable) printed at right. Call status is printed beside each bar as well as indicated by color.</figcaption>
 </figure>
 """
 
@@ -677,7 +677,7 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
         )
         radius = min(12.0, 4.5 + math.log10(depth + 1) * 2.2)
         status = str(row.get("call_status") or "")
-        color = _STATUS_COLORS.get(status, "#8dd7aa")
+        color = _STATUS_COLORS.get(status, "#bdcbd6")
         x = plot_left + (posterior * plot_width)
         marks.append(
             f'<text class="chart-label" x="8" y="{y + 4:.1f}">{_safe(row.get("locus_id", ""))}</text>'
@@ -695,7 +695,7 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
     {"".join(ticks)}
     {"".join(marks)}
   </svg>
-  <figcaption>Farther right is more confident. Point size scales with dominant-cluster read depth; color indicates status.</figcaption>
+  <figcaption>Farther right is more confident. Point size scales with dominant-cluster read depth; status is also printed beside each point.</figcaption>
 </figure>
 """
 
@@ -712,7 +712,7 @@ def _variant_mixture_svg(
         str(row.get("locus_id", "")): str(row.get("call_status", ""))
         for row in allele_rows
     }
-    palette = ["#62ff9b", "#5fe8ff", "#ff5fc8", "#ffc857", "#9d8cff", "#ff8f70"]
+    palette = ["#56b4e9", "#e69f00", "#cc79a7", "#f0e442", "#a9a0ed", "#a6b2bd"]
     row_height = 36
     plot_left = 180
     plot_width = 650
@@ -755,7 +755,7 @@ def _variant_mixture_svg(
             (
                 f'{row.get("variant_id", "")} candidate',
                 float(row.get("estimated_fraction") or 0),
-                "#ffc857",
+                "#e69f00",
                 f'{row.get("repeat_count", "")}U candidate',
             )
             for row in candidate_rows
@@ -765,7 +765,7 @@ def _variant_mixture_svg(
         )
         if trace_fraction > 0:
             segments.append(
-                (f"trace ({len(trace_rows)} variants)", trace_fraction, "#64748b", "trace")
+                (f"trace ({len(trace_rows)} variants)", trace_fraction, "#a6b2bd", "trace")
             )
         cursor = plot_left
         segment_svg = []
@@ -788,7 +788,7 @@ def _variant_mixture_svg(
         dominant = meaningful[0] if meaningful else estimates[0]
         dominant_fraction = float(dominant.get("estimated_fraction") or 0)
         status = status_by_locus.get(locus_id, "")
-        status_color = _STATUS_COLORS.get(status, "#8dd7aa")
+        status_color = _STATUS_COLORS.get(status, "#bdcbd6")
         rows_svg.append(
             f'<circle cx="12" cy="{y + 10:.1f}" r="5" fill="{status_color}"/>'
             f'<text class="chart-label" x="24" y="{y + 14:.1f}">{_safe(locus_id)}</text>'
@@ -1305,71 +1305,74 @@ def write_report(
   <style>
     :root {{
       color-scheme: dark;
-      --screen: #07150f;
-      --panel: #0b2117;
-      --phosphor: #62ff9b;
-      --amber: #ffc857;
-      --magenta: #ff5fc8;
-      --cyan: #5fe8ff;
-      --muted: #8dd7aa;
-      --line: #245c3a;
+      --screen: #101820;
+      --panel: #182530;
+      --accent: #56b4e9;
+      --warning: #e69f00;
+      --reference: #cc79a7;
+      --info: #56b4e9;
+      --muted: #bdcbd6;
+      --line: #526777;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
       background:
-        radial-gradient(circle at 50% -15%, rgba(98, 255, 155, 0.14), transparent 34rem),
-        linear-gradient(180deg, #030705 0%, #07150f 55%, #030705 100%);
-      color: var(--phosphor);
+        radial-gradient(circle at 50% -15%, rgba(86, 180, 233, 0.14), transparent 34rem),
+        linear-gradient(180deg, #101820 0%, #101820 55%, #101820 100%);
+      color: #edf2f7;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       letter-spacing: 0;
     }}
     main {{ max-width: 1320px; margin: 0 auto; padding: 2rem; }}
-    h1, h2 {{ color: var(--amber); }}
+    a {{ color: var(--accent); text-decoration: underline; }}
+    a:visited {{ color: #dcc0e8; }}
+    a:focus-visible, summary:focus-visible {{ outline: 3px solid var(--warning); outline-offset: 3px; }}
+    h1, h2 {{ color: var(--warning); }}
     h1 {{ font-size: clamp(1.7rem, 4vw, 3rem); margin: 0 0 0.35rem; }}
     h2 {{ font-size: 1.1rem; margin-top: 2rem; }}
     .subhead {{ color: var(--muted); margin: 0 0 1.5rem; }}
     .generated-at {{ color: var(--muted); font-size: 0.78rem; margin: -1rem 0 1.5rem; }}
     .terminal {{
       border: 2px solid var(--line);
-      background: linear-gradient(180deg, rgba(11, 33, 23, 0.94), rgba(4, 13, 9, 0.94));
-      box-shadow: 0 0 0 1px rgba(98,255,155,0.16), 0 0 28px rgba(98,255,155,0.12);
+      background: linear-gradient(180deg, rgba(24, 37, 48, 0.94), rgba(16, 24, 32, 0.94));
+      box-shadow: 0 0 0 1px rgba(86,180,233,0.16), 0 0 28px rgba(86,180,233,0.12);
       border-radius: 8px;
       padding: 1rem;
     }}
     .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin: 1rem 0 1.5rem; }}
     .metric {{
       border: 1px solid var(--line);
-      background: rgba(98, 255, 155, 0.055);
+      background: rgba(86, 180, 233, 0.055);
       padding: 0.75rem;
       border-radius: 6px;
       min-height: 5rem;
     }}
-    .metric strong {{ display: block; color: var(--cyan); font-size: 0.8rem; margin-bottom: 0.35rem; }}
-    .metric span {{ color: var(--amber); font-size: 1.35rem; }}
+    .metric strong {{ display: block; color: var(--info); font-size: 0.8rem; margin-bottom: 0.35rem; }}
+    .metric span {{ color: var(--warning); font-size: 1.35rem; }}
     .metric small {{ display: block; color: var(--muted); line-height: 1.35; margin-top: 0.35rem; }}
-    .metric.good {{ border-color: rgba(98,255,155,0.65); }}
-    .metric.warn {{ border-color: rgba(255,200,87,0.75); }}
+    .metric.good {{ border-color: rgba(86,180,233,0.65); }}
+    .metric.warn {{ border-color: rgba(230,159,0,0.75); }}
     .findings {{ display: grid; gap: 0.55rem; margin: 0 0 1.5rem; }}
-    .finding {{ display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0.8rem; padding: 0.75rem 0.9rem; border-left: 4px solid var(--cyan); background: rgba(95,232,255,0.06); border-radius: 4px; }}
-    .finding strong {{ color: var(--cyan); }}
-    .finding span {{ color: #d8fbe2; }}
-    .finding.warn {{ border-left-color: var(--amber); background: rgba(255,200,87,0.07); }}
-    .finding.warn strong {{ color: var(--amber); }}
-    .finding.good {{ border-left-color: var(--phosphor); }}
-    .finding.good strong {{ color: var(--phosphor); }}
+    .finding {{ display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0.8rem; padding: 0.75rem 0.9rem; border-left: 4px solid var(--info); background: rgba(86,180,233,0.06); border-radius: 4px; }}
+    .finding strong {{ color: var(--info); }}
+    .finding span {{ color: #edf2f7; }}
+    .finding.warn {{ border-left-style: dashed; border-left-color: var(--warning); background: rgba(230,159,0,0.07); }}
+    .finding.warn strong {{ color: var(--warning); }}
+    .finding.good {{ border-left-color: var(--accent); }}
+    .finding.good strong {{ color: var(--accent); }}
     .report-section {{ margin-top: 2.2rem; padding-top: 0.2rem; }}
     .section-intro {{ color: var(--muted); max-width: 72rem; line-height: 1.5; }}
     .terminal-note {{ color: var(--muted); }}
-    .warning-banner {{ margin: 0.75rem 0; padding: 0.8rem 1rem; color: #1b1200; background: var(--amber); border: 2px solid #ff8c42; border-radius: 5px; }}
+    .warning-banner {{ margin: 0.75rem 0; padding: 0.8rem 1rem; color: #1b1200; background: var(--warning); border: 2px solid #e69f00; border-radius: 5px; }}
     table {{ border-collapse: collapse; width: 100%; margin-top: 0.75rem; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 0.55rem; text-align: left; }}
-    th {{ color: var(--cyan); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }}
-    td {{ color: #d8fbe2; }}
-    .primary-table tbody tr:first-child {{ background: rgba(98,255,155,0.08); }}
+    th {{ color: var(--info); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }}
+    td {{ color: #edf2f7; }}
+    .primary-table tbody tr:first-child {{ background: rgba(86,180,233,0.08); }}
     .status-pill {{ display: inline-block; border: 1px solid; border-radius: 999px; padding: 0.16rem 0.48rem; white-space: nowrap; font-size: 0.78rem; }}
-    .status-good {{ color: var(--phosphor); border-color: var(--phosphor); background: rgba(98,255,155,0.08); }}
-    .status-warn {{ color: var(--amber); border-color: var(--amber); background: rgba(255,200,87,0.08); }}
+    .status-good {{ color: var(--accent); border-color: var(--accent); background: rgba(86,180,233,0.08); }}
+    .status-warn {{ color: var(--warning); border-color: var(--warning); background: rgba(230,159,0,0.08); }}
     .gel-panel {{ margin: 1rem 0 1.5rem; }}
     .gel-panel svg {{ width: 100%; max-height: 620px; display: block; }}
     .gel-panel figcaption {{ color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }}
@@ -1377,37 +1380,37 @@ def write_report(
     .well-line {{ stroke: #7e8cff; stroke-width: 1.2; opacity: 0.55; }}
     .well {{ fill: #03030c; stroke: #7e8cff; opacity: 0.75; }}
     .marker-band {{ fill: #b6d8ff; filter: url(#glow); opacity: 0.92; }}
-    .query-band {{ fill: var(--phosphor); filter: url(#glow); }}
-    .reference-band {{ fill: var(--magenta); filter: url(#glow); opacity: 0.88; }}
-    .lane-title {{ fill: var(--amber); text-anchor: middle; font: 700 15px "Courier New", monospace; }}
+    .query-band {{ fill: var(--accent); filter: url(#glow); }}
+    .reference-band {{ fill: var(--reference); filter: url(#glow); opacity: 0.88; }}
+    .lane-title {{ fill: var(--warning); text-anchor: middle; font: 700 15px "Courier New", monospace; }}
     .gel-legend {{ fill: var(--muted); text-anchor: middle; font: 12px "Courier New", monospace; }}
-    .band-hit .band-label {{ fill: #d6ffe2; font: 10px "Courier New", monospace; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }}
+    .band-hit .band-label {{ fill: #edf2f7; font: 10px "Courier New", monospace; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }}
     .band-hit:hover .band-label, .band-hit:focus .band-label {{ opacity: 0.95; }}
-    .band-hit:focus {{ outline: none; }}
-    .reference-label {{ fill: #ffd5f3; }}
+    .band-hit:focus {{ outline: 2px dashed var(--warning); outline-offset: 3px; }}
+    .reference-label {{ fill: #f0d8e7; }}
     .marker-label {{ fill: #b6d8ff; font: 11px "Courier New", monospace; text-anchor: end; }}
-    .chart-grid {{ stroke: rgba(141, 215, 170, 0.18); stroke-width: 1; }}
+    .chart-grid {{ stroke: rgba(189, 203, 214, 0.18); stroke-width: 1; }}
     .chart-axis {{ fill: var(--muted); font: 12px "Courier New", monospace; }}
-    .chart-label {{ fill: #d6ffe2; font: 12px "Courier New", monospace; }}
+    .chart-label {{ fill: #edf2f7; font: 12px "Courier New", monospace; }}
     .chart-value {{ fill: var(--muted); font: 11px "Courier New", monospace; }}
-    .segment-label {{ fill: #03130b; font: 700 10px "Courier New", monospace; pointer-events: none; }}
-    .confidence-track {{ stroke: rgba(95, 232, 255, 0.42); stroke-width: 3; }}
-    .mixture-track, .mapping-track {{ fill: rgba(141, 215, 170, 0.1); stroke: var(--line); stroke-width: 1; }}
-    .mapping-bar {{ fill: var(--cyan); opacity: 0.82; }}
-    .chart-panel {{ margin: 0.75rem 0 1.5rem; border: 1px solid var(--line); border-radius: 7px; padding: 0.6rem; background: rgba(3, 12, 8, 0.58); }}
+    .segment-label {{ fill: #101820; font: 700 10px "Courier New", monospace; pointer-events: none; }}
+    .confidence-track {{ stroke: rgba(86, 180, 233, 0.42); stroke-width: 3; }}
+    .mixture-track, .mapping-track {{ fill: rgba(189, 203, 214, 0.1); stroke: var(--line); stroke-width: 1; }}
+    .mapping-bar {{ fill: var(--info); opacity: 0.82; }}
+    .chart-panel {{ margin: 0.75rem 0 1.5rem; border: 1px solid var(--line); border-radius: 7px; padding: 0.6rem; background: rgba(16, 24, 32, 0.58); }}
     .chart-panel svg {{ width: 100%; display: block; min-width: 720px; }}
     .chart-panel figcaption {{ color: var(--muted); font-size: 0.88rem; margin-top: 0.45rem; }}
     .chart-scroll {{ overflow-x: auto; }}
-    details {{ border: 1px solid var(--line); border-radius: 6px; margin: 0.7rem 0; padding: 0.65rem 0.8rem; background: rgba(98, 255, 155, 0.035); }}
-    summary {{ color: var(--cyan); cursor: pointer; font-weight: 700; }}
+    details {{ border: 1px solid var(--line); border-radius: 6px; margin: 0.7rem 0; padding: 0.65rem 0.8rem; background: rgba(86, 180, 233, 0.035); }}
+    summary {{ color: var(--info); cursor: pointer; font-weight: 700; }}
     .table-scroll {{ overflow-x: auto; }}
     .taxon-result {{ padding: 1.1rem; margin: 1rem 0 1.5rem; border: 2px solid var(--line); border-radius: 8px; }}
-    .taxon-result.good {{ border-color: rgba(98,255,155,0.7); }}
-    .taxon-result.warn {{ border-color: rgba(255,200,87,0.8); background: rgba(255,200,87,0.04); }}
+    .taxon-result.good {{ border-color: rgba(86,180,233,0.7); }}
+    .taxon-result.warn {{ border-color: rgba(230,159,0,0.8); background: rgba(230,159,0,0.04); }}
     .taxon-call {{ font-size: clamp(1.7rem, 4vw, 2.7rem); font-weight: 800; color: #fff; margin: 0.3rem 0; }}
     .taxon-badge {{ display: inline-block; padding: 0.3rem 0.65rem; border-radius: 999px; font-weight: 800; letter-spacing: 0.05em; }}
-    .taxon-badge.good {{ color: var(--green); border: 1px solid var(--green); }}
-    .taxon-badge.warn {{ color: var(--amber); border: 1px solid var(--amber); }}
+    .taxon-badge.good {{ color: var(--accent); border: 1px solid var(--accent); }}
+    .taxon-badge.warn {{ color: var(--warning); border: 1px solid var(--warning); }}
     .taxon-explanation {{ max-width: 70ch; }}
     @media (max-width: 700px) {{
       main {{ padding: 1rem; }}
@@ -1671,35 +1674,38 @@ def write_assembly_report(
   <style>
     :root {{
       color-scheme: dark;
-      --screen: #07150f;
-      --panel: #0b2117;
-      --phosphor: #62ff9b;
-      --amber: #ffc857;
-      --cyan: #5fe8ff;
-      --magenta: #ff5fc8;
-      --muted: #8dd7aa;
-      --line: #245c3a;
+      --screen: #101820;
+      --panel: #182530;
+      --accent: #56b4e9;
+      --warning: #e69f00;
+      --info: #56b4e9;
+      --reference: #cc79a7;
+      --muted: #bdcbd6;
+      --line: #526777;
     }}
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
       background:
-        radial-gradient(circle at 50% -15%, rgba(98, 255, 155, 0.14), transparent 34rem),
-        linear-gradient(180deg, #030705 0%, #07150f 55%, #030705 100%);
-      color: var(--phosphor);
+        radial-gradient(circle at 50% -15%, rgba(86, 180, 233, 0.14), transparent 34rem),
+        linear-gradient(180deg, #101820 0%, #101820 55%, #101820 100%);
+      color: #edf2f7;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       letter-spacing: 0;
     }}
     main {{ max-width: 1320px; margin: 0 auto; padding: 2rem; }}
-    h1, h2 {{ color: var(--amber); }}
+    a {{ color: var(--accent); text-decoration: underline; }}
+    a:visited {{ color: #dcc0e8; }}
+    a:focus-visible, summary:focus-visible {{ outline: 3px solid var(--warning); outline-offset: 3px; }}
+    h1, h2 {{ color: var(--warning); }}
     h1 {{ font-size: clamp(1.7rem, 4vw, 3rem); margin: 0 0 0.35rem; }}
     h2 {{ font-size: 1.1rem; margin-top: 2rem; }}
     .subhead, .terminal-note {{ color: var(--muted); }}
-    .warning-banner {{ margin: 0.75rem 0; padding: 0.8rem 1rem; color: #1b1200; background: var(--amber); border: 2px solid #ff8c42; border-radius: 5px; }}
+    .warning-banner {{ margin: 0.75rem 0; padding: 0.8rem 1rem; color: #1b1200; background: var(--warning); border: 2px solid #e69f00; border-radius: 5px; }}
     .terminal {{
       border: 2px solid var(--line);
-      background: linear-gradient(180deg, rgba(11, 33, 23, 0.94), rgba(4, 13, 9, 0.94));
-      box-shadow: 0 0 0 1px rgba(98,255,155,0.16), 0 0 28px rgba(98,255,155,0.12);
+      background: linear-gradient(180deg, rgba(24, 37, 48, 0.94), rgba(16, 24, 32, 0.94));
+      box-shadow: 0 0 0 1px rgba(86,180,233,0.16), 0 0 28px rgba(86,180,233,0.12);
       border-radius: 8px;
       padding: 1rem;
       overflow-x: auto;
@@ -1707,31 +1713,31 @@ def write_assembly_report(
     .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin: 1rem 0 1.5rem; }}
     .metric {{
       border: 1px solid var(--line);
-      background: rgba(98, 255, 155, 0.055);
+      background: rgba(86, 180, 233, 0.055);
       padding: 0.75rem;
       border-radius: 6px;
       min-height: 5rem;
     }}
-    .metric strong {{ display: block; color: var(--cyan); font-size: 0.8rem; margin-bottom: 0.35rem; }}
-    .metric span {{ color: var(--amber); font-size: 1.35rem; }}
+    .metric strong {{ display: block; color: var(--info); font-size: 0.8rem; margin-bottom: 0.35rem; }}
+    .metric span {{ color: var(--warning); font-size: 1.35rem; }}
     .metric small {{ display: block; color: var(--muted); line-height: 1.35; margin-top: 0.35rem; }}
-    .metric.good {{ border-color: rgba(98,255,155,0.65); }}
-    .metric.warn {{ border-color: rgba(255,200,87,0.75); }}
+    .metric.good {{ border-color: rgba(86,180,233,0.65); }}
+    .metric.warn {{ border-color: rgba(230,159,0,0.75); }}
     .findings {{ display: grid; gap: 0.55rem; margin: 0 0 1.5rem; }}
-    .finding {{ display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0.8rem; padding: 0.75rem 0.9rem; border-left: 4px solid var(--cyan); background: rgba(95,232,255,0.06); border-radius: 4px; }}
-    .finding strong {{ color: var(--cyan); }}
-    .finding span {{ color: #d8fbe2; }}
-    .finding.warn {{ border-left-color: var(--amber); background: rgba(255,200,87,0.07); }}
-    .finding.warn strong {{ color: var(--amber); }}
-    .finding.good {{ border-left-color: var(--phosphor); }}
-    .finding.good strong {{ color: var(--phosphor); }}
+    .finding {{ display: grid; grid-template-columns: minmax(150px, 220px) 1fr; gap: 0.8rem; padding: 0.75rem 0.9rem; border-left: 4px solid var(--info); background: rgba(86,180,233,0.06); border-radius: 4px; }}
+    .finding strong {{ color: var(--info); }}
+    .finding span {{ color: #edf2f7; }}
+    .finding.warn {{ border-left-style: dashed; border-left-color: var(--warning); background: rgba(230,159,0,0.07); }}
+    .finding.warn strong {{ color: var(--warning); }}
+    .finding.good {{ border-left-color: var(--accent); }}
+    .finding.good strong {{ color: var(--accent); }}
     .report-section {{ margin-top: 2.2rem; padding-top: 0.2rem; }}
     .section-intro {{ color: var(--muted); max-width: 72rem; line-height: 1.5; }}
     table {{ border-collapse: collapse; width: 100%; margin-top: 0.75rem; min-width: 900px; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 0.55rem; text-align: left; vertical-align: top; }}
-    th {{ color: var(--cyan); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }}
-    td {{ color: #d8fbe2; }}
-    .primary-table tbody tr:first-child {{ background: rgba(98,255,155,0.08); }}
+    th {{ color: var(--info); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }}
+    td {{ color: #edf2f7; }}
+    .primary-table tbody tr:first-child {{ background: rgba(86,180,233,0.08); }}
     .gel-panel {{ margin: 1rem 0 1.5rem; }}
     .gel-panel svg {{ width: 100%; max-height: 620px; display: block; }}
     .gel-panel figcaption {{ color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }}
@@ -1739,32 +1745,32 @@ def write_assembly_report(
     .well-line {{ stroke: #7e8cff; stroke-width: 1.2; opacity: 0.55; }}
     .well {{ fill: #03030c; stroke: #7e8cff; opacity: 0.75; }}
     .marker-band {{ fill: #b6d8ff; filter: url(#assembly-glow); opacity: 0.92; }}
-    .query-band {{ fill: var(--phosphor); filter: url(#assembly-glow); }}
-    .reference-band {{ fill: var(--magenta); filter: url(#assembly-glow); opacity: 0.88; }}
-    .lane-title {{ fill: var(--amber); text-anchor: middle; font: 700 15px "Courier New", monospace; }}
+    .query-band {{ fill: var(--accent); filter: url(#assembly-glow); }}
+    .reference-band {{ fill: var(--reference); filter: url(#assembly-glow); opacity: 0.88; }}
+    .lane-title {{ fill: var(--warning); text-anchor: middle; font: 700 15px "Courier New", monospace; }}
     .gel-legend {{ fill: var(--muted); text-anchor: middle; font: 12px "Courier New", monospace; }}
-    .band-hit .band-label {{ fill: #d6ffe2; font: 10px "Courier New", monospace; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }}
+    .band-hit .band-label {{ fill: #edf2f7; font: 10px "Courier New", monospace; opacity: 0; pointer-events: none; transition: opacity 120ms ease; }}
     .band-hit:hover .band-label, .band-hit:focus .band-label {{ opacity: 0.95; }}
-    .band-hit:focus {{ outline: none; }}
-    .reference-label {{ fill: #ffd5f3; }}
+    .band-hit:focus {{ outline: 2px dashed var(--warning); outline-offset: 3px; }}
+    .reference-label {{ fill: #f0d8e7; }}
     .marker-label {{ fill: #b6d8ff; font: 11px "Courier New", monospace; text-anchor: end; }}
     .chart-scroll {{ overflow-x: auto; }}
-    .chart-panel {{ margin: 0.75rem 0 1.5rem; border: 1px solid var(--line); border-radius: 7px; padding: 0.6rem; background: rgba(3, 12, 8, 0.58); }}
+    .chart-panel {{ margin: 0.75rem 0 1.5rem; border: 1px solid var(--line); border-radius: 7px; padding: 0.6rem; background: rgba(16, 24, 32, 0.58); }}
     .chart-panel svg {{ width: 100%; display: block; min-width: 720px; }}
     .chart-panel figcaption {{ color: var(--muted); font-size: 0.88rem; margin-top: 0.45rem; }}
-    .chart-label {{ fill: #d6ffe2; font: 12px "Courier New", monospace; }}
+    .chart-label {{ fill: #edf2f7; font: 12px "Courier New", monospace; }}
     .chart-value {{ fill: var(--muted); font: 11px "Courier New", monospace; }}
-    .mapping-track {{ fill: rgba(141, 215, 170, 0.1); stroke: var(--line); stroke-width: 1; }}
-    details {{ border: 1px solid var(--line); border-radius: 6px; margin: 0.7rem 0; padding: 0.65rem 0.8rem; background: rgba(98,255,155,0.035); }}
-    summary {{ color: var(--cyan); cursor: pointer; font-weight: 700; }}
+    .mapping-track {{ fill: rgba(189, 203, 214, 0.1); stroke: var(--line); stroke-width: 1; }}
+    details {{ border: 1px solid var(--line); border-radius: 6px; margin: 0.7rem 0; padding: 0.65rem 0.8rem; background: rgba(86,180,233,0.035); }}
+    summary {{ color: var(--info); cursor: pointer; font-weight: 700; }}
     .table-scroll {{ overflow-x: auto; }}
     .taxon-result {{ padding: 1.1rem; margin: 1rem 0 1.5rem; border: 2px solid var(--line); border-radius: 8px; }}
-    .taxon-result.good {{ border-color: rgba(98,255,155,0.7); }}
-    .taxon-result.warn {{ border-color: rgba(255,200,87,0.8); background: rgba(255,200,87,0.04); }}
+    .taxon-result.good {{ border-color: rgba(86,180,233,0.7); }}
+    .taxon-result.warn {{ border-color: rgba(230,159,0,0.8); background: rgba(230,159,0,0.04); }}
     .taxon-call {{ font-size: clamp(1.7rem, 4vw, 2.7rem); font-weight: 800; color: #fff; margin: 0.3rem 0; }}
     .taxon-badge {{ display: inline-block; padding: 0.3rem 0.65rem; border-radius: 999px; font-weight: 800; letter-spacing: 0.05em; }}
-    .taxon-badge.good {{ color: var(--green); border: 1px solid var(--green); }}
-    .taxon-badge.warn {{ color: var(--amber); border: 1px solid var(--amber); }}
+    .taxon-badge.good {{ color: var(--accent); border: 1px solid var(--accent); }}
+    .taxon-badge.warn {{ color: var(--warning); border: 1px solid var(--warning); }}
     .taxon-explanation {{ max-width: 70ch; }}
     @media (max-width: 700px) {{
       main {{ padding: 1rem; }}
@@ -1841,8 +1847,9 @@ def _mapping_identification_section(outdir: Path) -> str:
           {_metric_card('Observed loci', f"{row.get('loci_recovered', '')}/{row.get('expected_loci', '')}")}
           {_metric_card('Model support', row.get('model_support', ''))}
           {_metric_card('Unclassified mapping fraction', row.get('unclassified_fraction', ''))}
+          {_metric_card('Closest reference IDs', row.get('equivalent_references') or row.get('closest_reference') or 'Not available')}
         </div>
-        <p class="section-intro">Identification uses the highest-ranked reference group shown in Closest Reference Genomes. Reference IDs are the result; taxon names are annotations, and support is never summed across a species. Multiple IDs in one group are indistinguishable with the available evidence. Competing molecule alignments are combined across VNTR loci with explicit repeat-length evidence. Mixed samples use EM to allocate ambiguous mappings. Support is conditional on the reference catalog and model; it is not a calibrated species probability or an organism abundance estimate.</p>
+        <p class="section-intro">Identification uses the highest-ranked reference group shown in Closest Reference Genomes. The classification names the taxon of that reference group; support is never summed across a species. Reference IDs are retained for traceability. Multiple IDs in one group are indistinguishable with the available evidence. Competing molecule alignments are combined across VNTR loci with explicit repeat-length evidence. Mixed samples use EM to allocate ambiguous mappings. Support is conditional on the reference catalog and model; it is not a calibrated species probability or an organism abundance estimate.</p>
         <div class="table-scroll"><table><thead><tr><th>Rank</th><th>Reference IDs</th><th>Taxon annotation</th><th>Model support / EM fraction</th></tr></thead><tbody>{table}</tbody></table></div>
       </section>
 """

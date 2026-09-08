@@ -74,9 +74,10 @@ across the weighted observations. It is not evidence of confirmed absence.
 
 Identification follows the highest-ranked **reference group**, using exactly the
 same order and support as `mapping_reference_matches.tsv`. Support is never
-summed across a species to choose the identification. The `assignment` is the
-reference ID, or all equivalent IDs when the evidence cannot distinguish them;
-taxon names and IDs are annotations only. Reference identification works without
+summed across a species to choose the identification. The `assignment` names the taxon of the
+highest-ranked reference group, with its reference IDs retained separately for
+traceability. Groups spanning multiple taxa are explicitly ambiguous; missing
+metadata do not produce an invented taxon call. Reference identification works without
 taxon metadata. The evidence table has one row per reference group.
 
 A model-supported unique reference requires support of at least 0.9, convergence,
@@ -85,7 +86,7 @@ at least two catalog references for comparison, and two observed loci by default
 indistinguishable references is `AMBIGUOUS_REFERENCES`, even when all its members
 have the same taxon label. Multiple reference groups with at least 0.05 fraction
 in metagenome mode are `MIXED_REFERENCES`, including mixtures within one species;
-the headline still names the highest-ranked group, with other components listed
+the headline names the taxon of the highest-ranked group, with other components listed
 in the evidence table. Below the support requirement the closest group remains
 visible as `CLOSEST_REFERENCE_LOW_CONFIDENCE`. No observations produce
 `INSUFFICIENT_EVIDENCE` and an unresolved assignment.

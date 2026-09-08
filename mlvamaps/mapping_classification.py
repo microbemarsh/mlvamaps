@@ -432,11 +432,20 @@ def run_mapping_classification(
                 status = "SUPPORTED" if ";" not in best_refs else "AMBIGUOUS_REFERENCES"
             if sample_mode == "metagenome" and sum(row["locus_balanced_fraction"] >= 0.05 for row in matches) > 1:
                 status = "MIXED_REFERENCES"
+        assignment = "Unresolved"
+        if best_taxon:
+            assignment = best.get("taxon_name") or f"Taxon ID: {best_taxon}"
+        elif best:
+            assignment = "Taxonomy unavailable"
+            if len(best_taxa - {""}) > 1:
+                assignment = "Ambiguous taxa: " + (best.get("taxon_name") or best["taxon_id"])
+            elif best_taxa - {""}:
+                assignment = "Unresolved taxonomy (incomplete reference metadata)"
         summary = {"sample_id": sample_id, "method": "mapping_em", "sample_mode": sample_mode,
             "reference_id": best.get("reference_id", ""), "equivalent_references": best_refs,
             "best_taxon": best_taxon, "best_species": best.get("taxon_name", "") if best_taxon else "",
-            "assignment": best_refs or "Unresolved", "assignment_status": status,
-            "assignment_rank": "reference" if status == "SUPPORTED" else "unresolved",
+            "assignment": assignment, "assignment_status": status,
+            "assignment_rank": "taxon" if status == "SUPPORTED" and best_taxon else "unresolved",
             "confidence": "MODEL_SUPPORTED" if status == "SUPPORTED" else "LOW",
             "model_support": best_support, "unclassified_fraction": unknown_fraction,
             "informative_loci": len(detected), "expected_loci": len(loci),

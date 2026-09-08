@@ -265,7 +265,8 @@ def test_ambiguous_reference_group_does_not_force_a_reference(tmp_path, same_tax
         sample_id="sample", query_sequences={l.locus_id: "ACGTTGAGACCTAA" for l in loci})
     summary = read_tsv(result["taxonomic_identification"])[0]
     assert summary["assignment_status"] == "AMBIGUOUS_REFERENCES"
-    assert summary["assignment"] == "A;B"
+    assert summary["assignment"] == ("Taxon A" if same_taxon else "Ambiguous taxa: Taxon A; Taxon B")
+    assert summary["equivalent_references"] == "A;B"
     assert summary["best_taxon"] == ("1" if same_taxon else "")
     assert float(summary["unclassified_fraction"]) < 0.01
     assert read_tsv(result["mapping_reference_matches"])[0]["equivalent_references"] == "A;B"
@@ -330,7 +331,8 @@ def test_identification_follows_reference_not_species_total(tmp_path, monkeypatc
     matches = read_tsv(result["mapping_reference_matches"])
     summary = read_tsv(result["taxonomic_identification"])[0]
     evidence = read_tsv(result["taxonomic_identification_evidence"])
-    assert summary["assignment"] == summary["reference_id"] == summary["closest_reference"] == matches[0]["reference_id"] == "A"
+    assert summary["assignment"] == "Taxon A"
+    assert summary["reference_id"] == summary["closest_reference"] == matches[0]["reference_id"] == "A"
     assert summary["best_taxon"] == "1"
     assert float(summary["model_support"]) == pytest.approx(0.4)
     assert [r["reference_id"] for r in evidence] == [r["reference_id"] for r in matches]
@@ -338,7 +340,8 @@ def test_identification_follows_reference_not_species_total(tmp_path, monkeypatc
     assert summary["assignment_status"] == ("MIXED_REFERENCES" if sample_mode == "metagenome" else "CLOSEST_REFERENCE_LOW_CONFIDENCE")
     write_assembly_report(tmp_path / "out", "sample", [], [], loci=loci, phylogenetic_rows=matches)
     report = (tmp_path / "out" / "report.html").read_text()
-    assert '<div class="taxon-call">A</div>' in report
+    assert '<div class="taxon-call">Taxon A</div>' in report
+    assert "Closest reference IDs" in report
     assert "<th>Reference IDs</th><th>Taxon annotation</th>" in report
     assert "support is never summed across a species" in report
 
@@ -350,7 +353,8 @@ def test_reference_identification_without_taxon_metadata(tmp_path):
         sample_id="sample", taxon_identification=True,
         query_sequences={l.locus_id: "ACGTTGAGACCTAA" for l in loci})
     summary = read_tsv(result["taxonomic_identification"])[0]
-    assert summary["assignment"] == "A"
+    assert summary["assignment"] == "Taxonomy unavailable"
+    assert summary["reference_id"] == "A"
     assert summary["best_taxon"] == summary["best_species"] == ""
     assert summary["assignment_status"] == "SUPPORTED"
     assert float(summary["unclassified_fraction"]) < 0.01
