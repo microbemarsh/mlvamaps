@@ -15,7 +15,7 @@
 </defs>
 <rect width="960" height="600" fill="#fcfcfa"/>
 <g font-family="Arial, Helvetica, sans-serif" transform="scale(1.0 1.0)">
-<text x="40" y="36" font-size="12" font-weight="600" fill="#4f625d">MLVAMAPS  /  EMU BRANCH</text>
+<text x="40" y="36" font-size="12" font-weight="600" fill="#4f625d">MLVAMAPS</text>
 <text x="40" y="76" font-size="32" font-weight="600" fill="#18211f">Alignment-based reference support</text>
 <text x="40" y="104" font-size="16" font-weight="400" fill="#4f625d">Observed sequence evidence + VNTR repeat-length agreement</text>
 <path d="M 296,196 H 344" fill="none" stroke="#4f625d" stroke-width="1.5" marker-end="url(#mlvamaps_sample_calling_github-arrow)"/>
@@ -59,7 +59,6 @@
 <rect x="40" y="428" width="256" height="80" rx="8" fill="#f2f4f3" stroke="#aebbb7" stroke-width="1.5" stroke-dasharray="4 4"/>
 <text x="56" y="456" font-size="18" font-weight="600" fill="#18211f">Optional profile tree</text>
 <text x="56" y="480" font-size="14" font-weight="400" fill="#4f625d">Repeat-profile similarity only</text>
-<text x="40" y="540" font-size="14" font-weight="400" fill="#4f625d">Allele calling runs alongside typing: assembly sizing or FASTQ candidate mapping.</text>
-<text x="40" y="564" font-size="14" font-weight="400" fill="#4f625d">Independent Emu-inspired model. EM fractions describe marker evidence, not organism abundance.</text>
+<text x="40" y="540" font-size="14" font-weight="400" fill="#4f625d">Parallel allele calling: assembly sizing or FASTQ candidate mapping.</text>
 </g>
 </svg>
