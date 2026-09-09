@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://github.com/microbemarsh/mlvamaps/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: REPLACE_WITH_RELEASE_TARBALL_SHA256
+  sha256: 277e7b518683bbae30dec43216ea935878fe8805ddc26843e0126f9a1240743f
 
 build:
   noarch: python
