@@ -31,16 +31,16 @@ external executables are also available from Bioconda/conda-forge.
 3. Commit the release, create an annotated tag, and push it:
 
    ```bash
-   git tag -a v0.1.0 -m "mlvamaps 0.1.0"
-   git push origin main v0.1.0
+   git tag -a v0.2.0 -m "mlvamaps 0.2.0"
+   git push origin main v0.2.0
    ```
 
 4. Download the immutable tag archive and calculate its checksum:
 
    ```bash
-   curl -L -o mlvamaps-0.1.0.tar.gz \
-     https://github.com/microbemarsh/mlvamaps/archive/refs/tags/v0.1.0.tar.gz
-   shasum -a 256 mlvamaps-0.1.0.tar.gz
+   curl -L -o mlvamaps-0.2.0.tar.gz \
+     https://github.com/microbemarsh/mlvamaps/archive/refs/tags/v0.2.0.tar.gz
+   shasum -a 256 mlvamaps-0.2.0.tar.gz
    ```
 
 5. Replace `REPLACE_WITH_RELEASE_TARBALL_SHA256` in `meta.yaml` with that hash.
