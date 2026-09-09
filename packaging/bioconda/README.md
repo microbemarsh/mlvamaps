@@ -12,9 +12,11 @@ platforms, so Sassy no longer blocks submission. The adapter sets `--no-rc`
 where mlvamaps owns strand handling and parses Sassy's zero-based, half-open TSV
 coordinates and CIGAR strings.
 
-`spoars`, the other native Python extension imported by the calling pipeline,
-is already available from Bioconda. The remaining declared Python packages and
-external executables are also available from Bioconda/conda-forge.
+`pyspoars`, the native Python extension imported as `spoars` by the calling
+pipeline, is already available from Bioconda. The similarly named `spoars`
+package contains only the command-line executable and does not satisfy the
+Python import. The remaining declared Python packages and external executables
+are also available from Bioconda/conda-forge.
 
 ## Prepare a release
 
@@ -60,6 +62,7 @@ external executables are also available from Bioconda/conda-forge.
    required external executable.
 
 The recipe is `noarch: python` because the `mlvamaps` distribution itself is
-pure Python. Platform-specific code is supplied through conda dependencies.
-Tests intentionally use imports and CLI help/version commands so they validate
-installation without downloading genomes or running expensive analyses.
+pure Python. Conda resolves the platform-specific `pyspoars` run dependency for
+the target environment. Tests intentionally use imports and CLI help/version
+commands so they validate installation without downloading genomes or running
+expensive analyses.

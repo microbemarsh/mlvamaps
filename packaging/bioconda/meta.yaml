@@ -15,6 +15,8 @@ build:
   script: {{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
   entry_points:
     - mlvamaps = mlvamaps.cli:main
+  run_exports:
+    - {{ pin_subpackage(name, max_pin="x.x") }}
 
 requirements:
   host:
@@ -31,12 +33,13 @@ requirements:
     - pysam >=0.22
     - regex >=2024.5.15
     - sassy >=0.2.2
-    - spoars >=0.1.3,<0.2
+    - pyspoars >=0.1.3,<0.2
 
 test:
   imports:
     - mlvamaps
   commands:
+    - python -c "import spoars"
     - sassy --help
     - mlvamaps --help
     - mlvamaps --version
