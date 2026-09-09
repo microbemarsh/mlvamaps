@@ -372,7 +372,7 @@ def run_mapping_classification(
     sample_mode="isolate", locus_quality=None, reference_metadata_path=None,
     taxon_identification=None, minimum_loci=2, repeat_scale=1.0,
     missing_locus_min_depth=3.0, missing_locus_min_fraction=0.8,
-    missing_locus_penalty=1.0, keep_alignments=False,
+    missing_locus_penalty=8.0, keep_alignments=False,
     query_repeat_counts=None,
 ):
     output = Path(outdir) / "classification"

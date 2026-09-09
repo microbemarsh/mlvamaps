@@ -581,7 +581,7 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         help="Fraction of panel loci meeting missing-locus depth, in (0, 1] (default: %(default)s)",
     )
     call.add_argument(
-        "--missing-locus-penalty", type=_nonnegative_float, default=1.0,
+        "--missing-locus-penalty", type=_nonnegative_float, default=8.0,
         help="Log-likelihood penalty per undetected query locus present in a reference after the coverage gate passes; 0 disables (default: %(default)s)",
     )
     call.add_argument(

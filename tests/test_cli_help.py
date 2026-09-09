@@ -18,3 +18,8 @@ def test_call_help(flags, capsys):
 def test_hidden_options_still_parse():
     args = build_parser().parse_args(["call", "-i", "sample.fastq", "--min-posterior", "0.9"])
     assert args.min_posterior == 0.9
+
+
+def test_confirmed_missing_locus_default_is_strongly_penalized():
+    args = build_parser().parse_args(["call"])
+    assert args.missing_locus_penalty == 8.0

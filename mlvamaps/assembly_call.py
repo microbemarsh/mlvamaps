@@ -828,7 +828,7 @@ def run_assembly_call(
     show_progress: bool = False,
     missing_locus_min_depth: float = 3.0,
     missing_locus_min_fraction: float = 0.8,
-    missing_locus_penalty: float = 1.0,
+    missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)

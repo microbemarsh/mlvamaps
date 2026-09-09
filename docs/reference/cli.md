@@ -50,7 +50,7 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `--classification-repeat-scale` | `1.0` | Repeat-count discrepancy scale in mapping log likelihoods, in repeat units. |
 | `--missing-locus-min-depth` | `3.0` | Minimum informative molecule support at a locus to count toward the coverage gate (read inputs only). |
 | `--missing-locus-min-fraction` | `0.8` | Required fraction of all panel loci meeting that depth, in `(0, 1]`. |
-| `--missing-locus-penalty` | `1.0` | Log-likelihood penalty per undetected query locus recorded in a reference once the gate passes; `0` disables. |
+| `--missing-locus-penalty` | `8.0` | Log-likelihood penalty per undetected query locus recorded in a reference once the gate passes; `0` disables. |
 
 ## Alignment-based reference assignment
 

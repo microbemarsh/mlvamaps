@@ -354,9 +354,9 @@ def test_coverage_penalty_is_reference_specific_and_applied_once(tmp_path, monke
         quality[locus]["depth"] = 3
     high = run_mapping_classification(**kwargs, outdir=tmp_path / "high")
     matches = {r["reference_id"]: r for r in read_tsv(high["mapping_reference_matches"])}
-    assert float(matches["A"]["log_likelihood"]) == -1
+    assert float(matches["A"]["log_likelihood"]) == -8
     assert float(matches["B"]["log_likelihood"]) == 0
-    assert float(matches["A"]["missing_locus_penalty"]) == 1
+    assert float(matches["A"]["missing_locus_penalty"]) == 8
     assert float(matches["B"]["missing_locus_penalty"]) == 0
 
 

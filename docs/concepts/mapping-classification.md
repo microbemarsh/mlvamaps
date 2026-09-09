@@ -69,8 +69,8 @@ matches and one of each error class, bounded to `[1e-4, 0.25]`.
 
 Low depth does not impose a new recovery-fraction requirement. Informative
 sequence evidence can support a closest taxon without a resolved repeat count.
-The optional missing-locus heuristic retains its defaults: three informative
-molecules at 80% of panel loci, then one penalty unit for an undetected query
+The optional missing-locus heuristic requires three informative molecules at
+80% of panel loci, then applies eight penalty units for an undetected query
 locus recorded in that reference. A locus detected by the new mapping pass is
 not penalized even if the allele caller had no call. The penalty is subtracted
 once from each reference's joint log score; in mixture mode it is distributed

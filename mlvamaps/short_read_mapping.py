@@ -46,7 +46,7 @@ def run_mapping_short_read_call(
     taxon_identification: bool | None,
     missing_locus_min_depth: float = 3.0,
     missing_locus_min_fraction: float = 0.8,
-    missing_locus_penalty: float = 1.0,
+    missing_locus_penalty: float = 8.0,
     show_progress: bool = True,
     classification_repeat_scale: float = 1.0,
 ) -> dict[str, Path]:

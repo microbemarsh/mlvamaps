@@ -164,7 +164,7 @@ def run_short_read_call(
     show_progress: bool = True,
     missing_locus_min_depth: float = 3.0,
     missing_locus_min_fraction: float = 0.8,
-    missing_locus_penalty: float = 1.0,
+    missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
 ) -> dict[str, Path]:
     """Call Illumina data with competitive minimap2 candidate mapping."""
