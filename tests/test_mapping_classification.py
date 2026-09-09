@@ -86,6 +86,21 @@ def test_em_resolves_mixture_and_has_monotone_objective():
     assert fit_reference_mixture(values, np.ones(len(values)))[0] == pytest.approx(fractions)
 
 
+def test_classification_scans_missing_reference_floor_once_per_molecule():
+    class Scores(dict):
+        scans = 0
+
+        def values(self):
+            self.scans += 1
+            return super().values()
+
+    scores = Scores({"A": -2.0, UNKNOWN: -4.0})
+    groups, _ = classify_molecules({("L1", "m1"): scores}, ["A", "B"])
+    likelihoods = {tuple(row["references"]): row["log_likelihood"] for row in groups}
+    assert likelihoods == {("A",): -2.0, ("B",): -12.0, (UNKNOWN,): -4.0}
+    assert scores.scans == 1
+
+
 def test_joint_reference_identity_cannot_switch_between_loci():
     scores = {
         ("L1", "m1"): {"A": 0, "B": -8, UNKNOWN: -20},

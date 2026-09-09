@@ -310,10 +310,11 @@ def classify_molecules(likelihoods, reference_ids, *, sample_mode="isolate", pen
     weights = np.array([min(depths[locus], 20) / depths[locus] for locus, _ in observations])
     # ponytail: dense molecule x reference matrix; use sparse blocks if catalogs
     # grow beyond the memory budget of the existing in-memory alignment reader.
-    matrix = np.array([
-        [likelihoods[key].get(ref, min(likelihoods[key].values()) - 8.0) for ref in references]
-        for key in observations
-    ], dtype=float)
+    matrix = np.empty((len(observations), len(references)), dtype=float)
+    for i, key in enumerate(observations):
+        scores = likelihoods[key]
+        floor = min(scores.values()) - 8.0
+        matrix[i] = [scores.get(ref, floor) for ref in references]
     if not np.isfinite(matrix).all():
         raise ValueError("Reference log likelihoods must be finite")
     for j, reference in enumerate(references):
