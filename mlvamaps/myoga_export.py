@@ -296,7 +296,7 @@ def discover_sample_calls(results_path: str | Path) -> tuple[list[SampleCalls], 
                 summary_fields, summary_rows = _read_table(summary_path)
                 if "run_status" in summary_fields and summary_rows:
                     run_status = summary_rows[0].get("run_status", "").casefold()
-                    if run_status and run_status != "success":
+                    if run_status and run_status not in {"success", "success_partial"}:
                         excluded.append(
                             _excluded(
                                 sample_id,
@@ -733,7 +733,10 @@ def export_myoga(
         assayed_loci = int(assayed_counts[index])
         required_loci = int(required_counts[index])
         fraction = float(callable_fractions[index])
-        if callable_loci == 0 and not combined_markers:
+        if combined_markers:
+            threshold_indices.append(index)
+            continue
+        if callable_loci == 0:
             reason = "NO_CALLABLE_LOCI"
         elif callable_loci < required_loci:
             reason = "TOO_FEW_CALLABLE_LOCI"

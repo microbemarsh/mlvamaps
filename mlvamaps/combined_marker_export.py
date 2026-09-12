@@ -139,12 +139,18 @@ def _retained_sample_sequences(
             assembly_sequences = dict(_read_fasta(path))
             break
     candidates: dict[str, list[tuple[int, str, str]]] = {}
+    query_amplicons = sample_dir / "classification" / "query_amplicons.fasta"
+    if query_amplicons.is_file():
+        for locus_id, sequence in _read_fasta(query_amplicons):
+            candidates.setdefault(locus_id, []).append(
+                (0, str(query_amplicons), sequence)
+            )
     matches = sample_dir / "local_assembly_pcr" / "matches.tsv"
     for row in _read_delimited(matches):
         locus_id = str(row.get("primer_name", ""))
         if locus_id and row.get("product_seq"):
             candidates.setdefault(locus_id, []).append(
-                (0, str(matches), str(row["product_seq"]))
+                (1, str(matches), str(row["product_seq"]))
             )
     for name in ("local_locus_products.fasta.gz", "local_locus_products.fasta"):
         path = sample_dir / name
@@ -159,7 +165,7 @@ def _retained_sample_sequences(
                 locus_id = record_id.split(contig_marker, 1)[0]
             else:
                 continue
-            candidates.setdefault(locus_id, []).append((1, str(path), sequence))
+            candidates.setdefault(locus_id, []).append((2, str(path), sequence))
         break
     return assembly_sequences, candidates
 
@@ -199,11 +205,6 @@ def recover_masked_sequences(
         }
         for locus_id in locus_order:
             call = rows_by_locus.get(locus_id, {})
-            if _finite_repeat(call.get("repeat_count")) is None:
-                status_rows.append(
-                    _sequence_status(sample_id, locus_id, "NO_EXACT_REPEAT_CALL")
-                )
-                continue
             sequence = _precomputed_masked_sequence(sample_dir, locus_id)
             if sequence:
                 item = RecoveredSequence(
@@ -407,6 +408,7 @@ def export_combined_markers(
     snp_sum = np.zeros((sample_count, sample_count), dtype=np.float64)
     repeat_sum = np.zeros((sample_count, sample_count), dtype=np.float64)
     loci_compared = np.zeros((sample_count, sample_count), dtype=np.int32)
+    repeat_loci_compared = np.zeros((sample_count, sample_count), dtype=np.int32)
     locus_status: list[dict[str, object]] = []
     mafft: str | None = None
     raxml_ng: str | None = None
@@ -421,7 +423,6 @@ def export_combined_markers(
                 index
                 for index, sample_id in enumerate(sample_ids)
                 if (sample_id, locus_id) in recovered
-                and math.isfinite(float(repeat_calls[index, locus_index]))
             ]
             safe_locus = _safe_name(locus_id)
             locus_dir = tree_dir / safe_locus
@@ -507,10 +508,11 @@ def export_combined_markers(
             }
             expanded = np.zeros((len(members), len(members)), dtype=np.float64)
             repeat_values = repeat_calls[members, locus_index]
+            finite_repeats = repeat_values[np.isfinite(repeat_values)]
             repeat_scale = max(
                 0.5,
-                statistics.pstdev(float(value) for value in repeat_values)
-                if len(repeat_values) > 1
+                statistics.pstdev(float(value) for value in finite_repeats)
+                if len(finite_repeats) > 1
                 else 0.0,
             )
             for left_position, left in enumerate(members):
@@ -525,9 +527,12 @@ def export_combined_markers(
                     expanded[left_position, right_position] = distance
                     expanded[right_position, left_position] = distance
                     normalized = distance / max(tree_scale, 1e-12)
-                    repeat_distance = abs(
-                        float(repeat_calls[left, locus_index])
-                        - float(repeat_calls[right, locus_index])
+                    left_repeat = float(repeat_calls[left, locus_index])
+                    right_repeat = float(repeat_calls[right, locus_index])
+                    repeat_distance = (
+                        abs(left_repeat - right_repeat)
+                        if math.isfinite(left_repeat) and math.isfinite(right_repeat)
+                        else math.nan
                     )
                     normalized_repeat = repeat_distance / repeat_scale
                     snp_sum[left, right] += normalized
@@ -540,23 +545,27 @@ def export_combined_markers(
                             "snp_patristic_distance": f"{distance:.8f}",
                             "locus_tree_scale": f"{tree_scale:.8f}",
                             "normalized_snp_distance": f"{normalized:.8f}",
-                            "repeat_count_distance": f"{repeat_distance:.8f}",
-                            "locus_repeat_scale": f"{repeat_scale:.8f}",
-                            "normalized_repeat_distance": f"{normalized_repeat:.8f}",
+                            "repeat_count_distance": "" if not math.isfinite(repeat_distance) else f"{repeat_distance:.8f}",
+                            "locus_repeat_scale": "" if not math.isfinite(repeat_distance) else f"{repeat_scale:.8f}",
+                            "normalized_repeat_distance": "" if not math.isfinite(normalized_repeat) else f"{normalized_repeat:.8f}",
                             "combined_locus_distance": (
-                                f"{snp_weight * normalized + repeat_weight * normalized_repeat:.8f}"
+                                f"{snp_weight * normalized + (repeat_weight * normalized_repeat if math.isfinite(normalized_repeat) else 0):.8f}"
                             ),
                         }
                     )
 
-            repeat_distances = np.abs(repeat_values[:, None] - repeat_values[None, :])
-            normalized_repeats = repeat_distances / repeat_scale
             for left_position, left in enumerate(members):
                 for right_position, right in enumerate(
                     members[left_position + 1 :], start=left_position + 1
                 ):
-                    repeat_sum[left, right] += normalized_repeats[left_position, right_position]
-                    repeat_sum[right, left] += normalized_repeats[left_position, right_position]
+                    left_repeat = float(repeat_values[left_position])
+                    right_repeat = float(repeat_values[right_position])
+                    if math.isfinite(left_repeat) and math.isfinite(right_repeat):
+                        normalized_repeat = abs(left_repeat - right_repeat) / repeat_scale
+                        repeat_sum[left, right] += normalized_repeat
+                        repeat_sum[right, left] += normalized_repeat
+                        repeat_loci_compared[left, right] += 1
+                        repeat_loci_compared[right, left] += 1
                     loci_compared[left, right] += 1
                     loci_compared[right, left] += 1
             tree_path.write_text(
@@ -595,8 +604,15 @@ def export_combined_markers(
                 compared >= min_pairwise_loci and fraction >= min_pairwise_fraction
             )
             mean_snp = snp_sum[left, right] / compared if compared else math.nan
-            mean_repeat = repeat_sum[left, right] / compared if compared else math.nan
-            distance = snp_weight * mean_snp + repeat_weight * mean_repeat
+            repeat_compared = int(repeat_loci_compared[left, right])
+            mean_repeat = (
+                repeat_sum[left, right] / repeat_compared
+                if repeat_compared
+                else math.nan
+            )
+            distance = snp_weight * mean_snp + (
+                repeat_weight * mean_repeat if repeat_compared else 0.0
+            )
             if compared:
                 combined[left, right] = combined[right, left] = distance
             pairwise_rows.append(
@@ -634,10 +650,11 @@ def export_combined_markers(
         dtype=np.int32,
     )
     supported_matrix = combined.copy()
+    sample_index = {sample_id: index for index, sample_id in enumerate(sample_ids)}
     for row in pairwise_rows:
         if row["comparison_status"] == "insufficient_overlap":
-            left = sample_ids.index(str(row["sample_1"]))
-            right = sample_ids.index(str(row["sample_2"]))
+            left = sample_index[str(row["sample_1"])]
+            right = sample_index[str(row["sample_2"])]
             supported_matrix[left, right] = supported_matrix[right, left] = math.nan
     eligible = np.flatnonzero(callable_counts > 0)
     if eligible.size:

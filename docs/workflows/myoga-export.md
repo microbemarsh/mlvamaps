@@ -10,7 +10,10 @@ repeat-distance workflow. It uses eight threads by default (`-t/--threads`),
 retains every discovered valid sample in the combined distance matrix and
 metadata, and leaves a distance blank only when two samples have no recoverable
 shared marker. Supply the rich locus panel with `--loci` when retained amplicons
-must be masked because precomputed masked query sequences are unavailable.
+must be masked because precomputed masked query sequences are unavailable. For
+current assembly results, the exporter reads
+`classification/query_amplicons.fasta`; partial successful calls
+(`run_status=success_partial`) are valid export inputs and are not discarded.
 
 ```bash
 mlvamaps export-myoga \

@@ -494,6 +494,27 @@ def test_failed_and_incomplete_results_are_reported_without_crashing(tmp_path):
     assert [row["sample_id"] for row in _read_tsv(output / "samples_used.tsv")] == ["GOOD"]
 
 
+def test_success_partial_sample_directories_are_valid_export_inputs(tmp_path):
+    results = tmp_path / "results"
+    for index in range(329):
+        sample_id = f"S{index:03d}"
+        path = _write_calls(results, sample_id, {"L1": index % 4})
+        (path.parent / "sample_summary.tsv").write_text(
+            f"sample_id\trun_status\n{sample_id}\tsuccess_partial\n"
+        )
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\n"
+        + "".join(f"S{index:03d}\t1\t2\n" for index in range(329))
+    )
+
+    export_myoga(results, metadata, tmp_path / "export")
+
+    matrix = _read_tsv(tmp_path / "export" / "mlva_distance_matrix.tsv")
+    assert len(matrix) == 329
+    assert len(matrix[0]) == 330
+
+
 def test_batch_summary_status_resolves_failed_sample_at_batch_root(tmp_path):
     results = tmp_path / "results"
     _write_calls(results, "FAILED", {"L1": 2})
@@ -830,6 +851,40 @@ def test_combined_marker_export_keeps_all_samples_and_uses_eight_threads(tmp_pat
     assert matrix[0]["S3"] == ""
     assert {row["sample_id"] for row in _read_tsv(tmp_path / "export" / "combined_marker_metadata.tsv")} == {"S1", "S2", "S3"}
     assert "--thread 8" in arguments.read_text()
+
+
+def test_combined_marker_export_uses_current_alignment_query_amplicons(tmp_path):
+    results = tmp_path / "results"
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\nS1\t1\t2\nS2\t3\t4\n"
+    )
+    for sample_id, sequence in (("S1", "AAAGGATATCCGGG"), ("S2", "AAAGGATATCTGGG")):
+        path = _write_calls(results, sample_id, {"L1": None})
+        classification = path.parent / "classification"
+        classification.mkdir()
+        (classification / "query_amplicons.fasta").write_text(f">L1\n{sequence}\n")
+    panel = tmp_path / "panel.tsv"
+    panel.write_text(
+        "locus_id\tforward_primer\treverse_primer\tleft_flank_sequence\t"
+        "right_flank_sequence\trepeat_motif\trepeat_unit_length_bp\n"
+        "L1\tAAA\tCCC\tGG\tCC\tAT\t2\n"
+    )
+
+    export_myoga(
+        results,
+        metadata,
+        tmp_path / "export",
+        combined_markers=True,
+        loci_path=panel,
+        mafft_bin=str(_fake_export_mafft(tmp_path)),
+    )
+
+    matrix = _read_tsv(tmp_path / "export" / "combined_marker_distance_matrix.tsv")
+    assert [row["sample_id"] for row in matrix] == ["S1", "S2"]
+    assert matrix[0]["S2"] != ""
+    statuses = _read_tsv(tmp_path / "export" / "combined_marker_sequence_status.tsv")
+    assert all("classification/query_amplicons.fasta" in row["source"] for row in statuses)
 
 
 def test_retained_assembly_evidence_is_masked_with_rich_panel(tmp_path):
