@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import json
 import re
 from pathlib import Path
 
@@ -513,6 +514,37 @@ def test_success_partial_sample_directories_are_valid_export_inputs(tmp_path):
     matrix = _read_tsv(tmp_path / "export" / "mlva_distance_matrix.tsv")
     assert len(matrix) == 329
     assert len(matrix[0]) == 330
+
+
+def test_alignment_likelihood_matrix_compares_all_classified_samples(tmp_path):
+    results = tmp_path / "results"
+    profiles = {
+        "S1": [("A", 1.0)],
+        "S2": [("A", 0.5), ("B", 0.5)],
+        "S3": [("B", 1.0)],
+    }
+    for sample_id, groups in profiles.items():
+        path = _write_calls(results, sample_id, {"L1": None})
+        classification = path.parent / "classification"
+        classification.mkdir()
+        (classification / "classification.json").write_text(json.dumps({
+            "groups": [
+                {"references": [reference], "locus_balanced_fraction": fraction}
+                for reference, fraction in groups
+            ]
+        }))
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\nS1\t1\t2\nS2\t3\t4\nS3\t5\t6\n"
+    )
+
+    export_myoga(results, metadata, tmp_path / "export", combined_markers=True)
+
+    matrix = _read_tsv(tmp_path / "export" / "alignment_likelihood_distance_matrix.tsv")
+    assert [row["sample_id"] for row in matrix] == ["S1", "S2", "S3"]
+    assert float(matrix[0]["S2"]) == pytest.approx(0.5411961)
+    assert float(matrix[0]["S3"]) == pytest.approx(1.0)
+    assert (tmp_path / "export" / "alignment_likelihood_nj.tree").is_file()
 
 
 def test_batch_summary_status_resolves_failed_sample_at_batch_root(tmp_path):

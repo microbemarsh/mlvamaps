@@ -75,6 +75,12 @@ With `--combined-markers`, `combined_marker_distance_matrix.tsv` and
 cells are blank only when no shared recovered marker permits a distance; the
 neighbor-joining tree remains limited to a finite complete submatrix.
 
+`alignment_likelihood_distance_matrix.tsv` compares every discovered sample's
+alignment-likelihood/EM composition using Hellinger distance. The matching
+pairwise table, metadata, and neighbor-joining tree are also written. This is a
+symmetric distance between fitted reference-component profiles, not a genomic
+SNP distance; cells remain blank when a sample has no usable `classification.json`.
+
 ## Reference builder outputs
 
 | File | Meaning |

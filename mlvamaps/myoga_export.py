@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import math
 import re
 import statistics
@@ -63,6 +64,10 @@ OUTPUT_NAMES = (
     "samples_excluded.tsv",
     "export_summary.tsv",
     "export_summary.txt",
+    "alignment_likelihood_pairwise_distances.tsv",
+    "alignment_likelihood_distance_matrix.tsv",
+    "alignment_likelihood_nj.tree",
+    "alignment_likelihood_metadata.tsv",
     *COMBINED_OUTPUT_NAMES,
 )
 
@@ -657,6 +662,63 @@ def _write_text_atomic(path: Path, text: str) -> None:
     temporary.replace(path)
 
 
+def _alignment_likelihood_distances(
+    samples: list[SampleCalls],
+) -> tuple[list[str], np.ndarray, list[dict[str, object]]]:
+    """Return Hellinger distances between alignment-likelihood mixture profiles."""
+    profiles: dict[str, dict[str, float]] = {}
+    for sample in samples:
+        path = sample.path.parent / "classification" / "classification.json"
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            profile: dict[str, float] = {}
+            for group in payload.get("groups", []):
+                references = tuple(sorted(str(value) for value in group.get("references", [])))
+                if not references:
+                    continue
+                value = float(group["locus_balanced_fraction"])
+                if not math.isfinite(value) or value < 0:
+                    raise ValueError("invalid locus_balanced_fraction")
+                profile[";".join(references)] = value
+            total = sum(profile.values())
+            if total <= 0:
+                raise ValueError("classification has no finite mixture profile")
+            profiles[sample.sample_id] = {
+                key: value / total for key, value in profile.items()
+            }
+        except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            continue
+
+    sample_ids = [sample.sample_id for sample in samples]
+    components = sorted({key for profile in profiles.values() for key in profile})
+    vectors = np.asarray(
+        [[profiles.get(sample_id, {}).get(key, 0.0) for key in components] for sample_id in sample_ids],
+        dtype=float,
+    )
+    matrix = np.full((len(sample_ids), len(sample_ids)), np.nan, dtype=float)
+    np.fill_diagonal(matrix, 0.0)
+    rows: list[dict[str, object]] = []
+    for left in range(len(sample_ids)):
+        for right in range(left + 1, len(sample_ids)):
+            available = sample_ids[left] in profiles and sample_ids[right] in profiles
+            distance = (
+                float(np.linalg.norm(np.sqrt(vectors[left]) - np.sqrt(vectors[right])) / math.sqrt(2))
+                if available
+                else math.nan
+            )
+            if available:
+                matrix[left, right] = matrix[right, left] = distance
+            rows.append({
+                "sample_1": sample_ids[left],
+                "sample_2": sample_ids[right],
+                "alignment_likelihood_distance": _format_number(distance),
+                "comparison_status": "sufficient" if available else "missing_classification",
+            })
+    return sample_ids, matrix, rows
+
+
 def export_myoga(
     results_path: str | Path,
     metadata_path: str | Path,
@@ -903,6 +965,38 @@ def export_myoga(
     elif tree_path.exists():
         tree_path.unlink()
 
+    likelihood_ids, likelihood_matrix, likelihood_rows = _alignment_likelihood_distances(samples)
+    write_tsv(
+        likelihood_rows,
+        output / "alignment_likelihood_pairwise_distances.tsv",
+        ["sample_1", "sample_2", "alignment_likelihood_distance", "comparison_status"],
+    )
+    write_tsv(
+        (
+            {
+                "sample_id": sample_id,
+                **{
+                    other: _format_number(float(likelihood_matrix[row, column]))
+                    for column, other in enumerate(likelihood_ids)
+                },
+            }
+            for row, sample_id in enumerate(likelihood_ids)
+        ),
+        output / "alignment_likelihood_distance_matrix.tsv",
+        ["sample_id", *likelihood_ids],
+    )
+    _write_metadata(
+        likelihood_ids, metadata, output / "alignment_likelihood_metadata.tsv"
+    )
+    likelihood_tree = output / "alignment_likelihood_nj.tree"
+    if likelihood_ids and np.isfinite(likelihood_matrix).all():
+        _write_text_atomic(
+            likelihood_tree,
+            neighbor_joining_tree_from_matrix(likelihood_ids, likelihood_matrix),
+        )
+    elif likelihood_tree.exists():
+        likelihood_tree.unlink()
+
     combined_result: dict[str, Path | int | str] = {}
     if combined_markers:
         panel_loci = read_loci_or_primers(loci_path, None) if loci_path else []
@@ -983,6 +1077,7 @@ def export_myoga(
         ("pairwise_comparisons", len(threshold_ids) * (len(threshold_ids) - 1) // 2),
         ("supported_pairwise_comparisons", int(np.isfinite(selected_matrix[np.triu_indices(len(threshold_ids), k=1)]).sum())),
         ("chosen_distance_metric", distance),
+        ("alignment_likelihood_samples", int(np.isfinite(likelihood_matrix).all(axis=1).sum())),
         ("combined_marker_export", "yes" if combined_markers else "no"),
         ("combined_marker_loci_built", combined_result.get("loci_built", 0)),
         ("combined_marker_tree_samples", combined_result.get("tree_samples", 0)),

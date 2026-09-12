@@ -139,12 +139,13 @@ def _retained_sample_sequences(
             assembly_sequences = dict(_read_fasta(path))
             break
     candidates: dict[str, list[tuple[int, str, str]]] = {}
-    query_amplicons = sample_dir / "classification" / "query_amplicons.fasta"
-    if query_amplicons.is_file():
-        for locus_id, sequence in _read_fasta(query_amplicons):
-            candidates.setdefault(locus_id, []).append(
-                (0, str(query_amplicons), sequence)
-            )
+    for name in ("classification/query_amplicons.fasta", "taxonomic_query_sequences.fasta"):
+        query_amplicons = sample_dir / name
+        if query_amplicons.is_file():
+            for locus_id, sequence in _read_fasta(query_amplicons):
+                candidates.setdefault(locus_id, []).append(
+                    (0, str(query_amplicons), sequence)
+                )
     matches = sample_dir / "local_assembly_pcr" / "matches.tsv"
     for row in _read_delimited(matches):
         locus_id = str(row.get("primer_name", ""))

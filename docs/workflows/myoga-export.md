@@ -11,9 +11,13 @@ retains every discovered valid sample in the combined distance matrix and
 metadata, and leaves a distance blank only when two samples have no recoverable
 shared marker. Supply the rich locus panel with `--loci` when retained amplicons
 must be masked because precomputed masked query sequences are unavailable. For
-current assembly results, the exporter reads
-`classification/query_amplicons.fasta`; partial successful calls
+current results, the exporter reads `classification/query_amplicons.fasta` for
+assemblies and `taxonomic_query_sequences.fasta` for FASTQ inputs; partial successful calls
 (`run_status=success_partial`) are valid export inputs and are not discarded.
+The export also writes an all-sample `alignment_likelihood_distance_matrix.tsv`
+from each sample's fitted reference-component profile. It uses Hellinger
+distance, so the matrix is symmetric even though raw alignment likelihoods are
+not sample-to-sample distances.
 
 ```bash
 mlvamaps export-myoga \
