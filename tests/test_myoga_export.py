@@ -575,6 +575,40 @@ def test_batch_root_combined_calls_allow_uneven_locus_rows(tmp_path):
     assert summary["pairwise_fraction_denominator"] == "shared_assayed_loci"
 
 
+def test_malformed_aggregate_sample_does_not_discard_valid_samples(tmp_path):
+    staging = tmp_path / "staging"
+    first = _write_calls(staging, "S1", {"L1": 1})
+    second = _write_calls(staging, "S2", {"L1": 2})
+    results = tmp_path / "results"
+    results.mkdir()
+    (results / "calls.tsv").write_text(
+        "\n".join(
+            [
+                *first.read_text().splitlines(),
+                *second.read_text().splitlines()[1:],
+                "BAD\tL1\tyes\tunknown",
+            ]
+        )
+        + "\n"
+    )
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\nS1\t1\t2\nS2\t3\t4\n"
+    )
+    output = tmp_path / "export"
+
+    export_myoga(results, metadata, output)
+
+    assert [row["sample_id"] for row in _read_tsv(output / "samples_used.tsv")] == ["S1", "S2"]
+    excluded = _read_tsv(output / "samples_excluded.tsv")
+    assert any(
+        row["sample_id"] == "BAD"
+        and row["reason"] == "MALFORMED_RESULTS"
+        and "non-numeric repeat_count" in row["details"]
+        for row in excluded
+    )
+
+
 def test_outputs_are_deterministic_and_force_is_required_for_overwrite(tmp_path):
     results, metadata = _basic_results(tmp_path)
     first = tmp_path / "first"

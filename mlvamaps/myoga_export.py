@@ -217,26 +217,40 @@ def discover_sample_calls(results_path: str | Path) -> tuple[list[SampleCalls], 
             for row in raw_rows:
                 sample_id = row.get("sample_id", "").strip()
                 if not sample_id:
-                    raise ValueError("calls row has an empty sample_id")
+                    excluded.append(
+                        _excluded(
+                            path.parent.name,
+                            "MALFORMED_RESULTS",
+                            "tree",
+                            path,
+                            details="calls row has an empty sample_id",
+                        )
+                    )
+                    continue
                 grouped[sample_id].append(row)
             aggregate = len(grouped) > 1 or (path.parent / "batch_status.tsv").exists()
             for sample_id, rows in grouped.items():
                 discovered_ids.add(sample_id)
-                loci = [row.get("locus_id", "").strip() for row in rows]
-                if any(not locus for locus in loci):
-                    raise ValueError(f"sample {sample_id!r} has an empty locus_id")
-                duplicates = sorted(
-                    {locus for locus in loci if loci.count(locus) > 1}, key=_natural_key
-                )
-                if duplicates:
-                    raise ValueError(
-                        f"sample {sample_id!r} has duplicate loci: {', '.join(duplicates)}"
+                try:
+                    loci = [row.get("locus_id", "").strip() for row in rows]
+                    if any(not locus for locus in loci):
+                        raise ValueError(f"sample {sample_id!r} has an empty locus_id")
+                    duplicates = sorted(
+                        {locus for locus in loci if loci.count(locus) > 1}, key=_natural_key
                     )
-                for row in rows:
-                    _numeric_repeat(row.get("repeat_count"))
-                candidates[sample_id].append(
-                    SampleCalls(sample_id, path, rows, loci, aggregate_source=aggregate)
-                )
+                    if duplicates:
+                        raise ValueError(
+                            f"sample {sample_id!r} has duplicate loci: {', '.join(duplicates)}"
+                        )
+                    for row in rows:
+                        _numeric_repeat(row.get("repeat_count"))
+                    candidates[sample_id].append(
+                        SampleCalls(sample_id, path, rows, loci, aggregate_source=aggregate)
+                    )
+                except ValueError as exc:
+                    excluded.append(
+                        _excluded(sample_id, "MALFORMED_RESULTS", "tree", path, details=str(exc))
+                    )
         except ValueError as exc:
             discovered_ids.add(path.parent.name)
             excluded.append(
