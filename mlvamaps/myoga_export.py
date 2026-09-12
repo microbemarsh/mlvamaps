@@ -11,7 +11,9 @@ from typing import Callable, Iterable
 
 import numpy as np
 
+from .combined_marker_export import COMBINED_OUTPUT_NAMES, export_combined_markers
 from .io import open_text, write_tsv
+from .primers import read_loci_or_primers
 from .profile_tree import neighbor_joining_tree_from_matrix
 from .sample_metadata import METADATA_ALIASES
 
@@ -61,6 +63,7 @@ OUTPUT_NAMES = (
     "samples_excluded.tsv",
     "export_summary.tsv",
     "export_summary.txt",
+    *COMBINED_OUTPUT_NAMES,
 )
 
 _MISSING = {"", ".", "na", "nan", "none", "null"}
@@ -667,6 +670,14 @@ def export_myoga(
     min_pairwise_loci: int = 1,
     min_pairwise_fraction: float = 0.0,
     distance: str = "repeat",
+    combined_markers: bool = False,
+    loci_path: str | Path | None = None,
+    snp_weight: float = 1.0,
+    repeat_weight: float = 1.0,
+    threads: int = 8,
+    mafft_bin: str = "mafft",
+    raxml_ng_bin: str = "raxml-ng",
+    raxml_model: str = "DNA",
     force: bool = False,
 ) -> dict[str, Path | int | str]:
     """Export completed mlvamaps results as a relatedness dataset for MYOGA."""
@@ -680,9 +691,13 @@ def export_myoga(
         raise ValueError("min_pairwise_fraction must be between 0 and 1")
     if distance not in {"repeat", "categorical"}:
         raise ValueError("distance must be 'repeat' or 'categorical'")
+    if snp_weight < 0 or repeat_weight < 0 or snp_weight + repeat_weight <= 0:
+        raise ValueError("SNP and repeat weights must be non-negative with a positive total")
 
     output = Path(outdir)
     existing = [output / name for name in OUTPUT_NAMES if (output / name).exists()]
+    if combined_markers and (output / "locus_trees").exists():
+        existing.append(output / "locus_trees")
     if existing and not force:
         raise ValueError(
             f"Output files already exist in {output}; use --force to replace this export"
@@ -718,7 +733,7 @@ def export_myoga(
         assayed_loci = int(assayed_counts[index])
         required_loci = int(required_counts[index])
         fraction = float(callable_fractions[index])
-        if callable_loci == 0:
+        if callable_loci == 0 and not combined_markers:
             reason = "NO_CALLABLE_LOCI"
         elif callable_loci < required_loci:
             reason = "TOO_FEW_CALLABLE_LOCI"
@@ -885,6 +900,31 @@ def export_myoga(
     elif tree_path.exists():
         tree_path.unlink()
 
+    combined_result: dict[str, Path | int | str] = {}
+    if combined_markers:
+        panel_loci = read_loci_or_primers(loci_path, None) if loci_path else []
+        combined_metadata_path = output / "combined_marker_metadata.tsv"
+        _write_metadata(
+            [sample.sample_id for sample in samples], metadata, combined_metadata_path
+        )
+        combined_result = export_combined_markers(
+            samples,
+            locus_order,
+            matrix,
+            combined_metadata_path,
+            output,
+            loci=panel_loci,
+            min_pairwise_loci=min_pairwise_loci,
+            min_pairwise_fraction=min_pairwise_fraction,
+            snp_weight=snp_weight,
+            repeat_weight=repeat_weight,
+            threads=threads,
+            mafft_bin=mafft_bin,
+            raxml_ng_bin=raxml_ng_bin,
+            raxml_model=raxml_model,
+            force=force,
+        )
+
 
     used_rows = []
     for sample, source_index in zip(final_samples, final_source_indexes):
@@ -940,6 +980,9 @@ def export_myoga(
         ("pairwise_comparisons", len(threshold_ids) * (len(threshold_ids) - 1) // 2),
         ("supported_pairwise_comparisons", int(np.isfinite(selected_matrix[np.triu_indices(len(threshold_ids), k=1)]).sum())),
         ("chosen_distance_metric", distance),
+        ("combined_marker_export", "yes" if combined_markers else "no"),
+        ("combined_marker_loci_built", combined_result.get("loci_built", 0)),
+        ("combined_marker_tree_samples", combined_result.get("tree_samples", 0)),
         ("minimum_callable_fraction", min_callable_fraction),
         ("minimum_callable_loci", min_callable_loci),
         (
@@ -990,4 +1033,7 @@ def export_myoga(
         "samples_excluded": output / "samples_excluded.tsv",
         "summary": output / "export_summary.tsv",
         "tree_samples": len(final_ids),
+        "combined_marker_tree": combined_result.get("tree", ""),
+        "combined_marker_distance_matrix": combined_result.get("distance_matrix", ""),
+        "combined_marker_metadata": combined_result.get("metadata", ""),
     }

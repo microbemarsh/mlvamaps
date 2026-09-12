@@ -731,6 +731,26 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         help="Distance used for the matrix and tree (default: %(default)s)",
     )
     export.add_argument(
+        "--combined-markers",
+        action="store_true",
+        help="Also build the historical repeat-masked SNP/repeat distance export",
+    )
+    export.add_argument(
+        "--loci",
+        dest="export_loci",
+        metavar="TSV",
+        help="Rich locus panel used to recover and mask retained amplicons",
+    )
+    export.add_argument("--phylogeny-snp-weight", type=_nonnegative_float, default=1.0)
+    export.add_argument("--phylogeny-repeat-weight", type=_nonnegative_float, default=1.0)
+    export.add_argument(
+        "-t", "--threads", type=_nonnegative_int, default=8,
+        help="MAFFT/RAxML-NG thread budget (default: %(default)s)",
+    )
+    export.add_argument("--mafft-bin", default="mafft")
+    export.add_argument("--raxml-ng-bin", default="raxml-ng")
+    export.add_argument("--raxml-model", default="DNA")
+    export.add_argument(
         "-o",
         "--output",
         "--outdir",
@@ -1262,6 +1282,14 @@ def main(argv: list[str] | None = None) -> int:
                 min_pairwise_loci=args.min_pairwise_loci,
                 min_pairwise_fraction=args.min_pairwise_fraction,
                 distance=args.distance,
+                combined_markers=args.combined_markers,
+                loci_path=args.export_loci,
+                snp_weight=args.phylogeny_snp_weight,
+                repeat_weight=args.phylogeny_repeat_weight,
+                threads=args.threads,
+                mafft_bin=args.mafft_bin,
+                raxml_ng_bin=args.raxml_ng_bin,
+                raxml_model=args.raxml_model,
                 force=args.force,
             )
         except ValueError as exc:
@@ -1272,6 +1300,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote MLVA relatedness tree to {result['tree']}")
         else:
             print("No MLVA relatedness tree was written because no samples passed filtering")
+        if args.combined_markers:
+            if result["combined_marker_tree"]:
+                print(f"Wrote combined SNP/repeat relatedness tree to {result['combined_marker_tree']}")
+            else:
+                print("No combined SNP/repeat tree was written")
         print(f"Wrote export summary to {result['summary']}")
         return 0
     if args.command == "call":

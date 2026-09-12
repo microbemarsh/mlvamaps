@@ -26,10 +26,11 @@ The CLI no longer accepts `--phylogenetics`, `--phylogeny-snp-weight`,
 `--phylogeny-repeat-weight`, the legacy target-calibration/bootstrap/placement
 options, or `calibrate-taxa`. Reference building no longer creates locus
 phylogenies or accepts `--min-references-per-tree`. MAFFT, RAxML-NG, EPA-ng and
-MUMmer are no longer runtime dependencies. `export-myoga` retains repeat and
-categorical profile comparisons; its combined-marker options are removed from
-both the CLI and Python API. The legacy `phylogeny`, `taxon_assignment`, and
-`combined_marker_export` modules have been deleted. Shared reference-loading
+MUMmer are no longer dependencies for calling or reference classification.
+`export-myoga --combined-markers` remains available as a separate retrospective
+workflow and invokes MAFFT and, for loci with at least four SNP haplotypes,
+RAxML-NG. The legacy general-purpose `phylogeny` and `taxon_assignment` modules
+have been deleted. Shared reference-loading
 helpers now live in `reference_database`; repeat-profile Newick generation
 lives in `profile_tree`.
 

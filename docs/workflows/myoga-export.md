@@ -5,6 +5,13 @@ into a filtered sample-by-locus dataset, pairwise MLVA distances, and a
 MYOGA-ready neighbor-joining tree. It reads existing result files and never
 reruns MLVA calling.
 
+Add `--combined-markers` to restore the retrospective repeat-masked SNP plus
+repeat-distance workflow. It uses eight threads by default (`-t/--threads`),
+retains every discovered valid sample in the combined distance matrix and
+metadata, and leaves a distance blank only when two samples have no recoverable
+shared marker. Supply the rich locus panel with `--loci` when retained amplicons
+must be masked because precomputed masked query sequences are unavailable.
+
 ```bash
 mlvamaps export-myoga \
   --results results/ \

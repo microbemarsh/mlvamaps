@@ -70,6 +70,11 @@ rerunning sample analysis:
 | `samples_excluded.tsv` | Tree exclusions and non-fatal geography exclusions with reason codes and details. |
 | `export_summary.tsv`, `export_summary.txt` | Machine- and human-readable discovery, filtering, overlap, and output totals. |
 
+With `--combined-markers`, `combined_marker_distance_matrix.tsv` and
+`combined_marker_metadata.tsv` retain all discovered valid samples. Pairwise
+cells are blank only when no shared recovered marker permits a distance; the
+neighbor-joining tree remains limited to a finite complete submatrix.
+
 ## Reference builder outputs
 
 | File | Meaning |

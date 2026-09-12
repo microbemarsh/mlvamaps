@@ -209,7 +209,6 @@ def test_sassy_assembly_products_retain_repeat_and_sequence_evidence(tmp_path):
     ["call", "--phylogeny-snp-weight", "1"],
     ["calibrate-taxa"],
     ["build-reference", "-i", "assemblies", "-p", "panel", "--min-references-per-tree", "3"],
-    ["export-myoga", "--results", "r", "--metadata", "m", "-o", "out", "--combined-markers"],
 ])
 def test_removed_typing_options_fail_explicitly(arguments):
     from mlvamaps.cli import build_parser

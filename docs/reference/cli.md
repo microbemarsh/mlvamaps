@@ -26,6 +26,13 @@ mlvamaps export-myoga --results results/ --metadata metadata.tsv \
 | `-o`, `--output DIR` | required | Export directory. |
 | `--force` | off | Replace existing export files. |
 
+`--combined-markers` restores the retrospective repeat-masked SNP plus repeat
+comparison. Use `--loci PANEL.tsv` when precomputed masked query sequences are
+not present. MAFFT uses eight threads by default; override this with `-t N` or
+`--threads N`. The combined distance matrix and metadata retain every valid
+discovered sample, with blank cells where no shared recovered marker permits a
+distance.
+
 See [dataset aggregation and MYOGA export](../workflows/myoga-export.md) for
 discovery rules, exact formulas, overlap pruning, and scientific caveats.
 
