@@ -402,8 +402,30 @@ def test_pairwise_overlap_filter_writes_na_and_prunes_poorly_connected_sample(tm
     unsupported = next(row for row in pairs if {row["sample_1"], row["sample_2"]} == {"A", "C"})
     assert unsupported["comparison_status"] == "insufficient_overlap"
     assert unsupported["repeat_distance"] == ""
+    matrix = {row["sample_id"]: row for row in _read_tsv(output / "mlva_distance_matrix.tsv")}
+    assert set(matrix) == {"A", "B", "C"}
+    assert matrix["A"]["B"] == "0.50000000"
+    assert matrix["A"]["C"] == ""
     assert {row["sample_id"] for row in _read_tsv(output / "samples_used.tsv")} == {"A", "B"}
     assert any(row["sample_id"] == "C" and row["reason"] == "INSUFFICIENT_PAIRWISE_OVERLAP" for row in _read_tsv(output / "samples_excluded.tsv"))
+
+
+def test_distance_matrix_keeps_computable_distances_below_requested_overlap(tmp_path):
+    results = tmp_path / "results"
+    _write_calls(results, "A", {"L1": 1, "L2": None})
+    _write_calls(results, "B", {"L1": 3, "L2": None})
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text("shared_identifier\tlatitude\tlongitude\nA\t1\t2\nB\t3\t4\n")
+    output = tmp_path / "export"
+
+    export_myoga(results, metadata, output, min_pairwise_loci=2)
+
+    pair = _read_tsv(output / "mlva_pairwise_distances.tsv")[0]
+    assert pair["comparison_status"] == "insufficient_overlap"
+    assert pair["repeat_distance"] == "2.00000000"
+    matrix = _read_tsv(output / "mlva_distance_matrix.tsv")
+    assert matrix[0]["B"] == matrix[1]["A"] == "2.00000000"
+    assert len(_read_tsv(output / "samples_used.tsv")) == 1
 
 
 def test_categorical_distance_can_drive_matrix_and_two_sample_tree(tmp_path):

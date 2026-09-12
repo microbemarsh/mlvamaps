@@ -525,17 +525,17 @@ def calculate_pairwise_distances(
             categorical_raw,
             compared,
             out=np.full(len(compared), np.nan, dtype=float),
-            where=supported,
+            where=compared > 0,
         )
         repeat_values = np.divide(
             repeat_raw,
             compared,
             out=np.full(len(compared), np.nan, dtype=float),
-            where=supported,
+            where=compared > 0,
         )
         for offset, right in enumerate(range(left + 1, sample_count)):
             overlap[left, right] = overlap[right, left] = int(compared[offset])
-            if supported[offset]:
+            if compared[offset] > 0:
                 if categorical.size:
                     categorical[left, right] = categorical[right, left] = categorical_values[offset]
                 if repeat.size:
@@ -765,8 +765,24 @@ def export_myoga(
         )
     pairwise_temporary.replace(pairwise_path)
     selected_matrix = repeat_matrix if distance == "repeat" else categorical_matrix
+    shared_assayed = (
+        threshold_applicable.astype(np.int32)
+        @ threshold_applicable.astype(np.int32).T
+    )
+    pairwise_fractions = np.divide(
+        overlap_matrix,
+        shared_assayed,
+        out=np.zeros_like(overlap_matrix, dtype=float),
+        where=shared_assayed > 0,
+    )
+    supported = (
+        (overlap_matrix >= min_pairwise_loci)
+        & (pairwise_fractions >= min_pairwise_fraction)
+    )
+    np.fill_diagonal(supported, True)
+    tree_matrix = np.where(supported, selected_matrix, np.nan)
     retained_local, removed_local = _complete_matrix_subset(
-        selected_matrix, threshold_counts, threshold_ids
+        tree_matrix, threshold_counts, threshold_ids
     )
     for local_index in removed_local:
         sample = threshold_samples[local_index]
@@ -785,7 +801,7 @@ def export_myoga(
 
     final_samples = [threshold_samples[index] for index in retained_local]
     final_ids = [sample.sample_id for sample in final_samples]
-    final_matrix = selected_matrix[np.ix_(retained_local, retained_local)]
+    final_matrix = tree_matrix[np.ix_(retained_local, retained_local)]
     final_source_indexes = [threshold_indices[index] for index in retained_local]
 
     metadata_status, metadata_issues = _write_metadata(
@@ -844,20 +860,20 @@ def export_myoga(
     write_tsv(profile_rows, output / "mlva_profiles.tsv", ["sample_id", *locus_order])
 
     distance_rows = []
-    for row_index, sample_id in enumerate(final_ids):
+    for row_index, sample_id in enumerate(threshold_ids):
         distance_rows.append(
             {
                 "sample_id": sample_id,
                 **{
-                    other: _format_number(float(final_matrix[row_index, column_index]))
-                    for column_index, other in enumerate(final_ids)
+                    other: _format_number(float(selected_matrix[row_index, column_index]))
+                    for column_index, other in enumerate(threshold_ids)
                 },
             }
         )
     write_tsv(
         distance_rows,
         output / "mlva_distance_matrix.tsv",
-        ["sample_id", *final_ids],
+        ["sample_id", *threshold_ids],
     )
 
     tree_path = output / "mlva_nj.tree"

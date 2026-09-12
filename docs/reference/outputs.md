@@ -64,7 +64,7 @@ rerunning sample analysis:
 | `mlva_profiles.tsv` | Final sample-by-locus exact repeat-count matrix; unresolved loci are empty. |
 | `mlva_calls_long.tsv` | Auditable final sample-by-locus calls retaining available `calls.tsv` evidence fields. |
 | `mlva_pairwise_distances.tsv` | Both categorical and repeat-count distance components over shared exact calls, including unsupported pre-tree pairs. |
-| `mlva_distance_matrix.tsv` | Symmetric selected-distance matrix for final tree samples, with a zero diagonal. |
+| `mlva_distance_matrix.tsv` | Symmetric selected-distance matrix for all samples passing per-sample thresholds, with a zero diagonal and blank cells where no shared exact call permits a distance. |
 | `mlva_nj.tree` | Deterministic neighbor-joining MLVA relatedness tree; absent when no sample passes filtering. |
 | `samples_used.tsv` | Final tree sample paths, callability, metadata, and coordinate status. |
 | `samples_excluded.tsv` | Tree exclusions and non-fatal geography exclusions with reason codes and details. |

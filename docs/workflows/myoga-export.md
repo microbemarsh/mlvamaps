@@ -78,9 +78,14 @@ fractional completeness requirement. The fractional denominator, when a
 positive threshold is requested, is the intersection of the two samples'
 assayed loci, so mixing compatible panels does not count loci absent from one
 panel as failed calls. Unsupported pairs remain in
-`mlva_pairwise_distances.tsv` with `comparison_status=insufficient_overlap` and
-empty normalized distances. The exporter never substitutes zero or a maximum
-distance. Before tree construction it repeatedly removes the sample with the
+`mlva_pairwise_distances.tsv` with
+`comparison_status=insufficient_overlap`. Their calculated distance is retained
+when the pair has at least one shared exact call; it is empty only when no
+distance can be calculated. The complete square distance matrix retains every
+sample that passes the per-sample callable threshold, including blank cells for
+pairs with no shared exact calls. The exporter never substitutes zero or a
+maximum distance. Before tree construction it repeatedly removes the sample
+with the
 most unsupported relationships, then the fewest callable loci and natural
 sample order as deterministic tie breaks, until the retained distance matrix is
 complete. These removals are reported as `INSUFFICIENT_PAIRWISE_OVERLAP`.
@@ -119,7 +124,8 @@ global_mlva/
 `mlva_calls_long.tsv` and `mlva_profiles.tsv` contain the final tree samples.
 The pairwise long table also retains threshold-passing samples subsequently
 removed for insufficient overlap, making those decisions auditable. The square
-matrix contains only final samples in identical row and column order.
+matrix contains all threshold-passing samples in identical row and column order;
+blank cells mean that a pair has no shared exact call.
 
 `mlva_nj.tree` is built with `mlvamaps`' deterministic NumPy neighbor-joining
 implementation. One- and two-sample exports produce valid simple Newick trees;
