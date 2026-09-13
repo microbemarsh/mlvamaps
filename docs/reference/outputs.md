@@ -72,7 +72,8 @@ rerunning sample analysis:
 
 With `--combined-markers`, `combined_marker_distance_matrix.tsv` and
 `combined_marker_metadata.tsv` retain all discovered valid samples. Pairwise
-cells are blank only when no shared recovered marker permits a distance; the
+cells are blank only when neither a shared exact repeat call nor a shared
+recovered SNP sequence permits a distance; the
 neighbor-joining tree remains limited to a finite complete submatrix.
 
 `alignment_likelihood_distance_matrix.tsv` compares every discovered sample's

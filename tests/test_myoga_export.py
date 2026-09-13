@@ -885,6 +885,31 @@ def test_combined_marker_export_keeps_all_samples_and_uses_eight_threads(tmp_pat
     assert "--thread 8" in arguments.read_text()
 
 
+def test_combined_marker_matrix_falls_back_to_repeat_calls_when_sequences_are_unavailable(tmp_path):
+    results = tmp_path / "results"
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text(
+        "shared_identifier\tlatitude\tlongitude\n"
+        "S1\t1\t2\nS2\t3\t4\nS3\t5\t6\n"
+    )
+    _write_calls(results, "S1", {"L1": 1, "L2": 4})
+    _write_calls(results, "S2", {"L1": 3, "L2": 4})
+    _write_calls(results, "S3", {"L1": 5, "L2": 2})
+
+    export_myoga(results, metadata, tmp_path / "export", combined_markers=True)
+
+    matrix = _read_tsv(tmp_path / "export" / "combined_marker_distance_matrix.tsv")
+    assert [row["sample_id"] for row in matrix] == ["S1", "S2", "S3"]
+    assert all(row[row["sample_id"]] == "0.00000000" for row in matrix)
+    assert all(matrix[left][matrix[right]["sample_id"]] != "" for left in range(3) for right in range(3))
+    assert matrix[0]["S2"] == matrix[1]["S1"]
+    pair = _read_tsv(tmp_path / "export" / "combined_marker_pairwise_distances.tsv")[0]
+    assert pair["loci_compared"] == "2"
+    assert pair["mean_normalized_snp_distance"] == ""
+    assert pair["mean_normalized_repeat_distance"] != ""
+    assert pair["combined_marker_distance"] != ""
+
+
 def test_combined_marker_export_uses_current_alignment_query_amplicons(tmp_path):
     results = tmp_path / "results"
     metadata = tmp_path / "metadata.tsv"

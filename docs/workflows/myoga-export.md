@@ -8,8 +8,9 @@ reruns MLVA calling.
 Add `--combined-markers` to restore the retrospective repeat-masked SNP plus
 repeat-distance workflow. It uses eight threads by default (`-t/--threads`),
 retains every discovered valid sample in the combined distance matrix and
-metadata, and leaves a distance blank only when two samples have no recoverable
-shared marker. Supply the rich locus panel with `--loci` when retained amplicons
+metadata, and leaves a distance blank only when two samples have neither a
+shared exact repeat call nor a shared recovered SNP sequence. Exact repeat calls
+remain usable when retained sequences are unavailable. Supply the rich locus panel with `--loci` when retained amplicons
 must be masked because precomputed masked query sequences are unavailable. For
 current results, the exporter reads `classification/query_amplicons.fasta` for
 assemblies and `taxonomic_query_sequences.fasta` for FASTQ inputs; partial successful calls

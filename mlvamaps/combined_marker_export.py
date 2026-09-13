@@ -409,6 +409,7 @@ def export_combined_markers(
     snp_sum = np.zeros((sample_count, sample_count), dtype=np.float64)
     repeat_sum = np.zeros((sample_count, sample_count), dtype=np.float64)
     loci_compared = np.zeros((sample_count, sample_count), dtype=np.int32)
+    snp_loci_compared = np.zeros((sample_count, sample_count), dtype=np.int32)
     repeat_loci_compared = np.zeros((sample_count, sample_count), dtype=np.int32)
     locus_status: list[dict[str, object]] = []
     mafft: str | None = None
@@ -420,6 +421,7 @@ def export_combined_markers(
         writer = csv.DictWriter(handle, fieldnames=LOCUS_SNP_FIELDS, delimiter="\t")
         writer.writeheader()
         for locus_index, locus_id in enumerate(locus_order):
+            locus_compared = np.zeros((sample_count, sample_count), dtype=bool)
             members = [
                 index
                 for index, sample_id in enumerate(sample_ids)
@@ -430,7 +432,27 @@ def export_combined_markers(
             locus_dir.mkdir(parents=True, exist_ok=True)
             alignment_path = locus_dir / "samples.repeat_masked.aligned.fasta"
             tree_path = locus_dir / "samples.tree"
+            repeat_values = repeat_calls[:, locus_index]
+            finite_repeats = repeat_values[np.isfinite(repeat_values)]
+            repeat_scale = max(
+                0.5,
+                statistics.pstdev(float(value) for value in finite_repeats)
+                if len(finite_repeats) > 1
+                else 0.0,
+            )
+            repeat_members = np.flatnonzero(np.isfinite(repeat_values))
+            for left_position, left in enumerate(repeat_members):
+                for right in repeat_members[left_position + 1 :]:
+                    normalized_repeat = abs(
+                        float(repeat_values[left]) - float(repeat_values[right])
+                    ) / repeat_scale
+                    repeat_sum[left, right] += normalized_repeat
+                    repeat_sum[right, left] += normalized_repeat
+                    repeat_loci_compared[left, right] += 1
+                    repeat_loci_compared[right, left] += 1
+                    locus_compared[left, right] = locus_compared[right, left] = True
             if not members:
+                loci_compared += locus_compared
                 locus_status.append(
                     _locus_status(locus_id, 0, 0, "NO_RECOVERED_SEQUENCES")
                 )
@@ -508,14 +530,6 @@ def export_combined_markers(
                 for member in indexes
             }
             expanded = np.zeros((len(members), len(members)), dtype=np.float64)
-            repeat_values = repeat_calls[members, locus_index]
-            finite_repeats = repeat_values[np.isfinite(repeat_values)]
-            repeat_scale = max(
-                0.5,
-                statistics.pstdev(float(value) for value in finite_repeats)
-                if len(finite_repeats) > 1
-                else 0.0,
-            )
             for left_position, left in enumerate(members):
                 for right_position, right in enumerate(
                     members[left_position + 1 :], start=left_position + 1
@@ -538,6 +552,9 @@ def export_combined_markers(
                     normalized_repeat = repeat_distance / repeat_scale
                     snp_sum[left, right] += normalized
                     snp_sum[right, left] += normalized
+                    snp_loci_compared[left, right] += 1
+                    snp_loci_compared[right, left] += 1
+                    locus_compared[left, right] = locus_compared[right, left] = True
                     writer.writerow(
                         {
                             "locus_id": locus_id,
@@ -555,20 +572,7 @@ def export_combined_markers(
                         }
                     )
 
-            for left_position, left in enumerate(members):
-                for right_position, right in enumerate(
-                    members[left_position + 1 :], start=left_position + 1
-                ):
-                    left_repeat = float(repeat_values[left_position])
-                    right_repeat = float(repeat_values[right_position])
-                    if math.isfinite(left_repeat) and math.isfinite(right_repeat):
-                        normalized_repeat = abs(left_repeat - right_repeat) / repeat_scale
-                        repeat_sum[left, right] += normalized_repeat
-                        repeat_sum[right, left] += normalized_repeat
-                        repeat_loci_compared[left, right] += 1
-                        repeat_loci_compared[right, left] += 1
-                    loci_compared[left, right] += 1
-                    loci_compared[right, left] += 1
+            loci_compared += locus_compared
             tree_path.write_text(
                 neighbor_joining_tree_from_matrix(
                     [sample_ids[index] for index in members], expanded
@@ -604,15 +608,19 @@ def export_combined_markers(
             supported = (
                 compared >= min_pairwise_loci and fraction >= min_pairwise_fraction
             )
-            mean_snp = snp_sum[left, right] / compared if compared else math.nan
+            snp_compared = int(snp_loci_compared[left, right])
+            mean_snp = (
+                snp_sum[left, right] / snp_compared if snp_compared else math.nan
+            )
             repeat_compared = int(repeat_loci_compared[left, right])
             mean_repeat = (
                 repeat_sum[left, right] / repeat_compared
                 if repeat_compared
                 else math.nan
             )
-            distance = snp_weight * mean_snp + (
-                repeat_weight * mean_repeat if repeat_compared else 0.0
+            distance = (
+                (snp_weight * mean_snp if snp_compared else 0.0)
+                + (repeat_weight * mean_repeat if repeat_compared else 0.0)
             )
             if compared:
                 combined[left, right] = combined[right, left] = distance
@@ -623,10 +631,10 @@ def export_combined_markers(
                     "loci_compared": compared,
                     "fraction_loci_compared": f"{fraction:.8f}",
                     "mean_normalized_snp_distance": ""
-                    if not compared
+                    if not snp_compared
                     else f"{mean_snp:.8f}",
                     "mean_normalized_repeat_distance": ""
-                    if not compared
+                    if not repeat_compared
                     else f"{mean_repeat:.8f}",
                     "snp_weight": f"{snp_weight:.6f}",
                     "repeat_weight": f"{repeat_weight:.6f}",
@@ -645,8 +653,12 @@ def export_combined_markers(
     )
     callable_counts = np.asarray(
         [
-            sum((sample_id, locus_id) in recovered for locus_id in locus_order)
-            for sample_id in sample_ids
+            sum(
+                (sample_id, locus_id) in recovered
+                or math.isfinite(float(repeat_calls[sample_index, locus_index]))
+                for locus_index, locus_id in enumerate(locus_order)
+            )
+            for sample_index, sample_id in enumerate(sample_ids)
         ],
         dtype=np.int32,
     )
