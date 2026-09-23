@@ -16,6 +16,7 @@ from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import read_fasta, read_profiles, write_fasta, write_tsv
 from .locus_measurement import measure_locus_product
 from .models import Locus
+from .locus_products import assembly_product, genotype_product, write_products
 from .mapping import (
     build_minimap2_map_command,
     check_minimap2,
@@ -623,11 +624,8 @@ def legacy_assembly_call_rows(
             ),
             key=lambda item: item[1],
         )
-        _raw_count, called_count = assembly_equivalent_product_allele(
-            locus,
-            int(product["product_size_bp"]),
-            round_tolerance,
-        )
+        genotype = genotype_product(assembly_product(product, sample_id), locus, round_tolerance)
+        _raw_count, called_count = genotype.repeat_count_raw, genotype.repeat_count
         support_probability = 1.0
         support = read_support.get(product["product_id"], {})
         rows.append(
@@ -960,6 +958,11 @@ def run_assembly_call(
         sample_id,
         assembly_round_tolerance,
     )
+    selected_ids = {row.get("evidence") for row in call_rows}
+    canonical_paths = write_products(
+        [assembly_product(p, sample_id, assembly_round_tolerance) for p in products if p["product_id"] in selected_ids],
+        loci, outdir_path,
+    )
     classification_paths: dict[str, Path] = {}
     reference_rows: list[dict] = []
     closest_reference_bands: list[dict] = []
@@ -1023,4 +1026,5 @@ def run_assembly_call(
         "report": outdir_path / "report.html",
         **legacy_paths,
         **classification_paths,
+        **canonical_paths,
     }

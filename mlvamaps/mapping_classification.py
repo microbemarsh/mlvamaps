@@ -483,6 +483,20 @@ def run_mapping_classification(
     if reads1 is None:
         paths["assembly_reference_evidence"] = output / "assembly_reference_evidence.tsv"
         paths["classification_query_amplicons"] = output / "query_amplicons.fasta"
+    repeat_comparison = []
+    for locus_id, observed in (query_repeat_counts or {}).items():
+        if observed in (None, ""):
+            continue
+        states = sorted({float(c.repeat_count) for c in contexts
+                         if c.locus_id == locus_id and c.repeat_count is not None})
+        closest = min(states, key=lambda state: abs(state-float(observed))) if states else None
+        repeat_comparison.append({"sample_id": sample_id, "locus_id": locus_id,
+            "observed_repeat_count": observed, "closest_known_repeat_count": closest,
+            "repeat_difference": float(observed)-closest if closest is not None else "",
+            "status": "KNOWN" if float(observed) in states else "NOVEL" if states else "NO_REFERENCE"})
+    paths["reference_repeat_comparison"] = output / "reference_repeat_comparison.tsv"
+    write_tsv(repeat_comparison, paths["reference_repeat_comparison"],
+              ["sample_id", "locus_id", "observed_repeat_count", "closest_known_repeat_count", "repeat_difference", "status"])
     paths.update(write_profile_tree(
         contexts, members, query_repeat_counts or {}, matches, sample_id, output, metadata,
     ))

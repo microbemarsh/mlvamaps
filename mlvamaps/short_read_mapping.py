@@ -1,4 +1,4 @@
-"""Illumina orchestration using shared competitive alignment evidence.
+"""FASTQ orchestration using reconstructed products or legacy competition.
 
 The module deliberately separates locus detection from genotype resolution.  A
 few flank-anchored molecules can establish presence without supplying enough
@@ -49,8 +49,11 @@ def run_mapping_short_read_call(
     missing_locus_penalty: float = 8.0,
     show_progress: bool = True,
     classification_repeat_scale: float = 1.0,
+    sr_engine: str = "repeat-likelihood", insert_mean=None, insert_sd=None,
+    technology: str = "illumina", max_anchor_edits: int = 3, round_tolerance: float = .25,
+    min_mixture_fraction: float = .01, min_secondary_reads: int = 2,
 ) -> dict[str, Path]:
-    """Run competitive minimap2 mapping and emit established output views."""
+    """Select recovery strategy and emit established output views."""
     # Lazy imports avoid a module cycle with the shared Illumina helpers.
     from .concurrency import resolve_threads
     from .io import read_fastq_pairs
@@ -63,6 +66,10 @@ def run_mapping_short_read_call(
     )
     from .pipeline import ALLELE_DISTRIBUTION_FIELDS, MATCH_FIELDS, REPEAT_COUNT_FIELDS, allele_distribution_rows
 
+    if sr_engine not in {"repeat-likelihood", "competitive"}:
+        raise ValueError("unknown short-read engine")
+    from .repeat_likelihood import estimate_insert_distribution
+    estimate_insert_distribution([], insert_mean, insert_sd)
     output = Path(outdir)
     output.mkdir(parents=True, exist_ok=True)
     loci = read_loci_or_primers(loci_path, primers_path)
@@ -74,7 +81,7 @@ def run_mapping_short_read_call(
     counters: dict[str, int] = defaultdict(int)
 
     if show_progress:
-        print(f"[{sample_id}] Filtering and validating Illumina read pairs")
+        print(f"[{sample_id}] Filtering and validating {technology} molecules")
     with open_text(filtered1, "wt") as first_handle, open_text(filtered2, "wt") as second_handle, open_text(orphans, "wt") as orphan_handle:
         chunk = []
 
@@ -105,22 +112,34 @@ def run_mapping_short_read_call(
 
     from .unified_fastq import common_calls_to_compatibility, run_unified_fastq_inference
 
+    inference_engine = run_unified_fastq_inference
+    extra = {}
+    if sr_engine != "competitive":
+        from .locus_reconstruction import run_reconstructed_fastq_inference
+        inference_engine = run_reconstructed_fastq_inference
+        extra = {"insert_mean": insert_mean, "insert_sd": insert_sd,
+                 "orphan_path": orphans if reads2_path else None,
+                 "max_anchor_edits": max_anchor_edits,
+                 "min_fraction": min_mixture_fraction, "min_secondary_reads": min_secondary_reads,
+                 "minimum_spanning_pairs": short_min_spanning_pairs, "round_tolerance": round_tolerance}
+    method = "competitive_minimap2" if sr_engine == "competitive" else "repeat_likelihood" if technology == "illumina" else "spanning_molecules"
     if show_progress:
-        print(f"[{sample_id}] Competitively mapping Illumina molecules with minimap2")
-    common_calls, molecule_evidence, _molecule_calls, unified_paths = run_unified_fastq_inference(
+        print(f"[{sample_id}] Recovering loci using {method}")
+    common_calls, molecule_evidence, _molecule_calls, unified_paths = inference_engine(
         reads1=filtered1,
         reads2=filtered2 if reads2_path else None,
         loci=loci,
         database_path=database_path,
         outdir=output,
         sample_id=sample_id,
-        technology="illumina",
+        technology=technology,
         minimap2_bin=minimap2_bin,
         threads=thread_count,
         minimum_molecules=min_depth,
         minimum_probability=short_confidence_threshold,
         maximum_candidate_repeat_count=short_max_candidate_repeat_count,
         keep_alignments=keep_intermediates,
+        **extra,
     )
     calls = common_calls_to_compatibility(common_calls)
     by_locus = {str(row["locus"]): row for row in common_calls}
@@ -134,7 +153,7 @@ def run_mapping_short_read_call(
             "repeat_count": row["repeat_count"], "locus_length_bp": "",
             "confidence": row["best_probability"],
             "supporting_fragments": row["molecule_support"],
-            "proper_spanning_pairs": 0, "junction_reads": row["junction_support"],
+            "proper_spanning_pairs": row.get("n_spanning", 0), "junction_reads": row["junction_support"],
             "full_spanning_reads": row["full_span_support"], "cigar_indel_reads": 0,
             "mean_mapq": "", "median_mapq": "",
             "candidate_scores": row["candidate_distribution"], "best_contexts": "",
@@ -143,13 +162,13 @@ def run_mapping_short_read_call(
     write_tsv(evidence_rows, output / "short_read_mapping_evidence.tsv", MAPPING_EVIDENCE_FIELDS)
     for call, common in zip(calls, common_calls):
         call.update({
-            "read_technology": "illumina",
+            "read_technology": technology,
             "evidence_class": str(common["status"]).upper(),
             "informative_molecule_count": common["molecule_support"],
             "boundary_1_support": common["junction_support"],
             "boundary_2_support": common["junction_support"],
             "both_boundary_support": common["full_span_support"],
-            "repeat_count_min": "", "repeat_count_max": "",
+            "repeat_count_min": common.get("repeat_count_min", ""), "repeat_count_max": common.get("repeat_count_max", ""),
             "repeat_count_interval_reason": "", "confidence_reason": call["evidence"],
             "short_read_warning": "" if common["status"] == "called" else call["evidence"],
             "recruited_read_pairs": common["molecule_support"],
@@ -160,13 +179,13 @@ def run_mapping_short_read_call(
             "estimated_primary_fraction": common["dominant_fraction"],
             "estimated_secondary_fraction": common["secondary_fraction"],
             "mixture_status": "MIXED" if common["status"] == "mixed" else "SINGLE",
-            "evidence_sources": "competitive_minimap2", "mapping_state": common["status"],
-            "supporting_fragments": common["molecule_support"], "proper_spanning_pairs": 0,
+            "evidence_sources": method, "mapping_state": common["status"],
+            "supporting_fragments": common["molecule_support"], "proper_spanning_pairs": common.get("n_spanning", 0),
             "junction_read_count": common["junction_support"],
             "full_spanning_read_count": common["full_span_support"], "cigar_indel_read_count": 0,
             "mean_mapq": "", "median_mapq": "", "candidate_allele_scores": common["candidate_distribution"],
             "best_reference_contexts": "", "reference_context_taxa": "",
-            "reference_context_provenance": "", "mlva_method": "competitive minimap2 shared inference",
+            "reference_context_provenance": "", "mlva_method": method,
             "query_sequence": "", "direct_product_support": common["direct_product_support"],
         })
     mapping_fields = [
@@ -182,6 +201,12 @@ def run_mapping_short_read_call(
     write_tsv(calls, output / "locus_repeat_counts.tsv",
               REPEAT_COUNT_FIELDS + [field for field in SHORT_CALL_EXTRA_FIELDS + mapping_fields if field not in REPEAT_COUNT_FIELDS])
     allele_rows = _allele_rows(calls)
+    if technology != "illumina":
+        for row in allele_rows:
+            if row["call_status"] == "NOT_FOUND":
+                row["call_status"] = "LOCUS_DROPOUT"
+    from .pipeline import ALLELE_FIELDS
+    write_tsv(allele_rows, output / "allele_calls.tsv", ALLELE_FIELDS)
     write_tsv(allele_distribution_rows(sample_id, calls), output / "allele_probability_distribution.tsv", ALLELE_DISTRIBUTION_FIELDS)
     fingerprint, probabilistic = build_fingerprint(sample_id, allele_rows, loci)
     write_tsv(fingerprint, output / "mlva_fingerprint.tsv", ["sample_id"] + [locus.locus_id for locus in loci])
@@ -201,11 +226,11 @@ def run_mapping_short_read_call(
         from .mapping_classification import run_mapping_classification
         classification_paths.update(run_mapping_classification(
             database_path=database_path, loci=loci, outdir=output, sample_id=sample_id,
-            reads1=filtered1, reads2=filtered2 if reads2_path else None, technology="illumina",
+            reads1=filtered1, reads2=filtered2 if reads2_path else None, technology=technology,
             sample_mode=sample_mode,
             threads=thread_count, minimap2_bin=minimap2_bin,
             locus_quality={str(row["locus"]): {"depth": row["molecule_support"], "status": row["status"]} for row in common_calls},
-            query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in calls if row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},
+            query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in calls if row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT", "MULTIPLE_VARIANTS"}},
             reference_metadata_path=reference_metadata_path,
             taxon_identification=taxon_identification, minimum_loci=taxon_min_loci or 2,
             repeat_scale=classification_repeat_scale,
@@ -227,11 +252,15 @@ def run_mapping_short_read_call(
         MATCH_FIELDS,
     )
 
+    reconstruction_metadata = {}
+    if "reconstruction_metadata" in unified_paths:
+        reconstruction_metadata = json.loads(unified_paths["reconstruction_metadata"].read_text())
+    insert_stats = reconstruction_metadata.get("insert_size") or {}
     qc_values = dict(counters)
     qc_values.update({
-        "insert_size_median": "", "insert_size_mean": "",
-        "insert_size_standard_deviation": "", "insert_size_mad": "",
-        "insert_size_pairs": 0,
+        "insert_size_median": "", "insert_size_mean": insert_stats.get("mean", ""),
+        "insert_size_standard_deviation": insert_stats.get("sd", ""), "insert_size_mad": "",
+        "insert_size_pairs": insert_stats.get("pairs_used", 0),
     })
     write_tsv(({"sample_id": sample_id, "metric": key, "value": value}
                for key, value in sorted(qc_values.items())),
@@ -247,7 +276,7 @@ def run_mapping_short_read_call(
                            "PRESENT_GENOTYPED" if row["state"] == "called" else "PRESENT_UNTYPED",
         "mapped_reads": row["supporting_fragments"], "full_product_reads": row["full_spanning_reads"],
         "genotype_informative_reads": row["junction_reads"], "candidate_alleles": row["candidate_scores"],
-        "reference_source": "minimap2_competitive_candidate_contexts",
+        "reference_source": method,
     } for row in evidence_rows]
     recruitment_fields = [
         "sample_id", "locus_id", "read_pairs_examined", "read_pairs_recruited",
@@ -264,12 +293,12 @@ def run_mapping_short_read_call(
     summary = {
         "sample_id": sample_id, "input_read_1": str(Path(reads1_path)),
         "input_read_2": "" if reads2_path is None else str(Path(reads2_path)),
-        "read_technology": "illumina", "sample_mode": sample_mode,
+        "read_technology": technology, "sample_mode": sample_mode,
         "total_reads": counters.get("input_reads", 0), "total_read_pairs": counters.get("input_pairs", 0),
         "retained_reads": counters.get("retained_reads", 0), "retained_pairs": counters.get("retained_pairs", 0),
         "callable_loci": states["called"], "complete_loci": states["called"],
         "partial_loci": states["detected_unresolved"] + states["low_coverage"] + states["ambiguous"],
-        "presence_only_loci": states["detected_unresolved"], "mixed_loci": states["ambiguous"],
+        "presence_only_loci": states["detected_unresolved"], "mixed_loci": states["mixed"],
         "missing_loci": states["no_evidence"], "best_profile_id": best.get("best_profile_id", ""),
         "best_profile_distance": best.get("distance", ""), "profile_confidence": best.get("confidence", ""),
         "run_status": "success_partial" if states["called"] < len(loci) else "success",
@@ -288,10 +317,10 @@ def run_mapping_short_read_call(
     metadata_path = output / "short_read_run_metadata.json"
     metadata_path.write_text(json.dumps({
                        "schema_version": "2.0", "mlvamaps_version": __version__,
-                       "method": "competitive_minimap2_shared_inference",
-                       "minimap2_version": minimap2_version(minimap2_bin),
+                       "method": method,
+                       "minimap2_version": minimap2_version(minimap2_bin) if sr_engine == "competitive" or database_path else "not_used",
                        "database": database_path or "panel-derived",
-                       "insert_size": {"median": None, "mean": None, "standard_deviation": None, "mad": None, "pairs_used": 0}, "parameters": {"minimum_mapq": short_min_mapping_quality,
+                       "insert_size": insert_stats, "parameters": {"minimum_mapq": short_min_mapping_quality,
                        "minimum_supporting_fragments": min_depth,
                        "minimum_spanning_pairs": short_min_spanning_pairs,
                        "confidence_threshold": short_confidence_threshold,
@@ -302,10 +331,14 @@ def run_mapping_short_read_call(
         reference_rows=reference_rows,
         closest_reference_bands=closest_reference_bands,
         presence_rows=recruitment, local_assembly_rows=[], short_read_rows=calls,
+        asv_rows=read_profiles(unified_paths["mapped_variant_table"]) if "mapped_variant_table" in unified_paths else [],
+        mixture_rows=read_profiles(unified_paths["mixture_abundance"]) if "mixture_abundance" in unified_paths else [],
+        mapping_rows=read_profiles(unified_paths["mapping_summary"]) if "mapping_summary" in unified_paths else [],
+        snp_rows=read_profiles(unified_paths["mapping_snps"]) if "mapping_snps" in unified_paths else [],
     )
     report_path = output / "report.html"
     report_path.write_text(report_path.read_text().replace(
-        "MLVA analysis report", "MLVA analysis report · Method: competitive minimap2 shared inference", 1
+        "MLVA analysis report", f"MLVA analysis report · Method: {method}", 1
     ))
     if show_progress:
         detected = len(loci) - states["no_evidence"]
@@ -316,7 +349,7 @@ def run_mapping_short_read_call(
         for path in (filtered1, filtered2, orphans):
             path.unlink(missing_ok=True)
     return {
-        "outdir": output, "calls": calls_path, "repeat_counts": output / "locus_repeat_counts.tsv",
+        "outdir": output, "calls": calls_path, "allele_calls": output / "allele_calls.tsv", "repeat_counts": output / "locus_repeat_counts.tsv",
         "allele_distribution": output / "allele_probability_distribution.tsv",
         "fingerprint": output / "mlva_fingerprint.tsv", "profile_matches": output / "profile_matches.tsv",
         "profile_match_loci": output / "profile_match_loci.tsv", "report": report_path,

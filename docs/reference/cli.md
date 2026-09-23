@@ -1,5 +1,10 @@
 # CLI options and thresholds
 
+The default FASTQ engines now use [canonical locus reconstruction](../concepts/locus-reconstruction.md).
+That document lists the new engine/insert options, evidence files, formulas and
+compatibility changes; competitive-mapping details below apply to the legacy engines.
+
+
 Run `mlvamaps call --help` for essential options, or `mlvamaps call --advanced`
 for the complete parser-generated reference. Advanced options remain usable
 without the `--advanced` flag.

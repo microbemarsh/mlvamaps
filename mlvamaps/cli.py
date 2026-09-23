@@ -435,6 +435,12 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         default=3,
         help="Informative molecules required to avoid Illumina LOW_DEPTH (default: %(default)s)",
     )
+    call.add_argument("--sr-engine", choices=("repeat-likelihood", "competitive"), default="repeat-likelihood",
+                      help="Short-read recovery engine; competitive is legacy/debug")
+    call.add_argument("--lr-engine", choices=("spanning", "competitive"), default="spanning",
+                      help="Long-read recovery engine; competitive is legacy/debug")
+    call.add_argument("--insert-mean", type=_positive_float, help="Library fragment mean in bp (requires --insert-sd)")
+    call.add_argument("--insert-sd", type=_positive_float, help="Library fragment SD in bp (requires --insert-mean)")
     call.add_argument("--min-read-length", type=int, default=50)
     call.add_argument("--max-read-length", type=int, default=100000)
     call.add_argument(
@@ -863,6 +869,7 @@ def _run_single_input(
             profiles_path=args.profiles,
             database_path=args.database,
             recruitment_database_path=args.recruitment_database,
+            lr_engine=args.lr_engine,
             outdir=str(outdir),
             sample_id=sample_id,
             min_read_length=args.min_read_length,
@@ -906,15 +913,20 @@ def _run_single_input(
         print(f"Wrote easy MLVA calls to {result['calls']}")
         print(f"Wrote detailed allele evidence to {result['allele_calls']}")
         print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
-        print(f"Wrote mapped VNTR variant groups to {result['mapped_variant_table']}")
-        print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
-        print(f"Wrote mapped read-group evidence to {result['mapped_read_memberships']}")
+        if "mapped_variant_table" in result:
+            print(f"Wrote mapped VNTR variant groups to {result['mapped_variant_table']}")
+        if "mixture_abundance" in result:
+            print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
+        if "mapped_read_memberships" in result:
+            print(f"Wrote mapped read-group evidence to {result['mapped_read_memberships']}")
         if args.profiles or args.database:
             print(f"Wrote ranked profile matches to {result['profile_matches']}")
             print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
         if not args.no_locus_mapping:
-            print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
-            print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
+            if "mapping_summary" in result:
+                print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
+            if "mapping_snps" in result:
+                print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
         print(f"Wrote report to {result['report']}")
         if args.database:
             print(f"Wrote reference matches to {result['mapping_reference_matches']}")
@@ -998,6 +1010,8 @@ def _run_short_input(
         short_confidence_threshold=args.short_confidence_threshold,
         short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
         short_consider_secondary=not args.no_short_secondary_alignments,
+        sr_engine=args.sr_engine, insert_mean=args.insert_mean, insert_sd=args.insert_sd,
+        min_mixture_fraction=args.min_mixture_fraction, min_secondary_reads=args.min_secondary_reads,
         missing_locus_min_depth=args.missing_locus_min_depth,
         missing_locus_min_fraction=args.missing_locus_min_fraction,
         missing_locus_penalty=args.missing_locus_penalty,
@@ -1010,7 +1024,7 @@ def _run_short_input(
     print(f"Wrote conservative Illumina calls to {result['calls']}")
     print(f"Wrote short-read QC to {result['short_read_qc']}")
     print(f"Wrote locus recruitment to {result['short_read_recruitment']}")
-    print(f"Wrote minimap2-derived mapping evidence to {result['short_read_mapping']}")
+    print(f"Wrote locus evidence to {result['short_read_mapping']}")
     print(f"Wrote MYOGA metadata to {result['myoga_samples']}")
     if "mapping_reference_matches" in result:
         print(f"Wrote mapping reference matches to {result['mapping_reference_matches']}")

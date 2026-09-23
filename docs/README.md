@@ -15,6 +15,8 @@ path, intermediate stage, output, and interpretation boundary.
 
 ## Concepts
 
+- [Canonical locus reconstruction and SR likelihood model](concepts/locus-reconstruction.md)
+
 - [Variant mixture abundance](concepts/variant-mixtures.md)
 - [Alignment-based classification and profile trees](concepts/mapping-classification.md)
 - [Migration to the emu workflow](workflows/emu-migration.md)

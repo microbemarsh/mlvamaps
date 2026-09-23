@@ -8,31 +8,37 @@ The main outputs are an MLVA fingerprint, per-locus calls and evidence, and a
 self-contained HTML report. Reference databases add alignment-based reference support using nucleotide
 variation and VNTR repeat-length evidence.
 
-<p align="center">
-  <img width="960" alt="Alignment-based workflow: assembly products and FASTQ molecules align to observed references for isolate support or EM mixture inference." src="figures/software_workflow/mlvamaps_sample_calling_github.png" />
-</p>
+mlvamaps uses input-specific locus reconstruction followed by a shared locus-level
+genotyping framework:
 
-Assembly and FASTQ inputs retain their own evidence-recovery paths:
+```mermaid
+flowchart LR
+  A[Assembly] --> P[Sassy PCR products]
+  L[Accurate long reads] --> M[Complete spanning molecules]
+  S[Paired or single short reads] --> E[E/S/F/FRR repeat evidence and EM]
+  P --> C[Canonical locus products]
+  M --> C
+  E --> C
+  C --> G[Shared repeat and SNP typing]
+  G --> O[Profiles, reference comparison and reports]
+```
 
-- **Genome assemblies:** Sassy-backed, primer-directed in silico PCR recovers
-  candidate amplicons; the assembly caller applies MLVA_finder-compatible
-  product selection and size-to-repeat conversion.
-- **Paired-end or single-end Illumina reads:** competitive minimap2 alignment
-  against candidate MLVA allele contexts supplies paired-molecule, boundary,
-  indel, and direct-product evidence to the shared allele caller.
-- **Long-read or amplicon FASTQ:** the same competitive candidate mapping is
-  followed by direct molecule measurement and shared allele inference. SPOARS
-  remains available for representative sequence correction and confirmation;
-  it is not required before a repeat-count call.
+Assembly product selection remains MLVA_finder compatible. Long reads are
+measured directly. Short reads combine enclosing, spanning-pair, flanking and
+anchored repeat-rich evidence using an independently implemented model inspired
+by [GangSTR concepts](https://doi.org/10.1093/nar/gkz501). This microbial model
+supports a dominant haploid allele and multiple metagenomic components; it does
+not impose human diploidy or average distinct repeat alleles. Reference databases
+do not constrain observable repeat states: novel alleles remain callable.
 
-Locus detection does not by itself imply a confident repeat-count call.
-Unresolved and missing calls remain explicit and are never converted to zero.
+The defaults are `--sr-engine repeat-likelihood` and `--lr-engine spanning`.
+Use `competitive` for either option to reproduce the legacy FASTQ workflow.
+Paired length inference needs a measured library distribution; when the available
+flanks cannot estimate it, provide `--insert-mean BP --insert-sd BP`. Flanking-only
+or unanchored repeat evidence cannot produce an exact count.
 
-mlvamaps uses competitive minimap2 alignment against candidate MLVA allele
-contexts for both short- and long-read sequencing data. Technology-specific
-evidence is extracted from these alignments and integrated by a shared
-locus-level allele inference framework. minimap2 supplies competing alignments;
-it does not by itself determine the MLVA allele.
+See [the model, formulas, diagnostics and validation limits](docs/concepts/locus-reconstruction.md).
+Missing and unresolved calls remain explicit and are never converted to zero.
 
 Reference typing uses one Emu-inspired alignment-likelihood framework:
 Sassy-recovered assembly amplicons are aligned to observed reference loci with

@@ -139,6 +139,16 @@ def _retained_sample_sequences(
             assembly_sequences = dict(_read_fasta(path))
             break
     candidates: dict[str, list[tuple[int, str, str]]] = {}
+    canonical_table = sample_dir / "reconstructed_locus_variants.tsv"
+    for row in _read_delimited(canonical_table):
+        import json
+        evidence = json.loads(row.get("evidence") or "{}")
+        if evidence.get("meaningful") == "no":
+            continue
+        if row.get("sequence"):
+            candidates.setdefault(str(row["locus_id"]), []).append(
+                (-1, str(canonical_table), str(row["sequence"]))
+            )
     for name in ("classification/query_amplicons.fasta", "taxonomic_query_sequences.fasta"):
         query_amplicons = sample_dir / name
         if query_amplicons.is_file():

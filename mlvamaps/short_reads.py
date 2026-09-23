@@ -1,4 +1,4 @@
-"""Shared Illumina helpers and the competitive minimap2 entry point."""
+"""Shared read QC and the selectable FASTQ reconstruction entry point."""
 
 from __future__ import annotations
 
@@ -166,8 +166,16 @@ def run_short_read_call(
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
+    sr_engine: str = "repeat-likelihood",
+    insert_mean: float | None = None,
+    insert_sd: float | None = None,
+    technology: str = "illumina",
+    round_tolerance: float = .25,
+    max_anchor_edits: int = 3,
+    min_mixture_fraction: float = .01,
+    min_secondary_reads: int = 2,
 ) -> dict[str, Path]:
-    """Call Illumina data with competitive minimap2 candidate mapping."""
+    """Call Illumina data using locus reconstruction or legacy competition."""
     from .short_read_mapping import run_mapping_short_read_call
 
     return run_mapping_short_read_call(
@@ -188,6 +196,9 @@ def run_short_read_call(
         missing_locus_min_fraction=missing_locus_min_fraction,
         missing_locus_penalty=missing_locus_penalty,
         classification_repeat_scale=classification_repeat_scale,
+        sr_engine=sr_engine, insert_mean=insert_mean, insert_sd=insert_sd,
+        technology=technology, max_anchor_edits=max_anchor_edits, round_tolerance=round_tolerance,
+        min_mixture_fraction=min_mixture_fraction, min_secondary_reads=min_secondary_reads,
         reference_metadata_path=reference_metadata_path,
         taxon_min_loci=taxon_min_loci,
         taxon_identification=taxon_identification,

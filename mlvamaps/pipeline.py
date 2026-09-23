@@ -396,6 +396,7 @@ def run_call(
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
+    lr_engine: str = "spanning",
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
@@ -471,6 +472,28 @@ def run_call(
     progress.step(f"Kept {len(filtered_reads):,}/{len(reads):,} reads after QC")
     write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
+
+    if lr_engine not in {"spanning", "competitive"}:
+        raise ValueError("unknown long-read engine")
+    if lr_engine == "spanning":
+        from .short_reads import run_short_read_call
+        result = run_short_read_call(
+            reads1_path=str(outdir_path / "filtered_reads.fastq.gz"), reads2_path=None,
+            loci_path=loci_path, primers_path=primers_path, profiles_path=profiles_path,
+            database_path=database_path, outdir=str(outdir_path), sample_id=sample_id,
+            short_min_read_length=min_read_length, short_min_mean_quality=min_qscore,
+            min_depth=min_depth, short_confidence_threshold=min_posterior, threads=thread_count,
+            sample_mode=sample_mode, minimap2_bin=minimap2_bin, technology="hifi",
+            max_anchor_edits=max_primer_mismatches, min_mixture_fraction=min_mixture_fraction,
+            round_tolerance=assembly_round_tolerance,
+            min_secondary_reads=min_secondary_reads, reference_metadata_path=reference_metadata_path,
+            taxon_min_loci=taxon_min_loci, taxon_identification=taxon_identification,
+            show_progress=show_progress, missing_locus_min_depth=missing_locus_min_depth,
+            missing_locus_min_fraction=missing_locus_min_fraction, missing_locus_penalty=missing_locus_penalty,
+            classification_repeat_scale=classification_repeat_scale,
+        )
+        result.update(screen_paths)
+        return result
 
     # Candidate-competition inference is independent of SPOARS and runs first.
     # The established downstream sequence workflow remains confirmatory and

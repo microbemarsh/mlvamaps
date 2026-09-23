@@ -19,3 +19,19 @@ python scripts/convert_geonome_metadata.py /path/to/geonome/metadata.tsv \
 Do not add one-off organism-specific converters here. Prefer generic import
 logic in the package, or keep project-specific transformations with the source
 dataset so their provenance remains explicit.
+## Cross-mode validation
+
+`benchmark_cross_mode.py` compares existing assembly/SR/LR runs using a TSV
+manifest with `sample_id`, `mode`, and `outdir` columns. Relative directories are
+resolved against the manifest directory.
+
+```bash
+python scripts/benchmark_cross_mode.py runs.tsv --output comparison.json
+```
+
+It writes JSON metrics and `comparison.loci.tsv`: exact/within-one repeat
+concordance, mean absolute difference, callable loci, full profiles, masked SNP
+concordance and mixture component/fraction concordance. Missing calls never
+become zero. Optional `--distance-matrix MODE=matrix.tsv` arguments compute tied-rank
+Spearman correlation over shared finite off-diagonal distances. SNP comparisons
+exclude unknown bases; component identity requires matching full masked sequence.

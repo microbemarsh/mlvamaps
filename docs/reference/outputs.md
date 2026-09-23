@@ -1,5 +1,10 @@
 # Output file reference
 
+The default FASTQ engines now use [canonical locus reconstruction](../concepts/locus-reconstruction.md).
+That document lists the new engine/insert options, evidence files, formulas and
+compatibility changes; competitive-mapping details below apply to the legacy engines.
+
+
 All generated FASTA and FASTQ artifacts are gzip-compressed by default and use
 a matching `.gz` suffix. Input files are never modified.
 

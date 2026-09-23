@@ -942,6 +942,7 @@ def write_report(
         mixture_table_rows = (
             '<tr><td colspan="10">No retained variants were available for mixture estimation.</td></tr>'
         )
+    canonical_mapping = any(row.get("method") == "canonical_variant_alignment" for row in mapping_rows)
     mapping_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
@@ -954,6 +955,12 @@ def write_report(
         "</tr>"
         for row in mapping_rows
     )
+    if canonical_mapping:
+        mapping_table_rows = (
+            '<tr><td colspan="7">Canonical variant alignments: depths are effective molecule counts; '
+            'SNP positions refer to the repeat-masked dominant product. Raw-read mapping fields are blank.</td></tr>'
+            + mapping_table_rows
+        )
     if not mapping_table_rows:
         mapping_table_rows = (
             '<tr><td colspan="7">Locus representative mapping was disabled or no retained '
