@@ -17,7 +17,7 @@ from .concurrency import resolve_threads
 from .progress import ProgressReporter
 from .io import read_fastq, read_fastq_pairs, write_fasta, write_tsv
 from .locus_measurement import find_anchor
-from .locus_products import LocusProduct, genotype_product, write_products
+from .locus_products import LocusProduct, product_repeat_allele, write_products
 from .mixture import estimate_variant_mixtures
 from .models import Locus, ReadPair
 from .repeat_likelihood import (
@@ -75,7 +75,7 @@ def recover_long_reads(pairs, loci, sample_id, min_fraction=0.01, min_secondary_
             product = oriented[fwd.start:rev.end] if complete else ""
             calibrated_size = (len(product) - (fwd.end-fwd.start) - (rev.end-rev.start)
                                + len(locus.forward_primer) + len(locus.reverse_primer)) if complete else None
-            count = genotype_product(LocusProduct(sample_id, locus.locus_id, "long_read", "molecule", product, calibrated_product_size_bp=calibrated_size), locus).repeat_count if complete else None
+            count = product_repeat_allele(LocusProduct(sample_id, locus.locus_id, "long_read", "molecule", product, calibrated_product_size_bp=calibrated_size), locus)[1] if complete else None
             row = {"sample_id": sample_id, "locus_id": locus.locus_id, "molecule_id": pair.molecule_id,
                    "orientation": strand, "complete": complete, "repeat_count": count,
                    "anchor_edits": sum(a.edit_distance for a in (fwd, rev) if a),
@@ -247,10 +247,10 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
     status = "not_found" if not recruited else "detected_unresolved"
     if best and confidence >= minimum_probability:
         status = "low_coverage" if best.effective_depth < minimum_molecules else "mixed" if len(meaningful) > 1 else "called"
-    repeat = genotype_product(best, locus).repeat_count if best else ""
+    repeat = product_repeat_allele(best, locus)[1] if best else ""
     count_distribution = defaultdict(float)
     for product in ranked:
-        count_distribution[genotype_product(product, locus).repeat_count] += product.estimated_fraction
+        count_distribution[product_repeat_allele(product, locus)[1]] += product.estimated_fraction
     counts = inference.counts if inference else {"E": sum(p.support_count for p in ranked)}
     return {"sample": sample_id, "locus": locus.locus_id, "technology": technology,
             "repeat_count": repeat, "status": status, "best_probability": confidence,
@@ -258,7 +258,7 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
             "molecule_support": recruited, "direct_product_support": counts.get("E", 0),
             "full_span_support": counts.get("E", 0), "junction_support": counts.get("F", 0),
             "dominant_fraction": best.estimated_fraction if best else "",
-            "secondary_repeat": genotype_product(ranked[1], locus).repeat_count if len(ranked)>1 else "",
+            "secondary_repeat": product_repeat_allele(ranked[1], locus)[1] if len(ranked)>1 else "",
             "secondary_fraction": ranked[1].estimated_fraction if len(ranked)>1 else "",
             "candidate_distribution": ";".join(f"{r}:{p:.6f}" for r,p in sorted(count_distribution.items(), key=lambda v:-v[1])),
             "confidence": confidence, "margin": confidence,
@@ -438,8 +438,13 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         stage_seconds["sequence_reconstruction"] = time.perf_counter() - started
     progress.step(f"[{sample_id}] Writing canonical genotypes and evidence")
     started = time.perf_counter()
-    paths = write_products(all_products, loci, output)
-    paths.update(write_compatibility_products(all_products, loci, output))
+    output_stats = {}
+    paths = write_products(all_products, loci, output, progress=progress, statistics=output_stats)
+    compatibility_started = time.perf_counter()
+    progress.step(f"[{sample_id}] Writing molecule memberships and allele predictions")
+    paths.update(write_compatibility_products(all_products, loci, output, progress=progress))
+    output_stats['compatibility_tables_seconds'] = time.perf_counter() - compatibility_started
+    progress.step(f"[{sample_id}] Writing locus calls and evidence summaries")
     if technology == "illumina":
         paths["molecule_repeat_likelihoods"] = molecule_likelihood_path
         if ambiguity_writer is not None:
@@ -466,37 +471,32 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
     stage_seconds["genotype_and_evidence_output"] = time.perf_counter() - started
     paths["reconstruction_metadata"].write_text(json.dumps({"technology": technology, "insert_size": vars(insert) if insert else None,
         "performance": {"stage_seconds": stage_seconds, "recruitment": recruitment_stats,
-                        "loci": locus_stats}}, indent=2) + "\n")
+                        "loci": locus_stats, "output": output_stats}}, indent=2) + "\n")
+    progress.step(f"[{sample_id}] Canonical genotype and evidence output finished in {stage_seconds['genotype_and_evidence_output']:.1f}s")
     return calls, audit, {}, paths
 
 
-def write_compatibility_products(products, loci, output):
+def write_compatibility_products(products, loci, output, *, progress=None):
     """Keep established variant, membership, mixture and read-call tables."""
     from .pipeline import ASV_FIELDS, ASV_MEMBERSHIP_FIELDS, PREDICTION_FIELDS
     from .mixture import MIXTURE_FIELDS
     by_id = {l.locus_id: l for l in loci}
-    variants, memberships, predictions, mixtures = [], [], [], []
+    variants, mixtures, repeats = [], [], []
     totals = Counter()
     dominant = {}
     for product in sorted(products, key=lambda p: -p.estimated_fraction):
         totals[product.locus_id] += product.support_count
         dominant.setdefault(product.locus_id, product.variant_id)
     for p in products:
-        genotype = genotype_product(p, by_id[p.locus_id])
+        raw_repeat, repeat = product_repeat_allele(p, by_id[p.locus_id])
+        repeats.append((raw_repeat, repeat))
         variants.append({"sample_id": p.sample_id, "locus_id": p.locus_id, "variant_id": p.variant_id,
-                         "repeat_count": genotype.repeat_count, "support_reads": p.support_count,
+                         "repeat_count": repeat, "support_reads": p.support_count,
                          "unique_sequences": 1, "frequency": p.estimated_fraction,
                          "representative_read_id": next(iter(p.evidence.get("molecule_ids", [])), ""),
                          "representative_sequence": p.sequence, "representative_length_bp": len(p.sequence)})
-        for molecule in p.evidence.get("molecule_ids", []):
-            membership = {"sample_id": p.sample_id, "read_id": molecule, "locus_id": p.locus_id,
-                          "variant_id": p.variant_id, "repeat_count": genotype.repeat_count}
-            memberships.append(membership)
-            predictions.append({**membership, "predicted_repeat_count": genotype.repeat_count,
-                                "probability": p.reconstruction_confidence,
-                                "evidence_weight": 1, "raw_repeat_count_estimate": genotype.repeat_count_raw})
         mixtures.append({"sample_id": p.sample_id, "locus_id": p.locus_id, "variant_id": p.variant_id,
-                         "repeat_count": genotype.repeat_count, "observed_reads": p.support_count,
+                         "repeat_count": repeat, "observed_reads": p.support_count,
                          "estimated_reads": p.effective_depth, "estimated_fraction": p.estimated_fraction,
                          "observed_fraction": p.support_count / max(totals[p.locus_id], 1),
                          "meaningful": p.evidence.get("meaningful", "yes"),
@@ -507,12 +507,36 @@ def write_compatibility_products(products, loci, output):
     paths = {}
     for key, name, rows, fields in (
         ("mapped_variant_table", "mapped_variant_table.tsv", variants, ASV_FIELDS),
-        ("mapped_read_memberships", "mapped_read_memberships.tsv", memberships, ASV_MEMBERSHIP_FIELDS),
-        ("read_predictions", "read_level_allele_predictions.tsv", predictions, PREDICTION_FIELDS),
         ("mixture_abundance", "vntr_mixture_abundance.tsv", mixtures, MIXTURE_FIELDS),
     ):
         paths[key] = output / name
         write_tsv(rows, paths[key], fields)
+    # Native CSV writers stream repeated molecule rows. Keep one row template
+    # per product, rather than two dictionaries per molecule for the sample.
+    from itertools import islice
+    for key, name, fields in (
+        ("mapped_read_memberships", "mapped_read_memberships.tsv", ASV_MEMBERSHIP_FIELDS),
+        ("read_predictions", "read_level_allele_predictions.tsv", PREDICTION_FIELDS),
+    ):
+        paths[key] = output / name
+        with paths[key].open('w', newline='') as handle:
+            writer = csv.writer(handle, delimiter='\t')
+            writer.writerow(fields)
+            read_column = fields.index('read_id')
+            written = 0
+            for p, (raw_repeat, repeat) in zip(products, repeats):
+                values = {"sample_id": p.sample_id, "locus_id": p.locus_id, "variant_id": p.variant_id,
+                          "repeat_count": repeat, "predicted_repeat_count": repeat,
+                          "probability": p.reconstruction_confidence, "evidence_weight": 1,
+                          "raw_repeat_count_estimate": raw_repeat}
+                row = [values.get(field, '') for field in fields]
+                molecules = iter(p.evidence.get('molecule_ids', []))
+                while batch := list(islice(molecules, 8192)):
+                    writer.writerows(row[:read_column] + [molecule] + row[read_column + 1:]
+                                     for molecule in batch)
+                    written += len(batch)
+                    if progress is not None:
+                        progress.count(f"[{p.sample_id}] {name} rows written", written)
     paths["mapped_variant_representatives"] = output / "mapped_variant_representatives.fasta.gz"
     write_fasta(((p.variant_id, p.sequence) for p in products), paths["mapped_variant_representatives"])
     paths.update({"asv_table": paths["mapped_variant_table"], "asv_memberships": paths["mapped_read_memberships"],

@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -43,15 +44,72 @@ def _iupac_find(pattern: str, sequence: str, start: int = 0) -> int:
     sequence = sequence.upper()
     if not pattern:
         return -1
+    if start >= 0:
+        # Literal searches and compiled character classes both run in native
+        # code. Sequence ambiguity is still literal, not a wildcard.
+        match = _iupac_pattern(pattern).search(sequence, start)
+        return match.start() if match else -1
     for index in range(start, len(sequence) - len(pattern) + 1):
         if all(base in _IUPAC.get(code, frozenset(code)) for code, base in zip(pattern, sequence[index:])):
             return index
     return -1
 
+
+@lru_cache(maxsize=256)
+def _iupac_pattern(pattern: str):
+    return re.compile(''.join('[' + ''.join(sorted(_IUPAC[code])) + ']'
+                             if code in _IUPAC else re.escape(code) for code in pattern))
+
+
+@lru_cache(maxsize=1)
+def _iupac_match_table():
+    table = np.eye(256, dtype=bool)
+    for code, bases in _IUPAC.items():
+        table[ord(code)] = False
+        table[ord(code), [ord(base) for base in bases]] = True
+    table.flags.writeable = False
+    return table
+
+
 def _longest_motif_run(sequence: str, motif: str) -> tuple[int, int] | None:
     motif = motif.upper()
     if not motif or set(motif) == {"N"}:
         return None
+    if len(sequence) < len(motif):
+        return None
+    if not sequence.isascii() or not motif.isascii():
+        return _longest_motif_run_scalar(sequence, motif)
+    # Score each possible unit once in bounded native array blocks, then join
+    # adjacent accepted units separately for each phase. The original search
+    # rescored every remaining unit at every start in a long repeat tract.
+    bases = np.frombuffer(sequence.encode('ascii'), dtype=np.uint8)
+    codes = np.frombuffer(motif.encode('ascii'), dtype=np.uint8)
+    unit = len(motif)
+    windows = np.lib.stride_tricks.sliding_window_view(bases, unit)
+    accepted = np.empty(len(windows), dtype=bool)
+    block = max(1, 1_048_576 // unit)
+    table = _iupac_match_table()
+    for start in range(0, len(windows), block):
+        matches = table[codes, windows[start:start + block]]
+        accepted[start:start + block] = np.count_nonzero(matches, axis=1) >= unit - unit // 8
+    best = None
+    for phase in range(min(unit, len(accepted))):
+        valid = accepted[phase::unit]
+        failures = np.flatnonzero(~valid)
+        starts = np.concatenate(([0], failures + 1))
+        ends = np.concatenate((failures, [len(valid)]))
+        lengths = ends - starts
+        index = int(np.argmax(lengths))
+        length = int(lengths[index]) * unit
+        offset = phase + int(starts[index]) * unit
+        if length and (best is None or length > best[1] - best[0]
+                       or (length == best[1] - best[0] and offset < best[0])):
+            best = (offset, offset + length)
+    return best
+
+
+def _longest_motif_run_scalar(sequence: str, motif: str) -> tuple[int, int] | None:
+    """Preserve literal non-ASCII matching for unusual imported sequences."""
     motif_length = len(motif)
     best: tuple[int, int] | None = None
     for offset in range(len(sequence) - motif_length + 1):

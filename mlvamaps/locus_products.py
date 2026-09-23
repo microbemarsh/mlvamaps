@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
+import time
 from pathlib import Path
 
 from .combined_marker_phylogeny import decompose_marker_sequence
@@ -45,12 +46,17 @@ class ProductGenotype:
     masking_method: str
 
 
-def genotype_product(product: LocusProduct, locus: Locus, tolerance: float | None = None) -> ProductGenotype:
-    """Use the assembly calibration and existing repeat masker for every input."""
-    raw, repeat = assembly_equivalent_product_allele(
+def product_repeat_allele(product: LocusProduct, locus: Locus, tolerance: float | None = None):
+    """Measure repeat count without computing an unused SNP haplotype."""
+    return assembly_equivalent_product_allele(
         locus, product.calibrated_product_size_bp or len(product.sequence),
         product.round_tolerance if tolerance is None else tolerance,
     )
+
+
+def genotype_product(product: LocusProduct, locus: Locus, tolerance: float | None = None) -> ProductGenotype:
+    """Use the assembly calibration and existing repeat masker for every input."""
+    raw, repeat = product_repeat_allele(product, locus, tolerance)
     components = decompose_marker_sequence(locus, product.sequence)
     haplotype = hashlib.sha256(components.snp_sequence.encode()).hexdigest()[:20]
     return ProductGenotype(product, raw, repeat, components.snp_sequence, haplotype,
@@ -72,29 +78,46 @@ PRODUCT_FIELDS = ["sample_id", "locus_id", "source_type", "variant_id", "orienta
                   "sequence", "repeat_likelihoods", "evidence"]
 
 
-def write_products(products: list[LocusProduct], loci: list[Locus], outdir: str | Path) -> dict[str, Path]:
+def write_products(products: list[LocusProduct], loci: list[Locus], outdir: str | Path,
+                   *, progress=None, statistics=None) -> dict[str, Path]:
     output = Path(outdir)
     by_id = {l.locus_id: l for l in loci}
-    rows = []
     genotypes = []
+    started = time.perf_counter()
     for product in products:
+        if progress is not None:
+            progress.step(f"[{product.sample_id}] {product.locus_id}: masking {len(product.sequence):,} bases for canonical genotyping")
         genotype = genotype_product(product, by_id[product.locus_id])
         genotypes.append(genotype)
-        row = {name: getattr(product, name, "") for name in PRODUCT_FIELDS}
-        for name in ("repeat_count", "repeat_count_raw", "haplotype_id", "combined_marker", "masking_method", "snp_sequence"):
-            row[name] = getattr(genotype, name)
-        row["repeat_likelihoods"] = json.dumps(product.repeat_likelihoods, sort_keys=True)
-        row["evidence"] = json.dumps(product.evidence, sort_keys=True)
-        rows.append(row)
+    if statistics is not None:
+        statistics['genotyping_seconds'] = time.perf_counter() - started
+    def rows():
+        for genotype in genotypes:
+            product = genotype.product
+            row = {name: getattr(product, name, "") for name in PRODUCT_FIELDS}
+            for name in ("repeat_count", "repeat_count_raw", "haplotype_id", "combined_marker", "masking_method", "snp_sequence"):
+                row[name] = getattr(genotype, name)
+            row["repeat_likelihoods"] = json.dumps(product.repeat_likelihoods, sort_keys=True)
+            row["evidence"] = json.dumps(product.evidence, sort_keys=True)
+            yield row
+    if progress is not None:
+        progress.step(f"Writing {len(products):,} canonical product sequences and evidence records")
+    started = time.perf_counter()
     fasta = output / "reconstructed_loci.fasta"
     table = output / "reconstructed_locus_variants.tsv"
     write_fasta(((p.variant_id, p.sequence) for p in products), fasta)
-    write_tsv(rows, table, PRODUCT_FIELDS)
+    write_tsv(rows(), table, PRODUCT_FIELDS)
+    if statistics is not None:
+        statistics['product_tables_seconds'] = time.perf_counter() - started
+    started = time.perf_counter()
+    alignment_paths = write_product_alignments(genotypes, output, progress=progress)
+    if statistics is not None:
+        statistics['canonical_alignments_seconds'] = time.perf_counter() - started
     return {"reconstructed_loci": fasta, "reconstructed_locus_variants": table,
-            **write_product_alignments(genotypes, output)}
+            **alignment_paths}
 
 
-def write_product_alignments(genotypes: list[ProductGenotype], output: Path) -> dict[str, Path]:
+def write_product_alignments(genotypes: list[ProductGenotype], output: Path, *, progress=None) -> dict[str, Path]:
     """Align repeat-masked variants once, with explicit canonical coordinates.
 
     SNP depths are component effective molecule counts, not pileup read counts.
@@ -110,6 +133,8 @@ def write_product_alignments(genotypes: list[ProductGenotype], output: Path) -> 
         by_locus[genotype.product.locus_id].append(genotype)
     snps, summaries, alignments, references = [], [], [], []
     for locus_id, variants in sorted(by_locus.items()):
+        if progress is not None:
+            progress.step(f"[{variants[0].product.sample_id}] {locus_id}: aligning {len(variants):,} canonical SNP sequences")
         variants.sort(key=lambda g: (-g.product.estimated_fraction, -g.product.support_count, g.product.variant_id))
         dominant = variants[0]
         reference = dominant.snp_sequence
@@ -120,8 +145,14 @@ def write_product_alignments(genotypes: list[ProductGenotype], output: Path) -> 
         for genotype in variants:
             if not reference or not genotype.snp_sequence:
                 continue
-            result = parasail.nw_trace_striped_32(genotype.snp_sequence, reference, 5, 1, matrix)
-            query, target = result.traceback.query, result.traceback.ref
+            if genotype.snp_sequence == reference and not set(reference) - set('ACGTN'):
+                # Identical strings attain the maximum score without any DP.
+                query = target = reference
+                cigar, score = f"{len(reference)}=", 2 * len(reference)
+            else:
+                result = parasail.nw_trace_striped_32(genotype.snp_sequence, reference, 5, 1, matrix)
+                query, target = result.traceback.query, result.traceback.ref
+                cigar, score = result.cigar.decode.decode(), result.score
             position = 0
             for base, ref in zip(query, target):
                 if ref != "-":
@@ -132,7 +163,7 @@ def write_product_alignments(genotypes: list[ProductGenotype], output: Path) -> 
             alignments.append({"sample_id": genotype.product.sample_id, "locus_id": locus_id,
                 "variant_id": genotype.product.variant_id, "reference_variant_id": dominant.product.variant_id,
                 "aligned_query": query, "aligned_reference": target,
-                "cigar": result.cigar.decode.decode(), "alignment_score": result.score})
+                "cigar": cigar, "alignment_score": score})
         n_snps = 0
         for position, alleles in sorted(counts.items()):
             total = sum(alleles.values())

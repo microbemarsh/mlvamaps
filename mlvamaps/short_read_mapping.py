@@ -146,6 +146,8 @@ def run_mapping_short_read_call(
         )
     stage_seconds["recovery_including_streamed_qc"] = time.perf_counter() - started
     stage_seconds["input_qc_and_intermediate_writes"] = qc_statistics["seconds"]
+    if show_progress:
+        print(f"[{sample_id}] Writing call tables and matching MLVA profiles", flush=True)
     calls = common_calls_to_compatibility(common_calls)
     by_locus = {str(row["locus"]): row for row in common_calls}
     evidence_rows = []
@@ -227,7 +229,7 @@ def run_mapping_short_read_call(
 
         if show_progress:
             print(
-                f"[{sample_id}] Classifying Illumina molecules against observed reference VNTRs"
+                f"[{sample_id}] Classifying Illumina molecules against observed reference VNTRs", flush=True
             )
         from .mapping_classification import run_mapping_classification
         classification_paths.update(run_mapping_classification(
@@ -336,6 +338,8 @@ def run_mapping_short_read_call(
                        "maximum_candidate_repeat_count": short_max_candidate_repeat_count,
                        "secondary_alignments": short_consider_secondary}}, indent=2, sort_keys=True) + "\n")
     started = time.perf_counter()
+    if show_progress:
+        print(f"[{sample_id}] Writing report", flush=True)
     write_report(
         output, sample_id, allele_rows, loci, matches, profiles,
         reference_rows=reference_rows,

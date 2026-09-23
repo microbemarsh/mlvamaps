@@ -95,8 +95,13 @@ def test_recovery_substage_progress_is_visible_in_stdout(tmp_path, capsys):
     output = capsys.readouterr().out
     assert output.index('Loading repeat templates') < output.index('Recruiting short-read molecules')
     assert 'Repeat fitting finished' in output
+    assert 'Writing molecule memberships and allele predictions' in output
+    assert 'Canonical genotype and evidence output finished' in output
     metadata = json.loads(paths['reconstruction_metadata'].read_text())
     assert metadata['performance']['stage_seconds']['template_loading'] >= 0
+    assert set(metadata['performance']['output']) == {
+        'genotyping_seconds', 'product_tables_seconds', 'canonical_alignments_seconds',
+        'compatibility_tables_seconds'}
 
 
 def test_profile_alignments_preserve_original_traceback_and_likelihoods():

@@ -268,3 +268,35 @@ loading, recruitment, fitting, likelihood output, and reconstruction even when
 SLURM sends stderr elsewhere. `reconstruction_metadata.json` includes template
 loading time and `performance.recruitment.template_motif_lengths` so long
 database-derived motifs are visible in completed runs.
+
+### Canonical genotype and evidence output
+
+The output stage separates repeat/SNP masking, canonical sequence alignment,
+molecule memberships, allele predictions, and locus summary tables. Each stage
+reports progress to stdout with immediate flushing. The subsequent reference
+classification message also flushes immediately, so buffered SLURM output does
+not leave the earlier canonical-output message visible during classification.
+`reconstruction_metadata.json` records `performance.output` timings for
+genotyping, product tables, canonical alignments, and compatibility tables.
+These are breakdowns of `stage_seconds.genotype_and_evidence_output`, not
+additional time to sum with it.
+
+The shared repeat masker checks each candidate unit once using bounded NumPy
+blocks, then joins adjacent accepted units by phase. This replaces repeated
+rescanning of long tracts while preserving the mismatch allowance, IUPAC
+semantics, and earliest-start tie rule. Primer/flank searches use compiled
+native regular expressions. Repeat-count-only tables use the existing length
+calibration directly, without calculating unused SNP haplotypes. Identical
+canonical SNP sequences use their exact ungapped alignment instead of running
+dynamic programming; differing sequences still use Parasail.
+
+Membership and prediction tables now stream in 8,192-row batches through the
+native CSV writer. Output columns, row order, molecule IDs and evidence are
+unchanged. On a local synthetic workload with two repeat variants and 100,000
+molecule memberships, canonical output took **0.49 s before and 0.18 s after**.
+Peak Python allocation during membership/prediction output fell from **45.7 MiB
+to 0.77 MiB**, excluding the already-resident products and molecule IDs. All
+output files matched after gzip decompression. A separate 4,000-base perfect
+repeat masking example fell from 0.392 s to 0.00056 s with identical boundaries.
+These timings measure these specific output/masking workloads; they do not
+predict recruitment time or whole-sample runtime on shared cluster storage.
