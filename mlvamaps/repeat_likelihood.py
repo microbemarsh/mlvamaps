@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from collections import Counter
+from functools import lru_cache
 import math
 
 import numpy as np
@@ -53,11 +54,18 @@ class FlankHit:
     edits: int
 
 
+@lru_cache(maxsize=256)
+def _read_profile(sequence: str):
+    return parasail.profile_create_32(sequence, _MATRIX)
+
+
+@lru_cache(maxsize=4096)
 def flank_hit(sequence: str, flank: str, minimum: int = 10) -> FlankHit | None:
     if not sequence or not flank:
         return None
-    result = parasail.sw_trace_striped_32(sequence, flank, 5, 1, _MATRIX)
-    q, r = result.traceback.query, result.traceback.ref
+    result = parasail.sw_trace_striped_profile_32(_read_profile(sequence), flank, 5, 1)
+    traceback = result.traceback
+    q, r = traceback.query, traceback.ref
     aligned = sum(a != "-" and b != "-" for a, b in zip(q, r))
     edits = sum(a != b for a, b in zip(q, r))
     if aligned < min(minimum, len(flank)) or edits / max(aligned, 1) > 0.15:
@@ -67,8 +75,43 @@ def flank_hit(sequence: str, flank: str, minimum: int = 10) -> FlankHit | None:
                     result.score, edits)
 
 
+@lru_cache(maxsize=128)
+def _primitive_motif(motif: str) -> str:
+    return motif[:(motif + motif).find(motif, 1)]
+
+
+@lru_cache(maxsize=128)
+def _motif_phases(motif: str, length: int) -> np.ndarray:
+    """Cache byte templates, not Python per-base comparisons, for each phase."""
+    # A database template can itself contain repeated units. Duplicate phases
+    # are identical evidence and need not be tested more than once.
+    motif = _primitive_motif(motif)
+    bases = np.frombuffer(motif.encode("ascii"), dtype=np.uint8)
+    positions = (np.arange(len(motif))[:, None] + np.arange(length)) % len(motif)
+    phases = bases[positions]
+    phases.flags.writeable = False
+    return phases
+
+
+@lru_cache(maxsize=4096)
 def repetitive(sequence: str, motif: str) -> bool:
     if not sequence or not motif:
+        return False
+    # Same cyclic Hamming test and 90% cutoff as before; NumPy performs the
+    # phase/base loops in native code. Bound cached arrays for long contexts.
+    if sequence.isascii() and motif.isascii():
+        motif = _primitive_motif(motif)
+        bases = np.frombuffer(sequence.encode("ascii"), dtype=np.uint8)
+        if len(sequence) * len(motif) <= 250_000:
+            matches = np.count_nonzero(_motif_phases(motif, len(sequence)) == bases, axis=1)
+            return bool(matches.max() / len(sequence) >= 0.9)
+        motif_bases = np.frombuffer(motif.encode("ascii"), dtype=np.uint8)
+        positions = np.arange(len(sequence))
+        for offset in range(0, len(motif), 64):
+            phases = np.arange(offset, min(offset + 64, len(motif)))[:, None]
+            expected = motif_bases[(positions + phases) % len(motif)]
+            if np.count_nonzero(expected == bases, axis=1).max() / len(sequence) >= 0.9:
+                return True
         return False
     return max(sum(base == motif[(i + offset) % len(motif)] for i, base in enumerate(sequence))
                for offset in range(len(motif))) / len(sequence) >= 0.9
@@ -208,11 +251,12 @@ def flank_insert_length(pair: ReadPair, template: RepeatTemplate) -> float | Non
 
 
 def _scores(evidence: list[MoleculeEvidence], template: RepeatTemplate, states: np.ndarray,
-            insert: InsertDistribution | None) -> np.ndarray:
+            insert: InsertDistribution | None, alignment_cache: dict | None = None) -> np.ndarray:
     sequences = [template.sequence(float(r)) for r in states]
     matrix = np.zeros((len(evidence), len(states)))
     # Repeated reads are common in amplicon data; cache independent realignments.
     cache = {}
+    raw_cache = {} if alignment_cache is None else alignment_cache
     for i, item in enumerate(evidence):
         if "discordant" in item.classes:
             continue
@@ -228,7 +272,12 @@ def _scores(evidence: list[MoleculeEvidence], template: RepeatTemplate, states: 
                 if repetitive(read, template.motif):
                     continue
                 if read not in cache:
-                    scores = np.asarray([parasail.sw_striped_32(read, seq, 5, 1, _MATRIX).score for seq in sequences], dtype=float)
+                    profile = _read_profile(read)
+                    previous = raw_cache.get(read, np.empty(0))
+                    new_scores = np.asarray([parasail.sw_striped_profile_32(profile, seq, 5, 1).score
+                                             for seq in sequences[len(previous):]], dtype=float)
+                    scores = np.concatenate((previous, new_scores))
+                    raw_cache[read] = scores
                     cache[read] = (scores - scores.max()) / 8.0
                 matrix[i] += cache[read]
     return matrix
@@ -265,13 +314,14 @@ def infer_repeat(evidence: list[MoleculeEvidence], template: RepeatTemplate,
     if insert:
         upper = min(maximum, max(upper, math.ceil((insert.mean + 4 * insert.sd) / template.unit)))
     step = 0.5 if template.unit >= 2 else 1.0
+    alignment_cache = {}
     while True:
         candidate_count = int(upper / step) + 1
         candidate_bases = candidate_count * (len(template.left) + len(template.right) + upper * template.unit / 2)
         if candidate_bases > 50_000_000:
             raise ValueError("candidate sequences exceed the 50-million-base memory safety limit; reduce the candidate ceiling")
         states = np.arange(0, upper + step / 2, step)
-        matrix = _scores(evidence, template, states, insert)
+        matrix = _scores(evidence, template, states, insert, alignment_cache)
         joint = matrix.sum(axis=0)
         posterior = np.exp(np.maximum(joint - joint.max(), -700))
         posterior /= posterior.sum()

@@ -35,3 +35,20 @@ concordance and mixture component/fraction concordance. Missing calls never
 become zero. Optional `--distance-matrix MODE=matrix.tsv` arguments compute tied-rank
 Spearman correlation over shared finite off-diagonal distances. SNP comparisons
 exclude unknown bases; component identity requires matching full masked sequence.
+
+## Short-read recruitment performance
+
+`benchmark_short_read_recruitment.py` times a bounded subset of paired or
+single-end FASTQs at several worker counts and checks evidence equivalence.
+Run it in the installed mlvamaps environment and within your CPU allocation:
+
+```bash
+python scripts/benchmark_short_read_recruitment.py \
+  --reads1 R1.fastq.gz --reads2 R2.fastq.gz --primers panel.tsv \
+  --database reference_build --pairs 10000 --threads 1 4 8 \
+  --output recruitment_timing.json
+```
+
+This isolates recruitment, including process startup and audit hashing. It does
+not measure reference classification or end-to-end sample runtime. Production
+calls also record stage timings in `reconstruction_metadata.json`.

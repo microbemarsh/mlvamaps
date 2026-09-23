@@ -121,7 +121,8 @@ def run_mapping_short_read_call(
                  "orphan_path": orphans if reads2_path else None,
                  "max_anchor_edits": max_anchor_edits,
                  "min_fraction": min_mixture_fraction, "min_secondary_reads": min_secondary_reads,
-                 "minimum_spanning_pairs": short_min_spanning_pairs, "round_tolerance": round_tolerance}
+                 "minimum_spanning_pairs": short_min_spanning_pairs, "round_tolerance": round_tolerance,
+                 "show_progress": show_progress, "stream_molecule_evidence": True}
     method = "competitive_minimap2" if sr_engine == "competitive" else "repeat_likelihood" if technology == "illumina" else "spanning_molecules"
     if show_progress:
         print(f"[{sample_id}] Recovering loci using {method}")

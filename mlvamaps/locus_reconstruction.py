@@ -3,12 +3,16 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import replace
+import csv
 import json
+import time
 from pathlib import Path
 
 import numpy as np
 import parasail
 
+from .concurrency import resolve_threads
+from .progress import ProgressReporter
 from .io import read_fastq, read_fastq_pairs, write_fasta, write_tsv
 from .locus_measurement import find_anchor
 from .locus_products import LocusProduct, genotype_product, write_products
@@ -112,7 +116,8 @@ def _project_flanks(item, sequence, template, count):
     for mate, read in enumerate(item.sequences):
         quality = item.qualities[mate] if item.qualities else None
         result = parasail.sw_trace_striped_32(read, sequence, 5, 1, _MATRIX)
-        q, r = result.traceback.query, result.traceback.ref
+        traceback = result.traceback
+        q, r = traceback.query, traceback.ref
         position = result.end_ref + 1 - len(r.replace("-", ""))
         insertion = ""
         query_position = result.end_query + 1 - len(q.replace("-", ""))
@@ -243,10 +248,32 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
             "second_best_repeat_count": inference.second if inference else ""}
 
 
-def run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, outdir, sample_id,
+MOLECULE_AUDIT_FIELDS = [
+    "sample_id", "locus_id", "molecule_id", "classes", "observed_repeat", "lower_bound",
+    "fragment_offset", "orientation", "alignment", "complete", "repeat_count",
+    "anchor_edits", "forward_start", "reverse_end", "variant_id",
+]
+
+
+def run_reconstructed_fastq_inference(*, outdir, stream_molecule_evidence=False, **kwargs):
+    """Optionally stream audit rows; file contents are identical in either mode."""
+    if stream_molecule_evidence and kwargs.get("technology") == "illumina":
+        output = Path(outdir)
+        output.mkdir(parents=True, exist_ok=True)
+        with (output / "molecule_candidate_evidence.tsv").open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=MOLECULE_AUDIT_FIELDS, delimiter="\t", extrasaction="ignore")
+            writer.writeheader()
+            return _run_reconstructed_fastq_inference(outdir=outdir, audit_writer=writer, **kwargs)
+    return _run_reconstructed_fastq_inference(outdir=outdir, **kwargs)
+
+
+def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, outdir, sample_id,
         technology, minimum_molecules, minimum_probability, maximum_candidate_repeat_count=100,
         insert_mean=None, insert_sd=None, orphan_path=None, min_fraction=.01, min_secondary_reads=2,
-        max_anchor_edits=3, threads=1, minimum_spanning_pairs=2, round_tolerance=.25, **_unused):
+        max_anchor_edits=3, threads=1, minimum_spanning_pairs=2, round_tolerance=.25,
+        show_progress=False, audit_writer=None, **_unused):
+    progress = ProgressReporter(enabled=show_progress)
+    stage_seconds, recruitment_stats = {}, {}
     output = Path(outdir)
     output.mkdir(parents=True, exist_ok=True)
     pairs = read_fastq_pairs(reads1, reads2)
@@ -265,37 +292,22 @@ def run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, ou
         templates = locus_templates(loci, database_path)
         evidence = defaultdict(list)
         insert_lengths = []
-        # Small exact flank seeds shortlist loci before costly local alignment.
-        seed_index = defaultdict(set)
-        for locus_id, template in templates.items():
-            if template:
-                for flank in (template.left, template.right):
-                    for pos in range(len(flank)-3):
-                        seed_index[flank[pos:pos+4]].add(locus_id)
-        # Streaming recruitment stores only locus-associated molecules.
-        for pair in pairs:
-            matches = []
-            candidates = set()
-            reads = [pair.read1] + ([pair.read2] if pair.read2 else [])
-            for read in reads:
-                for sequence in (read.sequence.upper(), revcomp(read.sequence)):
-                    for pos in range(len(sequence)-3):
-                        candidates.update(seed_index.get(sequence[pos:pos+4], ()))
-            for locus_id in sorted(candidates):
-                template = templates[locus_id]
-                item = classify_pair(pair, template)
-                if item:
-                    matches.append(item)
-            # Shared motifs/flanks are insufficient to disambiguate taxa/loci.
-            if len(matches) == 1:
-                evidence[matches[0].locus_id].append(matches[0])
-                length = flank_insert_length(pair, templates[matches[0].locus_id])
-                if length:
-                    insert_lengths.append(length)
-            elif matches:
-                for item in matches:
-                    audit.append({"sample_id": sample_id, "locus_id": item.locus_id,
-                                  "molecule_id": item.molecule_id, "classes": "ambiguous_locus", "alignment": json.dumps(item.alignment)})
+        from .short_read_recruitment import recruit_short_reads
+        progress.step(f"[{sample_id}] Recruiting short-read molecules with up to {resolve_threads(threads)} worker(s)")
+        started = time.perf_counter()
+        for chunk in recruit_short_reads(pairs, templates, sample_id, threads, statistics=recruitment_stats):
+            recruitment_stats["pairs_examined"] = recruitment_stats.get("pairs_examined", 0) + chunk.examined
+            recruitment_stats["locus_tests"] = recruitment_stats.get("locus_tests", 0) + chunk.locus_tests
+            for item in chunk.evidence:
+                evidence[item.locus_id].append(item)
+            if audit_writer is None:
+                audit.extend(chunk.ambiguous)
+            else:
+                audit_writer.writerows(chunk.ambiguous)
+            insert_lengths.extend(chunk.insert_lengths)
+            progress.count(f"[{sample_id}] Read pairs recruited/scanned", recruitment_stats["pairs_examined"])
+        stage_seconds["recruitment"] = time.perf_counter() - started
+        progress.step(f"[{sample_id}] Recruitment finished in {stage_seconds['recruitment']:.1f}s; fitting {len(loci)} loci")
         insert = estimate_insert_distribution(insert_lengths, insert_mean, insert_sd)
         def fit_locus(locus):
             items = [e for e in evidence[locus.locus_id] if e.classes and "discordant" not in e.classes]
@@ -304,13 +316,16 @@ def run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, ou
             if result and not any("E" in e.classes for e in items) and sum("S" in e.classes for e in items) < minimum_spanning_pairs:
                 result.identifiable = False
             return result
-        from .concurrency import resolve_threads
         from concurrent.futures import ThreadPoolExecutor
+        started = time.perf_counter()
         if resolve_threads(threads) > 1 and len(loci) > 1:
             with ThreadPoolExecutor(max_workers=min(len(loci), resolve_threads(threads))) as executor:
                 fitted = list(executor.map(fit_locus, loci))
         else:
             fitted = [fit_locus(locus) for locus in loci]
+        stage_seconds["repeat_fitting"] = time.perf_counter() - started
+        progress.step(f"[{sample_id}] Repeat fitting finished in {stage_seconds['repeat_fitting']:.1f}s; writing molecule likelihoods")
+        started = time.perf_counter()
         molecule_likelihood_path = output / "molecule_repeat_likelihoods.tsv"
         def molecule_likelihood_rows():
             for locus, inference in zip(loci, fitted):
@@ -322,6 +337,9 @@ def run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, ou
                                    "molecule_id": item.molecule_id, "repeat_count": state, "log_likelihood": score}
         write_tsv(molecule_likelihood_rows(), molecule_likelihood_path,
                   ["sample_id", "locus_id", "molecule_id", "repeat_count", "log_likelihood"])
+        stage_seconds["molecule_likelihood_output"] = time.perf_counter() - started
+        progress.step(f"[{sample_id}] Reconstructing locus sequences")
+        started = time.perf_counter()
         for locus, inference in zip(loci, fitted):
             items = evidence[locus.locus_id]
             usable = [e for e in items if e.classes and "discordant" not in e.classes]
@@ -345,10 +363,17 @@ def run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, ou
                 likelihood_rows.extend({"sample_id": sample_id, "locus_id": locus.locus_id, "repeat_count": r,
                     "log_likelihood": ll, "posterior": p} for r,ll,p in zip(inference.states, inference.log_likelihoods, inference.posterior))
             for item in items:
-                audit.append({"sample_id": sample_id, "locus_id": locus.locus_id, "molecule_id": item.molecule_id,
+                row = {"sample_id": sample_id, "locus_id": locus.locus_id, "molecule_id": item.molecule_id,
                               "classes": ";".join(item.classes), "observed_repeat": item.observed_repeat,
                               "lower_bound": item.lower_bound, "fragment_offset": item.fragment_offset,
-                              "orientation": ";".join(item.orientations), "alignment": json.dumps(item.alignment)})
+                              "orientation": ";".join(item.orientations), "alignment": json.dumps(item.alignment)}
+                if audit_writer is None:
+                    audit.append(row)
+                else:
+                    audit_writer.writerow(row)
+        stage_seconds["sequence_reconstruction"] = time.perf_counter() - started
+    progress.step(f"[{sample_id}] Writing canonical genotypes and evidence")
+    started = time.perf_counter()
     paths = write_products(all_products, loci, output)
     paths.update(write_compatibility_products(all_products, loci, output))
     if technology == "illumina":
@@ -357,21 +382,24 @@ def run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, ou
     for key, filename, rows, fields in (
         ("common_locus_calls", "common_locus_calls.tsv", calls, COMMON_LOCUS_CALL_FIELDS),
         ("molecule_evidence", "molecule_candidate_evidence.tsv", audit,
-         ["sample_id", "locus_id", "molecule_id", "classes", "observed_repeat", "lower_bound", "fragment_offset", "orientation", "alignment", "complete", "repeat_count", "anchor_edits", "forward_start", "reverse_end", "variant_id"]),
+         MOLECULE_AUDIT_FIELDS),
         ("short_read_repeat_evidence", "short_read_repeat_evidence.tsv", summaries,
          ["sample_id", "locus_id", "E", "S", "F", "FRR", "best_repeat", "second_repeat", "confidence", "interval_min", "interval_max", "effective_depth", "limit_reached", "identifiable", "components", "reason"]),
         ("repeat_likelihoods", "repeat_likelihoods.tsv", likelihood_rows,
          ["sample_id", "locus_id", "repeat_count", "log_likelihood", "posterior"]),
     ):
         paths[key] = output / filename
-        write_tsv(rows, paths[key], fields)
+        if key != "molecule_evidence" or audit_writer is None:
+            write_tsv(rows, paths[key], fields)
     dominant = {}
     for product in sorted(all_products, key=lambda p: -p.estimated_fraction):
         dominant.setdefault(product.locus_id, product.sequence)
     paths["taxonomic_query_sequences"] = output / "taxonomic_query_sequences.fasta"
     write_fasta(dominant.items(), paths["taxonomic_query_sequences"])
     paths["reconstruction_metadata"] = output / "reconstruction_metadata.json"
-    paths["reconstruction_metadata"].write_text(json.dumps({"technology": technology, "insert_size": vars(insert) if insert else None}, indent=2) + "\n")
+    stage_seconds["genotype_and_evidence_output"] = time.perf_counter() - started
+    paths["reconstruction_metadata"].write_text(json.dumps({"technology": technology, "insert_size": vars(insert) if insert else None,
+        "performance": {"stage_seconds": stage_seconds, "recruitment": recruitment_stats}}, indent=2) + "\n")
     return calls, audit, {}, paths
 
 
