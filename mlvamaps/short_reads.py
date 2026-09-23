@@ -174,6 +174,7 @@ def run_short_read_call(
     max_anchor_edits: int = 3,
     min_mixture_fraction: float = .01,
     min_secondary_reads: int = 2,
+    sr_recruitment_audit: str = "compact",
 ) -> dict[str, Path]:
     """Call Illumina data using locus reconstruction or legacy competition."""
     from .short_read_mapping import run_mapping_short_read_call
@@ -197,6 +198,7 @@ def run_short_read_call(
         missing_locus_penalty=missing_locus_penalty,
         classification_repeat_scale=classification_repeat_scale,
         sr_engine=sr_engine, insert_mean=insert_mean, insert_sd=insert_sd,
+        sr_recruitment_audit=sr_recruitment_audit,
         technology=technology, max_anchor_edits=max_anchor_edits, round_tolerance=round_tolerance,
         min_mixture_fraction=min_mixture_fraction, min_secondary_reads=min_secondary_reads,
         reference_metadata_path=reference_metadata_path,

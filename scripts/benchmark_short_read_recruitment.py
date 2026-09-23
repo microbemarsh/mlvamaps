@@ -7,7 +7,7 @@ Example (run in the installed mlvamaps environment):
     --pairs 10000 --threads 1 4 8 --output recruitment_timing.json
 
 This benchmarks recruitment, not QC, repeat inference, classification or reports.
-Every worker count must produce the same retained evidence fingerprint. Run this
+Every worker count and audit mode must produce the same retained evidence fingerprint. Run this
 inside an allocation large enough for the largest requested worker count.
 """
 from __future__ import annotations
@@ -41,29 +41,34 @@ def positive_int(value):
     return parsed
 
 
-def benchmark(pairs, templates, threads):
+def benchmark(pairs, templates, threads, audit_mode="compact"):
     # Prevent an earlier serial run from warming the next one's caches.
     for function in (_cyclic_search_text, _motif_phases, _primitive_motif, _read_profile, _flank_profile, flank_hit, repetitive):
         function.cache_clear()
     digest = hashlib.sha256()
+    audit_digest = hashlib.sha256()
     statistics = {}
-    unique = ambiguous = 0
+    unique = ambiguous = locus_tests = skipped = 0
     started = time.perf_counter()
-    for chunk in recruit_short_reads(iter(pairs), templates, 'benchmark', threads, statistics=statistics):
+    for chunk in recruit_short_reads(iter(pairs), templates, 'benchmark', threads, statistics=statistics,
+                                    audit_mode=audit_mode):
         unique += len(chunk.evidence)
-        ambiguous += len(chunk.ambiguous)
+        ambiguous += chunk.ambiguous_pairs
+        locus_tests += chunk.locus_tests
+        skipped += chunk.skipped_locus_tests
         # Hash one record at a time to keep audit memory bounded.
-        for kind, rows in (('unique', (asdict(e) for e in chunk.evidence)), ('ambiguous', chunk.ambiguous)):
-            for row in rows:
-                digest.update(kind.encode())
-                digest.update(json.dumps(row, sort_keys=True).encode())
+        for item in chunk.evidence:
+            digest.update(json.dumps(asdict(item), sort_keys=True).encode())
         for length in chunk.insert_lengths:
             digest.update(repr(length).encode())
+        for row in chunk.ambiguous if audit_mode == 'full' else chunk.ambiguity_witnesses:
+            audit_digest.update(json.dumps(row, sort_keys=True).encode())
     elapsed = time.perf_counter() - started
-    return {'requested_threads': threads, 'workers': statistics['workers'],
+    return {'requested_threads': threads, 'workers': statistics['workers'], 'audit_mode': audit_mode,
             'pairs': len(pairs), 'seconds': elapsed, 'pairs_per_second': len(pairs)/elapsed,
-            'uniquely_recruited_pairs': unique, 'ambiguous_locus_rows': ambiguous,
-            'evidence_sha256': digest.hexdigest()}
+            'uniquely_recruited_pairs': unique, 'ambiguous_pairs': ambiguous,
+            'locus_tests': locus_tests, 'skipped_locus_tests': skipped,
+            'evidence_sha256': digest.hexdigest(), 'audit_sha256': audit_digest.hexdigest()}
 
 
 def main():
@@ -76,6 +81,7 @@ def main():
     parser.add_argument('--database')
     parser.add_argument('--pairs', type=positive_int, default=10000)
     parser.add_argument('--threads', type=positive_int, nargs='+', default=[1, 4])
+    parser.add_argument('--audit-modes', choices=['compact', 'full'], nargs='+', default=['full', 'compact'])
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     loci = read_loci_or_primers(args.loci, args.primers)
@@ -83,12 +89,17 @@ def main():
     pairs, qc = qc_read_pairs(list(islice(read_fastq_pairs(args.reads1, args.reads2), args.pairs)),
                              min_length=40, min_mean_quality=15, trim_quality=0, min_pair_retention=.5)
     results = []
-    for threads in args.threads:
-        row = benchmark(pairs, templates, threads)
-        print(json.dumps(row), flush=True)
-        if results and row['evidence_sha256'] != results[0]['evidence_sha256']:
-            raise RuntimeError('recruitment evidence changed with worker count')
-        results.append(row)
+    for mode in args.audit_modes:
+        for threads in args.threads:
+            row = benchmark(pairs, templates, threads, mode)
+            print(json.dumps(row), flush=True)
+            if results and any(row[key] != results[0][key] for key in
+                               ('evidence_sha256', 'uniquely_recruited_pairs', 'ambiguous_pairs')):
+                raise RuntimeError('recruitment evidence changed with worker count or audit mode')
+            if any(row['audit_sha256'] != previous['audit_sha256'] for previous in results
+                   if previous['audit_mode'] == mode):
+                raise RuntimeError('recruitment audit changed with worker count')
+            results.append(row)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({'qc': qc, 'recruitment_benchmarks': results}, indent=2)+'\n')
 

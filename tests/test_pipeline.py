@@ -683,6 +683,9 @@ def test_cli_has_conventional_output_and_thread_options():
     )
     assert default_call_args.outdir == "results"
     assert default_call_args.threads == 32
+    assert default_call_args.sr_recruitment_audit == 'compact'
+    assert parser.parse_args(['call', '-p', 'primers.tsv', '-i', 'sample.fastq.gz',
+                              '--sr-recruitment-audit', 'full']).sr_recruitment_audit == 'full'
     assert default_call_args.min_qscore == 15.0
     assert default_call_args.sample_mode == "metagenome"
     assert default_call_args.recruitment_preset is None

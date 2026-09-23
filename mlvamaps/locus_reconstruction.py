@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from contextlib import ExitStack
 from dataclasses import replace
 import csv
 import json
@@ -278,14 +279,22 @@ MOLECULE_AUDIT_FIELDS = [
 
 
 def run_reconstructed_fastq_inference(*, outdir, stream_molecule_evidence=False, **kwargs):
-    """Optionally stream audit rows; file contents are identical in either mode."""
-    if stream_molecule_evidence and kwargs.get("technology") == "illumina":
+    """Own diagnostic streams for the duration of inference."""
+    if kwargs.get("technology") == "illumina":
         output = Path(outdir)
         output.mkdir(parents=True, exist_ok=True)
-        with (output / "molecule_candidate_evidence.tsv").open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=MOLECULE_AUDIT_FIELDS, delimiter="\t", extrasaction="ignore")
-            writer.writeheader()
-            return _run_reconstructed_fastq_inference(outdir=outdir, audit_writer=writer, audit_handle=handle, **kwargs)
+        with ExitStack() as stack:
+            if stream_molecule_evidence:
+                handle = stack.enter_context((output / "molecule_candidate_evidence.tsv").open("w", newline=""))
+                writer = csv.DictWriter(handle, fieldnames=MOLECULE_AUDIT_FIELDS, delimiter="\t", extrasaction="ignore")
+                writer.writeheader()
+                kwargs.update(audit_writer=writer, audit_handle=handle)
+            if kwargs.get("sr_recruitment_audit", "full") == "compact":
+                handle = stack.enter_context((output / "ambiguous_molecules.tsv").open("w", newline=""))
+                writer = csv.writer(handle, delimiter="\t")
+                writer.writerow(["sample_id", "molecule_id", "witness_locus_1", "witness_locus_2", "candidate_search_complete"])
+                kwargs["ambiguity_writer"] = writer
+            return _run_reconstructed_fastq_inference(outdir=outdir, **kwargs)
     return _run_reconstructed_fastq_inference(outdir=outdir, **kwargs)
 
 
@@ -294,7 +303,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         insert_mean=None, insert_sd=None, orphan_path=None, min_fraction=.01, min_secondary_reads=2,
         max_anchor_edits=3, threads=1, minimum_spanning_pairs=2, round_tolerance=.25,
         show_progress=False, audit_writer=None, audit_handle=None, pairs=None,
-        recruitment_threads=None, **_unused):
+        recruitment_threads=None, sr_recruitment_audit="full", ambiguity_writer=None, **_unused):
     progress = ProgressReporter(enabled=show_progress, stream=sys.stdout)
     stage_seconds, recruitment_stats, locus_stats = {}, {}, {}
     output = Path(outdir)
@@ -325,12 +334,19 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         insert_lengths = []
         from .short_read_recruitment import recruit_short_reads
         recruitment_threads = threads if recruitment_threads is None else recruitment_threads
-        progress.step(f"[{sample_id}] Recruiting short-read molecules with up to {resolve_threads(recruitment_threads)} worker(s)")
+        progress.step(f"[{sample_id}] Recruiting short-read molecules with up to {resolve_threads(recruitment_threads)} worker(s); {sr_recruitment_audit} ambiguity audit")
         started = time.perf_counter()
+        recruitment_stats.update(pairs_examined=0, locus_tests=0, uniquely_recruited_pairs=0,
+                                 ambiguous_pairs=0, unmatched_pairs=0, skipped_locus_tests=0)
         for chunk in recruit_short_reads(pairs, templates, sample_id, recruitment_threads, statistics=recruitment_stats,
-                                        audit_fields=MOLECULE_AUDIT_FIELDS if audit_handle is not None else None):
-            recruitment_stats["pairs_examined"] = recruitment_stats.get("pairs_examined", 0) + chunk.examined
-            recruitment_stats["locus_tests"] = recruitment_stats.get("locus_tests", 0) + chunk.locus_tests
+                                        audit_fields=MOLECULE_AUDIT_FIELDS if audit_handle is not None else None,
+                                        audit_mode=sr_recruitment_audit):
+            recruitment_stats["pairs_examined"] += chunk.examined
+            recruitment_stats["uniquely_recruited_pairs"] += len(chunk.evidence)
+            for key in ("locus_tests", "ambiguous_pairs", "unmatched_pairs", "skipped_locus_tests"):
+                recruitment_stats[key] += getattr(chunk, key)
+            if ambiguity_writer is not None:
+                ambiguity_writer.writerows((sample_id, *row) for row in chunk.ambiguity_witnesses)
             for item in chunk.evidence:
                 evidence[item.locus_id].append(item)
             if audit_handle is not None:
@@ -340,8 +356,12 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             else:
                 audit_writer.writerows(chunk.ambiguous)
             insert_lengths.extend(chunk.insert_lengths)
-            progress.count(f"[{sample_id}] Read pairs recruited/scanned", recruitment_stats["pairs_examined"])
+            rate = recruitment_stats["pairs_examined"] / max(time.perf_counter() - started, 1e-9)
+            progress.count(f"[{sample_id}] Read pairs scanned", recruitment_stats["pairs_examined"],
+                           detail=f"{recruitment_stats['uniquely_recruited_pairs']:,} unique, "
+                                  f"{recruitment_stats['ambiguous_pairs']:,} ambiguous; {rate:,.0f} pairs/s")
         stage_seconds["recruitment"] = time.perf_counter() - started
+        recruitment_stats["pairs_per_second"] = recruitment_stats["pairs_examined"] / max(stage_seconds["recruitment"], 1e-9)
         progress.step(f"[{sample_id}] Recruitment finished in {stage_seconds['recruitment']:.1f}s; fitting {len(loci)} loci")
         insert = estimate_insert_distribution(insert_lengths, insert_mean, insert_sd)
         def fit_locus(locus):
@@ -422,6 +442,8 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
     paths.update(write_compatibility_products(all_products, loci, output))
     if technology == "illumina":
         paths["molecule_repeat_likelihoods"] = molecule_likelihood_path
+        if ambiguity_writer is not None:
+            paths["ambiguous_molecules"] = output / "ambiguous_molecules.tsv"
     from .allele_inference import COMMON_LOCUS_CALL_FIELDS
     for key, filename, rows, fields in (
         ("common_locus_calls", "common_locus_calls.tsv", calls, COMMON_LOCUS_CALL_FIELDS),

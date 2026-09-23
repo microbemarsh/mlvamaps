@@ -204,6 +204,24 @@ class MoleculeEvidence:
     qualities: tuple[str | None, ...] = ()
 
 
+def pair_has_anchor(pair: ReadPair, template: RepeatTemplate) -> bool:
+    """Whether classify_pair would retain this pair, without building evidence.
+
+    Every accepted flank hit has a positive score, so an orientation with an
+    anchor always outranks one without anchors. One hit therefore proves that
+    classify_pair returns evidence, regardless of its eventual evidence tags.
+    Repeat-only orientations remain excluded exactly as in classify_pair.
+    """
+    for read in (pair.read1, pair.read2):
+        if read is None:
+            continue
+        for sequence in (read.sequence.upper(), revcomp(read.sequence)):
+            if not repetitive(sequence, template.motif) and (
+                    flank_hit(sequence, template.left) or flank_hit(sequence, template.right)):
+                return True
+    return False
+
+
 def classify_pair(pair: ReadPair, template: RepeatTemplate) -> MoleculeEvidence | None:
     """Anchor to non-repeat sequence; count each pair once, with multiple tags."""
     reads = [pair.read1] + ([pair.read2] if pair.read2 else [])

@@ -54,6 +54,7 @@ def run_mapping_short_read_call(
     sr_engine: str = "repeat-likelihood", insert_mean=None, insert_sd=None,
     technology: str = "illumina", max_anchor_edits: int = 3, round_tolerance: float = .25,
     min_mixture_fraction: float = .01, min_secondary_reads: int = 2,
+    sr_recruitment_audit: str = "compact",
 ) -> dict[str, Path]:
     """Select recovery strategy and emit established output views."""
     # Lazy imports avoid a module cycle with the shared Illumina helpers.
@@ -70,6 +71,8 @@ def run_mapping_short_read_call(
 
     if sr_engine not in {"repeat-likelihood", "competitive"}:
         raise ValueError("unknown short-read engine")
+    if sr_recruitment_audit not in {"compact", "full"}:
+        raise ValueError("short-read recruitment audit must be compact or full")
     from .repeat_likelihood import estimate_insert_distribution
     estimate_insert_distribution([], insert_mean, insert_sd)
     run_started = time.perf_counter()
@@ -115,6 +118,7 @@ def run_mapping_short_read_call(
         extra = {"insert_mean": insert_mean, "insert_sd": insert_sd,
                  "pairs": pair_stream,
                  "recruitment_threads": io_plan['recruitment_workers'],
+                 "sr_recruitment_audit": sr_recruitment_audit,
                  "max_anchor_edits": max_anchor_edits,
                  "min_fraction": min_mixture_fraction, "min_secondary_reads": min_secondary_reads,
                  "minimum_spanning_pairs": short_min_spanning_pairs, "round_tolerance": round_tolerance,
@@ -325,6 +329,7 @@ def run_mapping_short_read_call(
                        "database": database_path or "panel-derived",
                        "performance": {"stage_seconds": stage_seconds, "qc": qc_statistics, "io": io_plan},
                        "insert_size": insert_stats, "parameters": {"minimum_mapq": short_min_mapping_quality,
+                       "recruitment_audit": sr_recruitment_audit,
                        "minimum_supporting_fragments": min_depth,
                        "minimum_spanning_pairs": short_min_spanning_pairs,
                        "confidence_threshold": short_confidence_threshold,

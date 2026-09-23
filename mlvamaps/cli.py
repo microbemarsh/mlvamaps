@@ -437,6 +437,8 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     )
     call.add_argument("--sr-engine", choices=("repeat-likelihood", "competitive"), default="repeat-likelihood",
                       help="Short-read recovery engine; competitive is legacy/debug")
+    call.add_argument("--sr-recruitment-audit", choices=("compact", "full"), default="compact",
+                      help="Ambiguous-pair diagnostics: compact stops after two loci; full tests all loci (slower)")
     call.add_argument("--lr-engine", choices=("spanning", "competitive"), default="spanning",
                       help="Long-read recovery engine; competitive is legacy/debug")
     call.add_argument("--insert-mean", type=_positive_float, help="Library fragment mean in bp (requires --insert-sd)")
@@ -1011,6 +1013,7 @@ def _run_short_input(
         short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
         short_consider_secondary=not args.no_short_secondary_alignments,
         sr_engine=args.sr_engine, insert_mean=args.insert_mean, insert_sd=args.insert_sd,
+        sr_recruitment_audit=args.sr_recruitment_audit,
         min_mixture_fraction=args.min_mixture_fraction, min_secondary_reads=args.min_secondary_reads,
         missing_locus_min_depth=args.missing_locus_min_depth,
         missing_locus_min_fraction=args.missing_locus_min_fraction,

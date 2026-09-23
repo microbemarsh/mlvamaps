@@ -37,8 +37,8 @@ The motif test retains the same cyclic Hamming comparison and 90% threshold,
 but runs its base/phase comparisons in NumPy. Bounded caches reuse motif phases,
 read profiles and flank results. Synthetic candidate expansion reuses previously
 calculated read/candidate alignment scores. Recruitment seed lengths and evidence
-thresholds are unchanged. Ambiguous-molecule audit rows are streamed to their
-existing TSV instead of accumulating in RAM. Uniquely recruited evidence remains
+thresholds are unchanged. Ambiguous-molecule diagnostics are streamed instead of
+accumulating in RAM (see compact/full audit modes below). Uniquely recruited evidence remains
 in memory for inference; output volume and fitting cost still scale with evidence.
 The core optimizations require no additional dependencies or switches. Optional
 native I/O libraries described below further accelerate compressed FASTQs.
@@ -46,7 +46,8 @@ native I/O libraries described below further accelerate compressed FASTQs.
 Progress messages now separate recruitment, repeat fitting, likelihood output,
 sequence reconstruction and genotype output. `reconstruction_metadata.json`
 adds `performance.stage_seconds` and `performance.recruitment` (actual worker
-count, chunk size, examined pairs and locus tests). Recruitment now includes
+count, chunk size, examined pairs, locus tests, skipped locus tests, unique,
+ambiguous and unmatched pair counts, audit mode and pairs per second). Recruitment now includes
 streamed input/QC time. Subsequent reference classification is timed separately
 in `short_read_run_metadata.json`. Each process has
 its own bounded caches, so memory still increases with worker count.
@@ -75,9 +76,54 @@ python scripts/benchmark_short_read_recruitment.py \
 ```
 
 Choose worker counts within the allocated CPUs. The benchmark includes worker
-startup and evidence hashing and verifies an identical evidence fingerprint for
-all requested worker counts. It uses the default SR QC thresholds; it does not
+startup and evidence hashing and compares both full and compact audit modes by
+default. It verifies identical retained evidence and insert calibration for all
+requested worker counts and modes, and identical diagnostics across worker
+counts within each mode. Use `--audit-modes compact` to time only the default
+caller path. It uses the default SR QC thresholds; it does not
 run repeat inference or reference classification.
+
+### Avoiding exhaustive work on ambiguous pairs
+
+The default `--sr-recruitment-audit compact` stops testing a pair once two loci
+have accepted anchors. Such a pair was already excluded from genotyping as
+ambiguous; testing further loci cannot change that decision. Locus membership
+uses the same Parasail flank alignments and repeat-only exclusion, but stops at
+the first accepted anchor. Full evidence classification runs only after a pair
+has been proven unique. Every candidate locus is still checked for pairs with
+zero or one match, with unchanged thresholds, insert calibration, genotype
+evidence and mixture inputs. The seed scan also stops once all loci are already
+candidates.
+
+In compact mode, `molecule_candidate_evidence.tsv` contains uniquely recruited
+evidence. `ambiguous_molecules.tsv` records one row per excluded pair with its
+sample ID, molecule ID, two witness locus IDs and `candidate_search_complete`
+(`yes` or `no`). Witnesses are sufficient to establish ambiguity, but are not an
+exhaustive list of matching loci. `--sr-recruitment-audit full` restores the
+exhaustive per-locus `ambiguous_locus` rows and alignments in
+`molecule_candidate_evidence.tsv`. This option applies to the repeat-likelihood
+engine; it does not change the legacy competitive engine.
+
+Progress now reports `Read pairs scanned`, unique and ambiguous counts, and
+pairs/s. The earlier `recruited/scanned` counter counted all examined pairs,
+including those discarded. Benefit depends on the ambiguous fraction and panel
+size; uniquely recruited pairs still require an exhaustive candidate search.
+An existing running process must be restarted with the updated installation to
+use these changes.
+
+Local single-worker benchmarks of 500 paired 150-base reads across 12 loci gave:
+
+| Motif lengths | Full audit | Compact audit |
+| --- | ---: | ---: |
+| 12/60 bases | 0.99 s | 0.14 s |
+| 1,800 bases | 3.09 s | 0.49 s |
+
+All pairs in these two synthetic workloads were ambiguous: they measure the
+benefit of early rejection, not genotype fitting or real-sample throughput. A
+separate 600-pair, three-locus workload retained all 600 unique pairs with
+identical evidence and insert fingerprints across both modes and one/four
+requested workers. Regression tests also compare genotype, SNP, mixture and
+likelihood outputs on inputs containing both unique and ambiguous pairs.
 
 ### Streaming QC and native gzip libraries
 
@@ -121,7 +167,7 @@ other platforms keep the original reader. `python-isal` is also included in
 Flank alignment now uses Parasail's SIMD byte lanes with an explicit wider-lane
 fallback on saturation. Impossible anchor scores skip traceback decoding, using
 a bound derived from the existing scoring and edit cutoff. Worker processes
-format ambiguous audit TSV chunks before sending them to the parent. These
+format full-mode ambiguous audit TSV chunks before sending them to the parent. These
 changes preserve evidence rather than subsampling it or changing anchor cutoffs.
 
 `short_read_run_metadata.json` records `performance.io`, the selected gzip writer,

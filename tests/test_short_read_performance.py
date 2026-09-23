@@ -234,19 +234,110 @@ def test_bit_mask_seed_filter_preserves_exhaustive_matches():
     assert [(row['molecule_id'],row['locus_id']) for row in chunk.ambiguous] == expected_ambiguous
 
 
-def test_parallel_recruitment_is_ordered_and_matches_serial():
+@pytest.mark.parametrize('audit_mode', ['full', 'compact'])
+def test_parallel_recruitment_is_ordered_and_matches_serial(audit_mode):
     pairs = list(reads())
     # Deliberately duplicate locus context to exercise ambiguous-molecule output.
     ts = templates()
+    from dataclasses import replace
+    ts['L1'] = replace(ts['L0'], locus=replace(ts['L0'].locus, locus_id='L1'))
     def collect(workers):
         stats = {}
-        result = list(recruit_short_reads(iter(pairs), ts, 's', workers, chunk_size=4, statistics=stats))
+        result = list(recruit_short_reads(iter(pairs), ts, 's', workers, chunk_size=4,
+                                         statistics=stats, audit_mode=audit_mode))
         return [asdict(chunk) for chunk in result], stats
     serial, _ = collect(1)
     parallel, stats = collect(2)
     assert serial == parallel
     assert stats['workers'] == 2
     assert sum(c['examined'] for c in parallel) == len(pairs)
+
+
+def test_anchor_existence_matches_complete_classification():
+    from mlvamaps.repeat_likelihood import pair_has_anchor
+    rng = random.Random(810)
+    cases = list(reads())
+    # Orphans, repeat-only reads, reverse reads, ambiguous bases and indels.
+    t = templates()['L0']
+    sequences = [t.motif*40, revcomp(t.motif*40), 'N'*150, '', t.left,
+                 t.sequence(5)[:30] + 'N' + t.sequence(5)[32:]]
+    sequences += [''.join(rng.choices('ACGTN', k=150)) for _ in range(100)]
+    for i, sequence in enumerate(sequences):
+        cases.append(ReadPair(str(i), ReadRecord(str(i), sequence)))
+        cases.append(ReadPair(str(i), ReadRecord(str(i), 'AATG'*30), ReadRecord(str(i), sequence)))
+    for pair in cases:
+        for template in templates().values():
+            assert pair_has_anchor(pair, template) == (classify_pair(pair, template) is not None)
+
+
+def test_compact_recruitment_preserves_unique_evidence_and_insert_calibration():
+    from dataclasses import replace
+    ts = templates()
+    ts['L1'] = replace(ts['L0'], locus=replace(ts['L0'].locus, locus_id='L1'))
+    pairs = list(reads())
+    flank = ts['L2'].left
+    pairs.append(ReadPair('insert', ReadRecord('insert/1', flank[:25]),
+                          ReadRecord('insert/2', revcomp(flank[-25:]))))
+    full = ShortReadRecruiter(ts, 's', audit_mode='full').recruit(pairs)
+    compact = ShortReadRecruiter(ts, 's', audit_mode='compact').recruit(pairs)
+    assert full.evidence and full.ambiguous_pairs and full.unmatched_pairs and full.insert_lengths
+    assert compact.evidence == full.evidence
+    assert compact.insert_lengths == full.insert_lengths
+    assert compact.ambiguous_pairs == full.ambiguous_pairs
+    assert compact.unmatched_pairs == full.unmatched_pairs
+    assert compact.examined == len(compact.evidence) + compact.ambiguous_pairs + compact.unmatched_pairs
+    assert compact.locus_tests + compact.skipped_locus_tests == full.locus_tests
+    assert compact.skipped_locus_tests > 0
+    assert len(compact.ambiguity_witnesses) == compact.ambiguous_pairs
+    full_hits = {}
+    for row in full.ambiguous:
+        full_hits.setdefault(row['molecule_id'], []).append(row['locus_id'])
+    for molecule, first, second, complete in compact.ambiguity_witnesses:
+        assert [first, second] == full_hits[molecule][:2]
+        assert complete == 'no'
+    # Two candidates really do complete the search; absent templates do not count.
+    compact = ShortReadRecruiter({'L0': ts['L0'], 'L1': ts['L1'], 'absent': None}, 's',
+                                audit_mode='compact').recruit(pairs[:1])
+    assert compact.ambiguity_witnesses == [('0', 'L0', 'L1', 'yes')]
+    assert compact.skipped_locus_tests == 0
+
+
+@pytest.mark.parametrize('stream', [False, True])
+def test_compact_recovery_preserves_genotypes_and_writes_ambiguity_witnesses(tmp_path, stream):
+    import csv
+    import gzip
+    from dataclasses import replace
+    from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
+    ts = templates()
+    ts['L1'] = replace(ts['L0'], locus=replace(ts['L0'].locus, locus_id='L1'))
+    pairs = list(reads(30))
+    results = {}
+    for mode in ('full', 'compact'):
+        results[mode] = run_reconstructed_fastq_inference(reads1=None, reads2=None, pairs=iter(pairs),
+            loci=[t.locus for t in ts.values()], database_path=None, outdir=tmp_path/mode,
+            sample_id='s', technology='illumina', minimum_molecules=3, minimum_probability=.8,
+            sr_recruitment_audit=mode, stream_molecule_evidence=stream)
+    full, compact = results['full'], results['compact']
+    assert full[0] == compact[0]
+    for key, path in full[3].items():
+        if key in {'reconstruction_metadata', 'molecule_evidence'}:
+            continue
+        def contents(p):
+            return gzip.decompress(p.read_bytes()) if p.suffix == '.gz' else p.read_bytes()
+        assert contents(path) == contents(compact[3][key]), key
+    def rows(path):
+        with path.open() as handle:
+            return list(csv.DictReader(handle, delimiter='\t'))
+    full_audit = rows(full[3]['molecule_evidence'])
+    assert rows(compact[3]['molecule_evidence']) == [r for r in full_audit if r['classes'] != 'ambiguous_locus']
+    witnesses = rows(compact[3]['ambiguous_molecules'])
+    assert witnesses and all(r['sample_id'] == 's' for r in witnesses)
+    assert {r['molecule_id'] for r in witnesses} == {r['molecule_id'] for r in full_audit if r['classes'] == 'ambiguous_locus'}
+    stats = json.loads(compact[3]['reconstruction_metadata'].read_text())['performance']['recruitment']
+    assert stats['ambiguous_pairs'] == len(witnesses)
+    assert stats['audit_mode'] == 'compact'
+    assert stats['pairs_per_second'] > 0
+    assert stats['skipped_locus_tests'] > 0
 
 
 def test_bounded_map_does_not_eagerly_consume_input():
