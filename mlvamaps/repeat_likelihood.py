@@ -19,6 +19,7 @@ from .repeat_calibration import repeat_unit_length
 from .mapping_classification import fit_reference_mixture
 
 _MATRIX = parasail.matrix_create("ACGTN", 2, -4)
+_KNOWN_BASES = str.maketrans('', '', 'ACGTN')
 
 
 @dataclass(frozen=True)
@@ -59,11 +60,37 @@ def _read_profile(sequence: str):
     return parasail.profile_create_32(sequence, _MATRIX)
 
 
+@lru_cache(maxsize=256)
+def _score_profile(sequence: str):
+    return parasail.profile_create_16(sequence, _MATRIX)
+
+
+@lru_cache(maxsize=256)
+def _flank_profile(sequence: str):
+    return parasail.profile_create_8(sequence, _MATRIX)
+
+
+@lru_cache(maxsize=128)
+def _minimum_anchor_score(required: int) -> int:
+    return min(2*n - 6*(3*n//20) for n in range(required, required + 7))
+
+
 @lru_cache(maxsize=4096)
 def flank_hit(sequence: str, flank: str, minimum: int = 10) -> FlankHit | None:
     if not sequence or not flank:
         return None
-    result = parasail.sw_trace_striped_profile_32(_read_profile(sequence), flank, 5, 1)
+    # Short-read anchors normally fit in SIMD byte lanes. Long/high-scoring
+    # anchors explicitly fall back on saturation; never trust clipped results.
+    result = parasail.sw_trace_striped_profile_8(_flank_profile(sequence), flank, 5, 1)
+    if result.saturated:
+        result = parasail.sw_trace_striped_profile_32(_read_profile(sequence), flank, 5, 1)
+    required = min(minimum, len(flank))
+    # An accepted alignment with n paired bases and e <= floor(.15*n) edits
+    # scores at least 2*n - 6*e (a gap costs no more than a mismatch here).
+    # Its minimum occurs in the first seven n values: stepping n by seven
+    # raises this bound by at least two. Avoid decoding impossible traces.
+    if result.score < _minimum_anchor_score(required):
+        return None
     traceback = result.traceback
     q, r = traceback.query, traceback.ref
     aligned = sum(a != "-" and b != "-" for a, b in zip(q, r))
@@ -250,9 +277,46 @@ def flank_insert_length(pair: ReadPair, template: RepeatTemplate) -> float | Non
     return None
 
 
+def _repeat_alignment_scores(read, template, states, previous):
+    """Exact local scores with redundant long periodic targets collapsed.
+
+    With match=2 and gap extension=1, a positive local alignment of an L-base
+    read spans fewer than 3L reference bases: at most L paired bases and fewer
+    than 2L reference-only gaps. Once a repeat exceeds 3L plus one motif period,
+    removing whole periods preserves all possible scoring windows, including
+    both flank boundaries and every internal repeat phase. This optimization
+    is score-only; it must not be used for tracebacks or reference coordinates.
+    """
+    motif = _primitive_motif(template.motif)
+    period = len(motif)
+    bound = 3 * len(read) + period
+    lengths = [round(float(state) * template.unit) for state in states]
+    equivalent = [n if n <= bound else bound + (n - bound) % period for n in lengths]
+    known = dict(zip(equivalent, previous))
+    scores = list(previous)
+    profile = None
+    exact_match_scoring = not read.translate(_KNOWN_BASES)
+    for length in equivalent[len(previous):]:
+        if length not in known:
+            target = template.left + (motif * math.ceil(length / period))[:length] + template.right
+            if read and exact_match_scoring and read in target:
+                score = 2 * len(read)  # The maximum attainable local score.
+            elif not read:
+                score = 0
+            else:
+                if profile is None:
+                    profile = _score_profile(read)
+                result = parasail.sw_striped_profile_16(profile, target, 5, 1)
+                if result.saturated:
+                    result = parasail.sw_striped_profile_32(_read_profile(read), target, 5, 1)
+                score = result.score
+            known[length] = score
+        scores.append(known[length])
+    return np.asarray(scores, dtype=float)
+
+
 def _scores(evidence: list[MoleculeEvidence], template: RepeatTemplate, states: np.ndarray,
             insert: InsertDistribution | None, alignment_cache: dict | None = None) -> np.ndarray:
-    sequences = [template.sequence(float(r)) for r in states]
     matrix = np.zeros((len(evidence), len(states)))
     # Repeated reads are common in amplicon data; cache independent realignments.
     cache = {}
@@ -272,11 +336,8 @@ def _scores(evidence: list[MoleculeEvidence], template: RepeatTemplate, states: 
                 if repetitive(read, template.motif):
                     continue
                 if read not in cache:
-                    profile = _read_profile(read)
                     previous = raw_cache.get(read, np.empty(0))
-                    new_scores = np.asarray([parasail.sw_striped_profile_32(profile, seq, 5, 1).score
-                                             for seq in sequences[len(previous):]], dtype=float)
-                    scores = np.concatenate((previous, new_scores))
+                    scores = _repeat_alignment_scores(read, template, states, previous)
                     raw_cache[read] = scores
                     cache[read] = (scores - scores.max()) / 8.0
                 matrix[i] += cache[read]

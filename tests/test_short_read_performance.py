@@ -91,14 +91,94 @@ def test_range_expansion_reuses_existing_candidate_alignments(monkeypatch):
     seq = t.left + t.motif*5
     item = classify_pair(ReadPair('m', ReadRecord('m', seq)), t)
     scores = []
-    original = parasail.sw_striped_profile_32
+    original = parasail.sw_striped_profile_16
     def tracked(profile, reference, *args):
         scores.append(reference)
         return original(profile, reference, *args)
-    monkeypatch.setattr(parasail, 'sw_striped_profile_32', tracked)
+    monkeypatch.setattr(parasail, 'sw_striped_profile_16', tracked)
     result = infer_repeat([item], t, maximum=40)
     assert len(result.states) == 81
-    assert len(scores) == len(set(scores)) == 81
+    assert 0 < len(scores) == len(set(scores)) < 81
+
+
+def test_periodic_score_collapse_matches_full_native_alignments():
+    from dataclasses import replace
+    from mlvamaps.repeat_likelihood import _repeat_alignment_scores
+    rng = random.Random(891)
+    def dna(n):
+        return ''.join(rng.choices('ACGT', k=n))
+    base = templates()['L0']
+    for unit, motif in ((1, 'A'), (3, 'ACG'), (4, 'AATG'), (7, dna(7)),
+                        (60, dna(60)), (60, 'ACGT'*15), (5, 'ACGTACG')):
+        template = replace(base, unit=unit, motif=motif)
+        states = np.array([0, .5, 1, 2.5, 5, 8, 15, 30, 50, 100])
+        target = template.sequence(8)
+        cases = [target, target[:60], target[-60:], dna(75), 'N'*40,
+                 target[:20] + 'NN' + target[23:80], target[:17] + 'A' + target[17:100]]
+        # Deliberately mismatch declared unit and motif length, above, to test
+        # right-boundary phase preservation as well as primitive motifs.
+        for read in cases:
+            expected = np.array([parasail.sw_striped_32(read, template.sequence(float(state)), 5, 1, _MATRIX).score
+                                 for state in states], dtype=float)
+            observed = _repeat_alignment_scores(read, template, states, np.empty(0))
+            np.testing.assert_array_equal(observed, expected)
+            prefix = _repeat_alignment_scores(read, template, states[:5], np.empty(0))
+            np.testing.assert_array_equal(_repeat_alignment_scores(read, template, states, prefix), expected)
+
+
+def test_repeat_fit_matches_exhaustive_scoring_for_mixtures_and_expansions(monkeypatch):
+    from dataclasses import replace
+    import mlvamaps.repeat_likelihood as module
+    original = module._repeat_alignment_scores
+    template = replace(templates()['L0'], unit=60, motif='AATG'*15)
+    reads_at_locus = [template.sequence(2), template.sequence(3)] * 4
+    reads_at_locus += [template.left + template.motif[:50], template.motif[:50] + template.right] * 4
+    evidence = [classify_pair(ReadPair(str(i), ReadRecord(str(i), s, 'I'*len(s))), template)
+                for i, s in enumerate(reads_at_locus)]
+    evidence = [e for e in evidence if e and e.classes]
+    def exhaustive(read, template, states, previous):
+        return np.array([parasail.sw_striped_32(read, template.sequence(float(r)), 5, 1, _MATRIX).score
+                         for r in states], dtype=float)
+    for items in (evidence, [e for e in evidence if 'F' in e.classes]):
+        monkeypatch.setattr(module, '_repeat_alignment_scores', exhaustive)
+        before = infer_repeat(items, template, maximum=100)
+        monkeypatch.setattr(module, '_repeat_alignment_scores', original)
+        after = infer_repeat(items, template, maximum=100)
+        for key, value in vars(before).items():
+            if isinstance(value, np.ndarray):
+                np.testing.assert_array_equal(getattr(after, key), value)
+            else:
+                assert getattr(after, key) == value
+
+
+def test_projection_reuse_preserves_quality_filtering_and_molecule_support(monkeypatch):
+    from dataclasses import replace
+    import mlvamaps.locus_reconstruction as reconstruction
+    from mlvamaps.repeat_likelihood import MoleculeEvidence, InsertDistribution
+    template = templates()['L0']
+    high = ('I'*len(template.left), 'I'*len(template.right))
+    low = (high[0][:20] + '!' + high[0][21:], high[1])
+    first = MoleculeEvidence('0', 'L0', ('S',), (template.left, template.right), ('+', '-'),
+                             fragment_offset=len(template.left)+len(template.right), qualities=high)
+    second = replace(first, molecule_id='1', qualities=low)
+    cache = {}
+    sequence = template.sequence(8)
+    assert 20 in reconstruction._project_flanks(first, sequence, template, 8, cache)
+    assert 20 not in reconstruction._project_flanks(second, sequence, template, 8, cache)
+    items = [replace(first if i % 2 else second, molecule_id=str(i)) for i in range(50)]
+    inference = infer_repeat(items, template, InsertDistribution(len(sequence), 1, 50, 'override'))
+    calls = []
+    original = reconstruction._project_flanks
+    def tracked(*args):
+        calls.append(True)
+        return original(*args)
+    monkeypatch.setattr(reconstruction, '_project_flanks', tracked)
+    products = reconstruction.reconstruct_short_products(items, template, inference, 's')
+    assert len(calls) == 2
+    assert len(products) == 1
+    assert products[0].sequence == sequence
+    assert products[0].support_count == 50
+    assert products[0].evidence['molecule_ids'] == [str(i) for i in range(50)]
 
 
 def test_bit_mask_seed_filter_preserves_exhaustive_matches():
@@ -185,3 +265,130 @@ def test_recruitment_processes_can_start_inside_batch_sample_threads():
         first = executor.submit(sample)
         second = executor.submit(sample)
         assert first.result() == second.result()
+
+
+def test_byte_lane_anchors_match_wide_alignments_with_indels_and_saturation(monkeypatch):
+    from mlvamaps.repeat_likelihood import FlankHit
+    rng = random.Random(481)
+    def dna(n):
+        return ''.join(rng.choices('ACGTN', k=n))
+    fallbacks = []
+    original = parasail.sw_trace_striped_profile_32
+    def tracked(*args):
+        fallbacks.append(True)
+        return original(*args)
+    monkeypatch.setattr(parasail, 'sw_trace_striped_profile_32', tracked)
+    for i in range(300):
+        flank = dna(rng.randint(4, 350))
+        seq = list(flank)
+        for _ in range(i % 17):
+            position = rng.randrange(len(seq))
+            if i % 2:
+                seq.insert(position, rng.choice('ACGTN'))
+            else:
+                seq[position] = rng.choice('ACGTN')
+        seq = dna(150) if i % 3 == 0 else ''.join(seq)
+        minimum = (4, 10, 14, 20)[i % 4]
+        result = parasail.sw_trace_striped_32(seq, flank, 5, 1, _MATRIX)
+        trace = result.traceback
+        q, r = trace.query, trace.ref
+        aligned = sum(a != '-' and b != '-' for a, b in zip(q, r))
+        edits = sum(a != b for a, b in zip(q, r))
+        expected = None
+        if aligned >= min(minimum, len(flank)) and edits / max(aligned, 1) <= .15:
+            expected = FlankHit(result.end_query + 1 - len(q.replace('-', '')), result.end_query + 1,
+                                result.end_ref + 1 - len(r.replace('-', '')), result.end_ref + 1,
+                                result.score, edits)
+        assert flank_hit(seq, flank, minimum) == expected
+    assert fallbacks
+
+
+def test_worker_formatted_audit_matches_original_tsv():
+    import csv
+    import io
+    from mlvamaps.locus_reconstruction import MOLECULE_AUDIT_FIELDS
+    ts = templates()
+    pairs = list(reads(20))
+    # Identical contexts guarantee ambiguous rows for every targeted molecule.
+    from dataclasses import replace
+    ts['duplicate'] = replace(ts['L0'], locus=replace(ts['L0'].locus, locus_id='duplicate'))
+    expected = io.StringIO(newline='')
+    writer = csv.DictWriter(expected, fieldnames=MOLECULE_AUDIT_FIELDS, delimiter='\t')
+    for chunk in recruit_short_reads(pairs, ts, 's', 1, chunk_size=4):
+        writer.writerows(chunk.ambiguous)
+    assert expected.getvalue()
+    actual = list(recruit_short_reads(pairs, ts, 's', 2, chunk_size=4, audit_fields=MOLECULE_AUDIT_FIELDS))
+    assert ''.join(chunk.audit_tsv for chunk in actual) == expected.getvalue()
+    assert not any(chunk.ambiguous for chunk in actual)
+
+
+@pytest.mark.parametrize('materialize', [False, True])
+def test_qc_stream_matches_disk_round_trip_with_orphans(tmp_path, materialize):
+    from mlvamaps.io import read_fastq, read_fastq_pairs, write_fastq
+    from mlvamaps.short_read_qc import filtered_pairs
+    from mlvamaps.short_reads import qc_read_pairs
+    from dataclasses import replace
+    pairs = list(reads(12))
+    pairs[1] = replace(pairs[1], read1=replace(pairs[1].read1, quality='!'*len(pairs[1].read1.sequence)))
+    pairs[2] = replace(pairs[2], read2=replace(pairs[2].read2, quality='!'*len(pairs[2].read2.sequence)))
+    pairs[3] = replace(pairs[3], read1=replace(pairs[3].read1, sequence='A', quality='I'),
+                       read2=replace(pairs[3].read2, sequence='T', quality='I'))
+    first, second = tmp_path/'r1.fq', tmp_path/'r2.fq'
+    write_fastq([p.read1 for p in pairs], first)
+    write_fastq([p.read2 for p in pairs], second)
+    f1, f2, orphan = (tmp_path/name for name in ('f1.fq.gz', 'f2.fq.gz', 'o.fq.gz'))
+    expected, metrics = qc_read_pairs(pairs, 40, 15, 0, .5)
+    counters, statistics = {}, {}
+    stream = filtered_pairs(first, second, f1, f2, orphan, materialize=materialize,
+        counters=counters, statistics=statistics, min_length=40, min_mean_quality=15,
+        trim_quality=0, min_pair_retention=.5, sample_id='s', chunk_size=2)
+    first_pair = next(stream)
+    assert counters['input_pairs'] == 2  # Inference can start before QC ends.
+    actual = [first_pair, *stream]
+    expected_order = [p for p in expected if p.read2] + [
+        ReadPair(p.read1.read_id, p.read1) for p in expected if p.read2 is None]
+    assert actual == expected_order
+    assert counters == metrics
+    assert statistics['seconds'] >= 0
+    assert f1.exists() == f2.exists() == materialize
+    if materialize:
+        disk = list(read_fastq_pairs(f1, f2)) + [ReadPair(r.read_id, r) for r in read_fastq(orphan)]
+        assert actual == disk
+
+
+def test_qc_mean_quality_matches_original_numpy_reduction():
+    from mlvamaps.sequence import mean_qscore
+    rng = random.Random(102)
+    assert mean_qscore(None) == mean_qscore('') == 0
+    for length in (1, 40, 150, 151, 250, 10000):
+        quality = ''.join(chr(rng.randint(33, 74)) for _ in range(length))
+        expected = float(np.frombuffer(quality.encode('ascii'), dtype=np.uint8).mean(dtype=np.float64) - 33)
+        assert mean_qscore(quality) == expected
+
+
+def test_streaming_pipeline_preserves_database_inputs_and_results(tmp_path, monkeypatch):
+    from mlvamaps.io import read_fastq_pairs, write_fastq, write_tsv
+    from mlvamaps.short_reads import run_short_read_call
+    pairs = list(reads(12))
+    first, second = tmp_path/'r1.fq', tmp_path/'r2.fq'
+    write_fastq([p.read1 for p in pairs], first)
+    write_fastq([p.read2 for p in pairs], second)
+    panel = tmp_path/'panel.tsv'
+    loci = [asdict(t.locus) for t in templates().values()]
+    write_tsv(loci, panel, list(loci[0]))
+    classified = []
+    def classify(**kwargs):
+        classified.extend(read_fastq_pairs(kwargs['reads1'], kwargs['reads2']))
+        return {}
+    monkeypatch.setattr('mlvamaps.mapping_classification.run_mapping_classification', classify)
+    monkeypatch.setattr('mlvamaps.minimap_mapping.minimap2_version', lambda _: 'test')
+    for database in (None, 'database'):
+        run_short_read_call(str(first), str(second), str(panel), str(tmp_path/str(database)), 's',
+                            database_path=database, threads=1, show_progress=False)
+    assert classified == pairs
+    for name in ('calls.tsv', 'reconstructed_loci.fasta', 'reconstructed_locus_variants.tsv',
+                 'locus_snps.tsv', 'short_read_qc_summary.tsv', 'molecule_candidate_evidence.tsv'):
+        assert (tmp_path/'None'/name).read_bytes() == (tmp_path/'database'/name).read_bytes()
+    metadata = json.loads((tmp_path/'database'/'short_read_run_metadata.json').read_text())
+    assert metadata['performance']['stage_seconds']['total'] > 0
+    assert metadata['performance']['qc']['materialized'] is True

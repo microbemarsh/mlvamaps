@@ -19,8 +19,9 @@ def revcomp(sequence: str) -> str:
 def mean_qscore(quality: Optional[str]) -> float:
     if not quality:
         return 0.0
-    values = np.frombuffer(quality.encode("ascii"), dtype=np.uint8)
-    return float(values.mean(dtype=np.float64) - 33.0)
+    # FASTQ strings are short: allocating a NumPy view and dispatching a
+    # reduction for every mate costs more than summing their ASCII bytes.
+    return sum(quality.encode("ascii")) / len(quality) - 33.0
 
 
 def hamming_distance(a: str, b: str) -> int:

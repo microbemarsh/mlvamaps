@@ -13,6 +13,7 @@ dependencies:
   - numpy>=1.24
   - parasail-python>=1.3.4
   - pysam
+  - python-isal>=1.6
   - regex
   - pytest
   - pip:

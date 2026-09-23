@@ -8,11 +8,13 @@ information to choose between adjacent repeat counts.
 from __future__ import annotations
 
 import json
+import time
+from contextlib import closing
 from collections import defaultdict
 from pathlib import Path
 
 from . import __version__
-from .io import open_text, read_profiles, write_tsv
+from .io import read_profiles, write_tsv
 from .profile_matching import (
     PROFILE_MATCH_LOCUS_FIELDS,
     build_fingerprint,
@@ -56,13 +58,13 @@ def run_mapping_short_read_call(
     """Select recovery strategy and emit established output views."""
     # Lazy imports avoid a module cycle with the shared Illumina helpers.
     from .concurrency import resolve_threads
-    from .io import read_fastq_pairs
+    from .short_read_qc import filtered_pairs
     from .primers import read_loci_or_primers
     from .report import write_report
     from .sample_metadata import MYOGA_SAMPLE_FIELDS, myoga_sample_row, write_csv
     from .short_reads import (
         SAMPLE_SUMMARY_FIELDS, SHORT_CALL_FIELDS, SHORT_CALL_EXTRA_FIELDS,
-        SHORT_QC_FIELDS, _allele_rows, qc_read_pairs,
+        SHORT_QC_FIELDS, _allele_rows,
     )
     from .pipeline import ALLELE_DISTRIBUTION_FIELDS, MATCH_FIELDS, REPEAT_COUNT_FIELDS, allele_distribution_rows
 
@@ -70,6 +72,8 @@ def run_mapping_short_read_call(
         raise ValueError("unknown short-read engine")
     from .repeat_likelihood import estimate_insert_distribution
     estimate_insert_distribution([], insert_mean, insert_sd)
+    run_started = time.perf_counter()
+    stage_seconds = {}
     output = Path(outdir)
     output.mkdir(parents=True, exist_ok=True)
     loci = read_loci_or_primers(loci_path, primers_path)
@@ -80,35 +84,26 @@ def run_mapping_short_read_call(
     orphans = output / "filtered_orphan_reads.fastq.gz"
     counters: dict[str, int] = defaultdict(int)
 
+    qc_statistics = {}
+    from .native_io import short_read_io_plan
+    io_plan = short_read_io_plan((reads1_path, reads2_path), thread_count)
+    pair_stream = filtered_pairs(
+        reads1_path, reads2_path, filtered1, filtered2, orphans,
+        materialize=bool(database_path or keep_intermediates or sr_engine == "competitive"),
+        counters=counters, statistics=qc_statistics,
+        min_length=short_min_read_length, min_mean_quality=short_min_mean_quality,
+        trim_quality=short_trim_quality, min_pair_retention=short_min_pair_retention,
+        sample_id=sample_id, show_progress=show_progress,
+        decompression_threads=tuple(io_plan['decoder_threads']),
+    )
     if show_progress:
-        print(f"[{sample_id}] Filtering and validating {technology} molecules")
-    with open_text(filtered1, "wt") as first_handle, open_text(filtered2, "wt") as second_handle, open_text(orphans, "wt") as orphan_handle:
-        chunk = []
-
-        def consume() -> None:
-            retained, metrics = qc_read_pairs(
-                chunk, short_min_read_length, short_min_mean_quality,
-                short_trim_quality, short_min_pair_retention,
-            )
-            for key, value in metrics.items():
-                counters[key] += int(value)
-            for pair in retained:
-                if pair.read2 is None:
-                    target = orphan_handle if reads2_path else first_handle
-                    quality = pair.read1.quality or "I" * len(pair.read1.sequence)
-                    target.write(f"@{pair.read1.read_id}\n{pair.read1.sequence}\n+\n{quality}\n")
-                else:
-                    for record, handle in ((pair.read1, first_handle), (pair.read2, second_handle)):
-                        quality = record.quality or "I" * len(record.sequence)
-                        handle.write(f"@{record.read_id}\n{record.sequence}\n+\n{quality}\n")
-            chunk.clear()
-
-        for pair in read_fastq_pairs(reads1_path, reads2_path):
-            chunk.append(pair)
-            if len(chunk) == 5000:
-                consume()
-        if chunk:
-            consume()
+        print(f"[{sample_id}] Filtering and validating {technology} molecules", flush=True)
+        print(f"[{sample_id}] Input I/O: {', '.join(io_plan['input_backends'])}; "
+              f"recruitment budget {io_plan['recruitment_workers']} worker(s)", flush=True)
+    if sr_engine == "competitive":
+        with closing(pair_stream):
+            for _ in pair_stream:
+                pass
 
     from .unified_fastq import common_calls_to_compatibility, run_unified_fastq_inference
 
@@ -118,7 +113,8 @@ def run_mapping_short_read_call(
         from .locus_reconstruction import run_reconstructed_fastq_inference
         inference_engine = run_reconstructed_fastq_inference
         extra = {"insert_mean": insert_mean, "insert_sd": insert_sd,
-                 "orphan_path": orphans if reads2_path else None,
+                 "pairs": pair_stream,
+                 "recruitment_threads": io_plan['recruitment_workers'],
                  "max_anchor_edits": max_anchor_edits,
                  "min_fraction": min_mixture_fraction, "min_secondary_reads": min_secondary_reads,
                  "minimum_spanning_pairs": short_min_spanning_pairs, "round_tolerance": round_tolerance,
@@ -126,22 +122,26 @@ def run_mapping_short_read_call(
     method = "competitive_minimap2" if sr_engine == "competitive" else "repeat_likelihood" if technology == "illumina" else "spanning_molecules"
     if show_progress:
         print(f"[{sample_id}] Recovering loci using {method}")
-    common_calls, molecule_evidence, _molecule_calls, unified_paths = inference_engine(
-        reads1=filtered1,
-        reads2=filtered2 if reads2_path else None,
-        loci=loci,
-        database_path=database_path,
-        outdir=output,
-        sample_id=sample_id,
-        technology=technology,
-        minimap2_bin=minimap2_bin,
-        threads=thread_count,
-        minimum_molecules=min_depth,
-        minimum_probability=short_confidence_threshold,
-        maximum_candidate_repeat_count=short_max_candidate_repeat_count,
-        keep_alignments=keep_intermediates,
-        **extra,
-    )
+    started = time.perf_counter()
+    with closing(pair_stream):
+        common_calls, molecule_evidence, _molecule_calls, unified_paths = inference_engine(
+            reads1=filtered1,
+            reads2=filtered2 if reads2_path else None,
+            loci=loci,
+            database_path=database_path,
+            outdir=output,
+            sample_id=sample_id,
+            technology=technology,
+            minimap2_bin=minimap2_bin,
+            threads=thread_count,
+            minimum_molecules=min_depth,
+            minimum_probability=short_confidence_threshold,
+            maximum_candidate_repeat_count=short_max_candidate_repeat_count,
+            keep_alignments=keep_intermediates,
+            **extra,
+        )
+    stage_seconds["recovery_including_streamed_qc"] = time.perf_counter() - started
+    stage_seconds["input_qc_and_intermediate_writes"] = qc_statistics["seconds"]
     calls = common_calls_to_compatibility(common_calls)
     by_locus = {str(row["locus"]): row for row in common_calls}
     evidence_rows = []
@@ -218,6 +218,7 @@ def run_mapping_short_read_call(
               output / "profile_match_loci.tsv", PROFILE_MATCH_LOCUS_FIELDS)
 
     classification_paths: dict[str, Path] = {}
+    started = time.perf_counter()
     if database_path:
 
         if show_progress:
@@ -239,6 +240,7 @@ def run_mapping_short_read_call(
             missing_locus_min_fraction=missing_locus_min_fraction,
             missing_locus_penalty=missing_locus_penalty,
         ))
+    stage_seconds["reference_classification"] = time.perf_counter() - started
     reference_rows = (
         read_profiles(classification_paths["mapping_reference_matches"])
         if classification_paths else []
@@ -321,12 +323,14 @@ def run_mapping_short_read_call(
                        "method": method,
                        "minimap2_version": minimap2_version(minimap2_bin) if sr_engine == "competitive" or database_path else "not_used",
                        "database": database_path or "panel-derived",
+                       "performance": {"stage_seconds": stage_seconds, "qc": qc_statistics, "io": io_plan},
                        "insert_size": insert_stats, "parameters": {"minimum_mapq": short_min_mapping_quality,
                        "minimum_supporting_fragments": min_depth,
                        "minimum_spanning_pairs": short_min_spanning_pairs,
                        "confidence_threshold": short_confidence_threshold,
                        "maximum_candidate_repeat_count": short_max_candidate_repeat_count,
                        "secondary_alignments": short_consider_secondary}}, indent=2, sort_keys=True) + "\n")
+    started = time.perf_counter()
     write_report(
         output, sample_id, allele_rows, loci, matches, profiles,
         reference_rows=reference_rows,
@@ -346,6 +350,11 @@ def run_mapping_short_read_call(
         print(f"[{sample_id}] {detected}/{len(loci)} loci have mapping evidence")
         print(f"[{sample_id}] {states['called']} called, {states['ambiguous']} ambiguous, "
               f"{states['low_coverage']} low coverage, {states['no_evidence']} no evidence")
+    stage_seconds["report"] = time.perf_counter() - started
+    stage_seconds["total"] = time.perf_counter() - run_started
+    metadata = json.loads(metadata_path.read_text())
+    metadata["performance"]["stage_seconds"] = stage_seconds
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
     if not keep_intermediates:
         for path in (filtered1, filtered2, orphans):
             path.unlink(missing_ok=True)

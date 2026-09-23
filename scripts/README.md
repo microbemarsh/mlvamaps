@@ -38,6 +38,29 @@ exclude unknown bases; component identity requires matching full masked sequence
 
 ## Short-read recruitment performance
 
+`benchmark_repeat_fitting.py` compares exhaustive native candidate alignment
+against equivalent-score reuse on synthetic flanking reads. It checks exact
+equality of all likelihoods, posteriors, mixture fractions and call fields:
+
+```bash
+python scripts/benchmark_repeat_fitting.py --molecules 500 --unit 60 \
+  --maximum 100 --output repeat_fitting_timing.json
+```
+
+This measures repeat fitting only, separately from recruitment and I/O.
+
+`benchmark_fastq_io.py` compares native decompression and compression backends
+on the same subset, including QC and retained-read hash checks. Install the
+`fastq` Python extra or conda-forge's `rapidgzip` and `python-isal` first:
+
+```bash
+python scripts/benchmark_fastq_io.py --reads1 R1.fastq.gz --reads2 R2.fastq.gz \
+  --pairs 300000 --threads 8 --scratch-dir "$SLURM_TMPDIR" --output fastq_io_timing.json
+```
+
+This isolates input/QC/output costs; sample-wide timings are recorded in
+`short_read_run_metadata.json`. QC overlaps recruitment in the default engine.
+
 `benchmark_short_read_recruitment.py` times a bounded subset of paired or
 single-end FASTQs at several worker counts and checks evidence equivalence.
 Run it in the installed mlvamaps environment and within your CPU allocation:

@@ -71,6 +71,20 @@ conda activate mlvamaps
 python -m pip install --no-deps .
 ```
 
+For large compressed FASTQs, enable the optional native I/O accelerators:
+
+```bash
+conda install -c conda-forge rapidgzip python-isal
+# Alternatively, inside the existing environment:
+python -m pip install '.[fastq]'
+```
+
+Rapidgzip supplies parallel input decompression; ISA-L accelerates gzip output.
+Both expose Python APIs. The caller automatically budgets decompression within
+`--threads` and retains HTSlib parsing. See the
+[Illumina performance notes](docs/workflows/illumina.md#performance-and-cpu-allocation)
+for platform support, timings, and the I/O benchmark.
+
 Verify the installation:
 
 ```bash

@@ -19,8 +19,7 @@ from .locus_products import LocusProduct, genotype_product, write_products
 from .mixture import estimate_variant_mixtures
 from .models import Locus, ReadPair
 from .repeat_likelihood import (
-    _MATRIX, RepeatTemplate, classify_pair, estimate_insert_distribution,
-    flank_insert_length, infer_repeat, panel_template,
+    _read_profile, RepeatTemplate, estimate_insert_distribution, infer_repeat, panel_template,
 )
 from .sequence import revcomp
 
@@ -109,18 +108,23 @@ def recover_long_reads(pairs, loci, sample_id, min_fraction=0.01, min_secondary_
     return products, audit, recruited
 
 
-def _project_flanks(item, sequence, template, count):
+def _project_flanks(item, sequence, template, count, alignment_cache=None):
     """Per-molecule base/indel votes; overlapping mates never count twice."""
     repeat_start, repeat_end = len(template.left), len(template.left) + round(count * template.unit)
     votes = defaultdict(set)
+    alignment_cache = {} if alignment_cache is None else alignment_cache
     for mate, read in enumerate(item.sequences):
         quality = item.qualities[mate] if item.qualities else None
-        result = parasail.sw_trace_striped_32(read, sequence, 5, 1, _MATRIX)
-        traceback = result.traceback
-        q, r = traceback.query, traceback.ref
-        position = result.end_ref + 1 - len(r.replace("-", ""))
+        if read not in alignment_cache:
+            result = parasail.sw_trace_striped_profile_32(_read_profile(read), sequence, 5, 1)
+            traceback = result.traceback
+            q, r = traceback.query, traceback.ref
+            if len(alignment_cache) >= 4096:
+                alignment_cache.clear()
+            alignment_cache[read] = (q, r, result.end_ref + 1 - len(r.replace("-", "")),
+                                     result.end_query + 1 - len(q.replace("-", "")))
+        q, r, position, query_position = alignment_cache[read]
         insertion = ""
-        query_position = result.end_query + 1 - len(q.replace("-", ""))
         for base, ref in zip(q, r):
             reliable = quality is None or base == "-" or ord(quality[query_position])-33 >= 20
             if base != "-":
@@ -155,10 +159,14 @@ def reconstruct_short_products(evidence, template, inference, sample_id, min_fra
         if not members:
             continue
         synthetic = template.sequence(repeat)
-        full = Counter(e.product_sequence for e in members if e.product_sequence)
+        full_members = defaultdict(list)
+        for item in members:
+            if item.product_sequence:
+                full_members[item.product_sequence].append(item)
+        full = Counter({seq: len(group) for seq, group in full_members.items()})
         # Exact observed products retain linked SNP/indel haplotypes. Singleton
         # sequences remain trace diagnostics rather than confirmed mixtures.
-        phased = [(seq, support, [e for e in members if e.product_sequence == seq])
+        phased = [(seq, support, full_members[seq])
                   for seq, support in full.most_common()]
         haplotype_weights = {}
         if full:
@@ -171,7 +179,20 @@ def reconstruct_short_products(evidence, template, inference, sample_id, min_fra
             haplotype_weights = {phased[int(row["variant_id"])][0]: float(row["estimated_fraction"])
                                  for row in estimates}
         if not phased:
-            projections = [_project_flanks(e, synthetic, template, repeat) for e in members]
+            # Raw alignments can be reused across quality variants; full
+            # projections also require identical qualities. Reset per candidate.
+            alignment_cache = {}
+            projection_cache = {}
+            projections = []
+            for item in members:
+                key = (item.sequences, item.qualities)
+                if key not in projection_cache:
+                    if len(projection_cache) >= 4096:
+                        projection_cache.clear()
+                    projection_cache[key] = _project_flanks(item, synthetic, template, repeat, alignment_cache)
+                # Identical sequence/quality pairs share immutable projections,
+                # but still contribute one vote for every original molecule.
+                projections.append(projection_cache[key])
             pileup = defaultdict(Counter)
             for projection in projections:
                 for position, allele in projection.items():
@@ -263,7 +284,7 @@ def run_reconstructed_fastq_inference(*, outdir, stream_molecule_evidence=False,
         with (output / "molecule_candidate_evidence.tsv").open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=MOLECULE_AUDIT_FIELDS, delimiter="\t", extrasaction="ignore")
             writer.writeheader()
-            return _run_reconstructed_fastq_inference(outdir=outdir, audit_writer=writer, **kwargs)
+            return _run_reconstructed_fastq_inference(outdir=outdir, audit_writer=writer, audit_handle=handle, **kwargs)
     return _run_reconstructed_fastq_inference(outdir=outdir, **kwargs)
 
 
@@ -271,12 +292,14 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         technology, minimum_molecules, minimum_probability, maximum_candidate_repeat_count=100,
         insert_mean=None, insert_sd=None, orphan_path=None, min_fraction=.01, min_secondary_reads=2,
         max_anchor_edits=3, threads=1, minimum_spanning_pairs=2, round_tolerance=.25,
-        show_progress=False, audit_writer=None, **_unused):
+        show_progress=False, audit_writer=None, audit_handle=None, pairs=None,
+        recruitment_threads=None, **_unused):
     progress = ProgressReporter(enabled=show_progress)
-    stage_seconds, recruitment_stats = {}, {}
+    stage_seconds, recruitment_stats, locus_stats = {}, {}, {}
     output = Path(outdir)
     output.mkdir(parents=True, exist_ok=True)
-    pairs = read_fastq_pairs(reads1, reads2)
+    if pairs is None:
+        pairs = read_fastq_pairs(reads1, reads2)
     if orphan_path:
         from itertools import chain
         pairs = chain(pairs, (ReadPair(r.read_id, r) for r in read_fastq(orphan_path)))
@@ -293,14 +316,18 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         evidence = defaultdict(list)
         insert_lengths = []
         from .short_read_recruitment import recruit_short_reads
-        progress.step(f"[{sample_id}] Recruiting short-read molecules with up to {resolve_threads(threads)} worker(s)")
+        recruitment_threads = threads if recruitment_threads is None else recruitment_threads
+        progress.step(f"[{sample_id}] Recruiting short-read molecules with up to {resolve_threads(recruitment_threads)} worker(s)")
         started = time.perf_counter()
-        for chunk in recruit_short_reads(pairs, templates, sample_id, threads, statistics=recruitment_stats):
+        for chunk in recruit_short_reads(pairs, templates, sample_id, recruitment_threads, statistics=recruitment_stats,
+                                        audit_fields=MOLECULE_AUDIT_FIELDS if audit_handle is not None else None):
             recruitment_stats["pairs_examined"] = recruitment_stats.get("pairs_examined", 0) + chunk.examined
             recruitment_stats["locus_tests"] = recruitment_stats.get("locus_tests", 0) + chunk.locus_tests
             for item in chunk.evidence:
                 evidence[item.locus_id].append(item)
-            if audit_writer is None:
+            if audit_handle is not None:
+                audit_handle.write(chunk.audit_tsv)
+            elif audit_writer is None:
                 audit.extend(chunk.ambiguous)
             else:
                 audit_writer.writerows(chunk.ambiguous)
@@ -310,11 +337,16 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         progress.step(f"[{sample_id}] Recruitment finished in {stage_seconds['recruitment']:.1f}s; fitting {len(loci)} loci")
         insert = estimate_insert_distribution(insert_lengths, insert_mean, insert_sd)
         def fit_locus(locus):
+            fit_started = time.perf_counter()
             items = [e for e in evidence[locus.locus_id] if e.classes and "discordant" not in e.classes]
             template = templates[locus.locus_id]
             result = infer_repeat(items, template, insert, maximum_candidate_repeat_count, minimum_probability) if items and template else None
             if result and not any("E" in e.classes for e in items) and sum("S" in e.classes for e in items) < minimum_spanning_pairs:
                 result.identifiable = False
+            elapsed = time.perf_counter() - fit_started
+            locus_stats[locus.locus_id] = {"repeat_fitting_seconds": elapsed,
+                "evidence_molecules": len(items), "candidate_states": len(result.states) if result else 0}
+            progress.step(f"[{sample_id}] {locus.locus_id}: fitted {len(items):,} molecules in {elapsed:.1f}s")
             return result
         from concurrent.futures import ThreadPoolExecutor
         started = time.perf_counter()
@@ -327,24 +359,28 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         progress.step(f"[{sample_id}] Repeat fitting finished in {stage_seconds['repeat_fitting']:.1f}s; writing molecule likelihoods")
         started = time.perf_counter()
         molecule_likelihood_path = output / "molecule_repeat_likelihoods.tsv"
-        def molecule_likelihood_rows():
+        likelihood_records = 0
+        with molecule_likelihood_path.open("w", newline="") as handle:
+            writer = csv.writer(handle, delimiter="\t")
+            writer.writerow(["sample_id", "locus_id", "molecule_id", "repeat_count", "log_likelihood"])
             for locus, inference in zip(loci, fitted):
                 if inference:
                     items = [e for e in evidence[locus.locus_id] if e.classes and "discordant" not in e.classes]
                     for item, scores in zip(items, inference.molecule_likelihoods):
-                        for state, score in zip(inference.states, scores):
-                            yield {"sample_id": sample_id, "locus_id": locus.locus_id,
-                                   "molecule_id": item.molecule_id, "repeat_count": state, "log_likelihood": score}
-        write_tsv(molecule_likelihood_rows(), molecule_likelihood_path,
-                  ["sample_id", "locus_id", "molecule_id", "repeat_count", "log_likelihood"])
+                        writer.writerows((sample_id, locus.locus_id, item.molecule_id, state, score)
+                                         for state, score in zip(inference.states, scores))
+                        likelihood_records += len(inference.states)
+                        progress.count(f"[{sample_id}] Molecule likelihood rows written", likelihood_records)
         stage_seconds["molecule_likelihood_output"] = time.perf_counter() - started
         progress.step(f"[{sample_id}] Reconstructing locus sequences")
         started = time.perf_counter()
         for locus, inference in zip(loci, fitted):
+            locus_started = time.perf_counter()
             items = evidence[locus.locus_id]
             usable = [e for e in items if e.classes and "discordant" not in e.classes]
             template = templates[locus.locus_id]
             products = reconstruct_short_products(usable, template, inference, sample_id, min_fraction, min_secondary_reads) if inference else []
+            locus_stats[locus.locus_id]["sequence_reconstruction_seconds"] = time.perf_counter() - locus_started
             all_products.extend(products)
             calls.append(_common_call(locus, products, len(items), sample_id, technology, minimum_molecules, minimum_probability, inference))
             summaries.append({"sample_id": sample_id, "locus_id": locus.locus_id,
@@ -399,7 +435,8 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
     paths["reconstruction_metadata"] = output / "reconstruction_metadata.json"
     stage_seconds["genotype_and_evidence_output"] = time.perf_counter() - started
     paths["reconstruction_metadata"].write_text(json.dumps({"technology": technology, "insert_size": vars(insert) if insert else None,
-        "performance": {"stage_seconds": stage_seconds, "recruitment": recruitment_stats}}, indent=2) + "\n")
+        "performance": {"stage_seconds": stage_seconds, "recruitment": recruitment_stats,
+                        "loci": locus_stats}}, indent=2) + "\n")
     return calls, audit, {}, paths
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+from contextlib import closing
 import gzip
 import shutil
 from pathlib import Path
@@ -9,6 +10,11 @@ from typing import Iterable, Iterator, Optional
 
 import pysam
 
+try:
+    from isal import igzip as _gzip_writer
+except ImportError:
+    _gzip_writer = gzip
+
 from .models import Locus, ReadPair, ReadRecord
 
 
@@ -16,14 +22,19 @@ def open_text(path: str | Path, mode: str = "rt"):
     path = Path(path)
     if path.suffix == ".gz":
         if any(operation in mode for operation in ("w", "a", "x")):
-            return gzip.open(path, mode, compresslevel=1)
+            return _gzip_writer.open(path, mode, compresslevel=1)
         return gzip.open(path, mode)
     return path.open(mode, newline="")
 
 
-def read_fastq(path: str | Path) -> Iterator[ReadRecord]:
+def read_fastq(path: str | Path, *, decompression_threads: int = 0) -> Iterator[ReadRecord]:
     try:
-        with pysam.FastxFile(str(path), persist=False) as handle:
+        if decompression_threads:
+            from .native_io import rapidgzip_fastx
+            source = rapidgzip_fastx(path, decompression_threads)
+        else:
+            source = pysam.FastxFile(str(path), persist=False)
+        with source as handle:
             for record in handle:
                 if record.quality is None:
                     raise ValueError(f"Expected FASTQ qualities for record {record.name!r}")
@@ -59,40 +70,44 @@ def normalize_read_id(read_id: str) -> tuple[str, int | None]:
 def read_fastq_pairs(
     reads1_path: str | Path,
     reads2_path: str | Path | None = None,
+    *, decompression_threads: tuple[int, int] = (0, 0),
 ) -> Iterator[ReadPair]:
     """Stream separate paired FASTQ files with strict name/count validation."""
     if reads2_path is None:
-        for read in read_fastq(reads1_path):
-            molecule_id, mate = normalize_read_id(read.read_id)
-            if mate == 2:
-                raise ValueError(
-                    f"Single-end FASTQ record {read.read_id!r} is labelled as mate 2"
-                )
-            yield ReadPair(molecule_id, read, None)
+        with closing(read_fastq(reads1_path, decompression_threads=decompression_threads[0])) as single:
+            for read in single:
+                molecule_id, mate = normalize_read_id(read.read_id)
+                if mate == 2:
+                    raise ValueError(
+                        f"Single-end FASTQ record {read.read_id!r} is labelled as mate 2"
+                    )
+                yield ReadPair(molecule_id, read, None)
         return
 
-    for record_number, (read1, read2) in enumerate(
-        zip_longest(read_fastq(reads1_path), read_fastq(reads2_path)), start=1
-    ):
-        if read1 is None or read2 is None:
-            shorter = reads1_path if read1 is None else reads2_path
-            raise ValueError(
-                f"Paired FASTQ files have different record counts; {shorter!s} "
-                f"ended before pair {record_number}"
-            )
-        id1, mate1 = normalize_read_id(read1.read_id)
-        id2, mate2 = normalize_read_id(read2.read_id)
-        if id1 != id2:
-            raise ValueError(
-                f"Paired FASTQ IDs differ at pair {record_number}: "
-                f"{read1.read_id!r} versus {read2.read_id!r}"
-            )
-        if mate1 not in (None, 1) or mate2 not in (None, 2):
-            raise ValueError(
-                f"Invalid mate labels at pair {record_number}: "
-                f"{read1.read_id!r}, {read2.read_id!r}"
-            )
-        yield ReadPair(id1, read1, read2)
+    with closing(read_fastq(reads1_path, decompression_threads=decompression_threads[0])) as first, \
+         closing(read_fastq(reads2_path, decompression_threads=decompression_threads[1])) as second:
+        for record_number, (read1, read2) in enumerate(
+            zip_longest(first, second), start=1
+        ):
+            if read1 is None or read2 is None:
+                shorter = reads1_path if read1 is None else reads2_path
+                raise ValueError(
+                    f"Paired FASTQ files have different record counts; {shorter!s} "
+                    f"ended before pair {record_number}"
+                )
+            id1, mate1 = normalize_read_id(read1.read_id)
+            id2, mate2 = normalize_read_id(read2.read_id)
+            if id1 != id2:
+                raise ValueError(
+                    f"Paired FASTQ IDs differ at pair {record_number}: "
+                    f"{read1.read_id!r} versus {read2.read_id!r}"
+                )
+            if mate1 not in (None, 1) or mate2 not in (None, 2):
+                raise ValueError(
+                    f"Invalid mate labels at pair {record_number}: "
+                    f"{read1.read_id!r}, {read2.read_id!r}"
+                )
+            yield ReadPair(id1, read1, read2)
 
 
 def read_fasta(path: str | Path) -> Iterator[tuple[str, str]]:

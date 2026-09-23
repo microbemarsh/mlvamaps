@@ -34,6 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+fastq = ["rapidgzip>=0.15.2", "isal>=1.6"]
 
 [project.scripts]
 mlvamaps = "mlvamaps.cli:main"
