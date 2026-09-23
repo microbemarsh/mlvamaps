@@ -292,14 +292,14 @@ def test_compact_recruitment_preserves_unique_evidence_and_insert_calibration():
     assert compact.unmatched_pairs == full.unmatched_pairs
     assert compact.examined == len(compact.evidence) + compact.ambiguous_pairs + compact.unmatched_pairs
     assert compact.locus_tests + compact.skipped_locus_tests == full.locus_tests
-    assert compact.skipped_locus_tests > 0
+    assert compact.skipped_locus_tests == 0
     assert len(compact.ambiguity_witnesses) == compact.ambiguous_pairs
     full_hits = {}
     for row in full.ambiguous:
         full_hits.setdefault(row['molecule_id'], []).append(row['locus_id'])
     for molecule, first, second, complete in compact.ambiguity_witnesses:
         assert [first, second] == full_hits[molecule][:2]
-        assert complete == 'no'
+        assert complete == 'yes'
     # Two candidates really do complete the search; absent templates do not count.
     compact = ShortReadRecruiter({'L0': ts['L0'], 'L1': ts['L1'], 'absent': None}, 's',
                                 audit_mode='compact').recruit(pairs[:1])
@@ -342,7 +342,7 @@ def test_compact_recovery_preserves_genotypes_and_writes_ambiguity_witnesses(tmp
     assert stats['ambiguous_pairs'] == len(witnesses)
     assert stats['audit_mode'] == 'compact'
     assert stats['pairs_per_second'] > 0
-    assert stats['skipped_locus_tests'] > 0
+    assert stats['skipped_locus_tests'] == 0
 
 
 def test_bounded_map_does_not_eagerly_consume_input():

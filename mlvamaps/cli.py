@@ -438,7 +438,7 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     call.add_argument("--sr-engine", choices=("repeat-likelihood", "competitive"), default="repeat-likelihood",
                       help="Short-read recovery engine; competitive is legacy/debug")
     call.add_argument("--sr-recruitment-audit", choices=("compact", "full"), default="compact",
-                      help="Ambiguous-pair diagnostics: compact stops after two loci; full tests all loci (slower)")
+                      help="Ambiguous-pair diagnostics: compact records the two strongest loci; full records all matching loci")
     call.add_argument("--lr-engine", choices=("spanning", "competitive"), default="spanning",
                       help="Long-read recovery engine; competitive is legacy/debug")
     call.add_argument("--insert-mean", type=_positive_float, help="Library fragment mean in bp (requires --insert-sd)")

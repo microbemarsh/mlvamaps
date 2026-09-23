@@ -70,8 +70,18 @@ flanks, motif and unit length. Incomplete panels can borrow an existing database
 context. Rich panel templates take precedence over database states. Four-base
 flank seeds shortlist loci, then Parasail local alignment checks non-repeat
 anchors in both orientations. Anchors require at least 10 aligned bases (or the
-whole shorter flank) and at least 85% identity. Multi-locus assignments are
-excluded and audited. Entirely repetitive reads cannot identify a locus alone.
+whole shorter flank) and at least 85% identity. When several loci match, the
+assignment score sums the strongest flank alignment per mate, avoiding double
+counting overlapping flank hits. The best locus must exceed the runner-up by
+both 12 score points and 20% of its own score; otherwise the pair is excluded
+and audited as ambiguous. These are conservative assignment guards, not
+calibrated probabilities. An incidental short match therefore cannot veto much
+stronger locus support. Entirely repetitive reads cannot identify a locus alone.
+Score-only alignment bounds prioritize candidates and skip exact anchor checks
+only when the remaining candidates cannot change the assignment. Compact audits
+can also stop when the two strongest ambiguous matches are settled; full audits
+retain all matching loci for ambiguous pairs. Full E/S/F/FRR evidence is computed
+only for retained loci or full ambiguity audit rows.
 
 Each physical pair has one likelihood vector; both mates may contribute sequence
 alignment, but repeat and fragment geometry are counted once. Evidence tags can

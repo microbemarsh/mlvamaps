@@ -83,47 +83,54 @@ counts within each mode. Use `--audit-modes compact` to time only the default
 caller path. It uses the default SR QC thresholds; it does not
 run repeat inference or reference classification.
 
-### Avoiding exhaustive work on ambiguous pairs
+### Resolving competing flank matches
 
-The default `--sr-recruitment-audit compact` stops testing a pair once two loci
-have accepted anchors. Such a pair was already excluded from genotyping as
-ambiguous; testing further loci cannot change that decision. Locus membership
-uses the same Parasail flank alignments and repeat-only exclusion, but stops at
-the first accepted anchor. Full evidence classification runs only after a pair
-has been proven unique. Every candidate locus is still checked for pairs with
-zero or one match, with unchanged thresholds, insert calibration, genotype
-evidence and mixture inputs. The seed scan also stops once all loci are already
-candidates.
+Recruitment accounts for all candidate loci before assigning a pair. A short
+incidental flank match no longer causes a much stronger locus match to be
+discarded. Assignment uses the sum of the strongest flank alignment per mate;
+the winner must exceed the runner-up by both 12 score points and 20% of its own
+score. Close matches remain ambiguous. These guards are not calibrated
+probabilities. The seed scan stops once all loci are already candidates.
+
+For panels with more than three candidate loci, fast score-only alignments
+bound the maximum possible anchor score on both strands. Candidates are checked
+in descending bound order. Full anchor checks stop only when the remaining
+bounds cannot change the winning assignment, or (in compact mode) the two
+strongest ambiguous matches. Ignoring identity and repeat-only exclusions in
+these bounds makes them conservative; those exclusions still apply to every
+accepted anchor. Small candidate sets and panels with at most three distinct
+flank contexts avoid the extra scoring pass.
+
+Full repeat evidence is built only for the retained locus and requested full
+ambiguity rows. Bounded caches reuse mate scores and quality-independent anchor
+alignments; each retained molecule still supplies its own qualities, evidence
+and insert contribution. `locus_tests` counts exact anchor checks and
+`skipped_locus_tests` counts candidates ruled out by the score bounds.
 
 In compact mode, `molecule_candidate_evidence.tsv` contains uniquely recruited
 evidence. `ambiguous_molecules.tsv` records one row per excluded pair with its
 sample ID, molecule ID, two witness locus IDs and `candidate_search_complete`
-(`yes` or `no`). Witnesses are sufficient to establish ambiguity, but are not an
-exhaustive list of matching loci. `--sr-recruitment-audit full` restores the
+(`yes` when the candidate ranking is resolved, including by score bounds).
+The witnesses are the two
+strongest matching loci, not an exhaustive list of matches.
+`--sr-recruitment-audit full` writes the
 exhaustive per-locus `ambiguous_locus` rows and alignments in
 `molecule_candidate_evidence.tsv`. This option applies to the repeat-likelihood
 engine; it does not change the legacy competitive engine.
 
 Progress now reports `Read pairs scanned`, unique and ambiguous counts, and
-pairs/s. The earlier `recruited/scanned` counter counted all examined pairs,
-including those discarded. Benefit depends on the ambiguous fraction and panel
-size; uniquely recruited pairs still require an exhaustive candidate search.
+pairs/s. Compact mode reduces ambiguity output and avoids unnecessary full
+evidence construction. It never rejects a pair merely because two loci match:
+a later candidate may be the correct locus. Both audit modes use the same
+assignment rule and insert calibration. Runtime depends on panel ambiguity;
+use `scripts/benchmark_short_read_recruitment.py` on representative FASTQs to
+measure throughput and verify matching evidence across worker counts.
 An existing running process must be restarted with the updated installation to
 use these changes.
 
-Local single-worker benchmarks of 500 paired 150-base reads across 12 loci gave:
-
-| Motif lengths | Full audit | Compact audit |
-| --- | ---: | ---: |
-| 12/60 bases | 0.99 s | 0.14 s |
-| 1,800 bases | 3.09 s | 0.49 s |
-
-All pairs in these two synthetic workloads were ambiguous: they measure the
-benefit of early rejection, not genotype fitting or real-sample throughput. A
-separate 600-pair, three-locus workload retained all 600 unique pairs with
-identical evidence and insert fingerprints across both modes and one/four
-requested workers. Regression tests also compare genotype, SNP, mixture and
-likelihood outputs on inputs containing both unique and ambiguous pairs.
+Regression tests cover perfect 150-base paired reads across 25 loci with
+incidental competing matches, near-identical loci that must remain ambiguous,
+and agreement between compact/full audits and serial/parallel recruitment.
 
 ### Streaming QC and native gzip libraries
 

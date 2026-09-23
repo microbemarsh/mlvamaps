@@ -29,7 +29,10 @@ if __package__ in (None, ""):
 from mlvamaps.io import read_fastq_pairs
 from mlvamaps.locus_reconstruction import locus_templates
 from mlvamaps.primers import read_loci_or_primers
-from mlvamaps.repeat_likelihood import _cyclic_search_text, _flank_profile, _motif_phases, _primitive_motif, _read_profile, flank_hit, repetitive
+from mlvamaps.repeat_likelihood import (
+    _cyclic_search_text, _flank_profile, _motif_phases, _oriented_anchors,
+    _primitive_motif, _read_profile, flank_hit, flank_score_bound, read_anchor_bound, repetitive,
+)
 from mlvamaps.short_read_recruitment import recruit_short_reads
 from mlvamaps.short_reads import qc_read_pairs
 
@@ -43,7 +46,9 @@ def positive_int(value):
 
 def benchmark(pairs, templates, threads, audit_mode="compact"):
     # Prevent an earlier serial run from warming the next one's caches.
-    for function in (_cyclic_search_text, _motif_phases, _primitive_motif, _read_profile, _flank_profile, flank_hit, repetitive):
+    for function in (_cyclic_search_text, _motif_phases, _primitive_motif, _read_profile,
+                     _flank_profile, flank_hit, flank_score_bound, read_anchor_bound,
+                     _oriented_anchors, repetitive):
         function.cache_clear()
     digest = hashlib.sha256()
     audit_digest = hashlib.sha256()

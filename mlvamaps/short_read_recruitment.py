@@ -1,7 +1,8 @@
 """Bounded parallel recruitment, using the sample's existing CPU allocation.
 
-The seed filter and classify_pair thresholds are unchanged. Process workers
-avoid serializing Python motif/anchor bookkeeping behind the interpreter lock;
+The seed filter and classify_pair thresholds are unchanged. Competing loci are
+resolved only when one has substantially stronger non-repeat anchor support.
+Process workers avoid serializing Python motif/anchor bookkeeping behind the interpreter lock;
 only retained evidence returns to the parent. No FASTQs are independently
 rescanned by each worker, and recruitment finishes before locus fitting begins.
 """
@@ -16,8 +17,41 @@ import json
 import multiprocessing
 
 from .concurrency import bounded_ordered_map, resolve_threads
-from .repeat_likelihood import MoleculeEvidence, RepeatTemplate, classify_pair, flank_insert_length, pair_has_anchor
+from .repeat_likelihood import (
+    MoleculeEvidence, RepeatTemplate, classify_pair, flank_insert_length,
+    pair_anchor_score, read_anchor_bound,
+)
 from .sequence import revcomp
+
+
+def anchor_score(item: MoleculeEvidence) -> int:
+    """Sum the strongest non-repeat anchor per mate, avoiding flank overlap.
+
+    Repeat sequence and evidence classes do not increase assignment strength.
+    Taking only one flank per mate avoids counting the same query bases twice
+    when local alignments to the two flanks overlap.
+    """
+    return sum(max((hit["score"] for hit in hits.values() if hit), default=0)
+               for hits in item.alignment.values())
+
+
+def resolve_locus_matches(matches: list[MoleculeEvidence]) -> MoleculeEvidence | None:
+    """Retain a unique hit or a clear winner; near ties remain ambiguous.
+
+    Require both a 12-point margin (two mismatch penalties) and a margin of
+    at least 20% of the winning anchor score. These conservative assignment
+    guards are not calibrated probabilities.
+    """
+    if len(matches) == 1:
+        return matches[0]
+    if not matches:
+        return None
+    ranked = sorted(((anchor_score(item), index) for index, item in enumerate(matches)),
+                    reverse=True)
+    best, index = ranked[0]
+    if best - ranked[1][0] >= max(12, 0.2 * best):
+        return matches[index]
+    return None
 
 
 @dataclass
@@ -40,6 +74,9 @@ class ShortReadRecruiter:
         if audit_mode not in {"compact", "full"}:
             raise ValueError("recruitment audit mode must be compact or full")
         self.templates = [template for _, template in sorted(templates.items()) if template is not None]
+        # Duplicate contexts share cached anchors already; a bound pass cannot
+        # separate them and only adds overhead to full ambiguity audits.
+        self.use_bounds = len({(t.left, t.right) for t in self.templates}) > 3
         self.sample_id = sample_id
         self.audit_fields = audit_fields
         self.audit_mode = audit_mode
@@ -72,36 +109,61 @@ class ShortReadRecruiter:
                         break
                 if candidates == self.all_candidates:
                     break
-            matches = []
-            matched_template = None
+            # Score-only SW bounds include both strands and do not reject
+            # repeat-only or low-identity hits. Thus no accepted anchor can
+            # exceed this bound, including classify_pair's strand tie rules.
+            candidates_with_bounds = []
+            use_bounds = self.use_bounds and candidates.bit_count() > 3
             while candidates:
                 bit = candidates & -candidates
                 candidates ^= bit
-                template = self.templates[bit.bit_length() - 1]
-                result.locus_tests += 1
-                if self.audit_mode == "compact":
-                    item = pair_has_anchor(pair, template)
-                else:
-                    item = classify_pair(pair, template)
-                if item:
-                    matches.append(template.locus.locus_id if self.audit_mode == "compact" else item)
-                    matched_template = template
-                    if self.audit_mode == "compact" and len(matches) == 2:
-                        result.ambiguity_witnesses.append((pair.molecule_id, matches[0], matches[1],
-                                                           "no" if candidates else "yes"))
-                        result.skipped_locus_tests += candidates.bit_count()
+                index = bit.bit_length() - 1
+                template = self.templates[index]
+                bound = sum(read_anchor_bound(read.sequence, template.left, template.right)
+                            for read in reads) if use_bounds else 0
+                candidates_with_bounds.append((bound, index))
+            if use_bounds:
+                candidates_with_bounds.sort(key=lambda item: (-item[0], item[1]))
+            matches = []
+            best = runner_up = 0
+            for position, (bound, index) in enumerate(candidates_with_bounds):
+                if use_bounds and matches:
+                    # The remaining bounds are descending. Skip only if none
+                    # can change a clear winner. Full ambiguity audits still
+                    # classify all candidates to retain every matching row.
+                    clear_winner = best - max(runner_up, bound) >= max(12, 0.2 * best)
+                    settled_ambiguity = (self.audit_mode == "compact" and runner_up > bound
+                                         and best - runner_up < max(12, 0.2 * best))
+                    if clear_winner or settled_ambiguity:
+                        result.skipped_locus_tests += len(candidates_with_bounds) - position
                         break
-            if len(matches) == 1:
-                result.evidence.append(classify_pair(pair, matched_template)
-                                       if self.audit_mode == "compact" else matches[0])
-                length = flank_insert_length(pair, matched_template)
+                template = self.templates[index]
+                result.locus_tests += 1
+                score = pair_anchor_score(pair, template)
+                if score:
+                    matches.append((score, index))
+                    if score >= best:
+                        best, runner_up = score, best
+                    elif score > runner_up:
+                        runner_up = score
+            # Audit ties and rows retain panel order regardless of bound order.
+            matches.sort(key=lambda item: (-item[0], item[1]))
+            if matches and (len(matches) == 1 or best - runner_up >= max(12, 0.2 * best)):
+                template = self.templates[matches[0][1]]
+                selected = classify_pair(pair, template)
+                result.evidence.append(selected)
+                length = flank_insert_length(pair, template)
                 if length:
                     result.insert_lengths.append(length)
             elif matches:
                 result.ambiguous_pairs += 1
                 if self.audit_mode == "compact":
+                    result.ambiguity_witnesses.append((pair.molecule_id,
+                        self.templates[matches[0][1]].locus.locus_id,
+                        self.templates[matches[1][1]].locus.locus_id, "yes"))
                     continue
-                for item in matches:
+                for _, index in sorted(matches, key=lambda item: item[1]):
+                    item = classify_pair(pair, self.templates[index])
                     row = {
                         "sample_id": self.sample_id, "locus_id": item.locus_id,
                         "molecule_id": item.molecule_id, "classes": "ambiguous_locus",

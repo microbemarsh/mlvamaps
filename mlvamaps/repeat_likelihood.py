@@ -76,6 +76,29 @@ def _minimum_anchor_score(required: int) -> int:
 
 
 @lru_cache(maxsize=4096)
+def flank_score_bound(sequence: str, flank: str) -> int:
+    """Upper bound on an accepted flank score without decoding a traceback.
+
+    Ignoring anchor length, identity and repeat-only rejection can only raise
+    the score. Saturated byte lanes fall back to an unclipped wide alignment.
+    """
+    if not sequence or not flank:
+        return 0
+    result = parasail.sw_striped_profile_8(_flank_profile(sequence), flank, 5, 1)
+    if result.saturated:
+        result = parasail.sw_striped_profile_32(_read_profile(sequence), flank, 5, 1)
+    return result.score
+
+
+@lru_cache(maxsize=4096)
+def read_anchor_bound(sequence: str, left_flank: str, right_flank: str) -> int:
+    """Bound a mate's strongest anchor; share repeated mates across pairs."""
+    return max(flank_score_bound(oriented, flank)
+               for oriented in (sequence.upper(), revcomp(sequence))
+               for flank in (left_flank, right_flank))
+
+
+@lru_cache(maxsize=4096)
 def flank_hit(sequence: str, flank: str, minimum: int = 10) -> FlankHit | None:
     if not sequence or not flank:
         return None
@@ -222,6 +245,29 @@ def pair_has_anchor(pair: ReadPair, template: RepeatTemplate) -> bool:
     return False
 
 
+@lru_cache(maxsize=4096)
+def _oriented_anchors(sequence: str, motif: str, left_flank: str, right_flank: str):
+    """Cache quality-independent anchors for scoring and final classification."""
+    choices = []
+    for strand, seq in (("+", sequence.upper()), ("-", revcomp(sequence))):
+        is_repeat = repetitive(seq, motif)
+        left = None if is_repeat else flank_hit(seq, left_flank)
+        right = None if is_repeat else flank_hit(seq, right_flank)
+        choices.append((sum(h.score for h in (left, right) if h), strand, seq, left, right, is_repeat))
+    return max(choices, key=lambda v: (v[0], v[5]))
+
+
+def pair_anchor_score(pair: ReadPair, template: RepeatTemplate) -> int:
+    """Exact recruitment score without repeat geometry or evidence objects."""
+    score = 0
+    for read in (pair.read1, pair.read2):
+        if read is not None:
+            _, _, _, left, right, _ = _oriented_anchors(
+                read.sequence, template.motif, template.left, template.right)
+            score += max(left.score if left else 0, right.score if right else 0)
+    return score
+
+
 def classify_pair(pair: ReadPair, template: RepeatTemplate) -> MoleculeEvidence | None:
     """Anchor to non-repeat sequence; count each pair once, with multiple tags."""
     reads = [pair.read1] + ([pair.read2] if pair.read2 else [])
@@ -231,13 +277,8 @@ def classify_pair(pair: ReadPair, template: RepeatTemplate) -> MoleculeEvidence 
     repeat_only = []
     qualities = []
     for read in reads:
-        choices = []
-        for strand, seq in (("+", read.sequence.upper()), ("-", revcomp(read.sequence))):
-            is_repeat = repetitive(seq, template.motif)
-            left = None if is_repeat else flank_hit(seq, template.left)
-            right = None if is_repeat else flank_hit(seq, template.right)
-            choices.append((sum(h.score for h in (left, right) if h), strand, seq, left, right, is_repeat))
-        _, strand, seq, left, right, is_repeat = max(choices, key=lambda v: (v[0], v[5]))
+        _, strand, seq, left, right, is_repeat = _oriented_anchors(
+            read.sequence, template.motif, template.left, template.right)
         oriented.append(seq)
         hits.append((left, right))
         strands.append(strand)
