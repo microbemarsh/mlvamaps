@@ -195,3 +195,30 @@ python scripts/benchmark_repeat_fitting.py \
 
 The benchmark verifies exact equality of every inference field, including
 mixture fractions and confidence, and excludes QC, recruitment and file writing.
+
+### Long database-derived motifs during recruitment
+
+When a panel lacks a concrete nucleotide motif, its database-derived motif can
+be a whole observed repeat tract. Comparing every rotation of a long tract with
+every background read is expensive, even before repeat fitting begins.
+
+For primitive motifs of at least 128 bases, recruitment first searches for exact
+read pieces using native string search. A read allowing `floor(length/10)`
+substitutions is divided into one more piece than that error budget. Every
+accepted cyclic match must contain at least one exact piece, so this filter
+cannot remove a phase accepted by the existing 90% identity rule. Proposed phases
+are verified with NumPy; low-complexity cases with many hits use the previous
+dense comparison. No anchor cutoff, evidence class, or read count is changed.
+
+A synthetic recruitment workload with 12 loci, 1,800-base database-style motifs,
+and 500 paired 150-base reads decreased from 23.83 s to 3.08 s in a single worker.
+All 6,000 locus tests and the complete evidence fingerprint were identical.
+This measures recruitment with long motifs, not the runtime of a real sample.
+The existing recruitment benchmark can measure your actual panel and inputs.
+
+Recovery updates now go to **stdout**, alongside `Recovering loci using
+repeat_likelihood`, and are flushed immediately. The log distinguishes template
+loading, recruitment, fitting, likelihood output, and reconstruction even when
+SLURM sends stderr elsewhere. `reconstruction_metadata.json` includes template
+loading time and `performance.recruitment.template_motif_lengths` so long
+database-derived motifs are visible in completed runs.

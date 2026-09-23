@@ -61,6 +61,44 @@ def test_vectorized_motif_test_matches_original():
         assert repetitive(sequence, motif) == expected
 
 
+def test_long_motif_seed_filter_preserves_error_boundary_and_wrapping():
+    from mlvamaps.repeat_likelihood import _seeded_repetitive
+    rng = random.Random(813)
+    for period in (128, 600, 1800):
+        motif = ''.join(rng.choices('ACGT', k=period))
+        for length in (9, 10, 19, 20, 149, 150, 151):
+            phase = period - 4
+            truth = ''.join(motif[(phase+i) % period] for i in range(length))
+            for error_count in (length//10, length//10 + 1):
+                sequence = list(truth)
+                for index in rng.sample(range(length), error_count):
+                    sequence[index] = next(base for base in 'ACGT' if base != sequence[index])
+                sequence = ''.join(sequence)
+                expected = max(sum(base == motif[(i+offset) % period] for i, base in enumerate(sequence))
+                               for offset in range(period)) / length >= .9
+                assert repetitive(sequence, motif) == expected
+    motif = 'A'*1800 + 'C'
+    sequence = 'C'*30 + 'A'*120
+    assert _seeded_repetitive(sequence, motif) is None  # Bound dense seed-hit work.
+    assert repetitive(sequence, motif) is False
+
+
+def test_recovery_substage_progress_is_visible_in_stdout(tmp_path, capsys):
+    from mlvamaps.io import write_fastq
+    from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
+    fastq = tmp_path/'reads.fq'
+    write_fastq([p.read1 for p in reads(3)], fastq)
+    _, _, _, paths = run_reconstructed_fastq_inference(reads1=fastq, reads2=None,
+        loci=[t.locus for t in templates().values()], database_path=None,
+        outdir=tmp_path/'out', sample_id='s', technology='illumina',
+        minimum_molecules=3, minimum_probability=.8, threads=1, show_progress=True)
+    output = capsys.readouterr().out
+    assert output.index('Loading repeat templates') < output.index('Recruiting short-read molecules')
+    assert 'Repeat fitting finished' in output
+    metadata = json.loads(paths['reconstruction_metadata'].read_text())
+    assert metadata['performance']['stage_seconds']['template_loading'] >= 0
+
+
 def test_profile_alignments_preserve_original_traceback_and_likelihoods():
     t = templates()['L0']
     rng = random.Random(37)

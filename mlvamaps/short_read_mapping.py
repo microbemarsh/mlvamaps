@@ -121,7 +121,7 @@ def run_mapping_short_read_call(
                  "show_progress": show_progress, "stream_molecule_evidence": True}
     method = "competitive_minimap2" if sr_engine == "competitive" else "repeat_likelihood" if technology == "illumina" else "spanning_molecules"
     if show_progress:
-        print(f"[{sample_id}] Recovering loci using {method}")
+        print(f"[{sample_id}] Recovering loci using {method}", flush=True)
     started = time.perf_counter()
     with closing(pair_stream):
         common_calls, molecule_evidence, _molecule_calls, unified_paths = inference_engine(

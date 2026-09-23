@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from dataclasses import replace
 import csv
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -294,7 +295,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         max_anchor_edits=3, threads=1, minimum_spanning_pairs=2, round_tolerance=.25,
         show_progress=False, audit_writer=None, audit_handle=None, pairs=None,
         recruitment_threads=None, **_unused):
-    progress = ProgressReporter(enabled=show_progress)
+    progress = ProgressReporter(enabled=show_progress, stream=sys.stdout)
     stage_seconds, recruitment_stats, locus_stats = {}, {}, {}
     output = Path(outdir)
     output.mkdir(parents=True, exist_ok=True)
@@ -312,7 +313,14 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             products = [p for p in all_products if p.locus_id == locus.locus_id]
             calls.append(_common_call(locus, products, recruited[locus.locus_id], sample_id, technology, minimum_molecules, minimum_probability))
     else:
+        progress.step(f"[{sample_id}] Loading repeat templates for {len(loci)} loci")
+        started = time.perf_counter()
         templates = locus_templates(loci, database_path)
+        stage_seconds["template_loading"] = time.perf_counter() - started
+        recruitment_stats["template_motif_lengths"] = {
+            name: len(template.motif) for name, template in templates.items() if template is not None
+        }
+        progress.step(f"[{sample_id}] Repeat templates loaded in {stage_seconds['template_loading']:.1f}s")
         evidence = defaultdict(list)
         insert_lengths = []
         from .short_read_recruitment import recruit_short_reads

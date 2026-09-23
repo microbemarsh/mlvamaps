@@ -120,6 +120,47 @@ def _motif_phases(motif: str, length: int) -> np.ndarray:
     return phases
 
 
+@lru_cache(maxsize=128)
+def _cyclic_search_text(motif: str, length: int):
+    size = len(motif) + length - 1
+    text = (motif * math.ceil(size / len(motif)))[:size]
+    return text, np.frombuffer(text.encode('ascii'), dtype=np.uint8)
+
+
+def _seeded_repetitive(sequence: str, motif: str) -> bool | None:
+    """Exact cyclic Hamming test using necessary, native substring searches.
+
+    At most floor(L/10) substitutions are allowed. Splitting the query into
+    that many plus one disjoint pieces guarantees at least one exact piece
+    in every accepted phase. Only phases proposed by exact pieces need the
+    full native Hamming comparison. None requests the dense fallback for
+    low-complexity inputs with too many seed hits.
+    """
+    length, period = len(sequence), len(motif)
+    errors = length // 10
+    text, cyclic = _cyclic_search_text(motif, length)
+    bases = np.frombuffer(sequence.encode('ascii'), dtype=np.uint8)
+    checked = set()
+    seed_hits = 0
+    for piece in range(errors + 1):
+        start = piece * length // (errors + 1)
+        end = (piece + 1) * length // (errors + 1)
+        seed = sequence[start:end]
+        stop = period + len(seed) - 1
+        position = text.find(seed, 0, stop)
+        while position >= 0:
+            phase = (position - start) % period
+            if phase not in checked:
+                if np.count_nonzero(bases == cyclic[phase:phase + length]) >= length - errors:
+                    return True
+                checked.add(phase)
+            seed_hits += 1
+            if seed_hits >= 128 or len(checked) >= 64:
+                return None
+            position = text.find(seed, position + 1, stop)
+    return False
+
+
 @lru_cache(maxsize=4096)
 def repetitive(sequence: str, motif: str) -> bool:
     if not sequence or not motif:
@@ -128,6 +169,10 @@ def repetitive(sequence: str, motif: str) -> bool:
     # phase/base loops in native code. Bound cached arrays for long contexts.
     if sequence.isascii() and motif.isascii():
         motif = _primitive_motif(motif)
+        if len(motif) >= 128:
+            accepted = _seeded_repetitive(sequence, motif)
+            if accepted is not None:
+                return accepted
         bases = np.frombuffer(sequence.encode("ascii"), dtype=np.uint8)
         if len(sequence) * len(motif) <= 250_000:
             matches = np.count_nonzero(_motif_phases(motif, len(sequence)) == bases, axis=1)
