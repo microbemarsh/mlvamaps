@@ -154,6 +154,106 @@ nucleotide-substitution model. Repeat homoplasy, locus-specific mutation rates,
 missing-data overlap, and the small number of MLVA loci limit evolutionary
 interpretation.
 
+## Comparing with chewBBACA cgMLST and GrapeTree
+
+Use this comparison to assess agreement in isolate relationships. MLVA and
+cgMLST measure different markers, so equal numeric distances or identical trees
+are not expected. In chewBBACA, alleles identify sequence variants at each locus;
+their numeric IDs are labels, not repeat counts. Its
+[ExtractCgMLST module](https://chewbbaca.readthedocs.io/en/latest/user/modules/ExtractCgMLST.html)
+selects loci by their prevalence across genomes and masks non-EXC/non-INF calls
+as missing. This locus-prevalence filter is distinct from the exporter's
+per-sample callable-fraction filter.
+
+| Export measure | Meaning | Role in a comparison |
+| --- | --- | --- |
+| `categorical_distance` | Fraction of shared callable VNTR loci with different repeat counts | Baseline for comparing allele-profile relationships |
+| `repeat_distance` | Mean absolute repeat-count difference | Sensitivity analysis that includes the size of repeat changes |
+| `combined_marker_distance` | Weighted sum of separately averaged, normalized SNP and repeat distances | Additional analysis using recovered sequence evidence |
+| `alignment_likelihood_distance` | Hellinger distance between fitted reference-component profiles | Reference-composition comparison |
+
+Categorical MLVA treats a change from 3 to 4 repeats and a change from 3 to 10
+repeats as one differing locus. It still cannot distinguish sequence variants
+with the same repeat count. It is therefore comparable in distance *definition*
+to allelic mismatch analysis, without being equivalent in biological resolution.
+
+For a controlled baseline:
+
+1. Use the same isolates in both analyses and one fixed MLVA panel. Record the
+   cgMLST schema, locus list, software versions, and all filtering settings.
+   Audit low-depth, uncertain, and mixed calls before comparison: the exporter
+   accepts any finite final `repeat_count` and applies no additional status or
+   confidence filter. Mixed samples require a separate interpretation from
+   single-isolate cgMLST profiles.
+2. Export categorical MLVA distances with explicit completeness requirements.
+   The example below requires 20 callable loci per sample and 20 shared calls
+   per pair for a 25-locus panel. These are illustrative analysis choices, not
+   validated equivalence thresholds. Repeat the analysis with complete profiles
+   to assess sensitivity to missing data. A supplied `--loci` file is used for
+   sequence recovery; it does not restrict the profile matrix to that panel.
+3. Restrict both comparisons to the same retained sample IDs. `samples_used.tsv`
+   describes the MLVA tree; the distance matrix can include additional samples
+   removed before tree construction. Filter pairwise rows by
+   `comparison_status=sufficient`; finite matrix cells alone do not establish
+   sufficient overlap.
+4. Compare pairwise distance ranks, nearest neighbors, and cluster membership.
+   Define clusters explicitly; a GrapeTree layout does not assign them. Tabulate
+   which cgMLST groups split across MLVA groups and which MLVA groups merge
+   cgMLST groups. Report the fraction of within-cgMLST-group isolate pairs also
+   grouped by MLVA, and the reverse fraction. Report excluded isolates alongside
+   agreement so filtering cannot hide poor recovery.
+   Use independently justified clustering thresholds for each method; a cgMLST
+   cutoff in allele differences does not transfer to 25 VNTR loci. Examine
+   disagreements by locus completeness, sequencing technology, and mixture
+   status. Repeated measurements of the same isolates across technologies help
+   separate reconstruction differences from marker differences.
+5. Use the same tree-building method when comparing topology. GrapeTree defaults
+   to MSTreeV2, with asymmetric distances and branch recrafting; this exporter
+   builds neighbor-joining trees. Running both profiles through the same
+   GrapeTree method isolates more of the marker effect. Alternatively, compare
+   both using the same symmetric categorical distance and NJ implementation.
+   Layout similarity and MST path lengths are not substitutes for pairwise
+   distance or cluster comparisons. See the
+   [GrapeTree options](https://github.com/achtman-lab/GrapeTree#usage---command-line-module-for-generating-trees).
+
+For results already restricted to the intended 25-locus panel and quality-audited
+isolates, a separate baseline export is:
+
+```bash
+mlvamaps export-myoga \
+  --results results/ \
+  --metadata metadata_with_fastq_matches.tsv \
+  --metadata-id shared_identifier \
+  --latitude latitude --longitude longitude \
+  --distance categorical \
+  --min-callable-fraction 0.8 --min-callable-loci 20 \
+  --min-pairwise-fraction 0.8 --min-pairwise-loci 20 \
+  -o myoga_categorical_comparison/
+```
+
+For GrapeTree profile input, convert empty MLVA cells to `-`, use `#Strain` as
+the identifier header, and encode every observed repeat value as a categorical
+label such as `R_0`, `R_3`, or `R_3.5`. A real zero-repeat call must not become
+GrapeTree's missing-value code `0`. Its
+[profile format](https://github.com/achtman-lab/GrapeTree#inputs) and
+[parser](https://github.com/achtman-lab/GrapeTree/blob/master/module/MSTrees.py)
+treat allele labels categorically. Select and record the same missing-data
+policy for both profile sets. GrapeTree's symmetric pairwise-deletion distance
+also rescales by panel size and includes a small numerical correction, so it
+does not exactly equal this export's categorical fraction.
+
+Keep the combined-marker export as a separately labelled analysis. Currently,
+`--combined-markers` bypasses per-sample callable thresholds, including for the
+MLVA outputs produced in that invocation. Combined trees still apply pairwise
+overlap thresholds. SNP and repeat components can use different sets of shared
+loci; a missing component contributes no term to the combined distance. Thus,
+a pair compared on repeat calls alone does not have the same evidence as a pair
+with both components. Repeat scales depend on the cohort's repeat-count standard
+deviation, and SNP scales depend on its positive haplotype distances. Adding
+isolates can change existing pairs' combined distances. Hold the cohort fixed,
+inspect component availability, and report component-specific results when
+assessing this metric against cgMLST.
+
 Existing batch `myoga_samples.csv` and `myoga_loci.csv` outputs remain
 unchanged for backward compatibility. The retrospective exporter is separate
 and can be run after any completed batch. Existing export files are protected;

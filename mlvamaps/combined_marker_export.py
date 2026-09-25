@@ -113,6 +113,9 @@ def _finite_repeat(value: object) -> float | None:
 def _read_delimited(path: Path) -> list[dict[str, str]]:
     if not path.is_file():
         return []
+    # Sequences and molecule-ID evidence can exceed csv's default 128 KiB limit.
+    # File bytes bound field characters; only raise the process-wide limit.
+    csv.field_size_limit(max(csv.field_size_limit(), path.stat().st_size))
     with path.open(newline="", encoding="utf-8") as handle:
         return [dict(row) for row in csv.DictReader(handle, delimiter="\t")]
 

@@ -10,7 +10,8 @@ import numpy as np
 import pytest
 
 import mlvamaps.cli as cli
-from mlvamaps.combined_marker_export import recover_masked_sequences
+from mlvamaps.combined_marker_export import _retained_sample_sequences, recover_masked_sequences
+from mlvamaps.io import write_tsv
 from mlvamaps.myoga_export import (
     SampleCalls,
     calculate_pairwise_distances,
@@ -942,6 +943,34 @@ def test_combined_marker_export_uses_current_alignment_query_amplicons(tmp_path)
     assert matrix[0]["S2"] != ""
     statuses = _read_tsv(tmp_path / "export" / "combined_marker_sequence_status.tsv")
     assert all("classification/query_amplicons.fasta" in row["source"] for row in statuses)
+
+
+@pytest.mark.parametrize("large_field", ["evidence", "sequence", "product_seq"])
+def test_retained_tables_accept_fields_above_default_csv_limit(tmp_path, large_field):
+    sequence = "AAAGGATATCCGGG"
+    evidence = {"meaningful": "yes"}
+    if large_field == "evidence":
+        evidence["molecule_ids"] = [f"read_{i:08d}" for i in range(10000)]
+    else:
+        sequence = "A" * 131073
+    if large_field == "product_seq":
+        path = tmp_path / "local_assembly_pcr" / "matches.tsv"
+        row = {"primer_name": "L1", "product_seq": sequence}
+        priority = 1
+    else:
+        path = tmp_path / "reconstructed_locus_variants.tsv"
+        row = {"locus_id": "L1", "sequence": sequence, "evidence": json.dumps(evidence)}
+        priority = -1
+    assert len(row[large_field]) > 131072
+    write_tsv([row], path, list(row))
+
+    previous_limit = csv.field_size_limit(131072)
+    try:
+        assembly, candidates = _retained_sample_sequences(tmp_path)
+        assert assembly == {}
+        assert candidates == {"L1": [(priority, str(path), sequence)]}
+    finally:
+        csv.field_size_limit(previous_limit)
 
 
 def test_retained_assembly_evidence_is_masked_with_rich_panel(tmp_path):
