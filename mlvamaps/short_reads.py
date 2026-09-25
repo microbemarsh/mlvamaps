@@ -166,7 +166,7 @@ def run_short_read_call(
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
-    sr_engine: str = "repeat-likelihood",
+    sr_engine: str = "competitive",
     insert_mean: float | None = None,
     insert_sd: float | None = None,
     technology: str = "illumina",
@@ -176,7 +176,7 @@ def run_short_read_call(
     min_secondary_reads: int = 2,
     sr_recruitment_audit: str = "compact",
 ) -> dict[str, Path]:
-    """Call Illumina data using locus reconstruction or legacy competition."""
+    """Call Illumina data using competitive alignment or locus reconstruction."""
     from .short_read_mapping import run_mapping_short_read_call
 
     return run_mapping_short_read_call(

@@ -36,6 +36,49 @@ def test_evidence_classes(template):
     assert 'discordant' in classify_pair(pair(t.left, t.right), t).classes
 
 
+def test_internal_flank_hits_do_not_invent_repeat_boundaries():
+    import random
+    from mlvamaps.repeat_likelihood import RepeatTemplate
+
+    rng = random.Random(912)
+    def dna(n):
+        return ''.join(rng.choices('ACGT', k=n))
+    t = RepeatTemplate(Locus('X'), dna(100), dna(100), 'AATG', 4)
+    # Two genuine internal matches, but neither reaches a repeat boundary.
+    unrelated = dna(10) + t.left[20:40] + dna(140) + t.right[60:80] + dna(10)
+    item = classify_pair(pair(unrelated), t)
+    assert item is not None  # Recruitment is separate from length evidence.
+    assert item.observed_repeat is None
+    assert 'E' not in item.classes
+    assert not infer_repeat([item], t).identifiable
+    # Internal anchors still locate a physical spanning pair.
+    spanning = classify_pair(pair(t.left[20:60], revcomp(t.right[40:80])), t)
+    assert 'S' in spanning.classes
+    assert spanning.fragment_offset == 160
+    for sequence in (t.left[20:40] + 'G' * 60 + t.motif * 8,
+                     t.motif * 8 + 'G' * 60 + t.right[60:80]):
+        item = classify_pair(pair(sequence), t)
+        assert item is not None
+        assert 'F' not in item.classes
+        assert item.lower_bound == 0
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_single_boundary_spanning_read_retains_low_coverage_call(template, reverse):
+    # The read covers the repeat and only ten bases of each adjacent flank;
+    # there is no full primer-bounded product and no insert calibration.
+    sequence = template.left[-10:] + template.motif * 8 + template.right[:10]
+    item = classify_pair(pair(revcomp(sequence) if reverse else sequence), template)
+    assert item.observed_repeat == 8
+    result = infer_repeat([item], template)
+    assert result.identifiable
+    products = reconstruct_short_products([item], template, result, 's')
+    from mlvamaps.locus_reconstruction import _common_call
+    call = _common_call(template.locus, products, 1, 's', 'illumina', 3, .8, result)
+    assert call['repeat_count'] == 8
+    assert call['status'] == 'low_coverage'
+
+
 @pytest.mark.parametrize('repeat', [2, 8, 12, 12.5, 40])
 def test_novel_and_outside_range(template, repeat):
     items = [classify_pair(pair(template.sequence(repeat), name=str(i)), template) for i in range(4)]
@@ -146,7 +189,8 @@ def test_end_to_end_three_modes(tmp_path, template):
     outputs = [
         run_assembly_call(str(fasta), str(panel), str(tmp_path/'assembly'), 's'),
         run_call(str(reads), str(panel), str(tmp_path/'lr'), 's'),
-        run_short_read_call(str(reads), str(mate), str(panel), str(tmp_path/'sr'), 's', show_progress=False),
+        run_short_read_call(str(reads), str(mate), str(panel), str(tmp_path/'sr'), 's',
+                            sr_engine='repeat-likelihood', show_progress=False),
     ]
     calls = [read_profiles(o['calls'])[0] for o in outputs]
     assert {float(row['repeat_count']) for row in calls} == {9}
@@ -239,7 +283,26 @@ def test_benchmark_missing_calls_and_tied_ranks(tmp_path):
     assert result['assembly:sr']['within_one_repeat_concordance'] == 1
     assert result['assembly:sr']['mean_absolute_repeat_difference'] == 1
     assert result['assembly:lr']['exact_repeat_concordance'] is None
+    assert result['assembly:lr']['missing_call_loci_by_mode'] == {'assembly': 0, 'lr': 1}
+    assert result['assembly:lr']['exact_repeat_recovery_by_mode'] == {'assembly': 0, 'lr': None}
+    assert next(row for row in rows if row['mode_b'] == 'lr')['comparison'] == 'missing_in_b'
     assert ranks([1, 1, 3]).tolist() == [.5, .5, 2]
+
+
+def test_benchmark_reports_dropout_despite_perfect_shared_concordance(tmp_path):
+    from scripts.benchmark_cross_mode import compare_runs
+    for mode, counts in [('assembly', [('X', '8'), ('Y', '9')]), ('sr', [('X', '8')])]:
+        directory = tmp_path / mode
+        directory.mkdir()
+        (directory / 'calls.tsv').write_text('locus_id\trepeat_count\tstatus\n' + ''.join(
+            f'{locus}\t{count}\tPASS\n' for locus, count in counts))
+    result, rows = compare_runs([{'sample_id': 's', 'mode': mode, 'outdir': tmp_path / mode}
+                                for mode in ['assembly', 'sr']])
+    comparison = result['assembly:sr']
+    assert comparison['exact_repeat_concordance'] == 1
+    assert comparison['exact_repeat_recovery_by_mode']['assembly'] == .5
+    assert comparison['missing_call_loci_by_mode']['sr'] == 1
+    assert {row['comparison'] for row in rows} == {'exact', 'missing_in_b'}
 
 
 def test_mask_excludes_repeat_length_differences(template):

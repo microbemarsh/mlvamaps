@@ -1,6 +1,17 @@
 # Illumina short-read workflow
 
-The default `--sr-engine repeat-likelihood` recruits molecules by non-repeat
+The default `--sr-engine competitive` maps reads against candidate MLVA allele
+contexts with minimap2 and applies shared allele inference. See the
+[competitive workflow](competitive-fastq.md) for evidence and output details.
+
+```bash
+mlvamaps call --loci panel.tsv -i sr --fq1 reads_1.fastq.gz --fq2 reads_2.fastq.gz \
+  --sample-mode metagenome -o results
+```
+
+## Optional repeat-likelihood engine
+
+Selecting `--sr-engine repeat-likelihood` recruits molecules by non-repeat
 flanks, then combines E (enclosing), S (spanning pair), F (flanking), and anchored
 FRR evidence. Repeat states are synthetic and can be novel or outside the panel's
 expected range. Haploid likelihood and the existing microbial EM model retain
@@ -8,7 +19,8 @@ distinct components, including supported SNP haplotypes with the same count.
 
 ```bash
 mlvamaps call --loci panel.tsv -i sr --fq1 reads_1.fastq.gz --fq2 reads_2.fastq.gz \
-  --insert-mean 400 --insert-sd 35 --sample-mode metagenome -o results
+  --sr-engine repeat-likelihood --insert-mean 400 --insert-sd 35 \
+  --sample-mode metagenome -o results
 ```
 
 Insert overrides must describe independently measured library statistics. They
@@ -19,10 +31,12 @@ FRRs without a locus anchor are excluded. Unidentifiable lengths remain blank.
 Read-supported non-repeat sequence is reconstructed after repeat inference;
 uncovered bases become N. Products enter the same genotype and SNP-mask path as
 assembly and LR products. See [formulas, diagnostics, CLI semantics and
-limitations](../concepts/locus-reconstruction.md). For regression comparison,
-`--sr-engine competitive` retains the [legacy workflow](competitive-fastq.md).
+limitations](../concepts/locus-reconstruction.md).
 
 ## Performance and CPU allocation
+
+The recruitment and repeat-fitting details below apply to
+`--sr-engine repeat-likelihood`. Native FASTQ I/O options also apply to competitive runs.
 
 `--threads` now applies to short-read recruitment as well as later locus fitting
 and reference mapping. Recruitment uses ordered 256-pair chunks and process
@@ -79,8 +93,8 @@ Choose worker counts within the allocated CPUs. The benchmark includes worker
 startup and evidence hashing and compares both full and compact audit modes by
 default. It verifies identical retained evidence and insert calibration for all
 requested worker counts and modes, and identical diagnostics across worker
-counts within each mode. Use `--audit-modes compact` to time only the default
-caller path. It uses the default SR QC thresholds; it does not
+counts within each mode. Use `--audit-modes compact` to time only this engine's
+default audit mode. It uses the default SR QC thresholds; it does not
 run repeat inference or reference classification.
 
 ### Resolving competing flank matches

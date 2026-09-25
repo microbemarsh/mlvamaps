@@ -13,7 +13,9 @@ from mlvamaps.sequence import revcomp
 from mlvamaps.short_reads import merge_read_pair, qc_read_pairs, run_short_read_call
 
 
-def test_short_read_wrapper_forwards_automatic_taxon_options(monkeypatch):
+@pytest.mark.parametrize('engine_options, expected_engine', [({}, 'competitive'),
+    ({'sr_engine': 'repeat-likelihood'}, 'repeat-likelihood')])
+def test_short_read_wrapper_forwards_automatic_taxon_options(monkeypatch, engine_options, expected_engine):
     observed = {}
 
     def fake_call(**kwargs):
@@ -25,12 +27,14 @@ def test_short_read_wrapper_forwards_automatic_taxon_options(monkeypatch):
         "r1.fastq", "r2.fastq", "panel.tsv", "out", "sample",
         database_path="multi-taxon-db", taxon_identification=True, taxon_min_loci=5,
         classification_repeat_scale=0.2,
+        **engine_options,
     )
 
     assert observed["database_path"] == "multi-taxon-db"
     assert observed["taxon_identification"] is True
     assert observed["taxon_min_loci"] == 5
     assert observed["classification_repeat_scale"] == 0.2
+    assert observed["sr_engine"] == expected_engine
 
 
 def _write_fastq(path: Path, records: list[tuple[str, str]], quality: str = "I") -> None:

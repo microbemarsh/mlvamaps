@@ -1,8 +1,10 @@
 # Output file reference
 
-The default FASTQ engines now use [canonical locus reconstruction](../concepts/locus-reconstruction.md).
-That document lists the new engine/insert options, evidence files, formulas and
-compatibility changes; competitive-mapping details below apply to the legacy engines.
+Short reads default to `--sr-engine competitive`; competitive-mapping outputs
+below apply to that engine and `--lr-engine competitive`.
+[Canonical locus reconstruction](../concepts/locus-reconstruction.md) describes
+outputs from the default `--lr-engine spanning` and optional
+`--sr-engine repeat-likelihood` engines.
 
 
 All generated FASTA and FASTQ artifacts are gzip-compressed by default and use

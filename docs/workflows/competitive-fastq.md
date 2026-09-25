@@ -1,7 +1,9 @@
-# Legacy competitive FASTQ workflows
+# Competitive FASTQ workflows
 
 The descriptions below apply only to `--lr-engine competitive` and
-`--sr-engine competitive`. The defaults use [locus reconstruction](../concepts/locus-reconstruction.md).
+`--sr-engine competitive`, the short-read default. Long reads default to
+`--lr-engine spanning`; short reads can opt into `--sr-engine repeat-likelihood`.
+Those engines use [locus reconstruction](../concepts/locus-reconstruction.md).
 
 # FASTQ and amplicon sequencing workflow
 

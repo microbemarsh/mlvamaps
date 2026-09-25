@@ -83,11 +83,16 @@ def compare_runs(manifest):
             shared = ca.keys() & cb.keys()
             shared_by_sample[sample] = len(shared)
             exact_profiles.append(bool(ca) and ca == cb)
-            for locus in sorted(shared):
+            for locus in sorted(ca.keys() | cb.keys()):
+                row = {'sample_id': sample, 'mode_a': a, 'mode_b': b, 'locus_id': locus,
+                       'repeat_a': ca.get(locus, ''), 'repeat_b': cb.get(locus, '')}
+                if locus not in shared:
+                    row['comparison'] = 'missing_in_a' if locus not in ca else 'missing_in_b'
+                    locus_rows.append(row)
+                    continue
                 delta = abs(ca[locus]-cb[locus])
                 differences.append(delta)
-                row = {'sample_id': sample, 'mode_a': a, 'mode_b': b, 'locus_id': locus,
-                       'repeat_a': ca[locus], 'repeat_b': cb[locus], 'absolute_difference': delta}
+                row.update(absolute_difference=delta, comparison='exact' if delta == 0 else 'discordant')
                 if va.get(locus) and vb.get(locus):
                     pa = max(va[locus], key=lambda r: float(r['estimated_fraction']))
                     pb = max(vb[locus], key=lambda r: float(r['estimated_fraction']))
@@ -100,9 +105,18 @@ def compare_runs(manifest):
                     fraction_distances.append(sum(abs(aa.get(k,0)-bb.get(k,0)) for k in aa.keys() | bb.keys()) / 2)
                     row['snp_matches'], row['snp_comparable_sites'] = match, sites
                 locus_rows.append(row)
+        exact_matches = sum(delta == 0 for delta in differences)
         result[f'{a}:{b}'] = {
             'shared_callable_loci': len(differences), 'shared_callable_loci_by_sample': shared_by_sample,
             'callable_loci_by_mode': callable_by_mode,
+            'exact_repeat_matches': exact_matches,
+            'discordant_repeat_loci': len(differences) - exact_matches,
+            # Each denominator includes calls missing from the other mode.
+            # This prevents improved shared-call accuracy from hiding dropout.
+            'exact_repeat_recovery_by_mode': {
+                mode: exact_matches / count if count else None for mode, count in callable_by_mode.items()},
+            'missing_call_loci_by_mode': {
+                a: callable_by_mode[b] - len(differences), b: callable_by_mode[a] - len(differences)},
             'exact_repeat_concordance': float(np.mean(np.asarray(differences)==0)) if differences else None,
             'within_one_repeat_concordance': float(np.mean(np.asarray(differences)<=1)) if differences else None,
             'mean_absolute_repeat_difference': float(np.mean(differences)) if differences else None,
@@ -165,7 +179,7 @@ def main():
     args.output.write_text(json.dumps({'comparisons': summary, 'distance_correlations': distance_correlations(args.distance_matrix)}, indent=2, allow_nan=False)+'\n')
     with args.output.with_suffix('.loci.tsv').open('w') as handle:
         writer = csv.DictWriter(handle, delimiter='\t', fieldnames=['sample_id','mode_a','mode_b','locus_id',
-            'repeat_a','repeat_b','absolute_difference','snp_matches','snp_comparable_sites'])
+            'repeat_a','repeat_b','comparison','absolute_difference','snp_matches','snp_comparable_sites'])
         writer.writeheader()
         writer.writerows(rows)
 

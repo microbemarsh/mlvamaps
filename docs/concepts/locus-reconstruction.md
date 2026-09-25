@@ -1,7 +1,11 @@
 # Input-specific reconstruction and shared genotyping
 
-mlvamaps uses input-specific locus reconstruction followed by a shared locus-level
-genotyping framework. Assemblies use Sassy primer-directed in-silico PCR, accurate
+This document describes the default long-read engine (`--lr-engine spanning`)
+and the optional short-read engine (`--sr-engine repeat-likelihood`). Short reads
+default to [competitive alignment](../workflows/competitive-fastq.md).
+
+The reconstruction engines use a shared locus-level genotyping framework.
+Assemblies use Sassy primer-directed in-silico PCR, accurate
 long reads use complete spanning molecules, and paired short reads combine
 enclosing, spanning-pair, flanking, and anchored repeat-rich evidence. Recovered
 products use the same calibrated repeat measurement, repeat masking and sequence
@@ -18,7 +22,7 @@ an inference input or training target.
 Previously, `unified_fastq.run_unified_fastq_inference` competitively mapped both
 read technologies to generated/database candidate alleles and
 `allele_inference.infer_alleles` chose repeat states. Assembly selected Sassy
-products with historical MLVA_finder rules. The new defaults separate recovery:
+products with historical MLVA_finder rules. The reconstruction engines separate recovery:
 
 ```mermaid
 flowchart TD
@@ -96,6 +100,15 @@ overlap and are not independent molecule counts:
   a lower bound `k_i`.
 - **FRR:** a motif-periodic read with a flank-anchored mate supplies a lower bound.
   Unanchored FRRs are excluded. No human-genome off-target assumption is used.
+
+E and F require the flank alignment to reach within three bases of the relevant
+repeat boundary. An internal flank match can recruit a molecule and locate a
+mate for S geometry, but cannot establish an observed boundary by extrapolating
+across the missing flank. The three-base allowance tolerates terminal alignment
+clipping; it is a heuristic, not an empirically calibrated error probability.
+A single enclosing molecule can still yield an allele marked `LOW_DEPTH` when
+its model confidence passes the threshold; independent insert calibration is
+not required for enclosing evidence.
 
 For each molecule and candidate, the implementation computes the composite score
 (up to constants independent of `R`):
@@ -177,10 +190,10 @@ depth times the candidate grid. No new dependencies are required.
 
 ## CLI and outputs
 
-New default options:
+Select reconstruction with these options:
 
 ```text
---sr-engine repeat-likelihood  # competitive retains the legacy/debug workflow
+--sr-engine repeat-likelihood  # opt-in; competitive is the short-read default
 --lr-engine spanning           # competitive retains the legacy/debug workflow
 --insert-mean BP --insert-sd BP # both required together, positive finite values
 ```

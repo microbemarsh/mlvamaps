@@ -484,6 +484,7 @@ def run_call(
             short_min_read_length=min_read_length, short_min_mean_quality=min_qscore,
             min_depth=min_depth, short_confidence_threshold=min_posterior, threads=thread_count,
             sample_mode=sample_mode, minimap2_bin=minimap2_bin, technology="hifi",
+            sr_engine="repeat-likelihood",
             max_anchor_edits=max_primer_mismatches, min_mixture_fraction=min_mixture_fraction,
             round_tolerance=assembly_round_tolerance,
             min_secondary_reads=min_secondary_reads, reference_metadata_path=reference_metadata_path,

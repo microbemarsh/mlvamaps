@@ -36,6 +36,35 @@ become zero. Optional `--distance-matrix MODE=matrix.tsv` arguments compute tied
 Spearman correlation over shared finite off-diagonal distances. SNP comparisons
 exclude unknown bases; component identity requires matching full masked sequence.
 
+The locus table includes calls missing from either mode, with `comparison` equal
+to `exact`, `discordant`, `missing_in_a`, or `missing_in_b`. The JSON reports
+`exact_repeat_recovery_by_mode`: exact matches divided by all callable loci in
+that mode, including those uncalled in the other mode. For an assembly/SR
+comparison, its `assembly` value measures recovery of assembly calls and should
+be reviewed alongside shared-call concordance and `missing_call_loci_by_mode`.
+Loci uncalled in both modes do not contribute to these metrics. Assembly calls
+are comparators, not an independently verified ground truth.
+
+For a server-only dataset, keep the reads and assemblies there and compare
+existing outputs with a manifest such as:
+
+```tsv
+sample_id	mode	outdir
+isolate1	assembly	/path/to/isolate1/assembly
+isolate1	sr_before	/path/to/isolate1/sr_before
+isolate1	sr_after	/path/to/isolate1/sr_after
+```
+
+Use identical reads, panels and settings for the two SR runs, and distinct output
+directories. Repeat at the coverage levels relevant to the experiment (for
+example 1x, 2x, 5x, 10x and full depth), using the same subsampled molecules for
+before/after runs and several subsampling seeds. Use a separate manifest per
+depth and seed. Inspect discordant loci and missing calls as well as aggregate
+metrics. Compare wall time under the same CPU allocation using
+`short_read_run_metadata.json` → `performance.stage_seconds.total`; recruitment
+and inference timings are also in `reconstruction_metadata.json`. These metadata
+do not report peak RAM; measure that with the server's job accounting if needed.
+
 ## Short-read recruitment performance
 
 `benchmark_repeat_fitting.py` compares exhaustive native candidate alignment

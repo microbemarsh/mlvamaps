@@ -518,7 +518,7 @@ def test_streaming_pipeline_preserves_database_inputs_and_results(tmp_path, monk
     monkeypatch.setattr('mlvamaps.minimap_mapping.minimap2_version', lambda _: 'test')
     for database in (None, 'database'):
         run_short_read_call(str(first), str(second), str(panel), str(tmp_path/str(database)), 's',
-                            database_path=database, threads=1, show_progress=False)
+                            database_path=database, sr_engine='repeat-likelihood', threads=1, show_progress=False)
     assert classified == pairs
     for name in ('calls.tsv', 'reconstructed_loci.fasta', 'reconstructed_locus_variants.tsv',
                  'locus_snps.tsv', 'short_read_qc_summary.tsv', 'molecule_candidate_evidence.tsv'):

@@ -51,7 +51,7 @@ def run_mapping_short_read_call(
     missing_locus_penalty: float = 8.0,
     show_progress: bool = True,
     classification_repeat_scale: float = 1.0,
-    sr_engine: str = "repeat-likelihood", insert_mean=None, insert_sd=None,
+    sr_engine: str = "competitive", insert_mean=None, insert_sd=None,
     technology: str = "illumina", max_anchor_edits: int = 3, round_tolerance: float = .25,
     min_mixture_fraction: float = .01, min_secondary_reads: int = 2,
     sr_recruitment_audit: str = "compact",

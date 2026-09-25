@@ -5,10 +5,10 @@ assembly FASTA and sequencing FASTQ. Both calling paths produce compatible
 locus calls, fingerprints, profile matches, and reports, but they preserve the
 different evidence available from assembled contigs and individual molecules.
 
-The default recovery/genotyping architecture and current diagram are documented
-in [locus reconstruction](../concepts/locus-reconstruction.md). Older rendered
-figures under `figures/software_workflow/` describe the retained competitive
-workflow and are not diagrams of the new default engines.
+Short reads default to [competitive candidate mapping](competitive-fastq.md).
+Long reads default to spanning-molecule recovery. The optional SR
+repeat-likelihood engine and default LR engine are documented in
+[locus reconstruction](../concepts/locus-reconstruction.md).
 
 ## Resource ownership
 
@@ -32,17 +32,17 @@ finalization.
 Local-assembly `build-reference` input already represents one complete cohort,
 so it proceeds directly from extraction to one finalization.
 
-## Locus reconstruction and legacy candidate mapping
+## Locus reconstruction and candidate mapping
 
 Assembly products, complete LR molecules, and SR likelihood/sequence
-reconstructions enter `locus_products.genotype_product`. The new SR model uses
+reconstructions enter `locus_products.genotype_product`. The optional SR model uses
 panel flanks or borrowed database context to identify loci and synthesizes
 repeat states independently of known alleles. Its candidate scores and per-pair
 evidence are retained for inspection.
 
-`--sr-engine competitive` and `--lr-engine competitive` retain the former
+`--sr-engine competitive` (the default) and `--lr-engine competitive` use the
 `unified_fastq` candidate-mapping workflow and cached minimap2 indexes.
-See [legacy competitive workflows](competitive-fastq.md) for those details.
+See [competitive workflows](competitive-fastq.md) for those details.
 
 ## Global thread budget
 

@@ -435,8 +435,8 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         default=3,
         help="Informative molecules required to avoid Illumina LOW_DEPTH (default: %(default)s)",
     )
-    call.add_argument("--sr-engine", choices=("repeat-likelihood", "competitive"), default="repeat-likelihood",
-                      help="Short-read recovery engine; competitive is legacy/debug")
+    call.add_argument("--sr-engine", choices=("competitive", "repeat-likelihood"), default="competitive",
+                      help="Short-read recovery engine (default: %(default)s)")
     call.add_argument("--sr-recruitment-audit", choices=("compact", "full"), default="compact",
                       help="Ambiguous-pair diagnostics: compact records the two strongest loci; full records all matching loci")
     call.add_argument("--lr-engine", choices=("spanning", "competitive"), default="spanning",

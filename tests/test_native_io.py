@@ -108,7 +108,7 @@ def test_parallel_decoder_feeds_spawned_recruitment_workers(tmp_path, monkeypatc
     outputs = []
     for threads in (1, 16):
         outputs.append(run_short_read_call(str(first), str(second), str(panel), str(tmp_path/str(threads)),
-                                          's', threads=threads, show_progress=False))
+                                          's', sr_engine='repeat-likelihood', threads=threads, show_progress=False))
     for name in ('calls.tsv', 'reconstructed_loci.fasta', 'molecule_candidate_evidence.tsv',
                  'molecule_repeat_likelihoods.tsv', 'short_read_qc_summary.tsv'):
         assert (tmp_path/'1'/name).read_bytes() == (tmp_path/'16'/name).read_bytes()

@@ -1,8 +1,10 @@
 # CLI options and thresholds
 
-The default FASTQ engines now use [canonical locus reconstruction](../concepts/locus-reconstruction.md).
-That document lists the new engine/insert options, evidence files, formulas and
-compatibility changes; competitive-mapping details below apply to the legacy engines.
+The defaults are `--sr-engine competitive` and `--lr-engine spanning`.
+[Canonical locus reconstruction](../concepts/locus-reconstruction.md) describes
+the default long-read engine and optional `--sr-engine repeat-likelihood`,
+including its insert options and evidence files. Competitive-mapping details
+below apply to the default short-read engine and `--lr-engine competitive`.
 
 
 Run `mlvamaps call --help` for essential options, or `mlvamaps call --advanced`

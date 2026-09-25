@@ -8,32 +8,29 @@ The main outputs are an MLVA fingerprint, per-locus calls and evidence, and a
 self-contained HTML report. Reference databases add alignment-based reference support using nucleotide
 variation and VNTR repeat-length evidence.
 
-mlvamaps uses input-specific locus reconstruction followed by a shared locus-level
-genotyping framework:
+mlvamaps uses input-specific evidence to produce compatible locus calls:
 
 ```mermaid
 flowchart LR
   A[Assembly] --> P[Sassy PCR products]
   L[Accurate long reads] --> M[Complete spanning molecules]
-  S[Paired or single short reads] --> E[E/S/F/FRR repeat evidence and EM]
+  S[Paired or single short reads] --> E[Competitive candidate alignment and allele inference]
   P --> C[Canonical locus products]
   M --> C
-  E --> C
   C --> G[Shared repeat and SNP typing]
   G --> O[Profiles, reference comparison and reports]
+  E --> O
 ```
 
 Assembly product selection remains MLVA_finder compatible. Long reads are
-measured directly. Short reads combine enclosing, spanning-pair, flanking and
-anchored repeat-rich evidence using an independently implemented model inspired
-by [GangSTR concepts](https://doi.org/10.1093/nar/gkz501). This microbial model
-supports a dominant haploid allele and multiple metagenomic components; it does
-not impose human diploidy or average distinct repeat alleles. Reference databases
-do not constrain observable repeat states: novel alleles remain callable.
+measured directly. Short reads use competitive minimap2 alignment against
+candidate MLVA allele contexts, followed by shared allele inference.
+See the [competitive workflow](docs/workflows/competitive-fastq.md).
 
-The defaults are `--sr-engine repeat-likelihood` and `--lr-engine spanning`.
-Use `competitive` for either option to reproduce the legacy FASTQ workflow.
-Paired length inference needs a measured library distribution; when the available
+The defaults are `--sr-engine competitive` and `--lr-engine spanning`.
+Use `--sr-engine repeat-likelihood` to opt into the independently implemented
+E/S/F/FRR model inspired by [GangSTR concepts](https://doi.org/10.1093/nar/gkz501).
+In that model, paired length inference needs a measured library distribution; when the available
 flanks cannot estimate it, provide `--insert-mean BP --insert-sd BP`. Flanking-only
 or unanchored repeat evidence cannot produce an exact count.
 

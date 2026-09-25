@@ -294,7 +294,12 @@ def classify_pair(pair: ReadPair, template: RepeatTemplate) -> MoleculeEvidence 
     for seq, quality, (left, right) in zip(oriented, qualities, hits):
         start = left.query_end + len(template.left) - left.flank_end if left else None
         end = right.query_start - right.flank_start if right else None
-        if start is not None and end is not None and 0 <= start <= end <= len(seq):
+        # Internal flank matches locate mates for S geometry, but do not
+        # observe a repeat boundary. Allow only terminal clipping of up to
+        # three bases for E/F evidence, not extrapolation across a flank.
+        left_boundary = left is not None and len(template.left) - left.flank_end <= 3
+        right_boundary = right is not None and right.flank_start <= 3
+        if left_boundary and right_boundary and 0 <= start <= end <= len(seq):
             classes.add("E")
             observed.append((end - start) / template.unit)
             # Only a complete observed primer-bounded product is a phased haplotype.
@@ -303,8 +308,8 @@ def classify_pair(pair: ReadPair, template: RepeatTemplate) -> MoleculeEvidence 
             if begin >= 0 and finish <= len(seq) and (quality is None or all(ord(q)-33 >= 20 for q in quality[begin:finish])):
                 product = seq[begin:finish]
         else:
-            segment = seq[start:] if start is not None and 0 <= start < len(seq) else (
-                seq[:end] if end is not None and 0 < end <= len(seq) else "")
+            segment = seq[start:] if left_boundary and 0 <= start < len(seq) else (
+                seq[:end] if right_boundary and 0 < end <= len(seq) else "")
             if segment and repetitive(segment, template.motif):
                 classes.add("F")
                 lower = max(lower, len(segment) / template.unit)
