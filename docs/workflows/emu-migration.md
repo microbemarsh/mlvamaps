@@ -15,7 +15,8 @@ reported repeat counts, reference counts, mismatch counts, and extended CIGARs.
 Mismatch counts describe aligned differences; they are not a quality-filtered
 SNP call set. Read SNP outputs retain their existing coverage/quality filters.
 
-FASTQ allele inference retains competitive candidate mapping. Reference typing
+Short-read allele calling uses competitive recruitment and targeted locus
+reconstruction. Optional competitive long-read inference remains available. Reference typing
 uses a separate alignment pass against observed reference amplicons. Synthetic
 candidate alleles and representative consensus sequences do not become
 reference-classification observations.

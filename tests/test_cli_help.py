@@ -11,7 +11,7 @@ def test_call_help(flags, capsys):
     output = capsys.readouterr().out
     for option in ("--input", "--panel", "--database", "--output", "--threads", "--advanced"):
         assert option in output
-    for option in ("--min-posterior", "--minimap2-bin", "--short-min-mapq"):
+    for option in ("--min-posterior", "--minimap2-bin", "--short-repeat-fraction"):
         assert (option in output) == ("--advanced" in flags)
 
 

@@ -6,9 +6,10 @@ import pytest
 from mlvamaps.models import Locus, ReadPair, ReadRecord
 from mlvamaps.sequence import revcomp
 from mlvamaps.locus_products import LocusProduct, genotype_product
-from mlvamaps.locus_reconstruction import recover_long_reads, reconstruct_short_products
-from mlvamaps.repeat_likelihood import (
-    panel_template, classify_pair, infer_repeat, InsertDistribution, estimate_insert_distribution,
+from mlvamaps.targeted_reconstruction import recover_locus, candidate_likelihood
+from mlvamaps.locus_reconstruction import recover_long_reads
+from mlvamaps.short_read_evidence import (
+    panel_template, classify_pair, InsertDistribution, estimate_insert_distribution,
 )
 
 
@@ -26,11 +27,11 @@ def pair(a, b=None, name='m'):
 def test_evidence_classes(template):
     t = template
     seq = t.sequence(12)
-    assert 'E' in classify_pair(pair(seq), t).classes
-    assert 'F' in classify_pair(pair(t.left + 'AATG'*5), t).classes
-    assert 'F' in classify_pair(pair('AATG'*5 + t.right), t).classes
-    assert 'S' in classify_pair(pair(t.left, revcomp(t.right)), t).classes
-    assert 'FRR' in classify_pair(pair(t.left, revcomp('AATG'*8)), t).classes
+    assert 'FULL_SPAN' in classify_pair(pair(seq), t).classes
+    assert 'LEFT_BOUNDARY' in classify_pair(pair(t.left + 'AATG'*5), t).classes
+    assert 'RIGHT_BOUNDARY' in classify_pair(pair('AATG'*5 + t.right), t).classes
+    assert 'FLANK_PAIR' in classify_pair(pair(t.left, revcomp(t.right)), t).classes
+    assert 'ANCHORED_REPEAT' in classify_pair(pair(t.left, revcomp('AATG'*8)), t).classes
     assert classify_pair(pair('AATG'*8), t) is None
     assert classify_pair(pair('CCCCCCCCCCCCCCCCCCCC'), t) is None
     assert 'discordant' in classify_pair(pair(t.left, t.right), t).classes
@@ -38,7 +39,7 @@ def test_evidence_classes(template):
 
 def test_internal_flank_hits_do_not_invent_repeat_boundaries():
     import random
-    from mlvamaps.repeat_likelihood import RepeatTemplate
+    from mlvamaps.short_read_evidence import RepeatTemplate
 
     rng = random.Random(912)
     def dna(n):
@@ -49,17 +50,17 @@ def test_internal_flank_hits_do_not_invent_repeat_boundaries():
     item = classify_pair(pair(unrelated), t)
     assert item is not None  # Recruitment is separate from length evidence.
     assert item.observed_repeat is None
-    assert 'E' not in item.classes
-    assert not infer_repeat([item], t).identifiable
+    assert 'FULL_SPAN' not in item.classes
+    assert not recover_locus([item], t, 's').identifiable
     # Internal anchors still locate a physical spanning pair.
     spanning = classify_pair(pair(t.left[20:60], revcomp(t.right[40:80])), t)
-    assert 'S' in spanning.classes
+    assert 'FLANK_PAIR' in spanning.classes
     assert spanning.fragment_offset == 160
     for sequence in (t.left[20:40] + 'G' * 60 + t.motif * 8,
                      t.motif * 8 + 'G' * 60 + t.right[60:80]):
         item = classify_pair(pair(sequence), t)
         assert item is not None
-        assert 'F' not in item.classes
+        assert not {'LEFT_BOUNDARY', 'RIGHT_BOUNDARY'} & set(item.classes)
         assert item.lower_bound == 0
 
 
@@ -70,9 +71,9 @@ def test_single_boundary_spanning_read_retains_low_coverage_call(template, rever
     sequence = template.left[-10:] + template.motif * 8 + template.right[:10]
     item = classify_pair(pair(revcomp(sequence) if reverse else sequence), template)
     assert item.observed_repeat == 8
-    result = infer_repeat([item], template)
+    result = recover_locus([item], template, 's')
     assert result.identifiable
-    products = reconstruct_short_products([item], template, result, 's')
+    products = result.products
     from mlvamaps.locus_reconstruction import _common_call
     call = _common_call(template.locus, products, 1, 's', 'illumina', 3, .8, result)
     assert call['repeat_count'] == 8
@@ -82,10 +83,10 @@ def test_single_boundary_spanning_read_retains_low_coverage_call(template, rever
 @pytest.mark.parametrize('repeat', [2, 8, 12, 12.5, 40])
 def test_novel_and_outside_range(template, repeat):
     items = [classify_pair(pair(template.sequence(repeat), name=str(i)), template) for i in range(4)]
-    result = infer_repeat(items, template)
-    assert result.best == repeat
+    result = recover_locus(items, template, 's')
+    assert genotype_product(result.products[0], template.locus).repeat_count == repeat
     assert result.identifiable
-    products = reconstruct_short_products(items, template, result, 'sample')
+    products = result.products
     assert genotype_product(products[0], template.locus).repeat_count == repeat
 
 
@@ -93,15 +94,15 @@ def test_spanning_pair_length(template):
     t = template
     items = [classify_pair(pair(t.left, revcomp(t.right), str(i)), t) for i in range(40)]
     insert = InsertDistribution(len(t.sequence(30)), 4, 40, 'override')
-    result = infer_repeat(items, t, insert)
+    result = recover_locus(items, t, 's', insert)
     assert result.best == 30
     assert result.identifiable
-    assert not infer_repeat(items, t).identifiable
+    assert not recover_locus(items, t, 's').identifiable
 
 
 def test_lower_bounds_never_force_exact_call(template):
     items = [classify_pair(pair(template.left + 'AATG'*25), template)] * 20
-    result = infer_repeat(items, template, maximum=30)
+    result = recover_locus(items, template, 's', maximum=30)
     assert not result.identifiable
     assert result.interval[0] >= 24
     assert result.limit_reached
@@ -125,8 +126,8 @@ def test_mixtures_and_snp_haplotypes(template, fraction, change_repeat):
     second = second[:20] + ('A' if second[20] != 'A' else 'C') + second[21:]
     sequences = [first]*round(100*fraction) + [second]*round(100*(1-fraction))
     items = [classify_pair(pair(seq, name=str(i)), template) for i,seq in enumerate(sequences)]
-    inference = infer_repeat(items, template)
-    products = reconstruct_short_products(items, template, inference, 'sample')
+    inference = recover_locus(items, template, 's')
+    products = inference.products
     assert len(products) == 2
     assert sorted(p.estimated_fraction for p in products) == pytest.approx(sorted([fraction, 1-fraction]), abs=.01)
     assert {p.sequence for p in products} == {first, second}
@@ -140,7 +141,7 @@ def test_cross_modality_product_equivalence(template):
     pairs = [pair(seq if i % 2 else revcomp(seq), name=str(i)) for i in range(6)]
     lr, audit, _ = recover_long_reads(pairs, [template.locus], 's', max_anchor_edits=1)
     items = [classify_pair(p, template) for p in pairs]
-    sr = reconstruct_short_products(items, template, infer_repeat(items, template), 's')
+    sr = recover_locus(items, template, 's').products
     for product in lr + sr:
         observed = genotype_product(product, template.locus)
         assert observed.repeat_count == assembly.repeat_count == 9
@@ -151,13 +152,13 @@ def test_cross_modality_product_equivalence(template):
 
 def test_spanning_mixture(template):
     # Two fragment geometries imply repeat states 20 and 40 under one library.
-    from mlvamaps.repeat_likelihood import MoleculeEvidence
-    items = [MoleculeEvidence(str(i), 'X', ('S',), (), (), fragment_offset=500-r*4)
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    items = [MoleculeEvidence(str(i), 'X', ('FLANK_PAIR',), (), (), fragment_offset=500-r*4)
              for i,r in enumerate([20]*70+[40]*30)]
-    result = infer_repeat(items, template, InsertDistribution(500, 4, 100, 'override'))
-    assert result.fractions[20] == pytest.approx(.7, abs=.01)
-    assert result.fractions[40] == pytest.approx(.3, abs=.01)
-    assert result.fractions.get(26, 0) < .01
+    result = recover_locus(items, template, 's', InsertDistribution(500, 4, 100, 'override'))
+    assert result.method == 'MIXED'
+    assert not result.identifiable
+    assert not result.products
 
 
 def write_panel(tmp_path, template):
@@ -190,7 +191,7 @@ def test_end_to_end_three_modes(tmp_path, template):
         run_assembly_call(str(fasta), str(panel), str(tmp_path/'assembly'), 's'),
         run_call(str(reads), str(panel), str(tmp_path/'lr'), 's'),
         run_short_read_call(str(reads), str(mate), str(panel), str(tmp_path/'sr'), 's',
-                            sr_engine='repeat-likelihood', show_progress=False),
+                            show_progress=False),
     ]
     calls = [read_profiles(o['calls'])[0] for o in outputs]
     assert {float(row['repeat_count']) for row in calls} == {9}
@@ -221,10 +222,11 @@ def test_database_does_not_change_rich_panel_novel_call(tmp_path, template):
 def test_partial_snp_consensus_and_uncovered_bases(template):
     seq = template.sequence(30)
     items = [classify_pair(pair(seq[:55], revcomp(seq[-55:]), str(i)), template) for i in range(40)]
-    result = infer_repeat(items, template, InsertDistribution(len(seq), 4, 40, 'override'))
-    products = reconstruct_short_products(items, template, result, 's')
+    result = recover_locus(items, template, 's', InsertDistribution(len(seq), 4, 40, 'override'))
+    products = result.products
     assert len(products) == 1
-    assert products[0].sequence == seq
+    assert products[0].sequence[:len(template.left)] == seq[:len(template.left)]
+    assert 'N' * 120 in products[0].sequence
     assert genotype_product(products[0], template.locus).repeat_count == 30
 
 
@@ -233,10 +235,10 @@ def test_partial_paired_snp_mixture(template):
     variant = original[:20] + 'A' + original[21:]
     truth = [original]*70 + [variant]*30
     items = [classify_pair(pair(seq[:55], revcomp(seq[-55:]), str(i)), template) for i,seq in enumerate(truth)]
-    inference = infer_repeat(items, template, InsertDistribution(len(original), 4, 100, 'override'))
-    products = reconstruct_short_products(items, template, inference, 's')
-    assert {p.sequence for p in products} == {original, variant}
-    assert sorted(p.estimated_fraction for p in products) == pytest.approx([.3, .7])
+    inference = recover_locus(items, template, 's', InsertDistribution(len(original), 4, 100, 'override'))
+    products = inference.products
+    assert products[0].sequence[20] == 'N'
+    assert products[0].evidence['call_method'] == 'INFERRED'
 
 
 def test_low_quality_snp_is_not_reported_as_supported(template):
@@ -246,8 +248,8 @@ def test_low_quality_snp_is_not_reported_as_supported(template):
         p = pair(seq[:55], revcomp(seq[-55:]), str(i))
         p = replace(p, read1=replace(p.read1, quality='I'*20+'!'+ 'I'*34))
         items.append(classify_pair(p, template))
-    inference = infer_repeat(items, template, InsertDistribution(len(seq), 4, 40, 'override'))
-    products = reconstruct_short_products(items, template, inference, 's')
+    inference = recover_locus(items, template, 's', InsertDistribution(len(seq), 4, 40, 'override'))
+    products = inference.products
     assert products[0].sequence[20] == 'N'
 
 
@@ -267,10 +269,11 @@ def test_shared_flanks_are_not_double_counted(tmp_path, template):
 def test_cli_engine_and_insert_options():
     from mlvamaps.cli import build_parser
     args = build_parser().parse_args(['call', '-i', 'reads.fq', '-p', 'primers.tsv',
-                                     '--sr-engine', 'competitive', '--lr-engine', 'competitive',
+                                     '--lr-engine', 'competitive',
                                      '--insert-mean', '400', '--insert-sd', '30'])
     assert args.insert_mean == 400 and args.insert_sd == 30
-    assert args.sr_engine == args.lr_engine == 'competitive'
+    assert args.lr_engine == 'competitive'
+    assert not hasattr(args, 'sr_engine')
 
 
 def test_benchmark_missing_calls_and_tied_ranks(tmp_path):
@@ -316,13 +319,13 @@ def test_singleton_secondary_sequence_remains_trace(template):
     seq = template.sequence(8)
     alt = seq[:20] + 'A' + seq[21:]
     items = [classify_pair(pair(s, name=str(i)), template) for i,s in enumerate([seq]*20+[alt])]
-    products = reconstruct_short_products(items, template, infer_repeat(items, template), 's')
+    products = recover_locus(items, template, 's').products
     assert {p.sequence for p in products} == {seq, alt}
     assert next(p for p in products if p.sequence == alt).evidence['meaningful'] == 'no'
 
 
 def test_flank_insert_geometry(template):
-    from mlvamaps.repeat_likelihood import flank_insert_length
+    from mlvamaps.short_read_evidence import flank_insert_length
     import random
     rng = random.Random(12)
     flank = ''.join(rng.choices('ACGT', k=600))
@@ -336,9 +339,10 @@ def test_overlapping_partial_reads_retain_nonrepeat_indel(template):
     truth = template.sequence(30)
     truth = truth[:20] + 'G' + truth[20:]
     items = [classify_pair(pair(truth[:55], revcomp(truth[-55:]), str(i)), template) for i in range(40)]
-    inference = infer_repeat(items, template, InsertDistribution(len(truth), 4, 40, 'override'))
-    products = reconstruct_short_products(items, template, inference, 's')
-    assert products[0].sequence == truth
+    inference = recover_locus(items, template, 's', InsertDistribution(len(truth), 4, 40, 'override'))
+    products = inference.products
+    assert products[0].sequence[:36] == truth[:36]
+    assert 'N' in products[0].sequence
     assert genotype_product(products[0], template.locus).repeat_count == genotype_product(
         LocusProduct('s', 'X', 'assembly', 'a', truth), template.locus).repeat_count
 
@@ -373,4 +377,4 @@ def test_custom_rounding_is_retained_in_canonical_output(tmp_path, template):
 def test_candidate_memory_safety_guard(template):
     t = replace(template, locus=replace(template.locus, expected_max_repeats=20000))
     with pytest.raises(ValueError, match='memory safety limit'):
-        infer_repeat([], t, maximum=20000)
+        candidate_likelihood([], t, None, 20000, .8)

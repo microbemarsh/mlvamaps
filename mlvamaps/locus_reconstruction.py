@@ -20,8 +20,8 @@ from .locus_measurement import find_anchor
 from .locus_products import LocusProduct, product_repeat_allele, write_products
 from .mixture import estimate_variant_mixtures
 from .models import Locus, ReadPair
-from .repeat_likelihood import (
-    _read_profile, RepeatTemplate, estimate_insert_distribution, infer_repeat, panel_template,
+from .short_read_evidence import (
+    _read_profile, RepeatTemplate, estimate_insert_distribution, panel_template,
 )
 from .sequence import revcomp
 
@@ -45,6 +45,26 @@ def locus_templates(loci, database_path=None):
                     motif, context.repeat_unit_length,
                 )
     return templates
+
+
+def recruitment_templates(loci, database_path, templates):
+    """One combined context collection; duplicate haplotypes do not gain votes."""
+    result = {name: t for name, t in templates.items() if t is not None}
+    if database_path:
+        from .candidate_contexts import _base_contexts, _repeat_template
+        by_id = {l.locus_id: l for l in loci}
+        seen = {(t.locus.locus_id, t.left, t.right, t.motif) for t in result.values()}
+        for context in _base_contexts(loci, database_path):
+            locus = by_id[context.locus_id]
+            from .short_read_evidence import _primitive_motif
+            observed = context.sequence[context.repeat_start:context.repeat_end]
+            motif = _primitive_motif(observed) if observed and not set(observed)-set('ACGT') else _repeat_template(context, locus)
+            key = (locus.locus_id, context.sequence[:context.repeat_start],
+                   context.sequence[context.repeat_end:], motif)
+            if motif and context.repeat_unit_length and key not in seen:
+                result[f"context:{len(result)}"] = RepeatTemplate(locus, key[1], key[2], motif, context.repeat_unit_length)
+                seen.add(key)
+    return result
 
 
 def recover_long_reads(pairs, loci, sample_id, min_fraction=0.01, min_secondary_reads=2,
@@ -134,109 +154,13 @@ def _project_flanks(item, sequence, template, count, alignment_cache=None):
             if ref == "-":
                 insertion += base if reliable else "N"
                 continue
-            if reliable and (position < repeat_start or position >= repeat_end):
+            anchors = item.alignment.get(str(mate), {})
+            anchored = (position < repeat_start and anchors.get("left")) or (position >= repeat_end and anchors.get("right"))
+            if reliable and anchored:
                 votes[position].add((insertion, base))
             insertion = ""
             position += 1
     return {p: next(iter(values)) for p, values in votes.items() if len(values) == 1}
-
-
-def reconstruct_short_products(evidence, template, inference, sample_id, min_fraction=.01, min_secondary_reads=2):
-    products = []
-    if not inference.identifiable:
-        return products
-    n = len(evidence)
-    states = list(inference.fractions)
-    columns = [int(np.argmin(abs(inference.states - r))) for r in states]
-    scores = inference.molecule_likelihoods[:, columns]
-    probs = np.exp(np.maximum(scores - scores.max(axis=1, keepdims=True), -700))
-    probs *= np.asarray([inference.fractions[r] for r in states])
-    probs /= probs.sum(axis=1, keepdims=True)
-    for column, repeat in enumerate(states):
-        fraction = inference.fractions[repeat]
-        if fraction < 1e-6:
-            continue
-        indexes = [i for i in range(n) if probs[i, column] >= 0.8]
-        members = [evidence[i] for i in indexes]
-        if not members:
-            continue
-        synthetic = template.sequence(repeat)
-        full_members = defaultdict(list)
-        for item in members:
-            if item.product_sequence:
-                full_members[item.product_sequence].append(item)
-        full = Counter({seq: len(group) for seq, group in full_members.items()})
-        # Exact observed products retain linked SNP/indel haplotypes. Singleton
-        # sequences remain trace diagnostics rather than confirmed mixtures.
-        phased = [(seq, support, full_members[seq])
-                  for seq, support in full.most_common()]
-        haplotype_weights = {}
-        if full:
-            haplotype_rows = [{"sample_id": sample_id, "locus_id": template.locus.locus_id,
-                "variant_id": str(i), "representative_sequence": seq,
-                "representative_length_bp": len(seq), "support_reads": support,
-                "repeat_count": repeat} for i, (seq, support, _) in enumerate(phased)]
-            estimates = estimate_variant_mixtures(haplotype_rows, min_fraction=min_fraction,
-                                                  min_secondary_reads=min_secondary_reads)
-            haplotype_weights = {phased[int(row["variant_id"])][0]: float(row["estimated_fraction"])
-                                 for row in estimates}
-        if not phased:
-            # Raw alignments can be reused across quality variants; full
-            # projections also require identical qualities. Reset per candidate.
-            alignment_cache = {}
-            projection_cache = {}
-            projections = []
-            for item in members:
-                key = (item.sequences, item.qualities)
-                if key not in projection_cache:
-                    if len(projection_cache) >= 4096:
-                        projection_cache.clear()
-                    projection_cache[key] = _project_flanks(item, synthetic, template, repeat, alignment_cache)
-                # Identical sequence/quality pairs share immutable projections,
-                # but still contribute one vote for every original molecule.
-                projections.append(projection_cache[key])
-            pileup = defaultdict(Counter)
-            for projection in projections:
-                for position, allele in projection.items():
-                    pileup[position][allele] += 1
-            heterozygous = {p for p, votes in pileup.items()
-                            if sum(v >= max(2, 0.1 * sum(votes.values())) for v in votes.values()) > 1}
-            # Phase only when individual molecules cover all variable sites.
-            signatures = Counter(tuple((p, projection[p]) for p in sorted(heterozygous))
-                                 for projection in projections if heterozygous <= projection.keys()) if heterozygous else Counter()
-            groups = [(sig, support) for sig, support in signatures.items() if support >= min_secondary_reads] or [((), len(members))]
-            for signature, support in groups:
-                chosen = [i for i, projection in enumerate(projections)
-                          if all(projection.get(p) == allele for p, allele in signature)]
-                group_votes = defaultdict(Counter)
-                for i in chosen:
-                    for p, allele in projections[i].items():
-                        group_votes[p][allele] += 1
-                sequence = []
-                start, end = len(template.left), len(template.left) + round(repeat * template.unit)
-                for p, base in enumerate(synthetic):
-                    if start <= p < end:
-                        sequence.append(base)
-                    elif group_votes[p]:
-                        (insertion, called), depth = group_votes[p].most_common(1)[0]
-                        sequence.append(insertion + ("" if called == "-" else called) if depth / sum(group_votes[p].values()) >= 0.7 else "N")
-                    else:
-                        sequence.append("N")  # Never impute an uncovered reference SNP.
-                phased.append(("".join(sequence), support, [members[i] for i in chosen]))
-        total = sum(support for _, support, _ in phased)
-        for sequence, support, group in phased:
-            estimated_fraction = fraction * haplotype_weights.get(sequence, support / total)
-            products.append(LocusProduct(sample_id, template.locus.locus_id, "short_read",
-                f"{template.locus.locus_id}|v{len(products)+1}", sequence,
-                support_count=support, effective_depth=float(n * estimated_fraction),
-                estimated_fraction=estimated_fraction, reconstruction_confidence=inference.confidence,
-                repeat_likelihoods={float(r): float(p) for r, p in zip(inference.states, inference.posterior)},
-                evidence={"inferred_repeat": repeat, "classes": inference.counts,
-                          "molecule_ids": [e.molecule_id for e in group],
-                          "meaningful": "yes" if support >= min_secondary_reads and estimated_fraction >= max(min_fraction, 1/(n+1)) else "no",
-                          "uncovered_bases": sequence.count("N"),
-                          "phase": "observed_product" if sequence in full else "molecule_supported_flank_consensus"}))
-    return products
 
 
 def _common_call(locus, products, recruited, sample_id, technology, minimum_molecules, minimum_probability, inference=None):
@@ -247,16 +171,18 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
     status = "not_found" if not recruited else "detected_unresolved"
     if best and confidence >= minimum_probability:
         status = "low_coverage" if best.effective_depth < minimum_molecules else "mixed" if len(meaningful) > 1 else "called"
+    if inference and inference.method == "MIXED":
+        status = "mixed"
     repeat = product_repeat_allele(best, locus)[1] if best else ""
     count_distribution = defaultdict(float)
     for product in ranked:
         count_distribution[product_repeat_allele(product, locus)[1]] += product.estimated_fraction
-    counts = inference.counts if inference else {"E": sum(p.support_count for p in ranked)}
+    counts = inference.counts if inference else {"FULL_SPAN": sum(p.support_count for p in ranked)}
     return {"sample": sample_id, "locus": locus.locus_id, "technology": technology,
             "repeat_count": repeat, "status": status, "best_probability": confidence,
-            "second_best_probability": sorted(inference.posterior, reverse=True)[1] if inference else 0,
-            "molecule_support": recruited, "direct_product_support": counts.get("E", 0),
-            "full_span_support": counts.get("E", 0), "junction_support": counts.get("F", 0),
+            "second_best_probability": sorted(inference.posterior, reverse=True)[1] if inference and len(inference.posterior)>1 else 0,
+            "molecule_support": recruited, "direct_product_support": counts.get("FULL_SPAN", 0),
+            "full_span_support": counts.get("FULL_SPAN", 0), "junction_support": counts.get("LEFT_BOUNDARY", 0) + counts.get("RIGHT_BOUNDARY", 0),
             "dominant_fraction": best.estimated_fraction if best else "",
             "secondary_repeat": product_repeat_allele(ranked[1], locus)[1] if len(ranked)>1 else "",
             "secondary_fraction": ranked[1].estimated_fraction if len(ranked)>1 else "",
@@ -265,9 +191,9 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
             "best_candidate_repeat": inference.best if inference else repeat,
             "dominant_repeat": repeat,
             "num_variants": len(ranked), "num_secondary": max(0, len(meaningful)-1),
-            "inference_method": "repeat_likelihood" if technology == "illumina" else "spanning_molecules",
-            "n_spanning": counts.get("S", 0), "repeat_count_min": inference.interval[0] if inference else repeat,
-            "repeat_count_max": inference.interval[1] if inference else repeat,
+            "inference_method": inference.method if inference else "spanning_molecules",
+            "n_spanning": counts.get("FLANK_PAIR", 0), "repeat_count_min": inference.interval[0] if inference and inference.interval else repeat,
+            "repeat_count_max": inference.interval[1] if inference and inference.interval else repeat,
             "second_best_repeat_count": inference.second if inference else ""}
 
 
@@ -303,7 +229,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         insert_mean=None, insert_sd=None, orphan_path=None, min_fraction=.01, min_secondary_reads=2,
         max_anchor_edits=3, threads=1, minimum_spanning_pairs=2, round_tolerance=.25,
         show_progress=False, audit_writer=None, audit_handle=None, pairs=None,
-        recruitment_threads=None, sr_recruitment_audit="full", ambiguity_writer=None, **_unused):
+        recruitment_threads=None, sr_recruitment_audit="full", ambiguity_writer=None, repeat_threshold=.7, **_unused):
     progress = ProgressReporter(enabled=show_progress, stream=sys.stdout)
     stage_seconds, recruitment_stats, locus_stats = {}, {}, {}
     output = Path(outdir)
@@ -325,6 +251,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         progress.step(f"[{sample_id}] Loading repeat templates for {len(loci)} loci")
         started = time.perf_counter()
         templates = locus_templates(loci, database_path)
+        contexts = recruitment_templates(loci, database_path, templates)
         stage_seconds["template_loading"] = time.perf_counter() - started
         recruitment_stats["template_motif_lengths"] = {
             name: len(template.motif) for name, template in templates.items() if template is not None
@@ -338,9 +265,9 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         started = time.perf_counter()
         recruitment_stats.update(pairs_examined=0, locus_tests=0, uniquely_recruited_pairs=0,
                                  ambiguous_pairs=0, unmatched_pairs=0, skipped_locus_tests=0)
-        for chunk in recruit_short_reads(pairs, templates, sample_id, recruitment_threads, statistics=recruitment_stats,
+        for chunk in recruit_short_reads(pairs, contexts, sample_id, recruitment_threads, statistics=recruitment_stats,
                                         audit_fields=MOLECULE_AUDIT_FIELDS if audit_handle is not None else None,
-                                        audit_mode=sr_recruitment_audit):
+                                        audit_mode=sr_recruitment_audit, repeat_threshold=repeat_threshold):
             recruitment_stats["pairs_examined"] += chunk.examined
             recruitment_stats["uniquely_recruited_pairs"] += len(chunk.evidence)
             for key in ("locus_tests", "ambiguous_pairs", "unmatched_pairs", "skipped_locus_tests"):
@@ -364,17 +291,16 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         recruitment_stats["pairs_per_second"] = recruitment_stats["pairs_examined"] / max(stage_seconds["recruitment"], 1e-9)
         progress.step(f"[{sample_id}] Recruitment finished in {stage_seconds['recruitment']:.1f}s; fitting {len(loci)} loci")
         insert = estimate_insert_distribution(insert_lengths, insert_mean, insert_sd)
+        from .targeted_reconstruction import recover_locus, EVIDENCE_CLASSES
         def fit_locus(locus):
-            fit_started = time.perf_counter()
-            items = [e for e in evidence[locus.locus_id] if e.classes and "discordant" not in e.classes]
-            template = templates[locus.locus_id]
-            result = infer_repeat(items, template, insert, maximum_candidate_repeat_count, minimum_probability) if items and template else None
-            if result and not any("E" in e.classes for e in items) and sum("S" in e.classes for e in items) < minimum_spanning_pairs:
-                result.identifiable = False
-            elapsed = time.perf_counter() - fit_started
-            locus_stats[locus.locus_id] = {"repeat_fitting_seconds": elapsed,
-                "evidence_molecules": len(items), "candidate_states": len(result.states) if result else 0}
-            progress.step(f"[{sample_id}] {locus.locus_id}: fitted {len(items):,} molecules in {elapsed:.1f}s")
+            started = time.perf_counter()
+            items = evidence[locus.locus_id]
+            result = recover_locus(items, templates[locus.locus_id], sample_id, insert,
+                maximum_candidate_repeat_count, minimum_probability, minimum_spanning_pairs,
+                min_fraction, min_secondary_reads,
+                context_templates=[t for t in contexts.values() if t.locus.locus_id == locus.locus_id])
+            locus_stats[locus.locus_id] = {"recovery_seconds": time.perf_counter()-started,
+                "evidence_molecules": len(items), "candidate_states": len(result.states), "call_method": result.method}
             return result
         from concurrent.futures import ThreadPoolExecutor
         started = time.perf_counter()
@@ -383,59 +309,42 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 fitted = list(executor.map(fit_locus, loci))
         else:
             fitted = [fit_locus(locus) for locus in loci]
-        stage_seconds["repeat_fitting"] = time.perf_counter() - started
-        progress.step(f"[{sample_id}] Repeat fitting finished in {stage_seconds['repeat_fitting']:.1f}s; writing molecule likelihoods")
-        started = time.perf_counter()
-        molecule_likelihood_path = output / "molecule_repeat_likelihoods.tsv"
-        likelihood_records = 0
-        with molecule_likelihood_path.open("w", newline="") as handle:
-            writer = csv.writer(handle, delimiter="\t")
-            writer.writerow(["sample_id", "locus_id", "molecule_id", "repeat_count", "log_likelihood"])
-            for locus, inference in zip(loci, fitted):
-                if inference:
-                    items = [e for e in evidence[locus.locus_id] if e.classes and "discordant" not in e.classes]
-                    for item, scores in zip(items, inference.molecule_likelihoods):
-                        writer.writerows((sample_id, locus.locus_id, item.molecule_id, state, score)
-                                         for state, score in zip(inference.states, scores))
-                        likelihood_records += len(inference.states)
-                        progress.count(f"[{sample_id}] Molecule likelihood rows written", likelihood_records)
-        stage_seconds["molecule_likelihood_output"] = time.perf_counter() - started
-        progress.step(f"[{sample_id}] Reconstructing locus sequences")
-        started = time.perf_counter()
-        for locus, inference in zip(loci, fitted):
-            locus_started = time.perf_counter()
+        stage_seconds["locus_recovery"] = time.perf_counter() - started
+        progress.step(f"[{sample_id}] Locus recovery finished in {stage_seconds['locus_recovery']:.1f}s")
+        for locus, result in zip(loci, fitted):
             items = evidence[locus.locus_id]
-            usable = [e for e in items if e.classes and "discordant" not in e.classes]
-            template = templates[locus.locus_id]
-            products = reconstruct_short_products(usable, template, inference, sample_id, min_fraction, min_secondary_reads) if inference else []
-            locus_stats[locus.locus_id]["sequence_reconstruction_seconds"] = time.perf_counter() - locus_started
+            usable = [e for e in items if "discordant" not in e.classes]
+            products = [replace(p, round_tolerance=round_tolerance) for p in result.products]
             all_products.extend(products)
-            calls.append(_common_call(locus, products, len(items), sample_id, technology, minimum_molecules, minimum_probability, inference))
+            calls.append(_common_call(locus, products, len(items), sample_id, technology,
+                                      minimum_molecules, minimum_probability, result))
+            read_lengths = [len(seq) for e in items for seq in e.sequences]
+            product_length = len(products[0].sequence) if products else None
+            template = templates[locus.locus_id]
             summaries.append({"sample_id": sample_id, "locus_id": locus.locus_id,
-                "E": inference.counts.get("E", 0) if inference else 0,
-                "S": inference.counts.get("S", 0) if inference else 0,
-                "F": inference.counts.get("F", 0) if inference else 0,
-                "FRR": inference.counts.get("FRR", 0) if inference else 0,
-                "best_repeat": inference.best if inference else "", "second_repeat": inference.second if inference else "",
-                "confidence": inference.confidence if inference else 0,
-                "interval_min": inference.interval[0] if inference else "", "interval_max": inference.interval[1] if inference else "",
-                "effective_depth": len(usable), "limit_reached": inference.limit_reached if inference else False,
-                "identifiable": inference.identifiable if inference else False,
-                "components": json.dumps(inference.fractions) if inference else "{}",
-                "reason": "insufficient_panel_context" if template is None else ""})
-            if inference:
-                likelihood_rows.extend({"sample_id": sample_id, "locus_id": locus.locus_id, "repeat_count": r,
-                    "log_likelihood": ll, "posterior": p} for r,ll,p in zip(inference.states, inference.log_likelihoods, inference.posterior))
+                "call_method": result.method, "confidence": result.confidence,
+                **{("n_flank_pairs" if name == "FLANK_PAIR" else "n_"+name.lower()): result.counts.get(name, 0) for name in EVIDENCE_CLASSES},
+                "best_repeat": calls[-1]['repeat_count'], "second_repeat": result.second,
+                "interval_min": result.interval[0] if result.interval else calls[-1]['repeat_count'],
+                "interval_max": result.interval[1] if result.interval else calls[-1]['repeat_count'],
+                "effective_depth": len(usable), "limit_reached": result.limit_reached,
+                "read_length": float(np.median(read_lengths)) if read_lengths else '',
+                "motif_length": template.unit if template else '', "amplicon_length": product_length or '',
+                "vntr_length": product_length-len(template.left)-len(template.right) if product_length and template else '',
+                "amplicon_insert_ratio": product_length/insert.mean if product_length and insert else '',
+                "reason": result.reason})
+            likelihood_rows.extend({"sample_id": sample_id, "locus_id": locus.locus_id,
+                "repeat_count": r, "log_likelihood": ll, "posterior": probability}
+                for r,ll,probability in zip(result.states, result.log_likelihoods, result.posterior))
             for item in items:
                 row = {"sample_id": sample_id, "locus_id": locus.locus_id, "molecule_id": item.molecule_id,
-                              "classes": ";".join(item.classes), "observed_repeat": item.observed_repeat,
-                              "lower_bound": item.lower_bound, "fragment_offset": item.fragment_offset,
-                              "orientation": ";".join(item.orientations), "alignment": json.dumps(item.alignment)}
+                       "classes": ";".join(item.classes), "observed_repeat": item.observed_repeat,
+                       "lower_bound": item.lower_bound, "fragment_offset": item.fragment_offset,
+                       "orientation": ";".join(item.orientations), "alignment": json.dumps(item.alignment)}
                 if audit_writer is None:
                     audit.append(row)
                 else:
                     audit_writer.writerow(row)
-        stage_seconds["sequence_reconstruction"] = time.perf_counter() - started
     progress.step(f"[{sample_id}] Writing canonical genotypes and evidence")
     started = time.perf_counter()
     output_stats = {}
@@ -446,7 +355,6 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
     output_stats['compatibility_tables_seconds'] = time.perf_counter() - compatibility_started
     progress.step(f"[{sample_id}] Writing locus calls and evidence summaries")
     if technology == "illumina":
-        paths["molecule_repeat_likelihoods"] = molecule_likelihood_path
         if ambiguity_writer is not None:
             paths["ambiguous_molecules"] = output / "ambiguous_molecules.tsv"
     from .allele_inference import COMMON_LOCUS_CALL_FIELDS
@@ -455,7 +363,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         ("molecule_evidence", "molecule_candidate_evidence.tsv", audit,
          MOLECULE_AUDIT_FIELDS),
         ("short_read_repeat_evidence", "short_read_repeat_evidence.tsv", summaries,
-         ["sample_id", "locus_id", "E", "S", "F", "FRR", "best_repeat", "second_repeat", "confidence", "interval_min", "interval_max", "effective_depth", "limit_reached", "identifiable", "components", "reason"]),
+         list(summaries[0]) if summaries else ["sample_id", "locus_id", "call_method", "confidence"]),
         ("repeat_likelihoods", "repeat_likelihoods.tsv", likelihood_rows,
          ["sample_id", "locus_id", "repeat_count", "log_likelihood", "posterior"]),
     ):

@@ -879,7 +879,7 @@ def write_report(
         f"<td><span class=\"status-pill {'status-good' if row.get('repeat_count') not in ('', None) else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
         f"<td>{_safe(row.get('recruited_read_pairs', ''))}</td>"
         f"<td>{_safe(row.get('informative_molecule_count', ''))}</td>"
-        f"<td>{_safe(row.get('mean_mapq', ''))}</td>"
+        f"<td>{_safe(row.get('call_method', ''))}</td>"
         f"<td>{_safe(row.get('proper_spanning_pairs', ''))}</td>"
         f"<td>{_safe(row.get('boundary_1_support', ''))} / {_safe(row.get('boundary_2_support', ''))} / {_safe(row.get('both_boundary_support', ''))}</td>"
         f"<td>{_safe(row.get('repeat_count', '')) if row.get('repeat_count') not in ('', None) else _safe(str(row.get('repeat_count_min', '')) + '..' + str(row.get('repeat_count_max', ''))) if row.get('repeat_count_min') not in ('', None) else 'unresolved'}</td>"
@@ -893,9 +893,9 @@ def write_report(
         short_read_section = f"""
       <section class="report-section">
         <h2>Illumina Evidence</h2>
-        <p class="section-intro">Exact values require VNTR-specific evidence derived from competing minimap2 candidate alignments. Conventional mapping uniqueness is not allele confidence; unresolved and presence-only evidence remains explicit.</p>
+        <p class="section-intro">Competitive recruitment feeds direct measurement, targeted reconstruction, then candidate inference when needed. Method and confidence describe the available evidence; unresolved loci remain explicit.</p>
         <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Evidence</th><th>Recruited pairs</th><th>Informative molecules</th><th>Mean MAPQ</th><th>Proper spanning pairs</th><th>Boundary 1 / 2 / both</th><th>Repeat or interval</th><th>Confidence</th><th>Warning / failure</th></tr></thead>
+          <thead><tr><th>Locus</th><th>Evidence</th><th>Recruited pairs</th><th>Informative molecules</th><th>Call method</th><th>Proper spanning pairs</th><th>Boundary 1 / 2 / both</th><th>Repeat or interval</th><th>Confidence</th><th>Warning / failure</th></tr></thead>
           <tbody>{short_read_table_rows}</tbody>
         </table></div>
       </section>

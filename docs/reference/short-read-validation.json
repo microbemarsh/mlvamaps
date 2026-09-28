@@ -1,0 +1,190 @@
+{
+  "baseline_revision": "e9dd281",
+  "baseline_engine": "former optional likelihood engine",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "python": "3.13.13",
+  "scope": "Synthetic six-locus paired FASTQ, 25% off-target background, 10000 molecules, one thread; three separate processes per case. Imports and input generation excluded from elapsed time. Peak RSS is process-wide.",
+  "limitation": "No real paired assembly/FASTQ dataset and no minimap2 executable were available; the prior default competitive mapper was not benchmarked.",
+  "summary": {
+    "direct": {
+      "before": {
+        "median_seconds": 1.797720791946631,
+        "median_peak_rss_mib": 91.453125
+      },
+      "after": {
+        "median_seconds": 1.7722377500031143,
+        "median_peak_rss_mib": 90.9375
+      }
+    },
+    "unresolved": {
+      "before": {
+        "median_seconds": 2.3529571250546724,
+        "median_peak_rss_mib": 107.703125
+      },
+      "after": {
+        "median_seconds": 1.608122417004779,
+        "median_peak_rss_mib": 90.90625
+      }
+    }
+  },
+  "runs": [
+    {
+      "seconds": 1.8026402500108816,
+      "peak_rss_bytes": 95436800,
+      "version": "before",
+      "scenario": "direct",
+      "trial": 0,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 1.797720791946631,
+      "peak_rss_bytes": 96305152,
+      "version": "before",
+      "scenario": "direct",
+      "trial": 1,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 1.7923523339559324,
+      "peak_rss_bytes": 95895552,
+      "version": "before",
+      "scenario": "direct",
+      "trial": 2,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 1.778333957947325,
+      "peak_rss_bytes": 95993856,
+      "version": "after",
+      "scenario": "direct",
+      "trial": 0,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 1.7722377500031143,
+      "peak_rss_bytes": 95354880,
+      "version": "after",
+      "scenario": "direct",
+      "trial": 1,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 1.7144640419865027,
+      "peak_rss_bytes": 94257152,
+      "version": "after",
+      "scenario": "direct",
+      "trial": 2,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 2.3529571250546724,
+      "peak_rss_bytes": 112934912,
+      "version": "before",
+      "scenario": "unresolved",
+      "trial": 0,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 2.3674447500379756,
+      "peak_rss_bytes": 114933760,
+      "version": "before",
+      "scenario": "unresolved",
+      "trial": 1,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 2.3480841660057195,
+      "peak_rss_bytes": 111493120,
+      "version": "before",
+      "scenario": "unresolved",
+      "trial": 2,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 1.608122417004779,
+      "peak_rss_bytes": 95502336,
+      "version": "after",
+      "scenario": "unresolved",
+      "trial": 0,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 1.6100379999843426,
+      "peak_rss_bytes": 95322112,
+      "version": "after",
+      "scenario": "unresolved",
+      "trial": 1,
+      "molecules": 10000,
+      "threads": 1
+    },
+    {
+      "seconds": 1.6046727909706533,
+      "peak_rss_bytes": 94306304,
+      "version": "after",
+      "scenario": "unresolved",
+      "trial": 2,
+      "molecules": 10000,
+      "threads": 1
+    }
+  ],
+  "synthetic_demo_comparison": {
+    "comparisons": {
+      "assembly:sr": {
+        "call_rate_by_mode": {
+          "assembly": 1.0,
+          "sr": 1.0
+        },
+        "ambiguous_no_call_rate_by_mode": {
+          "assembly": 0.0,
+          "sr": 0.0
+        },
+        "incorrect_call_rate_among_comparable": 0.0,
+        "per_locus_call_rate": {
+          "demo": {
+            "assembly": 1.0,
+            "sr": 1.0
+          }
+        },
+        "shared_callable_loci": 1,
+        "shared_callable_loci_by_sample": {
+          "demo": 1
+        },
+        "callable_loci_by_mode": {
+          "assembly": 1,
+          "sr": 1
+        },
+        "exact_repeat_matches": 1,
+        "discordant_repeat_loci": 0,
+        "exact_repeat_recovery_by_mode": {
+          "assembly": 1.0,
+          "sr": 1.0
+        },
+        "missing_call_loci_by_mode": {
+          "assembly": 0,
+          "sr": 0
+        },
+        "exact_repeat_concordance": 1.0,
+        "within_one_repeat_concordance": 1.0,
+        "mean_absolute_repeat_difference": 0.0,
+        "snp_concordance": 1.0,
+        "snp_comparable_sites": 72,
+        "repeat_sequence_concordance_at_equal_counts": 1.0,
+        "repeat_sequence_comparable_sites": 16,
+        "full_profile_concordance": 1.0,
+        "component_set_concordance": 1.0,
+        "mean_component_fraction_total_variation": 0.0
+      }
+    },
+    "distance_correlations": {}
+  }
+}

@@ -14,27 +14,25 @@ mlvamaps uses input-specific evidence to produce compatible locus calls:
 flowchart LR
   A[Assembly] --> P[Sassy PCR products]
   L[Accurate long reads] --> M[Complete spanning molecules]
-  S[Paired or single short reads] --> E[Competitive candidate alignment and allele inference]
+  S[Paired or single short reads] --> E[Competitive recruitment and targeted reconstruction]
   P --> C[Canonical locus products]
   M --> C
   C --> G[Shared repeat and SNP typing]
   G --> O[Profiles, reference comparison and reports]
-  E --> O
+  E --> C
 ```
 
 Assembly product selection remains MLVA_finder compatible. Long reads are
-measured directly. Short reads use competitive minimap2 alignment against
-candidate MLVA allele contexts, followed by shared allele inference.
-See the [competitive workflow](docs/workflows/competitive-fastq.md).
+measured directly. Short reads competitively recruit locus-associated pairs,
+rescue informative mates, and attempt direct or targeted local reconstruction.
+Recovered sequence uses the shared repeat/SNP interpreter. A bounded haploid
+candidate likelihood fallback handles unresolved loci; reference classification
+is performed separately after measurement.
 
-The defaults are `--sr-engine competitive` and `--lr-engine spanning`.
-Use `--sr-engine repeat-likelihood` to opt into the independently implemented
-E/S/F/FRR model inspired by [GangSTR concepts](https://doi.org/10.1093/nar/gkz501).
-In that model, paired length inference needs a measured library distribution; when the available
-flanks cannot estimate it, provide `--insert-mean BP --insert-sd BP`. Flanking-only
-or unanchored repeat evidence cannot produce an exact count.
-
-See [the model, formulas, diagnostics and validation limits](docs/concepts/locus-reconstruction.md).
+The evidence hierarchy is **direct → reconstructed → inferred**, with explicit
+ambiguous, no-call and mixed outcomes. There is one short-read pathway. The
+long-read default remains `--lr-engine spanning`. See the [Illumina workflow](docs/workflows/illumina.md)
+and [method, diagnostics and limitations](docs/concepts/locus-reconstruction.md).
 Missing and unresolved calls remain explicit and are never converted to zero.
 
 Reference typing uses one Emu-inspired alignment-likelihood framework:

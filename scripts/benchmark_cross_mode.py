@@ -58,21 +58,29 @@ def snp_comparison(first, second):
 
 
 def compare_runs(manifest):
-    runs = {}
+    runs, details = {}, {}
     for row in manifest:
         key = (row['sample_id'], row['mode'])
         if key in runs:
             raise ValueError(f'duplicate manifest entry: {key}')
         runs[key] = load_run(row['outdir'])
+        directory = Path(row['outdir'])
+        details[key] = {r['locus_id']: dict(r) for r in read_table(directory/'calls.tsv')}
+        for qc in read_table(directory/'short_read_repeat_evidence.tsv'):
+            details[key].setdefault(qc['locus_id'], {}).update(qc)
     modes = sorted({mode for _,mode in runs})
     samples = sorted({sample for sample,_ in runs})
     result, locus_rows = {}, []
     for a,b in itertools.combinations(modes, 2):
         differences, exact_profiles, components = [], [], []
         snp_matches = snp_sites = 0
+        repeat_matches = repeat_sites = 0
         callable_by_mode = {a: 0, b: 0}
         shared_by_sample = {}
         fraction_distances = []
+        total_by_mode = {a: 0, b: 0}
+        ambiguous_by_mode = {a: 0, b: 0}
+        per_locus = {}
         for sample in samples:
             if (sample,a) not in runs or (sample,b) not in runs:
                 continue
@@ -80,14 +88,31 @@ def compare_runs(manifest):
             cb, vb = runs[sample,b]
             callable_by_mode[a] += len(ca)
             callable_by_mode[b] += len(cb)
+            for mode in (a, b):
+                total_by_mode[mode] += len(details[sample, mode])
+                ambiguous_by_mode[mode] += sum(r.get('call_method') in {'AMBIGUOUS', 'NO_CALL'} or
+                    r.get('status') in {'NOT_FOUND', 'UNRESOLVED', 'PRESENT_UNTYPED', 'PRESENT_COUNT_UNKNOWN', 'AMBIGUOUS', 'LOCUS_DROPOUT'}
+                    for r in details[sample, mode].values())
             shared = ca.keys() & cb.keys()
             shared_by_sample[sample] = len(shared)
             exact_profiles.append(bool(ca) and ca == cb)
-            for locus in sorted(ca.keys() | cb.keys()):
+            for locus in sorted(details[sample,a].keys() | details[sample,b].keys()):
                 row = {'sample_id': sample, 'mode_a': a, 'mode_b': b, 'locus_id': locus,
                        'repeat_a': ca.get(locus, ''), 'repeat_b': cb.get(locus, '')}
+                rate = per_locus.setdefault(locus, {a: [0, 0], b: [0, 0]})
+                for mode, calls, suffix in ((a, ca, 'a'), (b, cb, 'b')):
+                    rate[mode][0] += int(locus in calls)
+                    rate[mode][1] += int(locus in details[sample,mode])
+                    info = details[sample,mode].get(locus, {})
+                    for field in ('call_method', 'confidence', 'effective_depth', 'read_length', 'motif_length',
+                                  'vntr_length', 'amplicon_length', 'amplicon_insert_ratio',
+                                  'n_full_span', 'n_left_boundary', 'n_right_boundary', 'n_flank_pairs',
+                                  'n_repeat_rich', 'n_anchored_repeat', 'n_softclip_left', 'n_softclip_right'):
+                        row[field+'_'+suffix] = info.get(field, '')
+                    read_length, vntr_length = number(info.get('read_length')), number(info.get('vntr_length'))
+                    row['vntr_read_ratio_'+suffix] = vntr_length/read_length if read_length and vntr_length is not None else ''
                 if locus not in shared:
-                    row['comparison'] = 'missing_in_a' if locus not in ca else 'missing_in_b'
+                    row['comparison'] = 'missing_in_both' if locus not in ca and locus not in cb else 'missing_in_a' if locus not in ca else 'missing_in_b'
                     locus_rows.append(row)
                     continue
                 delta = abs(ca[locus]-cb[locus])
@@ -104,9 +129,19 @@ def compare_runs(manifest):
                     components.append(aa.keys() == bb.keys())
                     fraction_distances.append(sum(abs(aa.get(k,0)-bb.get(k,0)) for k in aa.keys() | bb.keys()) / 2)
                     row['snp_matches'], row['snp_comparable_sites'] = match, sites
+                    if delta == 0:
+                        rm, rs = snp_comparison(pa.get('repeat_sequence', ''), pb.get('repeat_sequence', ''))
+                        repeat_matches += rm
+                        repeat_sites += rs
+                        row['repeat_sequence_matches'], row['repeat_sequence_sites'] = rm, rs
                 locus_rows.append(row)
         exact_matches = sum(delta == 0 for delta in differences)
         result[f'{a}:{b}'] = {
+            'call_rate_by_mode': {m: callable_by_mode[m]/n if n else None for m,n in total_by_mode.items()},
+            'ambiguous_no_call_rate_by_mode': {m: ambiguous_by_mode[m]/n if n else None for m,n in total_by_mode.items()},
+            'incorrect_call_rate_among_comparable': (len(differences)-exact_matches)/len(differences) if differences else None,
+            'per_locus_call_rate': {l: {m: called/total if total else None for m,(called,total) in values.items()}
+                                    for l,values in per_locus.items()},
             'shared_callable_loci': len(differences), 'shared_callable_loci_by_sample': shared_by_sample,
             'callable_loci_by_mode': callable_by_mode,
             'exact_repeat_matches': exact_matches,
@@ -122,6 +157,8 @@ def compare_runs(manifest):
             'mean_absolute_repeat_difference': float(np.mean(differences)) if differences else None,
             'snp_concordance': snp_matches/snp_sites if snp_sites else None,
             'snp_comparable_sites': snp_sites,
+            'repeat_sequence_concordance_at_equal_counts': repeat_matches/repeat_sites if repeat_sites else None,
+            'repeat_sequence_comparable_sites': repeat_sites,
             'full_profile_concordance': float(np.mean(exact_profiles)) if exact_profiles else None,
             'component_set_concordance': float(np.mean(components)) if components else None,
             'mean_component_fraction_total_variation': float(np.mean(fraction_distances)) if fraction_distances else None,
@@ -178,8 +215,9 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({'comparisons': summary, 'distance_correlations': distance_correlations(args.distance_matrix)}, indent=2, allow_nan=False)+'\n')
     with args.output.with_suffix('.loci.tsv').open('w') as handle:
-        writer = csv.DictWriter(handle, delimiter='\t', fieldnames=['sample_id','mode_a','mode_b','locus_id',
-            'repeat_a','repeat_b','comparison','absolute_difference','snp_matches','snp_comparable_sites'])
+        writer = csv.DictWriter(handle, delimiter='\t', fieldnames=list(dict.fromkeys(['sample_id','mode_a','mode_b','locus_id',
+            'repeat_a','repeat_b','comparison','absolute_difference','snp_matches','snp_comparable_sites'] +
+            [field for row in rows for field in row])))
         writer.writeheader()
         writer.writerows(rows)
 

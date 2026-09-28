@@ -1,11 +1,10 @@
 # Output file reference
 
-Short reads default to `--sr-engine competitive`; competitive-mapping outputs
-below apply to that engine and `--lr-engine competitive`.
-[Canonical locus reconstruction](../concepts/locus-reconstruction.md) describes
-outputs from the default `--lr-engine spanning` and optional
-`--sr-engine repeat-likelihood` engines.
-
+Short reads and default spanning long reads emit [canonical locus products](../concepts/locus-reconstruction.md).
+Short reads add `call_method` and `confidence` to calls, with detailed evidence
+counts and reconstruction diagnostics in `short_read_repeat_evidence.tsv`.
+Competitive mapping tables below also serve downstream reference classification
+and the optional `--lr-engine competitive`.
 
 All generated FASTA and FASTQ artifacts are gzip-compressed by default and use
 a matching `.gz` suffix. Input files are never modified.
@@ -149,9 +148,11 @@ data are supplied.
 | --- | --- |
 | `short_read_qc_summary.tsv` | Input/retained reads and pairs, orphans, and empirical insert-size values when estimable. |
 | `short_read_recruitment_summary.tsv` | Unique, ambiguous, discordant, and orphan pair counts per locus. |
-| `short_read_mapping_evidence.tsv` | Per-locus state, candidate scores, molecule support, boundary evidence, MAPQ, and context provenance. |
+| `short_read_mapping_evidence.tsv` | Per-locus state, candidate scores, molecule support and boundary evidence; legacy mapper fields remain blank. |
+| `short_read_repeat_evidence.tsv` | Direct/reconstructed/inferred method, confidence, evidence counts, depth and length features. |
+| `reconstructed_locus_variants.tsv` | Shared repeat counts, masked SNP markers, full sequence, observed repeat sequence and motif-relative edits. |
 | `short_read_run_metadata.json` | minimap2 and mlvamaps versions, resolved parameters, database source, and insert-size estimate. |
-| `filtered_reads_1.fastq.gz`, `filtered_reads_2.fastq.gz` | Quality-filtered mates, written with fast gzip compression for downstream native recruitment. |
+| `filtered_reads_1.fastq.gz`, `filtered_reads_2.fastq.gz` | Quality-filtered mates, materialized when downstream classification or retained intermediates need them. |
 | `filtered_orphan_reads.fastq.gz` | Retained single mates whose partner failed QC; empty when no orphans are present. |
 | `sample_summary.tsv` | One normalized sample row for batch aggregation. |
 | `myoga_samples.csv` | MYOGA metadata; `genome_id` equals `sample_id` and generated sample tree-tip IDs. |
@@ -166,7 +167,8 @@ fields. Empty `repeat_count` plus populated `repeat_count_min` and
 `PRESENCE_ONLY` means detected but not sized.
 
 When Illumina mode receives `--database`, complete primer-bounded locus products
-also produce the standard `classification/` reference-support outputs. Their
+produce canonical products. A separate read mapping pass produces the standard
+`classification/` reference-support outputs. Their
 ranked `sequence_reference` rows are appended to `profile_matches.tsv` and
 rendered in `report.html`. Informative alignments can contribute to reference
 support even when the repeat count is unresolved.

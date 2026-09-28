@@ -44,6 +44,9 @@ class ProductGenotype:
     haplotype_id: str
     combined_marker: str
     masking_method: str
+    repeat_sequence: str = ""
+    repeat_motif_cigar: str = ""
+    repeat_motif_edits: tuple = ()
 
 
 def product_repeat_allele(product: LocusProduct, locus: Locus, tolerance: float | None = None):
@@ -59,8 +62,46 @@ def genotype_product(product: LocusProduct, locus: Locus, tolerance: float | Non
     raw, repeat = product_repeat_allele(product, locus, tolerance)
     components = decompose_marker_sequence(locus, product.sequence)
     haplotype = hashlib.sha256(components.snp_sequence.encode()).hexdigest()[:20]
+    repeated = components.repeat_sequence
+    if components.masking_method != 'flank_bounded' and locus.left_flank_sequence and locus.right_flank_sequence:
+        from .locus_measurement import find_anchor
+        left = find_anchor(locus.left_flank_sequence, components.oriented_sequence, 2)
+        right = find_anchor(locus.right_flank_sequence, components.oriented_sequence, 2,
+                            left.end if left else 0)
+        if left and right:
+            repeated = components.oriented_sequence[left.end:right.start]
+    cigar, edits = repeat_motif_variants(repeated, locus.repeat_motif)
     return ProductGenotype(product, raw, repeat, components.snp_sequence, haplotype,
-                           f"{repeat}:{haplotype}", components.masking_method)
+                           f"{repeat}:{haplotype}", components.masking_method, repeated, cigar, edits)
+
+
+def repeat_motif_variants(sequence: str, motif: str) -> tuple[str, tuple]:
+    """Describe observed repeat changes against an equal-length motif template.
+
+    Positions are 1-based within this motif alignment, not genome coordinates.
+    Repetitive indel placement is not uniquely phased. N-containing inferred
+    intervals supply no repeat SNP claims. Existing masked markers are unchanged.
+    """
+    if not sequence or not motif or set(sequence+motif)-set('ACGT'):
+        return '', ()
+    target = (motif*((len(sequence)+len(motif)-1)//len(motif)))[:len(sequence)]
+    if target == sequence:
+        return f'{len(sequence)}=', ()
+    # ponytail: bound quadratic global alignment to 10 kb; larger products
+    # retain their full repeat sequence until a banded variant aligner is needed.
+    if len(sequence) > 10000:
+        return '', ()
+    import parasail
+    result = parasail.nw_trace_striped_32(sequence, target, 5, 1, parasail.matrix_create('ACGT', 2, -4))
+    query_position = reference_position = 0
+    edits = []
+    for base, ref in zip(result.traceback.query, result.traceback.ref):
+        query_position += base != '-'
+        reference_position += ref != '-'
+        if base != ref:
+            edits.append({'query_position': query_position, 'motif_position': reference_position,
+                          'reference': ref, 'alternate': base})
+    return result.cigar.decode.decode(), tuple(edits)
 
 
 def assembly_product(product: dict, sample_id: str, round_tolerance: float = 0.25) -> LocusProduct:
@@ -75,7 +116,7 @@ PRODUCT_FIELDS = ["sample_id", "locus_id", "source_type", "variant_id", "orienta
                   "support_count", "effective_depth", "estimated_fraction",
                   "reconstruction_confidence", "round_tolerance", "repeat_count", "repeat_count_raw",
                   "haplotype_id", "combined_marker", "masking_method", "snp_sequence",
-                  "sequence", "repeat_likelihoods", "evidence"]
+                  "repeat_sequence", "repeat_motif_cigar", "repeat_motif_edits", "sequence", "repeat_likelihoods", "evidence"]
 
 
 def write_products(products: list[LocusProduct], loci: list[Locus], outdir: str | Path,
@@ -95,8 +136,9 @@ def write_products(products: list[LocusProduct], loci: list[Locus], outdir: str 
         for genotype in genotypes:
             product = genotype.product
             row = {name: getattr(product, name, "") for name in PRODUCT_FIELDS}
-            for name in ("repeat_count", "repeat_count_raw", "haplotype_id", "combined_marker", "masking_method", "snp_sequence"):
+            for name in ("repeat_count", "repeat_count_raw", "haplotype_id", "combined_marker", "masking_method", "snp_sequence", "repeat_sequence", "repeat_motif_cigar"):
                 row[name] = getattr(genotype, name)
+            row["repeat_motif_edits"] = json.dumps(genotype.repeat_motif_edits, sort_keys=True)
             row["repeat_likelihoods"] = json.dumps(product.repeat_likelihoods, sort_keys=True)
             row["evidence"] = json.dumps(product.evidence, sort_keys=True)
             yield row

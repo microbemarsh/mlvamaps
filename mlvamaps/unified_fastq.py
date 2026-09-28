@@ -15,7 +15,6 @@ from .io import write_fasta, write_tsv
 from .long_read_evidence import extract_long_read_evidence
 from .minimap_mapping import map_reads_to_candidates_bam
 from .models import Locus
-from .short_read_evidence import extract_short_read_evidence
 
 
 def taxonomic_query_sequences(
@@ -85,6 +84,12 @@ def run_unified_fastq_inference(
     maximum_candidate_repeat_count: int = 100,
     keep_alignments: bool = False,
 ) -> tuple[list[dict[str, object]], list[CandidateEvidence], dict[tuple[str, str], int | float], dict[str, Path]]:
+    if technology == "illumina":
+        from .locus_reconstruction import run_reconstructed_fastq_inference
+        return run_reconstructed_fastq_inference(reads1=reads1, reads2=reads2, loci=loci,
+            database_path=database_path, outdir=outdir, sample_id=sample_id, technology=technology,
+            threads=threads, minimum_molecules=minimum_molecules, minimum_probability=minimum_probability,
+            maximum_candidate_repeat_count=maximum_candidate_repeat_count)
     outdir = Path(outdir)
     work = outdir / "candidate_mapping"
     work.mkdir(parents=True, exist_ok=True)
@@ -116,10 +121,7 @@ def run_unified_fastq_inference(
         mapping_reference, reads1, reads2, contexts, bam, threads, technology,
         executable=minimap2_bin,
     )
-    if technology == "illumina":
-        evidence = extract_short_read_evidence(alignments, contexts, loci)
-    else:
-        evidence = extract_long_read_evidence(alignments, contexts, loci, technology)
+    evidence = extract_long_read_evidence(alignments, contexts, loci, technology)
     calls, molecule_calls = infer_alleles(
         evidence, loci, contexts, sample_id, technology,
         InferenceThresholds(

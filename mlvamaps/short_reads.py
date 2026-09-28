@@ -1,4 +1,4 @@
-"""Shared read QC and the selectable FASTQ reconstruction entry point."""
+"""Shared read QC and the targeted FASTQ reconstruction entry point."""
 
 from __future__ import annotations
 
@@ -110,19 +110,6 @@ def merge_read_pair(
     return ReadRecord(f"{pair.molecule_id}/merged", "".join(sequence), "".join(quality))
 
 
-def _merge_overlap_is_repeat_only(pair: ReadPair, merged: ReadRecord, locus: Locus) -> bool:
-    if pair.read2 is None or not locus.repeat_motif:
-        return False
-    overlap = len(pair.read1.sequence) + len(pair.read2.sequence) - len(merged.sequence)
-    if overlap <= 0:
-        return False
-    motif = locus.repeat_motif.upper()
-    if not motif or set(motif) - set("ACGT"):
-        return False
-    periodic = motif * math.ceil((overlap + len(motif) * 2) / len(motif))
-    return pair.read1.sequence[-overlap:].upper() in periodic
-
-
 def _allele_rows(call_rows: list[dict]) -> list[dict]:
     return [{
         "sample_id": row["sample_id"], "locus_id": row["locus_id"],
@@ -155,9 +142,8 @@ def run_short_read_call(
     short_min_pair_retention: float = 0.5, min_depth: int = 3,
     threads: int = DEFAULT_THREADS, keep_intermediates: bool = False,
     sample_mode: str = "isolate", minimap2_bin: str = "minimap2",
-    short_min_mapping_quality: int = 0,
     short_min_spanning_pairs: int = 2, short_confidence_threshold: float = 0.8,
-    short_max_candidate_repeat_count: int = 100, short_consider_secondary: bool = True,
+    short_max_candidate_repeat_count: int = 100,
     reference_metadata_path: str | None = None,
     taxon_min_loci: int | None = None,
     taxon_identification: bool | None = None,
@@ -166,7 +152,6 @@ def run_short_read_call(
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
-    sr_engine: str = "competitive",
     insert_mean: float | None = None,
     insert_sd: float | None = None,
     technology: str = "illumina",
@@ -175,6 +160,7 @@ def run_short_read_call(
     min_mixture_fraction: float = .01,
     min_secondary_reads: int = 2,
     sr_recruitment_audit: str = "compact",
+    short_repeat_fraction: float = .7,
 ) -> dict[str, Path]:
     """Call Illumina data using competitive alignment or locus reconstruction."""
     from .short_read_mapping import run_mapping_short_read_call
@@ -188,17 +174,15 @@ def run_short_read_call(
         short_min_pair_retention=short_min_pair_retention, min_depth=min_depth,
         threads=threads, keep_intermediates=keep_intermediates, sample_mode=sample_mode,
         minimap2_bin=minimap2_bin,
-        short_min_mapping_quality=short_min_mapping_quality,
         short_min_spanning_pairs=short_min_spanning_pairs,
         short_confidence_threshold=short_confidence_threshold,
         short_max_candidate_repeat_count=short_max_candidate_repeat_count,
-        short_consider_secondary=short_consider_secondary,
         missing_locus_min_depth=missing_locus_min_depth,
         missing_locus_min_fraction=missing_locus_min_fraction,
         missing_locus_penalty=missing_locus_penalty,
         classification_repeat_scale=classification_repeat_scale,
-        sr_engine=sr_engine, insert_mean=insert_mean, insert_sd=insert_sd,
-        sr_recruitment_audit=sr_recruitment_audit,
+        insert_mean=insert_mean, insert_sd=insert_sd,
+        sr_recruitment_audit=sr_recruitment_audit, short_repeat_fraction=short_repeat_fraction,
         technology=technology, max_anchor_edits=max_anchor_edits, round_tolerance=round_tolerance,
         min_mixture_fraction=min_mixture_fraction, min_secondary_reads=min_secondary_reads,
         reference_metadata_path=reference_metadata_path,

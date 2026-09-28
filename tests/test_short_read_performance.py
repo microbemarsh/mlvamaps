@@ -10,8 +10,8 @@ import pytest
 
 from mlvamaps.concurrency import bounded_ordered_map
 from mlvamaps.models import Locus, ReadPair, ReadRecord
-from mlvamaps.repeat_likelihood import (
-    _MATRIX, _scores, classify_pair, flank_hit, infer_repeat, panel_template, repetitive,
+from mlvamaps.short_read_evidence import (
+    _MATRIX, classify_pair, flank_hit, panel_template, cyclic_match as repetitive,
 )
 from mlvamaps.short_read_recruitment import ShortReadRecruiter, recruit_short_reads
 from mlvamaps.sequence import revcomp
@@ -62,7 +62,7 @@ def test_vectorized_motif_test_matches_original():
 
 
 def test_long_motif_seed_filter_preserves_error_boundary_and_wrapping():
-    from mlvamaps.repeat_likelihood import _seeded_repetitive
+    from mlvamaps.short_read_evidence import _seeded_repetitive
     rng = random.Random(813)
     for period in (128, 600, 1800):
         motif = ''.join(rng.choices('ACGT', k=period))
@@ -94,7 +94,7 @@ def test_recovery_substage_progress_is_visible_in_stdout(tmp_path, capsys):
         minimum_molecules=3, minimum_probability=.8, threads=1, show_progress=True)
     output = capsys.readouterr().out
     assert output.index('Loading repeat templates') < output.index('Recruiting short-read molecules')
-    assert 'Repeat fitting finished' in output
+    assert 'Locus recovery finished' in output
     assert 'Writing molecule memberships and allele predictions' in output
     assert 'Canonical genotype and evidence output finished' in output
     metadata = json.loads(paths['reconstruction_metadata'].read_text())
@@ -121,109 +121,6 @@ def test_profile_alignments_preserve_original_traceback_and_likelihoods():
             assert asdict(observed) == dict(query_start=result.end_query+1-len(q.replace('-','')),
                 query_end=result.end_query+1, flank_start=result.end_ref+1-len(r.replace('-','')),
                 flank_end=result.end_ref+1, score=result.score, edits=edits)
-    seq = t.sequence(6)
-    item = classify_pair(ReadPair('m', ReadRecord('m', seq)), t)
-    states = np.arange(0, 10.5, .5)
-    scalar = np.array([parasail.sw_striped_32(seq, t.sequence(r), 5, 1, _MATRIX).score for r in states])
-    expected = -.5*((states-item.observed_repeat)/.20)**2 + (scalar-scalar.max())/8
-    np.testing.assert_array_equal(_scores([item], t, states, None)[0], expected)
-
-
-def test_range_expansion_reuses_existing_candidate_alignments(monkeypatch):
-    t = templates()['L0']
-    seq = t.left + t.motif*5
-    item = classify_pair(ReadPair('m', ReadRecord('m', seq)), t)
-    scores = []
-    original = parasail.sw_striped_profile_16
-    def tracked(profile, reference, *args):
-        scores.append(reference)
-        return original(profile, reference, *args)
-    monkeypatch.setattr(parasail, 'sw_striped_profile_16', tracked)
-    result = infer_repeat([item], t, maximum=40)
-    assert len(result.states) == 81
-    assert 0 < len(scores) == len(set(scores)) < 81
-
-
-def test_periodic_score_collapse_matches_full_native_alignments():
-    from dataclasses import replace
-    from mlvamaps.repeat_likelihood import _repeat_alignment_scores
-    rng = random.Random(891)
-    def dna(n):
-        return ''.join(rng.choices('ACGT', k=n))
-    base = templates()['L0']
-    for unit, motif in ((1, 'A'), (3, 'ACG'), (4, 'AATG'), (7, dna(7)),
-                        (60, dna(60)), (60, 'ACGT'*15), (5, 'ACGTACG')):
-        template = replace(base, unit=unit, motif=motif)
-        states = np.array([0, .5, 1, 2.5, 5, 8, 15, 30, 50, 100])
-        target = template.sequence(8)
-        cases = [target, target[:60], target[-60:], dna(75), 'N'*40,
-                 target[:20] + 'NN' + target[23:80], target[:17] + 'A' + target[17:100]]
-        # Deliberately mismatch declared unit and motif length, above, to test
-        # right-boundary phase preservation as well as primitive motifs.
-        for read in cases:
-            expected = np.array([parasail.sw_striped_32(read, template.sequence(float(state)), 5, 1, _MATRIX).score
-                                 for state in states], dtype=float)
-            observed = _repeat_alignment_scores(read, template, states, np.empty(0))
-            np.testing.assert_array_equal(observed, expected)
-            prefix = _repeat_alignment_scores(read, template, states[:5], np.empty(0))
-            np.testing.assert_array_equal(_repeat_alignment_scores(read, template, states, prefix), expected)
-
-
-def test_repeat_fit_matches_exhaustive_scoring_for_mixtures_and_expansions(monkeypatch):
-    from dataclasses import replace
-    import mlvamaps.repeat_likelihood as module
-    original = module._repeat_alignment_scores
-    template = replace(templates()['L0'], unit=60, motif='AATG'*15)
-    reads_at_locus = [template.sequence(2), template.sequence(3)] * 4
-    reads_at_locus += [template.left + template.motif[:50], template.motif[:50] + template.right] * 4
-    evidence = [classify_pair(ReadPair(str(i), ReadRecord(str(i), s, 'I'*len(s))), template)
-                for i, s in enumerate(reads_at_locus)]
-    evidence = [e for e in evidence if e and e.classes]
-    def exhaustive(read, template, states, previous):
-        return np.array([parasail.sw_striped_32(read, template.sequence(float(r)), 5, 1, _MATRIX).score
-                         for r in states], dtype=float)
-    for items in (evidence, [e for e in evidence if 'F' in e.classes]):
-        monkeypatch.setattr(module, '_repeat_alignment_scores', exhaustive)
-        before = infer_repeat(items, template, maximum=100)
-        monkeypatch.setattr(module, '_repeat_alignment_scores', original)
-        after = infer_repeat(items, template, maximum=100)
-        for key, value in vars(before).items():
-            if isinstance(value, np.ndarray):
-                np.testing.assert_array_equal(getattr(after, key), value)
-            else:
-                assert getattr(after, key) == value
-
-
-def test_projection_reuse_preserves_quality_filtering_and_molecule_support(monkeypatch):
-    from dataclasses import replace
-    import mlvamaps.locus_reconstruction as reconstruction
-    from mlvamaps.repeat_likelihood import MoleculeEvidence, InsertDistribution
-    template = templates()['L0']
-    high = ('I'*len(template.left), 'I'*len(template.right))
-    low = (high[0][:20] + '!' + high[0][21:], high[1])
-    first = MoleculeEvidence('0', 'L0', ('S',), (template.left, template.right), ('+', '-'),
-                             fragment_offset=len(template.left)+len(template.right), qualities=high)
-    second = replace(first, molecule_id='1', qualities=low)
-    cache = {}
-    sequence = template.sequence(8)
-    assert 20 in reconstruction._project_flanks(first, sequence, template, 8, cache)
-    assert 20 not in reconstruction._project_flanks(second, sequence, template, 8, cache)
-    items = [replace(first if i % 2 else second, molecule_id=str(i)) for i in range(50)]
-    inference = infer_repeat(items, template, InsertDistribution(len(sequence), 1, 50, 'override'))
-    calls = []
-    original = reconstruction._project_flanks
-    def tracked(*args):
-        calls.append(True)
-        return original(*args)
-    monkeypatch.setattr(reconstruction, '_project_flanks', tracked)
-    products = reconstruction.reconstruct_short_products(items, template, inference, 's')
-    assert len(calls) == 2
-    assert len(products) == 1
-    assert products[0].sequence == sequence
-    assert products[0].support_count == 50
-    assert products[0].evidence['molecule_ids'] == [str(i) for i in range(50)]
-
-
 def test_bit_mask_seed_filter_preserves_exhaustive_matches():
     ts = templates()
     pairs = list(reads())
@@ -259,7 +156,7 @@ def test_parallel_recruitment_is_ordered_and_matches_serial(audit_mode):
 
 
 def test_anchor_existence_matches_complete_classification():
-    from mlvamaps.repeat_likelihood import pair_has_anchor
+    from mlvamaps.short_read_evidence import pair_has_anchor
     rng = random.Random(810)
     cases = list(reads())
     # Orphans, repeat-only reads, reverse reads, ambiguous bases and indels.
@@ -402,7 +299,7 @@ def test_recruitment_processes_can_start_inside_batch_sample_threads():
 
 
 def test_byte_lane_anchors_match_wide_alignments_with_indels_and_saturation(monkeypatch):
-    from mlvamaps.repeat_likelihood import FlankHit
+    from mlvamaps.short_read_evidence import FlankHit
     rng = random.Random(481)
     def dna(n):
         return ''.join(rng.choices('ACGTN', k=n))
@@ -518,7 +415,7 @@ def test_streaming_pipeline_preserves_database_inputs_and_results(tmp_path, monk
     monkeypatch.setattr('mlvamaps.minimap_mapping.minimap2_version', lambda _: 'test')
     for database in (None, 'database'):
         run_short_read_call(str(first), str(second), str(panel), str(tmp_path/str(database)), 's',
-                            database_path=database, sr_engine='repeat-likelihood', threads=1, show_progress=False)
+                            database_path=database, threads=1, show_progress=False)
     assert classified == pairs
     for name in ('calls.tsv', 'reconstructed_loci.fasta', 'reconstructed_locus_variants.tsv',
                  'locus_snps.tsv', 'short_read_qc_summary.tsv', 'molecule_candidate_evidence.tsv'):

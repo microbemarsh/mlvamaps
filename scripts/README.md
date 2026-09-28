@@ -42,7 +42,9 @@ to `exact`, `discordant`, `missing_in_a`, or `missing_in_b`. The JSON reports
 that mode, including those uncalled in the other mode. For an assembly/SR
 comparison, its `assembly` value measures recovery of assembly calls and should
 be reviewed alongside shared-call concordance and `missing_call_loci_by_mode`.
-Loci uncalled in both modes do not contribute to these metrics. Assembly calls
+Loci uncalled in both modes are retained in call-rate denominators and labeled
+`missing_in_both`. The table also joins short-read depth, length and evidence
+features. Assembly calls
 are comparators, not an independently verified ground truth.
 
 For a server-only dataset, keep the reads and assemblies there and compare
@@ -67,16 +69,16 @@ do not report peak RAM; measure that with the server's job accounting if needed.
 
 ## Short-read recruitment performance
 
-`benchmark_repeat_fitting.py` compares exhaustive native candidate alignment
-against equivalent-score reuse on synthetic flanking reads. It checks exact
-equality of all likelihoods, posteriors, mixture fractions and call fields:
+`benchmark_reconstruction.py` generates six synthetic loci with off-target
+background reads, runs the complete short-read path and records wall time and
+peak resident memory. Direct and unresolved scenarios exercise separate paths:
 
 ```bash
-python scripts/benchmark_repeat_fitting.py --molecules 500 --unit 60 \
-  --maximum 100 --output repeat_fitting_timing.json
+python scripts/benchmark_reconstruction.py --molecules 10000 --threads 1 --output bench/direct
+python scripts/benchmark_reconstruction.py --molecules 10000 --scenario unresolved --output bench/unresolved
 ```
 
-This measures repeat fitting only, separately from recruitment and I/O.
+These synthetic measurements do not establish performance on real libraries.
 
 `benchmark_fastq_io.py` compares native decompression and compression backends
 on the same subset, including QC and retained-read hash checks. Install the

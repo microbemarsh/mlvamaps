@@ -6,7 +6,7 @@ import pytest
 
 from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
 from mlvamaps.models import Locus, ReadPair, ReadRecord
-from mlvamaps.repeat_likelihood import classify_pair, panel_template
+from mlvamaps.short_read_evidence import classify_pair, panel_template
 from mlvamaps.sequence import revcomp
 from mlvamaps.short_read_recruitment import ShortReadRecruiter, anchor_score, resolve_locus_matches
 
@@ -34,9 +34,7 @@ def paired_reads(template, name):
 def test_incidental_matches_do_not_hide_perfect_multilocus_calls(tmp_path, audit_mode):
     templates = panel()
     pairs = [paired_reads(t, f'{name}_{i}') for name, t in templates.items() for i in range(6)]
-    # The original any-two-hits rule discards every one of these molecules.
-    assert all(sum(classify_pair(pair, t) is not None for t in templates.values()) > 1
-               for pair in pairs[::6])
+    # Short incidental anchors must not compete with each molecule's true locus.
     chunk = ShortReadRecruiter(templates, 's', audit_mode=audit_mode).recruit(pairs)
     assert chunk.ambiguous_pairs == chunk.unmatched_pairs == 0
     assert [(e.molecule_id, e.locus_id) for e in chunk.evidence] == [
@@ -70,12 +68,12 @@ def test_uncontested_short_anchor_is_retained(audit_mode):
     pair = ReadPair('short', ReadRecord('short', template.left[-10:] + 'AATG'*10))
     chunk = ShortReadRecruiter({'L00': template}, 's', audit_mode=audit_mode).recruit([pair])
     assert len(chunk.evidence) == 1
-    assert 'F' in chunk.evidence[0].classes
+    assert 'LEFT_BOUNDARY' in chunk.evidence[0].classes
 
 
 @pytest.mark.parametrize('audit_mode', ['full', 'compact'])
 def test_score_bounds_preserve_exhaustive_evidence_and_audits(audit_mode):
-    from mlvamaps.repeat_likelihood import pair_anchor_score
+    from mlvamaps.short_read_evidence import pair_anchor_score
     rng = random.Random(314)
     templates = panel()
     templates['L01'] = replace(templates['L00'], locus=templates['L01'].locus)
@@ -130,7 +128,7 @@ def test_score_bounds_preserve_exhaustive_evidence_and_audits(audit_mode):
 
 def test_score_bound_matches_unclipped_alignment():
     import parasail
-    from mlvamaps.repeat_likelihood import _MATRIX, flank_score_bound
+    from mlvamaps.short_read_evidence import _MATRIX, flank_score_bound
     rng = random.Random(614)
     for length in (0, 9, 30, 150, 500):
         flank = ''.join(rng.choices('ACGTN', k=length))
@@ -148,9 +146,9 @@ def test_compact_path_only_classifies_retained_molecules(monkeypatch):
     classified = []
     original = module.classify_pair
 
-    def tracked(pair, template):
+    def tracked(pair, template, repeat_threshold=.7):
         classified.append((pair.molecule_id, template.locus.locus_id))
-        return original(pair, template)
+        return original(pair, template, repeat_threshold)
 
     monkeypatch.setattr(module, 'classify_pair', tracked)
     chunk = ShortReadRecruiter(templates, 's', audit_mode='compact').recruit(pairs)

@@ -13,9 +13,7 @@ from mlvamaps.sequence import revcomp
 from mlvamaps.short_reads import merge_read_pair, qc_read_pairs, run_short_read_call
 
 
-@pytest.mark.parametrize('engine_options, expected_engine', [({}, 'competitive'),
-    ({'sr_engine': 'repeat-likelihood'}, 'repeat-likelihood')])
-def test_short_read_wrapper_forwards_automatic_taxon_options(monkeypatch, engine_options, expected_engine):
+def test_short_read_wrapper_forwards_automatic_taxon_options(monkeypatch):
     observed = {}
 
     def fake_call(**kwargs):
@@ -27,14 +25,12 @@ def test_short_read_wrapper_forwards_automatic_taxon_options(monkeypatch, engine
         "r1.fastq", "r2.fastq", "panel.tsv", "out", "sample",
         database_path="multi-taxon-db", taxon_identification=True, taxon_min_loci=5,
         classification_repeat_scale=0.2,
-        **engine_options,
     )
 
     assert observed["database_path"] == "multi-taxon-db"
     assert observed["taxon_identification"] is True
     assert observed["taxon_min_loci"] == 5
     assert observed["classification_repeat_scale"] == 0.2
-    assert observed["sr_engine"] == expected_engine
 
 
 def _write_fastq(path: Path, records: list[tuple[str, str]], quality: str = "I") -> None:
@@ -119,10 +115,6 @@ def test_metadata_alias_normalization_and_myoga_id_consistency():
     assert row["latitude"] == "1.5" and row["longitude"] == "-2.5"
 
 
-@pytest.mark.skipif(
-    shutil.which("minimap2") is None,
-    reason="minimap2 unavailable",
-)
 def test_canonical_short_read_pipeline_calls_recoverable_product(tmp_path):
     panel = tmp_path / "panel.tsv"
     reads1, reads2 = tmp_path / "reads_1.fastq", tmp_path / "reads_2.fastq"
@@ -135,5 +127,5 @@ def test_canonical_short_read_pipeline_calls_recoverable_product(tmp_path):
     with result["calls"].open() as handle:
         call = next(csv.DictReader(handle, delimiter="\t"))
     assert call["repeat_count"] == "4"
-    assert call["mlva_method"] == "competitive minimap2 shared inference"
+    assert call["mlva_method"] == "targeted_locus_reconstruction"
     assert not (tmp_path / "out" / "short_read_assembly_summary.tsv").exists()

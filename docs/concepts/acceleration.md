@@ -5,8 +5,9 @@ possible, and avoid generic fuzzy-string packages for core matching.
 
 Current backend policy:
 
-- `minimap2` performs competitive alignment of both Illumina and long reads
-  against versioned candidate allele contexts. Its SAM stream is decoded by
+- `minimap2` performs downstream competitive reference classification of FASTQ
+  molecules against observed amplicons, and optional long-read alignment against
+  versioned candidate allele contexts. Its SAM stream is decoded by
   `pysam`/htslib and, only when retained, stored as compressed BAM rather than
   materialized as text SAM.
 - The Bioconda `sassy>=0.2.2` command-line tool is the Rust/SIMD search engine

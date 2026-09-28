@@ -91,7 +91,7 @@ def test_parallel_decoder_feeds_spawned_recruitment_workers(tmp_path, monkeypatc
     from dataclasses import asdict
     from mlvamaps.io import write_fastq, write_tsv
     from mlvamaps.models import Locus, ReadRecord
-    from mlvamaps.repeat_likelihood import panel_template
+    from mlvamaps.short_read_evidence import panel_template
     from mlvamaps.sequence import revcomp
     from mlvamaps.short_reads import run_short_read_call
     locus = Locus('X', forward_primer='ACGTCAGTACGATCG', reverse_primer='TCGTAGCACTGATCG',
@@ -108,9 +108,9 @@ def test_parallel_decoder_feeds_spawned_recruitment_workers(tmp_path, monkeypatc
     outputs = []
     for threads in (1, 16):
         outputs.append(run_short_read_call(str(first), str(second), str(panel), str(tmp_path/str(threads)),
-                                          's', sr_engine='repeat-likelihood', threads=threads, show_progress=False))
+                                          's', threads=threads, show_progress=False))
     for name in ('calls.tsv', 'reconstructed_loci.fasta', 'molecule_candidate_evidence.tsv',
-                 'molecule_repeat_likelihoods.tsv', 'short_read_qc_summary.tsv'):
+                 'short_read_qc_summary.tsv'):
         assert (tmp_path/'1'/name).read_bytes() == (tmp_path/'16'/name).read_bytes()
     metadata = json.loads(outputs[1]['run_metadata'].read_text())
     assert metadata['performance']['io']['input_backends'] == ['rapidgzip+htslib'] * 2

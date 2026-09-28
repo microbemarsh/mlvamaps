@@ -1,7 +1,6 @@
 """Bounded parallel recruitment, using the sample's existing CPU allocation.
 
-The seed filter and classify_pair thresholds are unchanged. Competing loci are
-resolved only when one has substantially stronger non-repeat anchor support.
+Competing loci are resolved only when one has substantially stronger non-repeat anchor support.
 Process workers avoid serializing Python motif/anchor bookkeeping behind the interpreter lock;
 only retained evidence returns to the parent. No FASTQs are independently
 rescanned by each worker, and recruitment finishes before locus fitting begins.
@@ -17,7 +16,7 @@ import json
 import multiprocessing
 
 from .concurrency import bounded_ordered_map, resolve_threads
-from .repeat_likelihood import (
+from .short_read_evidence import (
     MoleculeEvidence, RepeatTemplate, classify_pair, flank_insert_length,
     pair_anchor_score, read_anchor_bound,
 )
@@ -70,14 +69,16 @@ class RecruitmentChunk:
 
 class ShortReadRecruiter:
     def __init__(self, templates: dict[str, RepeatTemplate | None], sample_id: str, audit_fields=None,
-                 audit_mode="full"):
+                 audit_mode="full", repeat_threshold=.7):
         if audit_mode not in {"compact", "full"}:
             raise ValueError("recruitment audit mode must be compact or full")
         self.templates = [template for _, template in sorted(templates.items()) if template is not None]
         # Duplicate contexts share cached anchors already; a bound pass cannot
         # separate them and only adds overhead to full ambiguity audits.
-        self.use_bounds = len({(t.left, t.right) for t in self.templates}) > 3
+        self.use_bounds = (len({(t.left, t.right) for t in self.templates}) > 3
+                           and len({t.locus.locus_id for t in self.templates}) == len(self.templates))
         self.sample_id = sample_id
+        self.repeat_threshold = repeat_threshold
         self.audit_fields = audit_fields
         self.audit_mode = audit_mode
         self.all_candidates = (1 << len(self.templates)) - 1
@@ -147,10 +148,17 @@ class ShortReadRecruiter:
                     elif score > runner_up:
                         runner_up = score
             # Audit ties and rows retain panel order regardless of bound order.
-            matches.sort(key=lambda item: (-item[0], item[1]))
+            by_locus = {}
+            for score, index in matches:
+                locus_id = self.templates[index].locus.locus_id
+                if locus_id not in by_locus or score > by_locus[locus_id][0]:
+                    by_locus[locus_id] = (score, index)
+            matches = sorted(by_locus.values(), key=lambda item: (-item[0], item[1]))
+            best = matches[0][0] if matches else 0
+            runner_up = matches[1][0] if len(matches)>1 else 0
             if matches and (len(matches) == 1 or best - runner_up >= max(12, 0.2 * best)):
                 template = self.templates[matches[0][1]]
-                selected = classify_pair(pair, template)
+                selected = classify_pair(pair, template, self.repeat_threshold)
                 result.evidence.append(selected)
                 length = flank_insert_length(pair, template)
                 if length:
@@ -163,7 +171,7 @@ class ShortReadRecruiter:
                         self.templates[matches[1][1]].locus.locus_id, "yes"))
                     continue
                 for _, index in sorted(matches, key=lambda item: item[1]):
-                    item = classify_pair(pair, self.templates[index])
+                    item = classify_pair(pair, self.templates[index], self.repeat_threshold)
                     row = {
                         "sample_id": self.sample_id, "locus_id": item.locus_id,
                         "molecule_id": item.molecule_id, "classes": "ambiguous_locus",
@@ -183,9 +191,9 @@ class ShortReadRecruiter:
 _WORKER_RECRUITER = None
 
 
-def _initialize_worker(templates, sample_id, audit_fields, audit_mode):
+def _initialize_worker(templates, sample_id, audit_fields, audit_mode, repeat_threshold):
     global _WORKER_RECRUITER
-    _WORKER_RECRUITER = ShortReadRecruiter(templates, sample_id, audit_fields, audit_mode)
+    _WORKER_RECRUITER = ShortReadRecruiter(templates, sample_id, audit_fields, audit_mode, repeat_threshold)
 
 
 def _recruit_chunk(pairs):
@@ -193,7 +201,7 @@ def _recruit_chunk(pairs):
 
 
 def recruit_short_reads(pairs, templates, sample_id, threads=1, chunk_size=256,
-                        statistics=None, audit_fields=None, audit_mode="full"):
+                        statistics=None, audit_fields=None, audit_mode="full", repeat_threshold=.7):
     """Yield ordered batches; at most two chunks per allocated CPU are queued."""
     if chunk_size < 1:
         raise ValueError("chunk_size must be positive")
@@ -213,13 +221,13 @@ def recruit_short_reads(pairs, templates, sample_id, threads=1, chunk_size=256,
         statistics["chunk_size"] = chunk_size
         statistics["audit_mode"] = audit_mode
     if workers <= 1:
-        recruiter = ShortReadRecruiter(templates, sample_id, audit_fields, audit_mode)
+        recruiter = ShortReadRecruiter(templates, sample_id, audit_fields, audit_mode, repeat_threshold)
         for batch in chain(initial, batches):
             yield recruiter.recruit(batch)
         return
     # Batch samples already run in threads. Explicit spawn is safe there and
     # does not inherit BLAS/Sassy state from a multithreaded parent via fork.
     with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
-                             initializer=_initialize_worker, initargs=(templates, sample_id, audit_fields, audit_mode)) as executor:
+                             initializer=_initialize_worker, initargs=(templates, sample_id, audit_fields, audit_mode, repeat_threshold)) as executor:
         yield from bounded_ordered_map(executor, _recruit_chunk, chain(initial, batches),
                                        max_pending=2 * workers)

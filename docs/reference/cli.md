@@ -1,11 +1,11 @@
 # CLI options and thresholds
 
-The defaults are `--sr-engine competitive` and `--lr-engine spanning`.
-[Canonical locus reconstruction](../concepts/locus-reconstruction.md) describes
-the default long-read engine and optional `--sr-engine repeat-likelihood`,
-including its insert options and evidence files. Competitive-mapping details
-below apply to the default short-read engine and `--lr-engine competitive`.
-
+Short reads use [targeted locus reconstruction](../concepts/locus-reconstruction.md).
+Long reads default to `--lr-engine spanning`; competitive mapping below applies
+to the optional `--lr-engine competitive` and downstream reference classification.
+Short-read inference controls include `--short-repeat-fraction`,
+`--short-confidence-threshold`, `--short-max-candidate-repeat-count`,
+`--short-min-spanning-pairs`, `--insert-mean` and `--insert-sd`.
 
 Run `mlvamaps call --help` for essential options, or `mlvamaps call --advanced`
 for the complete parser-generated reference. Advanced options remain usable
@@ -97,8 +97,8 @@ model and [migration](../workflows/emu-migration.md) for removed options.
 | `--manifest` | None | Failure-isolated batch TSV. |
 | `--sample-metadata` | None | CSV/TSV joined by sample ID. |
 | `--force` | Off | Rerun already-successful manifest samples. |
-| `--keep-intermediates` | Off | Retain compressed `candidate_mapping/candidate_alignments.bam`; normal candidate mapping does not write text SAM. |
-| `--short-min-mapq` | `0` | Locus-assignment aid only; allele competition retains low-MAPQ alternatives. |
+| `--keep-intermediates` | Off | Retain QC FASTQs and any competitive alignment intermediates; short-read recruitment does not write SAM. |
+| `--short-repeat-fraction` | `0.7` | Motif-compatible fraction required for repeat-rich tagging. |
 | `--short-min-spanning-pairs` | `2` | Opposite-flank pairs required as decisive geometry evidence. |
 | `--short-confidence-threshold` | `0.8` | Minimum normalized candidate score for a call. |
 

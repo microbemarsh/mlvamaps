@@ -421,22 +421,17 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     call.add_argument("--short-min-mean-quality", type=_nonnegative_float, default=15.0)
     call.add_argument("--short-trim-quality", type=_nonnegative_int, default=0)
     call.add_argument("--short-min-pair-retention", type=_fraction, default=0.5)
-    call.add_argument("--short-min-mapq", type=_nonnegative_int, default=0)
     call.add_argument("--short-min-spanning-pairs", type=_nonnegative_int, default=2)
     call.add_argument("--short-confidence-threshold", type=_fraction, default=0.8)
     call.add_argument("--short-max-candidate-repeat-count", type=_positive_int, default=100)
-    call.add_argument(
-        "--no-short-secondary-alignments", action="store_true",
-        help="Ignore secondary candidate alignments (not recommended for homologous contexts)",
-    )
+    call.add_argument("--short-repeat-fraction", type=_fraction, default=.7,
+                      help="Minimum motif-compatible read fraction for repeat-rich evidence (default: %(default)s)")
     call.add_argument(
         "--short-min-informative-molecules",
         type=_positive_int,
         default=3,
         help="Informative molecules required to avoid Illumina LOW_DEPTH (default: %(default)s)",
     )
-    call.add_argument("--sr-engine", choices=("competitive", "repeat-likelihood"), default="competitive",
-                      help="Short-read recovery engine (default: %(default)s)")
     call.add_argument("--sr-recruitment-audit", choices=("compact", "full"), default="compact",
                       help="Ambiguous-pair diagnostics: compact records the two strongest loci; full records all matching loci")
     call.add_argument("--lr-engine", choices=("spanning", "competitive"), default="spanning",
@@ -574,7 +569,7 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         "--minimap2-bin",
         default="minimap2",
         metavar="PATH",
-        help="minimap2 executable for short-read recruitment, representative mapping, and assembly support (default: %(default)s)",
+        help="minimap2 executable for reference classification, optional long-read mapping, and assembly support (default: %(default)s)",
     )
     call.add_argument(
         "--classification-repeat-scale", type=_positive_float, default=1.0,
@@ -1007,12 +1002,11 @@ def _run_short_input(
         keep_intermediates=args.keep_intermediates,
         sample_mode=args.sample_mode,
         minimap2_bin=args.minimap2_bin,
-        short_min_mapping_quality=args.short_min_mapq,
         short_min_spanning_pairs=args.short_min_spanning_pairs,
         short_confidence_threshold=args.short_confidence_threshold,
         short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
-        short_consider_secondary=not args.no_short_secondary_alignments,
-        sr_engine=args.sr_engine, insert_mean=args.insert_mean, insert_sd=args.insert_sd,
+        short_repeat_fraction=args.short_repeat_fraction,
+        insert_mean=args.insert_mean, insert_sd=args.insert_sd,
         sr_recruitment_audit=args.sr_recruitment_audit,
         min_mixture_fraction=args.min_mixture_fraction, min_secondary_reads=args.min_secondary_reads,
         missing_locus_min_depth=args.missing_locus_min_depth,

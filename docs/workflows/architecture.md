@@ -5,10 +5,9 @@ assembly FASTA and sequencing FASTQ. Both calling paths produce compatible
 locus calls, fingerprints, profile matches, and reports, but they preserve the
 different evidence available from assembled contigs and individual molecules.
 
-Short reads default to [competitive candidate mapping](competitive-fastq.md).
-Long reads default to spanning-molecule recovery. The optional SR
-repeat-likelihood engine and default LR engine are documented in
-[locus reconstruction](../concepts/locus-reconstruction.md).
+Short reads use [targeted paired-end reconstruction](illumina.md).
+Long reads default to spanning-molecule recovery. Both use the shared
+[locus interpreter](../concepts/locus-reconstruction.md).
 
 ## Resource ownership
 
@@ -34,15 +33,13 @@ so it proceeds directly from extraction to one finalization.
 
 ## Locus reconstruction and candidate mapping
 
-Assembly products, complete LR molecules, and SR likelihood/sequence
-reconstructions enter `locus_products.genotype_product`. The optional SR model uses
-panel flanks or borrowed database context to identify loci and synthesizes
-repeat states independently of known alleles. Its candidate scores and per-pair
-evidence are retained for inspection.
+Assembly products, complete LR molecules, and SR recovered sequences enter
+`locus_products.genotype_product`. Short reads use a combined flank index,
+competitive context assignment, direct/overlap recovery, bounded local assembly,
+and a haploid candidate fallback. Reference classification is separate.
 
-`--sr-engine competitive` (the default) and `--lr-engine competitive` use the
-`unified_fastq` candidate-mapping workflow and cached minimap2 indexes.
-See [competitive workflows](competitive-fastq.md) for those details.
+`--lr-engine competitive` retains the optional long-read candidate-mapping
+workflow and cached minimap2 indexes. See [competitive workflows](competitive-fastq.md).
 
 ## Global thread budget
 
