@@ -61,7 +61,8 @@ Motif discovery uses the panel unit length and lagged sequence identity, with
 at least two units, 12 bases, 90% consensus identity, and two supporting
 molecules. Competing motifs of comparable molecule support remain ambiguous.
 Primer arms extend through unique nonperiodic overlaps only where extensions
-agree. At most 256 distinct quality-filtered sequences per locus and eight
+agree. High-depth sequences are consolidated by coordinate pileup before
+selecting up to 256 supported sequences per locus. At most eight
 arm extensions are inspected. A graph is enabled only after both observed
 primer-to-repeat arms and a dominant motif are recovered. The two arms are
 placed at compatible motif phases. This is a small graph with one variable
@@ -122,18 +123,24 @@ Contiguous Q20 segments of at least 20 bases remain usable when another part
 of their read fails this threshold. A quality-validated complete product is
 not rejected because of low-quality bases outside its primers.
 
-Unresolved small pools enter a seeded overlap graph. Contained sequences are
-collapsed; each edge must have a unique non-repeat-only overlap, allowing at
-most 2% substitutions. Exact 15-base seeds bound the candidate-offset search.
-For error-bearing paths, SPOARS overlap alignment produces a weighted consensus;
-disagreement below 70% support becomes `N`. If POA changes the length established
-by the unique overlap offsets, the reconstruction remains unresolved. Paths start
-at the forward primer and must reach the reverse primer. Cycles, multiple
-valid products, inconsistent paired placements and nonunique overlap offsets
-are unresolved. Reliable library statistics additionally constrain uniquely
-placed mate distances. The graph is capped at 256 distinct sequences and 64
-path expansions. Hitting either cap defers to inference, never an arbitrary
-repeat traversal. No whole-genome assembly or external assembler is used.
+Unresolved pools enter a seeded overlap graph. High-depth reads first form
+coordinate pileups: full-read placements with unique offsets consolidate
+substitution errors, with each molecule voting once per position. Indels and
+ambiguous repeat placements remain separate. Contained sequences are collapsed
+while retaining their molecule support; each edge must have a unique
+non-repeat-only overlap, allowing at most 2% substitutions. Exact 15-base seeds
+bound the candidate-offset search. Consistent overlap components form a shared
+coordinate pileup without enumerating redundant paths through every read start.
+
+Consensus uses the validated overlap coordinates and preserves their observed
+length; disagreement below 70% support becomes `N`. Paths start at the forward
+primer and must reach the reverse primer. Nonunique overlaps are excluded
+without vetoing independently anchored complete paths. Conflicting product
+lengths, cycles and inconsistent paired placements remain unresolved. Reliable
+library statistics additionally constrain uniquely placed mate distances.
+Resource limits apply to 2048 compacted nodes and 64 alternative path expansions,
+not the original number of recruited read sequences. Hitting a limit defers
+to inference. No whole-genome assembly or external assembler is used.
 
 Observed complete products and reconstructed contigs then pass through
 `run_in_silico_pcr_loci`, `pcr_rows_to_products` and

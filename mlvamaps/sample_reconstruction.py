@@ -14,7 +14,7 @@ import regex
 from .models import ReadPair, ReadRecord
 from .sequence import revcomp
 from .short_read_evidence import MoleculeEvidence, RepeatTemplate, classify_pair, primer_bounds
-from .targeted_reconstruction import _overlaps
+from .targeted_reconstruction import _overlaps, _pileup_sequences
 
 
 def reliable_sequences(items):
@@ -26,7 +26,7 @@ def reliable_sequences(items):
             quality = item.qualities[i] if item.qualities else None
             for match in regex.finditer('[5-~]{21,}', quality or 'I'*len(sequence)):
                 sequences[sequence[match.start():match.end()]].add(item.molecule_id)
-    return sequences
+    return _pileup_sequences(sequences) if len(sequences) > 256 else sequences
 
 
 @lru_cache(maxsize=8192)

@@ -36,6 +36,70 @@ def fixture(count=8):
     return locus, template, sequence, pairs
 
 
+@pytest.mark.parametrize('unit,nominal,product_bp,count,depth', [(12, 10, 314, 11, 2482), (9, 16, 229, 17, 14642)])
+def test_high_depth_primer_only_pileup_reaches_assembly_caller(tmp_path, unit, nominal, product_bp, count, depth):
+    from mlvamaps.assembly_call import run_assembly_call
+    from mlvamaps.io import read_profiles, write_tsv
+    from dataclasses import asdict
+    rng = random.Random(123)
+    def dna(n):
+        return ''.join(rng.choices('ACGT', k=n))
+    nonrepeat = product_bp-unit*nominal
+    left, right, motif = dna(nonrepeat//2), dna(nonrepeat-nonrepeat//2), dna(unit)
+    sequence = left+motif*count+right
+    locus = Locus(f'L_{unit}bp_{product_bp}bp_{nominal}U', forward_primer=left[:20],
+        reverse_primer=revcomp(right[-20:]), repeat_unit_length_bp=unit,
+        repeat_motif='N'*unit, expected_product_size_bp=product_bp, nominal_repeat_units=nominal)
+    world = dna(80)+sequence+dna(80)
+    pairs = []
+    for i in range(depth):
+        start = rng.randrange(len(world)-200+1)
+        read = list(world[start:start+200])
+        if i % 3:
+            position = rng.randrange(len(read))
+            read[position] = rng.choice([base for base in 'ACGT' if base != read[position]])
+        read = ''.join(read)
+        pairs.append(pair(read, read, str(i)))
+    template = locus_templates([locus])[locus.locus_id]
+    recruited = ShortReadRecruiter({locus.locus_id: template}, 's').recruit(pairs).evidence
+    assert len({seq for item in recruited for seq in item.sequences}) > 256
+    assert not any(item.product_sequence for item in recruited)
+    calls, _, _, paths = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+        pairs=iter(pairs), loci=[locus], database_path=None, outdir=tmp_path/'sr',
+        sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8)
+    assert calls[0]['repeat_count'] == count
+    assert calls[0]['inference_method'] == 'RECONSTRUCTED'
+    assert calls[0]['status'] == 'called'
+    audit = read_profiles(paths['reconstruction_pcr'])[0]
+    assert audit['measurement_source'] == 'sassy_assembly_pcr'
+    assert int(audit['pcr_product_size_bp']) == len(sequence)
+    assert int(audit['input_molecules']) >= depth//2
+    panel, truth = tmp_path/'panel.tsv', tmp_path/'truth.fa'
+    write_tsv([asdict(locus)], panel, list(asdict(locus)))
+    truth.write_text('>truth\n'+sequence+'\n')
+    assembly = run_assembly_call(str(truth), str(panel), str(tmp_path/'assembly'), 's')
+    assert float(read_profiles(assembly['calls'])[0]['repeat_count']) == calls[0]['repeat_count']
+
+
+def test_high_depth_pileup_cannot_bridge_an_unobserved_repeat():
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    from mlvamaps.targeted_reconstruction import microassemble
+    locus, template, sequence, _ = fixture(40)
+    rng = random.Random(14)
+    items = []
+    for i in range(1800):
+        read = list(sequence[:220] if i % 2 else sequence[-220:])
+        if i % 3:
+            position = rng.randrange(len(read))
+            read[position] = rng.choice([base for base in 'ACGT' if base != read[position]])
+        items.append(MoleculeEvidence(str(i), locus.locus_id, ('UNINFORMATIVE',),
+                                     (''.join(read),), ('+',)))
+    assert len({item.sequences[0] for item in items}) > 256
+    product, _, reason = microassemble(items, template)
+    assert not product
+    assert reason in {'no_complete_path', 'ambiguous_overlap_offsets'}
+
+
 def test_internal_reads_rescue_a_primer_only_locus_and_reach_sassy(tmp_path):
     locus, template, sequence, pairs = fixture()
     recruited = ShortReadRecruiter({'L': template}, 's').recruit(pairs).evidence

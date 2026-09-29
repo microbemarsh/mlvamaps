@@ -32,7 +32,8 @@ supports partial boundary evidence and the likelihood fallback below.
 1. Stream QC and competitive recruitment against a combined flank index.
 2. Classify spans, boundaries, flank pairs and anchored repeat-rich reads.
 3. Recover observed products and uniquely overlapping pairs.
-4. Reconstruct unresolved loci with a bounded overlap graph and SPOARS consensus.
+4. Pile up recruited reads, consolidate substitution errors, and reconstruct
+   unresolved loci through unique overlaps.
 5. Measure recovered contigs with the same Sassy PCR and length calibration as assembly.
 6. Use haploid candidate likelihoods only for unresolved rich-panel loci, then
    interpret products through the shared repeat/SNP layer.
@@ -40,6 +41,9 @@ supports partial boundary evidence and the likelihood fallback below.
 The graph retains contiguous high-quality segments rather than discarding a
 whole read for one bad base. Overlaps tolerate up to 2% substitutions but must
 have a unique non-repeat offset; ambiguous consensus bases remain `N`.
+Read and path redundancy is consolidated before applying reconstruction limits,
+so thousands of recruited molecules can contribute to a primer-bounded consensus.
+Consensus retains the length established by the overlap coordinates.
 Sassy runs on the small recovered-contig collection after recruitment.
 `locus_reconstruction/reconstructed_contigs.fasta.gz` and
 `locus_reconstruction/reconstruction_pcr.tsv` retain the sequences and PCR

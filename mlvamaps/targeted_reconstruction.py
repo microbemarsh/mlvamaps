@@ -146,11 +146,86 @@ def direct_products(items, template, sample_id, min_fraction, min_secondary_read
     return products
 
 
-def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
+def _pileup_consensus(rows, length):
+    votes = [dict() for _ in range(length)]
+    for sequence, offset, members in rows:
+        for position, base in enumerate(sequence, offset):
+            for molecule in members:
+                previous = votes[position].get(molecule, base)
+                votes[position][molecule] = base if previous == base else 'N'
+    consensus = []
+    for column in votes:
+        base, support = Counter(column.values()).most_common(1)[0] if column else ('N', 0)
+        consensus.append(base if column and support/len(column) >= .7 else 'N')
+    return ''.join(consensus)
+
+
+def _pileup_sequences(sequences):
+    """Consolidate substitution errors at uniquely anchored read coordinates.
+
+    Same-length, ungapped placements preserve observed lengths. An indel or an
+    ambiguous repeat offset remains a separate graph node, never a forced join.
+    Molecules vote once per position, including overlapping mates.
+    """
+    index = defaultdict(list)
+    representatives, groups = [], []
+    for sequence in sorted(sequences, key=lambda s: (-len(s), -len(sequences[s]), s)):
+        placements = set()
+        for start in range(0, len(sequence)-14, 15):
+            for node, position in index.get(sequence[start:start+15], ()):
+                offset = position-start
+                if offset == 0 and len(sequence) == len(representatives[node]):
+                    placements.add((node, offset))
+        matches = []
+        for node, offset in placements:
+            target = representatives[node][offset:offset+len(sequence)]
+            errors = sum(a != b for a, b in zip(sequence, target))
+            if errors <= int(.02*len(sequence)):
+                matches.append((errors, node, offset))
+        matches.sort()
+        if matches and (len(matches) == 1 or matches[0][0] < matches[1][0]):
+            _, node, offset = matches[0]
+            groups[node].append((sequence, offset))
+        else:
+            node = len(representatives)
+            representatives.append(sequence)
+            groups.append([(sequence, 0)])
+            positions = defaultdict(list)
+            for start in range(len(sequence)-14):
+                positions[sequence[start:start+15]].append(start)
+            for seed, starts in positions.items():
+                if len(starts) == 1 and 'N' not in seed:
+                    index[seed].append((node, starts[0]))
+    result = defaultdict(set)
+    for representative, group in zip(representatives, groups):
+        consensus = _pileup_consensus(((sequence, offset, sequences[sequence])
+                                      for sequence, offset in group), len(representative))
+        result[consensus].update(set().union(*(sequences[sequence] for sequence, _ in group)))
+    return result
+
+
+def _compatible_pairs(items, sequence, insert):
+    for item in items:
+        if len(item.sequences) != 2 or set(item.orientations) != {'+', '-'}:
+            continue
+        first = item.orientations.index('+')
+        a, b = item.sequences[first], item.sequences[1-first]
+        x, y = sequence.find(a), sequence.find(b)
+        if x >= 0 and y >= 0 and sequence.find(a, x+1) < 0 and sequence.find(b, y+1) < 0:
+            fragment = y + len(b) - x
+            if y < x or (insert and abs(fragment-insert.mean) > 4*insert.sd):
+                return False
+    return True
+
+
+def microassemble(items, template, insert=None, max_nodes=2048, max_paths=64):
     """Seeded overlap graph with unique offsets and bounded paths.
 
-    ponytail: O(n²) overlaps, capped at 256 distinct sequences. Larger or
-    branching pools defer to inference; a seeded graph is the upgrade path.
+    High-depth reads first form coordinate pileups; limits apply to compacted
+    sequences. Seed-indexed overlaps and shared coordinate layouts keep redundant
+    coverage from consuming the graph/path budget.
+    ponytail: at most 2048 compacted nodes and 64 alternative path expansions; complex
+    unresolved graphs still defer to inference, not arbitrary repeat joins.
     Repeat-only edges and multiple overlap offsets are rejected, not resolved
     using reference length. All accepted contigs must contain both primers.
     """
@@ -163,16 +238,42 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
             else:
                 for segment in regex.finditer(r'[5-~]{20,}', quality):
                     sequences[seq[segment.start():segment.end()]].add(item.molecule_id)
-    if len(sequences) > max_nodes:
+    if max_nodes <= 0:
         return '', [], 'assembly_node_limit'
+    if len(sequences) > 256:
+        sequences = _pileup_sequences(sequences)
+    pileup_rows = {sequence: [(sequence, 0, set(members))] for sequence, members in sequences.items()}
     nodes = sorted(sequences, key=lambda s: (-len(s), s))
-    nodes = [s for i, s in enumerate(nodes) if not any(s in larger for larger in nodes[:i])]
+    retained = []
+    for sequence in nodes:
+        container = next((larger for larger in retained if sequence in larger), None)
+        if container is not None:
+            offset = container.find(sequence)
+            if container.find(sequence, offset+1) < 0:
+                # Contained reads vote only where they were observed, not
+                # across the containing read's unsupported extensions.
+                pileup_rows[container].extend((read, offset+start, members)
+                                             for read, start, members in pileup_rows[sequence])
+                sequences[container].update(sequences[sequence])
+        else:
+            retained.append(sequence)
+    nodes = retained
+    if len(nodes) > max_nodes:
+        return '', [], 'assembly_node_limit'
+    seed_index = defaultdict(set)
+    for j, right in enumerate(nodes):
+        for start in range(0, len(right)-14, 15):
+            seed_index[right[start:start+15]].add(j)
     edges = defaultdict(list)
     ambiguous = False
     for i, left in enumerate(nodes):
-        for j, right in enumerate(nodes):
+        candidates = set()
+        for start in range(len(left)-14):
+            candidates.update(seed_index.get(left[start:start+15], ()))
+        for j in sorted(candidates):
             if i == j:
                 continue
+            right = nodes[j]
             # Full coverage of the target adds no sequence. Near-duplicate
             # reads can otherwise form reciprocal edges at the same genomic
             # position, falsely appearing to be a repeat traversal cycle.
@@ -183,61 +284,83 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
                 edges[i].append((j, overlaps[0]))
             elif len(overlaps) > 1:
                 ambiguous = True
-    if ambiguous:
-        return '', [], 'ambiguous_overlap_offsets'
+    # Ambiguous repeat-only joins are omitted. They must not veto an
+    # independently anchored complete path elsewhere in a high-depth pool.
+    # A consistent overlap component is already a coordinate system. Pile up
+    # all its reads once instead of enumerating thousands of equivalent paths.
+    neighbors = defaultdict(list)
+    for i, outgoing in edges.items():
+        for j, overlap in outgoing:
+            offset = len(nodes[i])-overlap
+            neighbors[i].append((j, offset))
+            neighbors[j].append((i, -offset))
+    unseen = set(range(len(nodes)))
+    layouts, consistent = [], True
+    while unseen:
+        seed = min(unseen)
+        positions, pending = {seed: 0}, [seed]
+        unseen.remove(seed)
+        while pending:
+            i = pending.pop()
+            for j, offset in neighbors[i]:
+                position = positions[i]+offset
+                if j in positions:
+                    consistent &= positions[j] == position
+                else:
+                    positions[j] = position
+                    unseen.discard(j)
+                    pending.append(j)
+        layouts.append(positions)
+    if consistent:
+        products = {}
+        for positions in layouts:
+            start = min(positions.values())
+            length = max(position+len(nodes[i]) for i, position in positions.items())-start
+            sequence = _pileup_consensus(((read, position-start+offset, members)
+                                         for i, position in positions.items()
+                                         for read, offset, members in pileup_rows[nodes[i]]), length)
+            product = primer_product(sequence, template)
+            if product and _compatible_pairs(items, sequence, insert):
+                products.setdefault(product, set()).update(set().union(*(sequences[nodes[i]] for i in positions)))
+        if len(products) == 1:
+            product, members = next(iter(products.items()))
+            if len(members) >= 2:
+                return product, sorted(members), ''
+        if products:
+            return '', [], 'multiple_reconstructions'
+        return '', [], 'ambiguous_overlap_offsets' if ambiguous else 'no_complete_path'
     starts = [i for i, seq in enumerate(nodes) if primer_bounds(seq, template.locus.forward_primer)]
-    paths = [(i, nodes[i], (i,)) for i in starts]
+    paths = [(i, nodes[i], ((i, 0),)) for i in starts]
     products = {}
-    visited = 0
+    visited = set()
     while paths:
         i, sequence, used = paths.pop()
-        visited += 1
-        if visited > max_paths:
+        key = i, sequence, tuple((j, offset) for j, offset in used if nodes[j] not in sequence)
+        if key in visited:
+            continue
+        visited.add(key)
+        if len(visited) > max_paths:
             return '', [], 'assembly_path_limit'
         product = primer_product(sequence, template)
         if product:
-            if any(nodes[j] not in sequence for j in used):
-                import spoars
-                graph = spoars.Poa(alignment_type='overlap', scoring=spoars.Scoring.default())
-                for j in used:
-                    graph.add(nodes[j], weight=len(sequences[nodes[j]]))
-                consensus = str(graph.consensus()).upper()
-                if len(consensus) != len(sequence):
-                    return '', [], 'poa_length_conflict'
-                msa = graph.msa()
-                if any(len(row) != len(consensus) for row in msa):
-                    return '', [], 'poa_length_conflict'
-                bases = []
-                for column in zip(*msa):
-                    votes = Counter()
-                    for j, base in zip(used, column):
-                        if base != '-':
-                            votes[base] += len(sequences[nodes[j]])
-                    base, support = votes.most_common(1)[0]
-                    bases.append(base if support/sum(votes.values()) >= .7 else 'N')
-                sequence = ''.join(bases)
+            if any(nodes[j] != sequence[offset:offset+len(nodes[j])] for j, offset in used):
+                # Overlaps already establish physical coordinates. Realigning
+                # these reads with POA can delete a repeat traversal; pile up
+                # at the validated offsets and retain uncertain bases as N.
+                sequence = _pileup_consensus(((read, offset+start, members)
+                                             for j, offset in used
+                                             for read, start, members in pileup_rows[nodes[j]]), len(sequence))
                 product = primer_product(sequence, template)
                 if not product:
                     continue
-            # Paired constraints are checked on the observed reconstruction.
-            for item in items:
-                if len(item.sequences) != 2 or set(item.orientations) != {'+', '-'}:
-                    continue
-                first = item.orientations.index('+')
-                a, b = item.sequences[first], item.sequences[1-first]
-                x, y = sequence.find(a), sequence.find(b)
-                if x >= 0 and y >= 0 and sequence.find(a, x+1) < 0 and sequence.find(b, y+1) < 0:
-                    fragment = y + len(b) - x
-                    if y < x or (insert and abs(fragment-insert.mean) > 4*insert.sd):
-                        break
-            else:
-                members = set().union(*(sequences[nodes[j]] for j in used))
+            if _compatible_pairs(items, sequence, insert):
+                members = set().union(*(sequences[nodes[j]] for j, _ in used))
                 products.setdefault(product, set()).update(members)
             continue
-        for j, overlap in edges[i]:
-            if j in used:
+        for j, overlap in edges.get(i, ()):
+            if any(j == previous for previous, _ in used):
                 return '', [], 'cyclic_overlap_graph'
-            paths.append((j, sequence + nodes[j][overlap:], used + (j,)))
+            paths.append((j, sequence + nodes[j][overlap:], used + ((j, len(sequence)-overlap),)))
     if products and len({len(product) for product in products}) == 1:
         # Base uncertainty need not discard an agreed primer-bounded length.
         # Keep primer ends identical so this cannot hide differences in PCR
@@ -252,7 +375,7 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
         members = sorted(set().union(*products.values()))
         if len(members) >= 2:
             return sequence, members, ''
-    return '', [], 'multiple_reconstructions' if products else 'no_complete_path'
+    return '', [], 'multiple_reconstructions' if products else 'ambiguous_overlap_offsets' if ambiguous else 'no_complete_path'
 
 
 def candidate_likelihood(items, template, insert, maximum, minimum_probability, context_templates=None):
@@ -344,7 +467,7 @@ def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_
         return LocusRecovery(counts=counts)
     products = direct_products(usable, template, sample_id, min_fraction, min_secondary_reads)
     counts = dict(Counter(c for e in items for c in e.classes))
-    if len(products) == 1 and 'N' in products[0].sequence:
+    if products and all('N' in product.sequence for product in products):
         sequence, members, _ = microassemble(usable, template, insert)
         # Existing direct length evidence must agree with the reconstructed path.
         if sequence and len(sequence) == len(products[0].sequence):

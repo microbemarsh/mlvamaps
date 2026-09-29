@@ -151,6 +151,17 @@ def test_bounded_graph_reports_limit(template):
     assert microassemble(items, template, max_nodes=0)[2] == 'assembly_node_limit'
 
 
+def test_contained_flank_reads_do_not_vote_for_uncovered_bases(template):
+    sequence = template.sequence(8)
+    first = sequence[:90]+next(base for base in 'ACGT' if base != sequence[90])+sequence[91:120]
+    items = evidence(template, [(first, None)] + [(sequence[60:190], None)]*3
+                     + [(sequence[140:], None)]*5 + [(sequence[:60], None)]*1000)
+    product, members, reason = microassemble(items, template)
+    assert product == sequence
+    assert len(members) == len(items)
+    assert not reason
+
+
 def test_insert_likelihood_distinguishes_or_withholds_adjacent_lengths(template):
     items = evidence(template, [(template.left, revcomp(template.right))]*40)
     confident = recover_locus(items, template, 's', InsertDistribution(320, 3, 40, 'override'))
