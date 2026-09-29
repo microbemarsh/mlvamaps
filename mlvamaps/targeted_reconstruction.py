@@ -12,6 +12,7 @@ import math
 
 import numpy as np
 import parasail
+import regex
 
 from .locus_products import LocusProduct, product_repeat_allele
 from .short_read_evidence import MoleculeEvidence, RepeatTemplate, InsertDistribution, _read_profile, repetitive, primer_product, primer_bounds
@@ -38,15 +39,30 @@ class LocusRecovery:
 
 
 @lru_cache(maxsize=4096)
-def _overlaps(left, right, motif, minimum=20, unit=0):
+def _overlaps(left, right, motif, minimum=20, unit=0, mismatch_fraction=0):
     # Every valid offset is considered. A repeat-only overlap is incapable of
     # determining the number of traversals and must never stitch an allele.
     # Without a supplied motif, require enough observed sequence to test two
     # repeat units. Shorter overlaps cannot rule out a repeat-only join.
-    return tuple(size for size in range(minimum, min(len(left), len(right)) + 1)
-                 if left[-size:] == right[:size]
+    candidates = range(minimum, min(len(left), len(right)) + 1)
+    if mismatch_fraction:
+        candidates = set()
+        # At 2% substitutions, every accepted >=20 bp overlap contains an
+        # intact 15-base block. Native substring searches bound verification.
+        for start in range(0, len(right)-14, 15):
+            seed = right[start:start+15]
+            position = left.find(seed)
+            while position >= 0:
+                size = len(left)-position+start
+                if minimum <= size <= min(len(left), len(right)):
+                    candidates.add(size)
+                position = left.find(seed, position+1)
+    return tuple(size for size in sorted(candidates)
+                 if (left[-size:] == right[:size] or mismatch_fraction and
+                     sum(a != b for a,b in zip(left[-size:], right[:size])) <= int(size*mismatch_fraction))
                  and (bool(motif) or unit > 0 and size >= 2*unit)
-                 and not repetitive(left[-size:], motif or right[:unit]))
+                 and not repetitive(left[-size:], motif or right[:unit])
+                 and not repetitive(right[:size], motif or right[:unit]))
 
 
 def merge_molecule(item, template):
@@ -68,7 +84,7 @@ def _reliable(item):
 def direct_products(items, template, sample_id, min_fraction, min_secondary_reads):
     groups = defaultdict(list)
     for item in items:
-        if not _reliable(item):
+        if not item.product_sequence and not _reliable(item):
             continue
         sequence = item.product_sequence or merge_molecule(item, item.template or template)
         if sequence:
@@ -131,7 +147,7 @@ def direct_products(items, template, sample_id, min_fraction, min_secondary_read
 
 
 def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
-    """Exact overlap graph with unique offsets and bounded paths.
+    """Seeded overlap graph with unique offsets and bounded paths.
 
     ponytail: O(n²) overlaps, capped at 256 distinct sequences. Larger or
     branching pools defer to inference; a seeded graph is the upgrade path.
@@ -140,9 +156,13 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
     """
     sequences = defaultdict(set)
     for item in items:
-        if _reliable(item):
-            for seq in item.sequences:
+        for index, seq in enumerate(item.sequences):
+            quality = item.qualities[index] if item.qualities else None
+            if quality is None:
                 sequences[seq].add(item.molecule_id)
+            else:
+                for segment in regex.finditer(r'[5-~]{20,}', quality):
+                    sequences[seq[segment.start():segment.end()]].add(item.molecule_id)
     if len(sequences) > max_nodes:
         return '', [], 'assembly_node_limit'
     nodes = sorted(sequences, key=lambda s: (-len(s), s))
@@ -153,7 +173,7 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
         for j, right in enumerate(nodes):
             if i == j:
                 continue
-            overlaps = _overlaps(left, right, template.motif, unit=template.unit)
+            overlaps = _overlaps(left, right, template.motif, unit=template.unit, mismatch_fraction=.02)
             if len(overlaps) == 1:
                 edges[i].append((j, overlaps[0]))
             elif len(overlaps) > 1:
@@ -161,7 +181,7 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
     if ambiguous:
         return '', [], 'ambiguous_overlap_offsets'
     starts = [i for i, seq in enumerate(nodes) if primer_bounds(seq, template.locus.forward_primer)]
-    paths = [(i, nodes[i], frozenset([i])) for i in starts]
+    paths = [(i, nodes[i], (i,)) for i in starts]
     products = {}
     visited = 0
     while paths:
@@ -171,6 +191,29 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
             return '', [], 'assembly_path_limit'
         product = primer_product(sequence, template)
         if product:
+            if any(nodes[j] not in sequence for j in used):
+                import spoars
+                graph = spoars.Poa(alignment_type='overlap', scoring=spoars.Scoring.default())
+                for j in used:
+                    graph.add(nodes[j], weight=len(sequences[nodes[j]]))
+                consensus = str(graph.consensus()).upper()
+                if len(consensus) != len(sequence):
+                    return '', [], 'poa_length_conflict'
+                msa = graph.msa()
+                if any(len(row) != len(consensus) for row in msa):
+                    return '', [], 'poa_length_conflict'
+                bases = []
+                for column in zip(*msa):
+                    votes = Counter()
+                    for j, base in zip(used, column):
+                        if base != '-':
+                            votes[base] += len(sequences[nodes[j]])
+                    base, support = votes.most_common(1)[0]
+                    bases.append(base if support/sum(votes.values()) >= .7 else 'N')
+                sequence = ''.join(bases)
+                product = primer_product(sequence, template)
+                if not product:
+                    continue
             # Paired constraints are checked on the observed reconstruction.
             for item in items:
                 if len(item.sequences) != 2 or set(item.orientations) != {'+', '-'}:
@@ -189,7 +232,7 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
         for j, overlap in edges[i]:
             if j in used:
                 return '', [], 'cyclic_overlap_graph'
-            paths.append((j, sequence + nodes[j][overlap:], used | {j}))
+            paths.append((j, sequence + nodes[j][overlap:], used + (j,)))
     if len(products) == 1:
         sequence, members = next(iter(products.items()))
         if len(members) >= 2:

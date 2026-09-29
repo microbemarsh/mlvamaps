@@ -244,6 +244,68 @@ def test_legacy_primer_only_recovery(template, scenario, monkeypatch):
         assert genotype_product(result.products[0], locus).repeat_count == 12
 
 
+def test_primer_only_reconstruction_uses_observed_reads_then_assembly_pcr(tmp_path, template):
+    import csv
+    from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
+    from mlvamaps.assembly_call import legacy_assembly_call_rows, pcr_rows_to_products
+    from mlvamaps.in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
+    from mlvamaps.io import write_fasta
+    locus = replace(template.locus, left_flank_sequence='', right_flank_sequence='',
+        repeat_motif='NNNN', expected_product_size_bp=232, nominal_repeat_units=8)
+    sequence = template.sequence(12)
+    middle = sequence[60:190]
+    # One sequencing substitution in a 50 bp overlap; no individual read or
+    # read pair contains a complete primer-bounded product.
+    middle = middle[:110] + next(b for b in 'ACGT' if b != middle[110]) + middle[111:]
+    pairs = []
+    for i in range(3):
+        item = pair('TTTTT'+sequence[:120], revcomp(middle), str(i))
+        pairs.append(replace(item, read1=replace(item.read1, quality='!!!!!'+'I'*120)))
+    pairs += [pair(sequence[140:], name=f'right{i}') for i in range(5)]
+    calls, _, _, paths = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+        pairs=iter(pairs), loci=[locus], database_path=None, outdir=tmp_path/'sr', sample_id='s',
+        technology='illumina', minimum_molecules=2, minimum_probability=.8)
+    assert calls[0]['repeat_count'] == 12
+    assert calls[0]['inference_method'] == 'RECONSTRUCTED'
+    with paths['reconstruction_pcr'].open() as handle:
+        audit = next(csv.DictReader(handle, delimiter='\t'))
+    assert audit['measurement_source'] == 'sassy_assembly_pcr'
+    assert audit['pcr_product_size_bp'] == str(len(sequence))
+    truth = tmp_path/'truth.fasta'
+    write_fasta([('truth', sequence)], truth)
+    pcr = run_in_silico_pcr_loci(truth, [locus], tmp_path/'assembly', threads=1)
+    products = pcr_rows_to_products(read_pcr_results(pcr['stats'], pcr['products']), [locus], 's')
+    assembly_call = legacy_assembly_call_rows([locus], products, 's')[0]
+    assert calls[0]['repeat_count'] == assembly_call['repeat_count']
+
+
+def test_verified_product_is_not_discarded_for_low_quality_outside_primers(template):
+    sequence = template.sequence(8)
+    item = pair('TTTT'+sequence+'AAAA')
+    item = replace(item, read1=replace(item.read1, quality='!!!!'+'I'*len(sequence)+'!!!!'))
+    observed = classify_pair(item, template)
+    assert observed.product_sequence == sequence
+    result = recover_locus([observed]*3, template, 's')
+    assert result.method == 'DIRECT' and result.products[0].sequence == sequence
+
+
+def test_short_read_primer_indel_uses_sassy_assembly_size_calibration(tmp_path, template):
+    from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
+    import csv
+    locus = replace(template.locus, expected_product_size_bp=232, nominal_repeat_units=8)
+    sequence = template.sequence(8)
+    sequence = sequence[:10] + 'C' + sequence[10:]
+    calls, _, _, paths = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+        pairs=iter([pair(sequence, name=str(i)) for i in range(3)]), loci=[locus],
+        database_path=None, outdir=tmp_path, sample_id='s', technology='illumina',
+        minimum_molecules=2, minimum_probability=.8)
+    assert calls[0]['repeat_count'] == 8
+    with paths['reconstruction_pcr'].open() as handle:
+        audit = next(csv.DictReader(handle, delimiter='\t'))
+    assert audit['poa_consensus_bp'] == '233'
+    assert audit['pcr_product_size_bp'] == '232'
+
+
 
 @pytest.mark.parametrize('unit', [0, 4])
 def test_primer_only_without_length_calibration_preserves_sequence_but_not_count(tmp_path, template, unit):
@@ -261,6 +323,10 @@ def test_primer_only_without_length_calibration_preserves_sequence_but_not_count
         product = next(csv.DictReader(handle, delimiter='\t'))
     assert product['sequence'] == template.sequence(8)
     assert product['repeat_count'] == ''
+    with paths['reconstruction_pcr'].open() as handle:
+        pcr = next(csv.DictReader(handle, delimiter='\t'))
+    assert pcr['called_repeat_count'] == ''
+    assert pcr['pcr_status'] == 'COUNT_UNCALIBRATED'
 
 
 @pytest.mark.parametrize('primer,sequence', [('ACGTACGA', 'ACTTACGA'), ('ARYTACGTARYT', 'AGCTACGTAGCT')])

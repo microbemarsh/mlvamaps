@@ -71,15 +71,31 @@ Complete products retain SNPs and indels, and supported distinct sequences are
 retained as possible mixtures. Singleton errors remain trace evidence; if only
 singleton same-length sequences exist, a 70%-agreement consensus is used.
 All bases used for reconstruction must be Q20 or higher when qualities exist.
+Contiguous Q20 segments of at least 20 bases remain usable when another part
+of their read fails this threshold. A quality-validated complete product is
+not rejected because of low-quality bases outside its primers.
 
-Unresolved small pools enter an exact overlap graph. Contained sequences are
-collapsed; each edge must have a unique non-repeat-only overlap. Paths start
+Unresolved small pools enter a seeded overlap graph. Contained sequences are
+collapsed; each edge must have a unique non-repeat-only overlap, allowing at
+most 2% substitutions. Exact 15-base seeds bound the candidate-offset search.
+For error-bearing paths, SPOARS overlap alignment produces a weighted consensus;
+disagreement below 70% support becomes `N`. If POA changes the length established
+by the unique overlap offsets, the reconstruction remains unresolved. Paths start
 at the forward primer and must reach the reverse primer. Cycles, multiple
 valid products, inconsistent paired placements and nonunique overlap offsets
 are unresolved. Reliable library statistics additionally constrain uniquely
 placed mate distances. The graph is capped at 256 distinct sequences and 64
 path expansions. Hitting either cap defers to inference, never an arbitrary
 repeat traversal. No whole-genome assembly or external assembler is used.
+
+Observed complete products and reconstructed contigs then pass through
+`run_in_silico_pcr_loci`, `pcr_rows_to_products` and
+`legacy_assembly_call_rows`, exactly as in assembly calling. This includes
+primer-indel product-size correction, mismatch-round selection and the legacy
+allele eligibility rules. A PCR hit for a different locus cannot inherit the
+contig's recruited molecules. Inferred sequence is not used as independent
+Sassy evidence. The report includes the contig length, PCR-calibrated length,
+repeat count and measurement source; raw PCR matches remain available for audit.
 
 ## Haploid candidate fallback
 

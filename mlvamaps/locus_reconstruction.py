@@ -221,6 +221,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         from itertools import chain
         pairs = chain(pairs, (ReadPair(r.read_id, r) for r in read_fastq(orphan_path)))
     all_products, calls, summaries, likelihood_rows, audit = [], [], [], [], []
+    reconstruction_paths = {}
     insert = None
     if technology != "illumina":
         all_products, audit, recruited = recover_long_reads(pairs, loci, sample_id, min_fraction, min_secondary_reads, max_anchor_edits)
@@ -291,6 +292,14 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 fitted = list(executor.map(fit_locus, loci))
         else:
             fitted = [fit_locus(locus) for locus in loci]
+        progress.step(f"[{sample_id}] Measuring reconstructed loci with assembly Sassy PCR")
+        pcr_started = time.perf_counter()
+        from .local_assembly import measure_reconstructed_loci
+        reconstruction_paths = measure_reconstructed_loci(fitted, loci, output/'locus_reconstruction',
+            sample_id, max_anchor_edits, round_tolerance)
+        stage_seconds['reconstruction_sassy_pcr'] = time.perf_counter() - pcr_started
+        for locus, result in zip(loci, fitted):
+            locus_stats[locus.locus_id]['call_method'] = result.method
         stage_seconds["locus_recovery"] = time.perf_counter() - started
         progress.step(f"[{sample_id}] Locus recovery finished in {stage_seconds['locus_recovery']:.1f}s")
         for locus, result in zip(loci, fitted):
@@ -331,6 +340,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
     started = time.perf_counter()
     output_stats = {}
     paths = write_products(all_products, loci, output, progress=progress, statistics=output_stats)
+    paths.update(reconstruction_paths)
     compatibility_started = time.perf_counter()
     progress.step(f"[{sample_id}] Writing molecule memberships and allele predictions")
     paths.update(write_compatibility_products(all_products, loci, output, progress=progress))

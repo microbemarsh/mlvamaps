@@ -866,7 +866,7 @@ def write_report(
         local_assembly_section = f"""
       <section class="report-section">
         <h2>FASTQ Local Assembly Concordance</h2>
-        <p class="section-intro">SPOARS assembles the dominant mapping-derived product group, then the standard assembly PCR caller measures the consensus. Compare the PCR product and final repeat columns directly with the corresponding assembly report. Min / mode / max shows the uncorrected read-product length distribution.</p>
+        <p class="section-intro">Locus-associated reads provide observed or locally reconstructed sequences. The standard Sassy assembly PCR caller measures the primer-bounded products using the assembly repeat-count calibration. Compare the PCR product and final repeat columns directly with the corresponding assembly report. Counts depend on recovering a complete product.</p>
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>Dominant mapped group</th><th>Reads</th><th>Unique products</th><th>Raw bp min / mode / max</th><th>POA bp</th><th>Assembly PCR bp</th><th>Raw repeats</th><th>Final repeats</th><th>Call source</th><th>POA status</th></tr></thead>
           <tbody>{local_assembly_table_rows}</tbody>

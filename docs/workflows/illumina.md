@@ -31,10 +31,19 @@ supports partial boundary evidence and the likelihood fallback below.
 
 1. Stream QC and competitive recruitment against a combined flank index.
 2. Classify spans, boundaries, flank pairs and anchored repeat-rich reads.
-3. Measure direct products and uniquely overlapping pairs.
-4. Attempt bounded per-locus overlap reconstruction when needed.
-5. Use haploid candidate likelihoods only for unresolved loci.
-6. Interpret recovered products through the same repeat/SNP layer as assembly.
+3. Recover observed products and uniquely overlapping pairs.
+4. Reconstruct unresolved loci with a bounded overlap graph and SPOARS consensus.
+5. Measure recovered contigs with the same Sassy PCR and length calibration as assembly.
+6. Use haploid candidate likelihoods only for unresolved rich-panel loci, then
+   interpret products through the shared repeat/SNP layer.
+
+The graph retains contiguous high-quality segments rather than discarding a
+whole read for one bad base. Overlaps tolerate up to 2% substitutions but must
+have a unique non-repeat offset; ambiguous consensus bases remain `N`.
+Sassy runs on the small recovered-contig collection after recruitment.
+`locus_reconstruction/reconstructed_contigs.fasta.gz` and
+`locus_reconstruction/reconstruction_pcr.tsv` retain the sequences and PCR
+measurements shown in the report's local assembly section.
 
 The hierarchy is `DIRECT` → `RECONSTRUCTED` → `INFERRED`. Insufficient evidence
 remains `AMBIGUOUS` or `NO_CALL`; substantial incompatible alleles are `MIXED`.

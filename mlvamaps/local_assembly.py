@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -28,6 +29,78 @@ LOCAL_ASSEMBLY_FIELDS = [
     "pcr_status",
     "measurement_source",
 ]
+
+
+def measure_reconstructed_loci(recoveries, loci, outdir, sample_id, max_errors=3,
+                               round_tolerance=.25):
+    """Measure observed short-read contigs through the assembly PCR workflow.
+
+    Recruitment has already assigned each contig to a locus. Other loci's PCR
+    hits cannot reassign its support, and an inferred/masked sequence is never
+    passed off as an independently reconstructed contig.
+    """
+    from .assembly_call import legacy_amplicon_bounds, legacy_assembly_call_rows, pcr_rows_to_products
+    from .locus_products import product_repeat_allele
+    output = Path(outdir)
+    output.mkdir(parents=True, exist_ok=True)
+    records = {}
+    for locus, recovery in zip(loci, recoveries):
+        if recovery.method not in {'DIRECT', 'RECONSTRUCTED', 'MIXED'}:
+            continue
+        for product in recovery.products:
+            if 'N' not in product.sequence or recovery.method == 'RECONSTRUCTED':
+                records[f'sr_contig_{len(records):06d}'] = (locus, product)
+    fasta = output/'reconstructed_contigs.fasta.gz'
+    write_fasta(((name, product.sequence) for name, (_, product) in records.items()), fasta)
+    if not records:
+        return {'reconstruction_contigs': fasta}
+    # Only a small contig collection reaches PCR. Avoid process-pool startup
+    # and forking from batch sample threads; FASTQ recruitment stays parallel.
+    pcr_paths = run_in_silico_pcr_loci(fasta, loci, output/'sassy_pcr', max_errors=max_errors,
+        threads=1, max_n_fraction=1.0, amplicon_bounds=legacy_amplicon_bounds(loci))
+    products = pcr_rows_to_products(read_pcr_results(pcr_paths['stats'], pcr_paths['products']),
+        loci, sample_id, enforce_locus_bounds=False, measure_products=False)
+    by_contig = defaultdict(list)
+    for product in products:
+        entry = records.get(product['contig'])
+        if entry and product['locus_id'] == entry[0].locus_id:
+            by_contig[product['contig']].append(product)
+    measured, audit = {}, []
+    for name, (locus, original) in records.items():
+        candidates = by_contig[name]
+        call = legacy_assembly_call_rows([locus], candidates, sample_id, round_tolerance)[0]
+        selected = next((p for p in candidates if p['product_id'] == call.get('evidence')), None)
+        # Panels without repeat calibration still retain their observed PCR
+        # sequence, while the shared genotype interpreter leaves count blank.
+        if selected is None and candidates and product_repeat_allele(original, locus)[1] is None:
+            selected = min(candidates, key=lambda p: (p['primer_error_round'], p['product_size_bp']))
+        raw, repeat = None, None
+        if selected:
+            measured[original.variant_id] = replace(original, sequence=selected['sequence'],
+                calibrated_product_size_bp=selected['product_size_bp'], round_tolerance=round_tolerance,
+                evidence={**original.evidence, 'measurement_source': 'sassy_assembly_pcr',
+                          'pcr_product_id': selected['product_id']})
+            raw, repeat = product_repeat_allele(measured[original.variant_id], locus)
+        audit.append({'sample_id': sample_id, 'locus_id': locus.locus_id, 'dominant_variant_id': original.variant_id,
+            'contig_id': name, 'input_molecules': original.support_count,
+            'input_reads': original.support_count, 'unique_sequences': 1,
+            'poa_consensus_bp': len(original.sequence), 'pcr_product_size_bp': selected['product_size_bp'] if selected else '',
+            'raw_repeat_count': raw, 'called_repeat_count': repeat,
+            'pcr_status': 'PASS' if repeat is not None else 'COUNT_UNCALIBRATED' if selected else 'PCR_UNRESOLVED',
+            'measurement_source': 'sassy_assembly_pcr'})
+    attempted = {p.variant_id for _, p in records.values()}
+    for recovery in recoveries:
+        recovery.products = [measured[p.variant_id] if p.variant_id in measured else p
+                             for p in recovery.products if p.variant_id not in attempted or p.variant_id in measured]
+        if not recovery.products and recovery.method in {'DIRECT', 'RECONSTRUCTED', 'MIXED'}:
+            recovery.method, recovery.confidence = 'AMBIGUOUS', 0.0
+            recovery.identifiable = False
+            recovery.reason = 'sassy_pcr_no_callable_product'
+    audit_path = output/'reconstruction_pcr.tsv'
+    from .io import write_tsv
+    write_tsv(audit, audit_path, list(audit[0]))
+    return {'reconstruction_contigs': fasta, 'reconstruction_pcr': audit_path,
+            'reconstruction_pcr_matches': pcr_paths['stats']}
 
 
 def _dominant_variants(mixture_rows: list[dict]) -> dict[str, str]:

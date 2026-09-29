@@ -225,6 +225,11 @@ def test_compact_recovery_preserves_genotypes_and_writes_ambiguity_witnesses(tmp
         if key in {'reconstruction_metadata', 'molecule_evidence'}:
             continue
         def contents(p):
+            if key == 'reconstruction_pcr_matches':
+                import csv
+                with p.open() as handle:
+                    return [{k: v for k, v in row.items() if k != 'source_file'}
+                            for row in csv.DictReader(handle, delimiter='\t')]
             return gzip.decompress(p.read_bytes()) if p.suffix == '.gz' else p.read_bytes()
         assert contents(path) == contents(compact[3][key]), key
     def rows(path):
@@ -276,6 +281,14 @@ def test_streamed_audit_matches_in_memory_files(tmp_path):
     assert results[0][1] and not results[1][1]
     for key,path in results[0][3].items():
         if key != 'reconstruction_metadata':
+            if key == 'reconstruction_pcr_matches':
+                import csv
+                def rows(p):
+                    with p.open() as handle:
+                        return [{k: v for k, v in row.items() if k != 'source_file'}
+                                for row in csv.DictReader(handle, delimiter='\t')]
+                assert rows(path) == rows(results[1][3][key])
+                continue
             # Gzip header timestamps/filenames can differ; compare logical bytes.
             import gzip
             if path.suffix == '.gz':
