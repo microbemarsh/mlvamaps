@@ -444,10 +444,10 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
 <figure class="chart-panel" aria-label="Individual locus repeat counts">
   <svg viewBox="0 0 1080 {height}" role="img">
     <title>Individual locus repeat counts</title>
-    <desc>Exact repeat count at every panel locus, shown independently of amplicon SNP bands.</desc>
+    <desc>Repeat-count calls and estimates at every panel locus, with call status.</desc>
     {"".join(marks)}
   </svg>
-  <figcaption>Bar length represents repeat units, with the exact call (and raw assembly estimate when applicable) printed at right. Call status is printed beside each bar as well as indicated by color.</figcaption>
+  <figcaption>Bar length represents repeat units. AMBIGUOUS values are provisional best estimates; inspect their intervals and evidence before comparison. Call status is printed beside each bar as well as indicated by color.</figcaption>
 </figure>
 """
 
@@ -599,7 +599,7 @@ def _variant_mixture_svg(
             f'{_safe(dominant.get("variant_id", ""))} {dominant_fraction * 100:.1f}%</text>'
         )
     return f"""
-<figure class="chart-panel" aria-label="EM-estimated variant abundance plot">
+<figure class="chart-panel" aria-label="Variant abundance plot">
   <svg viewBox="0 0 1000 {height}" role="img">
     <title>Variant mixture abundance</title>
     <desc>Stacked estimated fractions of confirmed, candidate, and trace variants at each locus.</desc>
@@ -607,7 +607,7 @@ def _variant_mixture_svg(
     <text class="chart-axis" x="{plot_left + plot_width}" y="26" text-anchor="end">100%</text>
     {"".join(rows_svg)}
   </svg>
-  <figcaption>Abundance estimates from competitive read-mapping groups. Confirmed variants are colored separately, candidates are amber, and trace components are combined in gray.</figcaption>
+  <figcaption>Estimated within-locus variant fractions. Confirmed variants are colored separately, candidates are amber, and trace components are combined in gray.</figcaption>
 </figure>
 """
 
@@ -679,6 +679,8 @@ def write_report(
     local_assembly_rows = local_assembly_rows or []
     taxon_screen_summary = taxon_screen_summary or {}
     short_read_rows = short_read_rows or []
+    is_short_read = any(row.get("read_technology", "illumina") == "illumina" for row in short_read_rows)
+    canonical_mapping = any(row.get("method") == "canonical_variant_alignment" for row in mapping_rows)
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
@@ -691,7 +693,7 @@ def write_report(
     reference_best = reference_rows[0] if reference_rows else {}
     total_loci = len(allele_rows)
     flagged = low_depth + dropout + multiple + sum(
-        row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE"}
+        row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE", "PRESENT_COUNT_UNKNOWN", "NOT_FOUND"}
         for row in allele_rows
     )
     summary_cards = [
@@ -740,13 +742,13 @@ def write_report(
         )
         summary_cards.append(
             _metric_card(
-                "POA assembly calls",
+                "Measured short-read products" if is_short_read else "POA assembly calls",
                 f"{poa_passed}/{len(local_assembly_rows)}",
-                "Dominant locus consensuses resolved by assembly PCR",
+                "Recovered products with calibrated repeat counts" if is_short_read else "Dominant locus consensuses resolved by assembly PCR",
                 "good" if poa_passed == len(local_assembly_rows) else "warn",
             )
         )
-    if mapping_rows:
+    if mapping_rows and not canonical_mapping:
         summary_cards.extend(
             [
                 _metric_card(
@@ -785,6 +787,8 @@ def write_report(
         )
     for status, title in (
         ("LOCUS_DROPOUT", "Missing loci"),
+        ("NOT_FOUND", "Missing loci"),
+        ("PRESENT_COUNT_UNKNOWN", "Detected loci without length evidence"),
         ("LOW_DEPTH", "Low-depth loci"),
         ("MULTIPLE_VARIANTS", "Mixed loci"),
         ("AMBIGUOUS", "Ambiguous loci"),
@@ -873,16 +877,33 @@ def write_report(
         </table></div>
       </section>
 """
+        if is_short_read:
+            local_assembly_table_rows = "\n".join(
+                "<tr>" + "".join(f"<td>{_safe(row.get(field, ''))}</td>" for field in (
+                    "locus_id", "dominant_variant_id", "input_molecules", "poa_consensus_bp",
+                    "pcr_product_size_bp", "raw_repeat_count", "called_repeat_count", "pcr_status")) + "</tr>"
+                for row in local_assembly_rows
+            )
+            local_assembly_section = f"""
+      <details>
+        <summary>Recovered short-read products</summary>
+        <p class="section-intro">Observed or reconstructed products use the same primer-product measurement and repeat calibration as assembly inputs. Likelihood-only estimates appear in Illumina Evidence.</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Variant</th><th>Molecules</th><th>Recovered bp</th><th>Primer product bp</th><th>Raw repeats</th><th>Repeats</th><th>Measurement status</th></tr></thead>
+          <tbody>{local_assembly_table_rows}</tbody>
+        </table></div>
+      </details>
+"""
     short_read_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
         f"<td><span class=\"status-pill {'status-good' if row.get('repeat_count') not in ('', None) else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
         f"<td>{_safe(row.get('recruited_read_pairs', ''))}</td>"
-        f"<td>{_safe(row.get('informative_molecule_count', ''))}</td>"
         f"<td>{_safe(row.get('call_method', ''))}</td>"
         f"<td>{_safe(row.get('proper_spanning_pairs', ''))}</td>"
         f"<td>{_safe(row.get('boundary_1_support', ''))} / {_safe(row.get('boundary_2_support', ''))} / {_safe(row.get('both_boundary_support', ''))}</td>"
-        f"<td>{_safe(row.get('repeat_count', '')) if row.get('repeat_count') not in ('', None) else _safe(str(row.get('repeat_count_min', '')) + '..' + str(row.get('repeat_count_max', ''))) if row.get('repeat_count_min') not in ('', None) else 'unresolved'}</td>"
+        f"<td>{_safe(row.get('repeat_count')) if row.get('repeat_count') not in ('', None) else 'unresolved'}</td>"
+        f"<td>{_safe(row.get('repeat_count_min', ''))} / {_safe(row.get('repeat_count_max', ''))}</td>"
         f"<td>{_safe(row.get('allele_confidence', ''))}</td>"
         f"<td>{_safe(row.get('short_read_warning') or row.get('failure_reason', ''))}</td>"
         "</tr>"
@@ -893,9 +914,9 @@ def write_report(
         short_read_section = f"""
       <section class="report-section">
         <h2>Illumina Evidence</h2>
-        <p class="section-intro">Competitive recruitment feeds direct measurement, targeted reconstruction, then candidate inference when needed. Method and confidence describe the available evidence; unresolved loci remain explicit.</p>
+        <p class="section-intro">Counts come from observed products, reconstructed products, or the best supported repeat-length candidate. AMBIGUOUS estimates retain their uncertainty interval. Tied candidates use the smallest equally supported count; boundary-only evidence may supply only a lower bound. Presence without length information remains unresolved.</p>
         <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Evidence</th><th>Recruited pairs</th><th>Informative molecules</th><th>Call method</th><th>Proper spanning pairs</th><th>Boundary 1 / 2 / both</th><th>Repeat or interval</th><th>Confidence</th><th>Warning / failure</th></tr></thead>
+          <thead><tr><th>Locus</th><th>Status</th><th>Recruited molecules</th><th>Call method</th><th>Spanning pairs</th><th>Left / right / full span</th><th>Best repeat count</th><th>Interval min / max</th><th>Confidence</th><th>Evidence / uncertainty</th></tr></thead>
           <tbody>{short_read_table_rows}</tbody>
         </table></div>
       </section>
@@ -942,7 +963,6 @@ def write_report(
         mixture_table_rows = (
             '<tr><td colspan="10">No retained variants were available for mixture estimation.</td></tr>'
         )
-    canonical_mapping = any(row.get("method") == "canonical_variant_alignment" for row in mapping_rows)
     mapping_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
@@ -1048,6 +1068,30 @@ def write_report(
         <summary>SNP evidence details ({len(snp_rows)} rows)</summary>
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>POA reference</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
+          <tbody>{snp_table_rows}</tbody>
+        </table></div>
+      </details>
+"""
+        if canonical_mapping:
+            mapping_overview_section = ""
+            mapping_table_rows = "\n".join(
+                "<tr>" + "".join(f"<td>{_safe(row.get(field, ''))}</td>" for field in (
+                    "locus_id", "reference_variant_id", "mean_depth", "snp_count")) + "</tr>"
+                for row in mapping_rows
+            )
+            mapping_detail_section = f"""
+      <details>
+        <summary>Recovered variant sequence evidence</summary>
+        <p class="section-intro">Variant sequences are compared with the repeat-masked dominant product. Support is effective molecule depth.</p>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Dominant variant</th><th>Effective molecules</th><th>SNPs</th></tr></thead>
+          <tbody>{mapping_table_rows}</tbody>
+        </table></div>
+      </details>
+      <details>
+        <summary>SNP evidence details ({len(snp_rows)} rows)</summary>
+        <div class="table-scroll"><table>
+          <thead><tr><th>Locus</th><th>Dominant variant</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
           <tbody>{snp_table_rows}</tbody>
         </table></div>
       </details>

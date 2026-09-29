@@ -125,7 +125,7 @@ def direct_products(items, template, sample_id, min_fraction, min_secondary_read
             groups[''.join(consensus)] = members
     total = sum(map(len, groups.values()))
     products = []
-    for seq, members in sorted(groups.items(), key=lambda v: (-len(v[1]), v[0])):
+    for seq, members in sorted(groups.items(), key=lambda v: (-len(v[1]), len(v[0]), v[0])):
         fraction = len(members) / total
         products.append(LocusProduct(sample_id, template.locus.locus_id, 'short_read',
             f'{template.locus.locus_id}|v{len(products)+1}', seq, support_count=len(members),
@@ -322,12 +322,18 @@ def candidate_likelihood(items, template, insert, maximum, minimum_probability, 
     modes = Counter(implied).most_common()
     mixed = len(modes)>1 and modes[1][1] >= max(3, .2*len(implied)) and abs(modes[0][0]-modes[1][0])*template.unit > 4*insert.sd
     confidence = float(posterior[best])
+    informative = np.ptp(joint) > 1e-8
+    tied = np.count_nonzero(np.isclose(joint, joint[best], rtol=0, atol=1e-8)) > 1
     return LocusRecovery(method='MIXED' if mixed else 'INFERRED' if identifiable and confidence >= minimum_probability and not limit else 'AMBIGUOUS',
-        confidence=confidence, states=states, log_likelihoods=joint, posterior=posterior,
-        best=float(states[best]), second=float(states[second]),
-        interval=(float(states[selected].min()), float(states[selected].max())),
-        identifiable=identifiable and confidence >= minimum_probability and not limit and not mixed,
-        limit_reached=limit)
+        confidence=confidence if informative else 0, states=states, log_likelihoods=joint, posterior=posterior,
+        best=float(states[best]) if informative else None, second=float(states[second]) if informative else None,
+        interval=(float(states[selected].min()), float(states[selected].max())) if informative else None,
+        identifiable=informative and identifiable and confidence >= minimum_probability and not limit and not mixed,
+        limit_reached=limit,
+        reason='no_repeat_length_information' if not informative else
+               'minimum_likelihood_tie; repeat_length_lower_bound' if tied and not insert else
+               'minimum_likelihood_tie' if tied else
+               'candidate_limit_reached' if limit else 'best_likelihood_estimate')
 
 
 def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_probability=.8,
@@ -348,7 +354,7 @@ def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_
             return LocusRecovery(products=[product], method='RECONSTRUCTED', confidence=.99, identifiable=True, counts=counts)
     if products:
         meaningful = [p for p in products if p.evidence['meaningful'] == 'yes']
-        return LocusRecovery(products=products if products[0].reconstruction_confidence >= minimum_probability else [],
+        return LocusRecovery(products=products,
                              method='MIXED' if len(meaningful)>1 else 'DIRECT' if products[0].reconstruction_confidence >= minimum_probability else 'AMBIGUOUS',
                              confidence=products[0].reconstruction_confidence,
                              identifiable=products[0].reconstruction_confidence >= minimum_probability, counts=counts)

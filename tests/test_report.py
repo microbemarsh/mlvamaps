@@ -10,6 +10,29 @@ from mlvamaps.report import (
 )
 
 
+def test_short_read_report_uses_relevant_evidence_and_flags_missing_counts(tmp_path):
+    alleles = [{'locus_id': 'L', 'called_repeat_count': 30, 'call_status': 'AMBIGUOUS',
+                'posterior_probability': .2, 'read_depth': 4},
+               {'locus_id': 'missing', 'called_repeat_count': '', 'call_status': 'NOT_FOUND',
+                'posterior_probability': 0, 'read_depth': 0},
+               {'locus_id': 'presence', 'called_repeat_count': '', 'call_status': 'PRESENT_COUNT_UNKNOWN',
+                'posterior_probability': 0, 'read_depth': 4}]
+    write_report(tmp_path, 's', alleles,
+        short_read_rows=[{'locus_id': 'L', 'read_technology': 'illumina', 'repeat_count': 30,
+                          'repeat_count_min': 20, 'repeat_count_max': 40}],
+        local_assembly_rows=[{'locus_id': 'L', 'input_molecules': 4, 'poa_consensus_bp': 320,
+                              'pcr_product_size_bp': 320, 'pcr_status': 'PASS'}],
+        mapping_rows=[{'locus_id': 'L', 'method': 'canonical_variant_alignment', 'mean_depth': 4}])
+    html = (tmp_path/'report.html').read_text()
+    assert '30 repeats' in html and '<td>20 / 40</td>' in html
+    assert 'Recovered short-read products' in html
+    assert 'Recovered variant sequence evidence' in html
+    assert 'Detected loci without length evidence' in html and 'Missing loci' in html
+    assert 'No locus-level review flags' not in html
+    assert 'POA' not in html and 'FASTQ Local Assembly Concordance' not in html
+    assert 'Representative Mapping Coverage' not in html and 'Assigned locus reads' not in html
+
+
 @pytest.mark.parametrize("status", [
     "SUPPORTED", "CLOSEST_REFERENCE_LOW_CONFIDENCE", "AMBIGUOUS_REFERENCES",
     "MIXED_REFERENCES", "INSUFFICIENT_EVIDENCE",

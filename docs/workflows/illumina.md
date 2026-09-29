@@ -45,8 +45,13 @@ Sassy runs on the small recovered-contig collection after recruitment.
 `locus_reconstruction/reconstruction_pcr.tsv` retain the sequences and PCR
 measurements shown in the report's local assembly section.
 
-The hierarchy is `DIRECT` → `RECONSTRUCTED` → `INFERRED`. Insufficient evidence
-remains `AMBIGUOUS` or `NO_CALL`; substantial incompatible alleles are `MIXED`.
+The hierarchy is `DIRECT` → `RECONSTRUCTED` → `INFERRED`. Low-confidence
+observed products and informative likelihood candidates retain their best
+repeat estimate in `calls.tsv`, the fingerprint, and the report, with
+`AMBIGUOUS` status and alternatives/intervals. Equally supported lengths use
+the smallest candidate; boundary-only estimates may represent only a lower
+bound. A flat likelihood or an uncalibrated primer-only product still cannot
+supply a numeric count. Substantial incompatible alleles are `MIXED`.
 See the [method definitions and limitations](../concepts/locus-reconstruction.md).
 
 Useful advanced controls:
@@ -87,6 +92,9 @@ The cross-mode manifest has `sample_id`, `mode` (`assembly`, `sr`, `lr`) and
 a validation target and is never supplied as training labels or expected calls.
 The comparison reports exact/±1 concordance, dropout, incorrect-call rate,
 per-locus call rates, SNP concordance and available short-read QC features.
+It also reports `best_estimates_including_ambiguous` concordance separately
+from confident-call metrics. The companion `.loci.tsv` includes both best
+estimates, statuses, and their absolute differences.
 Synthetic performance fixtures are not a substitute for paired real assemblies
 and Illumina libraries. Resource measurements are described in the
 [refactor validation report](../reference/short-read-validation.md).
@@ -182,9 +190,11 @@ mlvamaps call -p examples/illumina_demo/panel.tsv \
   file independently.
 - **Many ambiguous pairs:** review similar primers in the panel. Where known,
   provide longer, divergent locus flanks in a rich panel.
-- **Presence-only locus:** this is expected when neither reads nor the local
-  graph resolve both boundaries. Do not replace the blank call with the
-  expected-range midpoint.
+- **Presence-only locus:** examine the evidence reason. Informative partial
+  reads retain a provisional estimate or lower bound; flank-only reads without
+  usable fragment-length information cannot estimate repeat number. An
+  incomplete primer-only product also needs reconstruction or additional
+  repeat-boundary information. Expected-range midpoints are not measurements.
 - **Database predates the context schema:** omit `--database` for allele calling;
   rebuild it only if reference classification is wanted.
 - **MYOGA row does not attach to a tip:** make `genome_id` exactly equal to the

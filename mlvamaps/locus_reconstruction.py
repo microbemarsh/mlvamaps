@@ -153,17 +153,32 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
     if repeat is None:
         repeat = ""
         status = "detected_unresolved"
+    if repeat == "" and inference and inference.best is not None:
+        repeat = inference.best
+    if repeat != "" and status == "detected_unresolved":
+        status = "ambiguous"
     count_distribution = defaultdict(float)
     for product in ranked:
         count = product_repeat_allele(product, locus)[1]
         if count is not None:
             count_distribution[count] += product.estimated_fraction
+    if inference and len(inference.states) and repeat != "":
+        count_distribution.clear()
+        for count, probability in zip(inference.states, inference.posterior):
+            count_distribution[float(count)] += float(probability)
+    interval = inference.interval if inference else None
+    if interval is None and count_distribution:
+        interval = min(count_distribution), max(count_distribution)
+    alternatives = sorted(((count, probability) for count, probability in count_distribution.items()
+                           if count != repeat), key=lambda item: (-item[1], item[0]))
     counts = inference.counts if inference else {"FULL_SPAN": sum(p.support_count for p in ranked)}
     return {"sample": sample_id, "locus": locus.locus_id, "technology": technology,
             "repeat_count": repeat, "status": status, "best_probability": confidence,
-            "second_best_probability": sorted(inference.posterior, reverse=True)[1] if inference and len(inference.posterior)>1 else 0,
+            "second_best_probability": alternatives[0][1] if alternatives else 0,
             "molecule_support": recruited, "direct_product_support": counts.get("FULL_SPAN", 0),
             "full_span_support": counts.get("FULL_SPAN", 0), "junction_support": counts.get("LEFT_BOUNDARY", 0) + counts.get("RIGHT_BOUNDARY", 0),
+            "left_boundary_support": counts.get("LEFT_BOUNDARY", 0),
+            "right_boundary_support": counts.get("RIGHT_BOUNDARY", 0),
             "dominant_fraction": best.estimated_fraction if best else "",
             "secondary_repeat": product_repeat_allele(ranked[1], locus)[1] if len(ranked)>1 else "",
             "secondary_fraction": ranked[1].estimated_fraction if len(ranked)>1 else "",
@@ -173,10 +188,10 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
             "dominant_repeat": repeat,
             "num_variants": len(ranked), "num_secondary": max(0, len(meaningful)-1),
             "inference_method": inference.method if inference else "spanning_molecules",
-            "reason": inference.reason if inference else "",
-            "n_spanning": counts.get("FLANK_PAIR", 0), "repeat_count_min": inference.interval[0] if inference and inference.interval else repeat,
-            "repeat_count_max": inference.interval[1] if inference and inference.interval else repeat,
-            "second_best_repeat_count": inference.second if inference else ""}
+            "reason": (inference.reason or ("low_confidence_observed_product" if status == "ambiguous" else "")) if inference else "",
+            "n_spanning": counts.get("FLANK_PAIR", 0), "repeat_count_min": interval[0] if interval else repeat,
+            "repeat_count_max": interval[1] if interval else repeat,
+            "second_best_repeat_count": alternatives[0][0] if alternatives else ""}
 
 
 MOLECULE_AUDIT_FIELDS = [
@@ -340,7 +355,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 from .repeat_calibration import assembly_equivalent_product_allele
                 target = templates[locus.locus_id]
                 calibrated = {float(n): assembly_equivalent_product_allele(locus,
-                    len(target.left)+len(target.right)+round(n*target.unit), round_tolerance)[0]
+                    len(target.left)+len(target.right)+round(n*target.unit), round_tolerance)[1]
                     for n in result.states}
                 if all(value is not None for value in calibrated.values()):
                     result.states = np.asarray([calibrated[float(n)] for n in result.states])

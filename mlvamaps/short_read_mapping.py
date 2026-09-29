@@ -171,11 +171,11 @@ def run_mapping_short_read_call(
                 "read_technology": technology,
                 "evidence_class": str(common["status"]).upper(),
                 "informative_molecule_count": common["molecule_support"],
-                "boundary_1_support": common["junction_support"],
-                "boundary_2_support": common["junction_support"],
+                "boundary_1_support": common.get("left_boundary_support", ""),
+                "boundary_2_support": common.get("right_boundary_support", ""),
                 "both_boundary_support": common["full_span_support"],
                 "repeat_count_min": common.get("repeat_count_min", ""), "repeat_count_max": common.get("repeat_count_max", ""),
-                "repeat_count_interval_reason": "", "confidence_reason": call["evidence"],
+                "repeat_count_interval_reason": common.get("reason", ""), "confidence_reason": call["evidence"],
                 "short_read_warning": "" if common["status"] == "called" else call["evidence"],
                 "recruited_read_pairs": common["molecule_support"],
                 "failure_reason": "" if common["status"] in {"called", "low_coverage"} else call["evidence"],
@@ -281,7 +281,8 @@ def run_mapping_short_read_call(
             "discordant_pairs": int(row["state"] == "mapping_conflict"), "orphan_reads": 0,
             "mean_mapping_quality": row["mean_mapq"], "mean_alignment_identity": "",
             "presence_status": "NO_EVIDENCE" if row["state"] == "no_evidence" else
-                               "PRESENT_GENOTYPED" if row["state"] == "called" else "PRESENT_UNTYPED",
+                               "PRESENT_GENOTYPED" if row["state"] == "called" else
+                               "PRESENT_PROVISIONAL" if row["repeat_count"] not in ("", None) else "PRESENT_UNTYPED",
             "mapped_reads": row["supporting_fragments"], "full_product_reads": row["full_spanning_reads"],
             "genotype_informative_reads": row["junction_reads"], "candidate_alleles": row["candidate_scores"],
             "reference_source": method,
@@ -316,7 +317,7 @@ def run_mapping_short_read_call(
         write_csv([myoga_sample_row(sample_id, sample_metadata, summary, fingerprint[0], len(loci))],
                   output / "myoga_samples.csv", MYOGA_SAMPLE_FIELDS)
         write_csv([{"genome_id": sample_id, "sample_id": sample_id, "locus_id": row["locus_id"],
-                    "repeat_count": row["repeat_count"], "repeat_count_min": "", "repeat_count_max": "",
+                    "repeat_count": row["repeat_count"], "repeat_count_min": row["repeat_count_min"], "repeat_count_max": row["repeat_count_max"],
                     "evidence_class": row["mapping_state"], "confidence": row["allele_confidence"]}
                    for row in calls], output / "myoga_loci.csv",
                   ["genome_id", "sample_id", "locus_id", "repeat_count", "repeat_count_min",

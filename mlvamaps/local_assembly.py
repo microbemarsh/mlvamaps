@@ -45,7 +45,7 @@ def measure_reconstructed_loci(recoveries, loci, outdir, sample_id, max_errors=3
     output.mkdir(parents=True, exist_ok=True)
     records = {}
     for locus, recovery in zip(loci, recoveries):
-        if recovery.method not in {'DIRECT', 'RECONSTRUCTED', 'MIXED'}:
+        if recovery.method not in {'DIRECT', 'RECONSTRUCTED', 'MIXED', 'AMBIGUOUS'}:
             continue
         for product in recovery.products:
             if 'N' not in product.sequence or recovery.method == 'RECONSTRUCTED':

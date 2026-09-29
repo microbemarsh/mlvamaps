@@ -185,12 +185,46 @@ def test_full_product_error_consensus_preserves_supported_snp(template):
     assert result.method == 'DIRECT'
 
 
-def test_conflicting_singleton_lengths_withhold_precise_call(template):
+def test_conflicting_singleton_lengths_retain_estimate_and_alternative(template):
     result = recover_locus(evidence(template, [(template.sequence(8), None),
                                                (template.sequence(12), None)]), template, 's')
     assert result.method == 'AMBIGUOUS'
-    assert not result.products
+    assert len(result.products) == 2
     assert result.confidence < .8
+    from mlvamaps.locus_reconstruction import _common_call
+    call = _common_call(template.locus, result.products, 2, 's', 'illumina', 3, .8, result)
+    assert call['status'] == 'ambiguous'
+    assert call['repeat_count'] == 8
+    assert call['second_best_repeat_count'] == 12
+    assert (call['repeat_count_min'], call['repeat_count_max']) == (8, 12)
+
+
+@pytest.mark.parametrize('kind', ['insert', 'boundary', 'presence'])
+def test_uncertain_length_estimates_survive_into_calls(template, kind):
+    from mlvamaps.locus_reconstruction import _common_call
+    from mlvamaps.unified_fastq import common_calls_to_compatibility
+    from mlvamaps.profile_matching import build_fingerprint
+    sequences = [(template.left, revcomp(template.right))] if kind == 'insert' else [
+        (template.left + (template.motif*20 if kind == 'boundary' else ''), None)]
+    result = recover_locus(evidence(template, sequences*4), template, 's',
+                           InsertDistribution(320, 100, 40, 'override') if kind == 'insert' else None)
+    assert not result.products
+    common = _common_call(template.locus, result.products, 4, 's', 'illumina', 3, .8, result)
+    call = common_calls_to_compatibility([common])[0]
+    if kind == 'presence':
+        assert call['repeat_count'] == ''
+        assert call['status'] == 'PRESENT_COUNT_UNKNOWN'
+        assert common['repeat_count_min'] == ''
+        assert 'no_repeat_length_information' in call['evidence']
+    else:
+        assert call['status'] == 'AMBIGUOUS'
+        assert call['repeat_count'] == (30 if kind == 'insert' else 20)
+        assert common['repeat_count_min'] <= call['repeat_count'] <= common['repeat_count_max']
+        assert call['allele_distribution']
+        if kind == 'boundary':
+            assert 'repeat_length_lower_bound' in call['evidence']
+        fingerprint, _ = build_fingerprint('s', [{'locus_id': 'L', 'called_repeat_count': call['repeat_count']}], [template.locus])
+        assert fingerprint[0]['L'] == call['repeat_count']
 
 
 @pytest.mark.parametrize('primer_only', [False, True])
@@ -447,6 +481,40 @@ def test_benchmark_counts_uncalled_loci_and_joins_features(tmp_path):
     assert rows[0]['n_repeat_rich_b'] == '3'
     assert rows[0]['vntr_read_ratio_b'] == 2
     assert rows[0]['comparison'] == 'missing_in_both'
+
+
+def test_uncertain_fastq_count_is_exported_and_compared_with_assembly(tmp_path, template):
+    from dataclasses import asdict
+    from mlvamaps.assembly_call import run_assembly_call
+    from mlvamaps.io import write_tsv, write_fastq, read_profiles
+    from mlvamaps.short_reads import run_short_read_call
+    from scripts.benchmark_cross_mode import compare_runs
+    # A wide independently measured insert distribution supports a best length
+    # but cannot identify one allele with high confidence.
+    panel = tmp_path/'panel.tsv'
+    write_tsv([asdict(template.locus)], panel, list(asdict(template.locus)))
+    for mate, sequence in [(1, template.left), (2, revcomp(template.right))]:
+        write_fastq([ReadRecord(str(i), sequence, 'I'*len(sequence)) for i in range(4)], tmp_path/f'r{mate}.fq')
+    output = run_short_read_call(str(tmp_path/'r1.fq'), str(tmp_path/'r2.fq'), str(panel),
+        str(tmp_path/'sr'), 's', insert_mean=320, insert_sd=100, show_progress=False)
+    call = read_profiles(output['calls'])[0]
+    assert call['status'] == 'AMBIGUOUS'
+    assert float(call['repeat_count']) == 30
+    assert float(read_profiles(output['fingerprint'])[0]['L']) == 30
+    assert '30 repeats' in output['report'].read_text()
+    import csv
+    with output['myoga_loci'].open() as handle:
+        assert next(csv.DictReader(handle))['repeat_count_min'] == call['repeat_count_min']
+    truth = tmp_path/'truth.fa'
+    truth.write_text('>truth\n'+template.sequence(30)+'\n')
+    run_assembly_call(str(truth), str(panel), str(tmp_path/'assembly'), 's')
+    metrics, rows = compare_runs([{'sample_id': 's', 'mode': mode, 'outdir': tmp_path/mode}
+                                 for mode in ('assembly', 'sr')])
+    comparison = metrics['assembly:sr']
+    assert comparison['shared_callable_loci'] == 0
+    assert comparison['best_estimates_including_ambiguous']['exact_repeat_concordance'] == 1
+    assert rows[0]['best_estimate_absolute_difference'] == 0
+    assert rows[0]['status_b'] == 'AMBIGUOUS'
 
 
 def test_common_interpreter_reports_repeat_snp_without_changing_masked_marker(template):

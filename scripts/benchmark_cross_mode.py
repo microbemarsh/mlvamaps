@@ -72,7 +72,7 @@ def compare_runs(manifest):
     samples = sorted({sample for sample,_ in runs})
     result, locus_rows = {}, []
     for a,b in itertools.combinations(modes, 2):
-        differences, exact_profiles, components = [], [], []
+        differences, estimate_differences, exact_profiles, components = [], [], [], []
         snp_matches = snp_sites = 0
         repeat_matches = repeat_sites = 0
         callable_by_mode = {a: 0, b: 0}
@@ -99,6 +99,14 @@ def compare_runs(manifest):
             for locus in sorted(details[sample,a].keys() | details[sample,b].keys()):
                 row = {'sample_id': sample, 'mode_a': a, 'mode_b': b, 'locus_id': locus,
                        'repeat_a': ca.get(locus, ''), 'repeat_b': cb.get(locus, '')}
+                for mode, suffix in ((a, 'a'), (b, 'b')):
+                    info = details[sample, mode].get(locus, {})
+                    row['best_estimate_' + suffix] = number(info.get('repeat_count'))
+                    row['status_' + suffix] = info.get('status', '')
+                if row['best_estimate_a'] is not None and row['best_estimate_b'] is not None:
+                    delta = abs(row['best_estimate_a'] - row['best_estimate_b'])
+                    row['best_estimate_absolute_difference'] = delta
+                    estimate_differences.append(delta)
                 rate = per_locus.setdefault(locus, {a: [0, 0], b: [0, 0]})
                 for mode, calls, suffix in ((a, ca, 'a'), (b, cb, 'b')):
                     rate[mode][0] += int(locus in calls)
@@ -137,6 +145,11 @@ def compare_runs(manifest):
                 locus_rows.append(row)
         exact_matches = sum(delta == 0 for delta in differences)
         result[f'{a}:{b}'] = {
+            'best_estimates_including_ambiguous': {
+                'comparable_loci': len(estimate_differences),
+                'exact_repeat_concordance': float(np.mean(np.asarray(estimate_differences)==0)) if estimate_differences else None,
+                'within_one_repeat_concordance': float(np.mean(np.asarray(estimate_differences)<=1)) if estimate_differences else None,
+            },
             'call_rate_by_mode': {m: callable_by_mode[m]/n if n else None for m,n in total_by_mode.items()},
             'ambiguous_no_call_rate_by_mode': {m: ambiguous_by_mode[m]/n if n else None for m,n in total_by_mode.items()},
             'incorrect_call_rate_among_comparable': (len(differences)-exact_matches)/len(differences) if differences else None,
