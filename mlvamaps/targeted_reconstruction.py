@@ -46,6 +46,8 @@ def _overlaps(left, right, motif, minimum=20, unit=0, mismatch_fraction=0):
     # repeat units. Shorter overlaps cannot rule out a repeat-only join.
     candidates = range(minimum, min(len(left), len(right)) + 1)
     if mismatch_fraction:
+        left_bases = np.frombuffer(left.encode('ascii'), dtype=np.uint8)
+        right_bases = np.frombuffer(right.encode('ascii'), dtype=np.uint8)
         candidates = set()
         # At 2% substitutions, every accepted >=20 bp overlap contains an
         # intact 15-base block. Native substring searches bound verification.
@@ -59,7 +61,7 @@ def _overlaps(left, right, motif, minimum=20, unit=0, mismatch_fraction=0):
                 position = left.find(seed, position+1)
     return tuple(size for size in sorted(candidates)
                  if (left[-size:] == right[:size] or mismatch_fraction and
-                     sum(a != b for a,b in zip(left[-size:], right[:size])) <= int(size*mismatch_fraction))
+                     np.count_nonzero(left_bases[-size:] != right_bases[:size]) <= int(size*mismatch_fraction))
                  and (bool(motif) or unit > 0 and size >= 2*unit)
                  and not repetitive(left[-size:], motif or right[:unit])
                  and not repetitive(right[:size], motif or right[:unit]))
@@ -147,17 +149,39 @@ def direct_products(items, template, sample_id, min_fraction, min_secondary_read
 
 
 def _pileup_consensus(rows, length):
-    votes = [dict() for _ in range(length)]
-    for sequence, offset, members in rows:
-        for position, base in enumerate(sequence, offset):
-            for molecule in members:
-                previous = votes[position].get(molecule, base)
-                votes[position][molecule] = base if previous == base else 'N'
-    consensus = []
-    for column in votes:
-        base, support = Counter(column.values()).most_common(1)[0] if column else ('N', 0)
-        consensus.append(base if column and support/len(column) >= .7 else 'N')
-    return ''.join(consensus)
+    rows = [(sequence, offset, members) for sequence, offset, members in rows if members]
+    if not rows or not length:
+        return 'N'*length
+    if len(rows) == 1:
+        sequence, offset, _ = rows[0]
+        return 'N'*offset + sequence + 'N'*(length-offset-len(sequence))
+    molecules = {name: i for i, name in enumerate(set().union(*(members for _, _, members in rows)))}
+    encoded = [(np.frombuffer(sequence.encode('ascii'), dtype=np.uint8), offset,
+                np.fromiter((molecules[name] for name in members), dtype=np.intp))
+               for sequence, offset, members in rows]
+    alphabet = np.unique(np.frombuffer(('N'+''.join(sequence for sequence, _, _ in rows)).encode('ascii'), dtype=np.uint8))
+    counts = np.zeros((len(alphabet), length), dtype=np.int64)
+    coverage = np.zeros(length, dtype=np.int64)
+    # Bound the native vote matrix to 8 MiB per worker. Zero means uncovered;
+    # conflicting mates become N and each molecule contributes only one vote.
+    chunk_size = max(1, 8*1024*1024//length)
+    for start in range(0, len(molecules), chunk_size):
+        stop = min(len(molecules), start+chunk_size)
+        votes = np.zeros((stop-start, length), dtype=np.uint8)
+        for bases, offset, members in encoded:
+            selected = members[(members >= start) & (members < stop)]-start
+            if not len(selected):
+                continue
+            region = votes[:, offset:offset+len(bases)]
+            previous = region[selected]
+            region[selected] = np.where((previous == 0) | (previous == bases), bases, ord('N'))
+        coverage += np.count_nonzero(votes, axis=0)
+        for i, base in enumerate(alphabet):
+            counts[i] += np.count_nonzero(votes == base, axis=0)
+    best = counts.argmax(axis=0)
+    consensus = alphabet[best]
+    consensus[(coverage == 0) | (counts[best, np.arange(length)]*10 < coverage*7)] = ord('N')
+    return consensus.tobytes().decode('ascii')
 
 
 def _pileup_sequences(sequences):
@@ -170,6 +194,7 @@ def _pileup_sequences(sequences):
     index = defaultdict(list)
     representatives, groups = [], []
     for sequence in sorted(sequences, key=lambda s: (-len(s), -len(sequences[s]), s)):
+        bases = np.frombuffer(sequence.encode('ascii'), dtype=np.uint8)
         placements = set()
         for start in range(0, len(sequence)-14, 15):
             for node, position in index.get(sequence[start:start+15], ()):
@@ -179,7 +204,7 @@ def _pileup_sequences(sequences):
         matches = []
         for node, offset in placements:
             target = representatives[node][offset:offset+len(sequence)]
-            errors = sum(a != b for a, b in zip(sequence, target))
+            errors = np.count_nonzero(bases != np.frombuffer(target.encode('ascii'), dtype=np.uint8))
             if errors <= int(.02*len(sequence)):
                 matches.append((errors, node, offset))
         matches.sort()
@@ -460,15 +485,17 @@ def candidate_likelihood(items, template, insert, maximum, minimum_probability, 
 
 
 def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_probability=.8,
-                  minimum_spanning_pairs=2, min_fraction=.01, min_secondary_reads=2, context_templates=None):
+                  minimum_spanning_pairs=2, min_fraction=.01, min_secondary_reads=2, context_templates=None,
+                  precomputed=None):
     counts = dict(Counter(c for e in items for c in e.classes))
     usable = [e for e in items if 'discordant' not in e.classes]
     if not usable or template is None:
         return LocusRecovery(counts=counts)
-    products = direct_products(usable, template, sample_id, min_fraction, min_secondary_reads)
+    products = precomputed[0] if precomputed is not None else direct_products(usable, template, sample_id, min_fraction, min_secondary_reads)
+    assembled = precomputed[1] if precomputed is not None else None
     counts = dict(Counter(c for e in items for c in e.classes))
     if products and all('N' in product.sequence for product in products):
-        sequence, members, _ = microassemble(usable, template, insert)
+        sequence, members, _ = assembled if assembled is not None else microassemble(usable, template, insert)
         # Existing direct length evidence must agree with the reconstructed path.
         if sequence and len(sequence) == len(products[0].sequence):
             product = LocusProduct(sample_id, template.locus.locus_id, 'short_read', template.locus.locus_id+'|v1',
@@ -481,7 +508,7 @@ def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_
                              method='MIXED' if len(meaningful)>1 else 'DIRECT' if products[0].reconstruction_confidence >= minimum_probability else 'AMBIGUOUS',
                              confidence=products[0].reconstruction_confidence,
                              identifiable=products[0].reconstruction_confidence >= minimum_probability, counts=counts)
-    sequence, members, reason = microassemble(usable, template, insert)
+    sequence, members, reason = assembled if assembled is not None else microassemble(usable, template, insert)
     if sequence:
         product = LocusProduct(sample_id, template.locus.locus_id, 'short_read', template.locus.locus_id+'|v1',
             sequence, support_count=len(members), effective_depth=len(members), reconstruction_confidence=.99,

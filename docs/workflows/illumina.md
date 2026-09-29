@@ -75,6 +75,14 @@ an exact allele. Repeat-rich read abundance is not treated as a copy-number
 measurement. `--threads` controls recruitment, I/O and subsequent locus work
 without overlapping full allocations.
 
+Pileup voting and overlap mismatch counts use native NumPy operations.
+Independent loci use process workers for reconstruction preparation and final
+recovery, capped by the sample's thread allocation and number of loci. Completed
+preparations are reused when recruitment has not changed the reads or template.
+The native vote buffer is capped at 8 MiB per worker; retained read evidence is
+additional memory. Stage timings and worker allocation are recorded in
+`reconstruction_metadata.json`.
+
 `calls.tsv` preserves the primary schema and adds call method and confidence.
 `short_read_repeat_evidence.tsv` contains evidence counts and failure-mode
 features; `reconstructed_locus_variants.tsv` retains recovered sequence.
@@ -87,6 +95,7 @@ Run metadata includes stage timings and insert statistics.
 python -m pytest -q
 python scripts/benchmark_reconstruction.py --output bench/direct --molecules 10000 --threads 1
 python scripts/benchmark_reconstruction.py --output bench/unresolved --molecules 10000 --scenario unresolved --threads 1
+python scripts/benchmark_reconstruction.py --output bench/pileup --molecules 12000 --scenario pileup --threads 4
 python scripts/benchmark_short_read_recruitment.py --help
 python scripts/benchmark_cross_mode.py manifest.tsv --output comparison.json
 ```

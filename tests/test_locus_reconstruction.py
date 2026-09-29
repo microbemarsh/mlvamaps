@@ -150,6 +150,57 @@ def test_cross_modality_product_equivalence(template):
     assert {r['orientation'] for r in audit} == {'+', '-'}
 
 
+def test_reconstruction_reuses_probe_product(tmp_path, template, monkeypatch):
+    from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
+    import mlvamaps.targeted_reconstruction as reconstruction
+    sequence = template.sequence(9)
+    original = reconstruction.microassemble
+    attempts = []
+    def counted(*args, **kwargs):
+        attempts.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(reconstruction, 'microassemble', counted)
+    reads = [pair(sequence[:55], name=f'left{i}') for i in range(3)]
+    reads += [pair(sequence[30:85], name=f'middle{i}') for i in range(3)]
+    reads += [pair(sequence[65:], name=f'right{i}') for i in range(3)]
+    calls, _, _, _ = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+        pairs=iter(reads), loci=[template.locus], database_path=None, outdir=tmp_path,
+        sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8)
+    assert calls[0]['repeat_count'] == 9
+    assert len(attempts) == 1
+
+
+def test_locus_process_workers_match_serial_calls_and_evidence(tmp_path):
+    import json
+    import os
+    import random
+    from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
+    rng = random.Random(512)
+    def dna(n):
+        return ''.join(rng.choices('ACGT', k=n))
+    loci, pairs = [], []
+    for index in range(4):
+        locus = Locus(f'L{index}', forward_primer=dna(20), reverse_primer=dna(20),
+            left_flank_sequence=dna(80), right_flank_sequence=dna(80), repeat_motif='AATG', repeat_unit_length_bp=4)
+        loci.append(locus)
+        sequence = panel_template(locus).sequence(8+index)
+        # Overlapping mates supply a complete product only after merging;
+        # worker-side FULL_SPAN upgrades must reach the parent audit too.
+        pairs += [pair(sequence[:160], revcomp(sequence[70:]), f'{index}-{i}') for i in range(20)]
+    outputs = []
+    for workers in (1, 2):
+        calls, _, _, paths = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+            pairs=iter(pairs), loci=loci, database_path=None, outdir=tmp_path/str(workers),
+            sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8, threads=workers)
+        outputs.append((calls, paths['molecule_evidence'].read_text(), paths['reconstructed_locus_variants'].read_text()))
+        performance = json.loads(paths['reconstruction_metadata'].read_text())['performance']
+        assert performance['recruitment']['reconstruction_workers'] == workers
+        pids = {stats['worker_pid'] for stats in performance['loci'].values()}
+        assert (os.getpid() in pids) == (workers == 1)
+        assert 1 <= len(pids) <= workers
+    assert outputs[0] == outputs[1]
+
+
 def test_spanning_mixture(template):
     # Two fragment geometries imply repeat states 20 and 40 under one library.
     from mlvamaps.short_read_evidence import MoleculeEvidence

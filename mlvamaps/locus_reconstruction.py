@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import parasail
 
-from .concurrency import resolve_threads
+from .concurrency import bounded_ordered_map, resolve_threads
 from .progress import ProgressReporter
 from .io import read_fastq, read_fastq_pairs, write_fasta, write_tsv
 from .locus_measurement import find_anchor
@@ -201,12 +201,56 @@ MOLECULE_AUDIT_FIELDS = [
 ]
 
 
+def _probe_locus(task):
+    from .targeted_reconstruction import direct_products, microassemble
+    template, items, options = task
+    started = time.perf_counter()
+    usable = [item for item in items if 'discordant' not in item.classes]
+    observed = direct_products(usable, template, options['sample_id'],
+                               options['min_fraction'], options['min_secondary_reads'])
+    assembled = None
+    if usable and (not observed or observed[0].reconstruction_confidence < options['minimum_probability']):
+        assembled = microassemble(usable, template, options['insert'])
+    return {'observed': observed, 'assembled': assembled,
+            'needs_rescue': assembled is not None and not assembled[0],
+            'spanning': [i for i, item in enumerate(items) if 'FULL_SPAN' in item.classes],
+            'seconds': time.perf_counter()-started}
+
+
+def _fit_locus(task):
+    from .targeted_reconstruction import recover_locus
+    from .repeat_calibration import assembly_equivalent_product_allele
+    import os
+    template, items, options, round_tolerance, precomputed = task
+    locus = template.locus
+    started = time.perf_counter()
+    result = recover_locus(items, template, **options, precomputed=precomputed)
+    if len(result.states):
+        # Export calibrated MLVA alleles, not graph motif-phase coordinates.
+        calibrated = {float(n): assembly_equivalent_product_allele(locus,
+            len(template.left)+len(template.right)+round(n*template.unit), round_tolerance)[1]
+            for n in result.states}
+        if all(value is not None for value in calibrated.values()):
+            result.states = np.asarray([calibrated[float(n)] for n in result.states])
+            result.best = calibrated.get(result.best)
+            result.second = calibrated.get(result.second)
+            if result.interval:
+                bounds = [value for n, value in calibrated.items() if result.interval[0] <= n <= result.interval[1]]
+                result.interval = min(bounds), max(bounds)
+            result.products = [replace(product, repeat_likelihoods={calibrated[n]: value
+                for n, value in product.repeat_likelihoods.items()}) for product in result.products]
+    stats = {'recovery_seconds': time.perf_counter()-started, 'evidence_molecules': len(items),
+             'candidate_states': len(result.states), 'call_method': result.method, 'worker_pid': os.getpid()}
+    return result, stats, [i for i, item in enumerate(items) if 'FULL_SPAN' in item.classes]
+
+
 def run_reconstructed_fastq_inference(*, outdir, stream_molecule_evidence=False, **kwargs):
     """Own diagnostic streams for the duration of inference."""
     if kwargs.get("technology") == "illumina":
         output = Path(outdir)
         output.mkdir(parents=True, exist_ok=True)
         with ExitStack() as stack:
+            kwargs['locus_stack'] = stack
             if kwargs.get('pairs') is not None and kwargs.get('replay_pairs') is None:
                 # Iterator-only API callers have no input path to replay.
                 # Spool to disk, never retain all background reads in memory.
@@ -247,7 +291,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         max_anchor_edits=3, threads=1, minimum_spanning_pairs=2, round_tolerance=.25,
         show_progress=False, audit_writer=None, audit_handle=None, pairs=None,
         recruitment_threads=None, sr_recruitment_audit="full", ambiguity_writer=None, repeat_threshold=.7,
-        replay_pairs=None, **_unused):
+        replay_pairs=None, locus_stack=None, **_unused):
     progress = ProgressReporter(enabled=show_progress, stream=sys.stdout)
     stage_seconds, recruitment_stats, locus_stats = {}, {}, {}
     output = Path(outdir)
@@ -315,16 +359,37 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         stage_seconds["recruitment"] = time.perf_counter() - started
         recruitment_stats["pairs_per_second"] = recruitment_stats["pairs_examined"] / max(stage_seconds["recruitment"], 1e-9)
         progress.step(f"[{sample_id}] Primer recruitment finished in {stage_seconds['recruitment']:.1f}s")
-        from .targeted_reconstruction import direct_products, microassemble
-        def incomplete(name, items):
-            usable = [item for item in items if 'discordant' not in item.classes]
-            if not usable:
-                return False
-            observed = direct_products(usable, templates[name], sample_id, min_fraction, min_secondary_reads)
-            if observed and observed[0].reconstruction_confidence >= minimum_probability:
-                return False
-            return not microassemble(usable, templates[name])[0]
-        needs_rescue = any(incomplete(name, items) for name, items in list(evidence.items()))
+        reconstruction_workers = min(resolve_threads(threads), max(1, sum(bool(evidence[locus.locus_id]) for locus in loci)))
+        locus_executor = None
+        if reconstruction_workers > 1 and locus_stack is not None:
+            from concurrent.futures import ProcessPoolExecutor
+            import multiprocessing
+            # Spawn is safe inside batch sample threads. Recruitment has
+            # finished; reuse these workers across the two locus stages.
+            locus_executor = locus_stack.enter_context(ProcessPoolExecutor(
+                max_workers=reconstruction_workers, mp_context=multiprocessing.get_context('spawn')))
+        else:
+            reconstruction_workers = 1
+        insert = estimate_insert_distribution(insert_lengths, insert_mean, insert_sd)
+        options = dict(sample_id=sample_id, insert=insert, maximum=maximum_candidate_repeat_count,
+                       minimum_probability=minimum_probability, minimum_spanning_pairs=minimum_spanning_pairs,
+                       min_fraction=min_fraction, min_secondary_reads=min_secondary_reads)
+        original_templates = dict(templates)
+        original_sizes = {locus.locus_id: len(evidence[locus.locus_id]) for locus in loci}
+        started = time.perf_counter()
+        progress.step(f"[{sample_id}] Preparing locus reconstructions with {reconstruction_workers} process worker(s)")
+        tasks = ((templates[locus.locus_id], evidence[locus.locus_id], options) for locus in loci)
+        results = (bounded_ordered_map(locus_executor, _probe_locus, tasks, reconstruction_workers)
+                   if locus_executor else map(_probe_locus, tasks))
+        probes = {}
+        for locus, probe in zip(loci, results):
+            probes[locus.locus_id] = probe
+            for i in probe['spanning']:
+                item = evidence[locus.locus_id][i]
+                item.classes = tuple(sorted(set(item.classes) | {'FULL_SPAN'}))
+        stage_seconds['reconstruction_probe'] = time.perf_counter()-started
+        recruitment_stats['reconstruction_workers'] = reconstruction_workers
+        needs_rescue = any(probe['needs_rescue'] for probe in probes.values())
         if needs_rescue and replay_pairs is not None:
             from .sample_reconstruction import recruit_sample_reads
             started = time.perf_counter()
@@ -340,42 +405,23 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             recruitment_stats['final_uniquely_recruited_pairs'] = sum(map(len, evidence.values()))
             reconstruction_paths['sample_repeat_graphs'] = output/'sample_repeat_graphs.json'
             reconstruction_paths['sample_repeat_graphs'].write_text(json.dumps(sample_metadata, indent=2)+'\n')
-        insert = estimate_insert_distribution(insert_lengths, insert_mean, insert_sd)
-        from .targeted_reconstruction import recover_locus, EVIDENCE_CLASSES
-        def fit_locus(locus):
-            started = time.perf_counter()
-            items = evidence[locus.locus_id]
-            result = recover_locus(items, templates[locus.locus_id], sample_id, insert,
-                maximum_candidate_repeat_count, minimum_probability, minimum_spanning_pairs,
-                min_fraction, min_secondary_reads)
-            if len(result.states):
-                # Graph loop counts depend on the chosen motif phase/arm
-                # boundary. Export calibrated MLVA alleles, just as products
-                # do, rather than leaking that internal coordinate system.
-                from .repeat_calibration import assembly_equivalent_product_allele
-                target = templates[locus.locus_id]
-                calibrated = {float(n): assembly_equivalent_product_allele(locus,
-                    len(target.left)+len(target.right)+round(n*target.unit), round_tolerance)[1]
-                    for n in result.states}
-                if all(value is not None for value in calibrated.values()):
-                    result.states = np.asarray([calibrated[float(n)] for n in result.states])
-                    result.best = calibrated.get(result.best)
-                    result.second = calibrated.get(result.second)
-                    if result.interval:
-                        bounds = [value for n, value in calibrated.items() if result.interval[0] <= n <= result.interval[1]]
-                        result.interval = min(bounds), max(bounds)
-                    result.products = [replace(product, repeat_likelihoods={calibrated[n]: value
-                        for n, value in product.repeat_likelihoods.items()}) for product in result.products]
-            locus_stats[locus.locus_id] = {"recovery_seconds": time.perf_counter()-started,
-                "evidence_molecules": len(items), "candidate_states": len(result.states), "call_method": result.method}
-            return result
-        from concurrent.futures import ThreadPoolExecutor
+        from .targeted_reconstruction import EVIDENCE_CLASSES
         started = time.perf_counter()
-        if resolve_threads(threads) > 1 and len(loci) > 1:
-            with ThreadPoolExecutor(max_workers=min(len(loci), resolve_threads(threads))) as executor:
-                fitted = list(executor.map(fit_locus, loci))
-        else:
-            fitted = [fit_locus(locus) for locus in loci]
+        def fit_tasks():
+            for locus in loci:
+                name = locus.locus_id
+                reusable = templates[name] == original_templates[name] and len(evidence[name]) == original_sizes[name]
+                precomputed = (probes[name]['observed'], probes[name]['assembled']) if reusable else None
+                yield templates[name], evidence[name], options, round_tolerance, precomputed
+        results = (bounded_ordered_map(locus_executor, _fit_locus, fit_tasks(), reconstruction_workers)
+                   if locus_executor else map(_fit_locus, fit_tasks()))
+        fitted = []
+        for locus, (result, stats, spanning) in zip(loci, results):
+            fitted.append(result)
+            locus_stats[locus.locus_id] = {**stats, 'probe_seconds': probes[locus.locus_id]['seconds']}
+            for i in spanning:
+                item = evidence[locus.locus_id][i]
+                item.classes = tuple(sorted(set(item.classes) | {'FULL_SPAN'}))
         progress.step(f"[{sample_id}] Measuring reconstructed loci with assembly Sassy PCR")
         pcr_started = time.perf_counter()
         from .local_assembly import measure_reconstructed_loci

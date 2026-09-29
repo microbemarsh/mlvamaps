@@ -162,6 +162,16 @@ def test_contained_flank_reads_do_not_vote_for_uncovered_bases(template):
     assert not reason
 
 
+def test_native_pileup_counts_conflicting_mates_once_across_chunks():
+    from mlvamaps.targeted_reconstruction import _pileup_consensus
+    # 10 MB of observations crosses the 8 MiB worker buffer. Conflicting
+    # observations consume one N vote, not a second vote for either base.
+    rows = [('A'*5000, 0, set(range(2000))), ('C'*5000, 0, set(range(650)))]
+    assert _pileup_consensus(rows, 5000) == 'N'*5000
+    rows[1] = ('C'*5000, 0, set(range(600)))
+    assert _pileup_consensus(rows, 5000) == 'A'*5000
+
+
 def test_insert_likelihood_distinguishes_or_withholds_adjacent_lengths(template):
     items = evidence(template, [(template.left, revcomp(template.right))]*40)
     confident = recover_locus(items, template, 's', InsertDistribution(320, 3, 40, 'override'))

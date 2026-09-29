@@ -1,0 +1,735 @@
+{
+  "baseline_revision": "5bdcbc6",
+  "scenario": "pileup",
+  "molecules": 12000,
+  "loci": 6,
+  "background_fraction": 0.25,
+  "runs_per_configuration": 1,
+  "timing_scope": "call execution including output; input generation and initial imports excluded",
+  "environment": {
+    "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "python": "3.13.13",
+    "numpy": "2.5.2"
+  },
+  "rss_units": "bytes on this Darwin host; parent and maximum child reported separately, not summed",
+  "measurements": {
+    "before-4": {
+      "seconds": 16.09442937502172,
+      "threads": 4,
+      "performance": {
+        "stage_seconds": {
+          "template_loading": 2.3374974261969328e-05,
+          "recruitment": 1.0003284169943072,
+          "sample_recruitment": 4.4837481250287965,
+          "reconstruction_sassy_pcr": 0.4551297080470249,
+          "locus_recovery": 10.029571583028883,
+          "genotype_and_evidence_output": 0.024307832994963974
+        },
+        "recruitment": {
+          "template_contexts": 6,
+          "template_source": "locus_panel",
+          "primer_only_loci": [
+            "L0",
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5"
+          ],
+          "template_motif_lengths": {
+            "L0": 0,
+            "L1": 0,
+            "L2": 0,
+            "L3": 0,
+            "L4": 0,
+            "L5": 0
+          },
+          "pairs_examined": 12000,
+          "locus_tests": 72000,
+          "uniquely_recruited_pairs": 4317,
+          "ambiguous_pairs": 0,
+          "unmatched_pairs": 7683,
+          "skipped_locus_tests": 0,
+          "workers": 4,
+          "chunk_size": 256,
+          "audit_mode": "compact",
+          "pairs_per_second": 11996.060289936051,
+          "sample_recruitment": {
+            "rounds": [
+              {
+                "round": 1,
+                "examined": 12000,
+                "recruited": 4684,
+                "ambiguous": 0,
+                "index_seeds": 3965,
+                "capped_loci": []
+              },
+              {
+                "round": 2,
+                "examined": 12000,
+                "recruited": 0,
+                "ambiguous": 0,
+                "index_seeds": 2817,
+                "capped_loci": [
+                  "L0",
+                  "L1",
+                  "L2",
+                  "L3",
+                  "L4",
+                  "L5"
+                ]
+              }
+            ],
+            "loci": {
+              "L0": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 1187
+                  }
+                ],
+                "graph_ready": true,
+                "left_bp": 180,
+                "right_bp": 180,
+                "motif": "AATG",
+                "left_sequence": "CCGCGGTATACGATCCCAGCTTACGTATGGCCCGCATGTCCTCCTTGCTACGGATGGGGATTTCCCCCCTAACCGCTTGTTATCGATGACTATGAATGGCCGGAGGAACTGGAAAGTTAGACGGCTGCAGATAGAGCTGCGCCGAAACGTAACTCGATGTTGCCAGGAATGATTGGAAAT",
+                "right_sequence": "AAGGAACTGGAGTTAGCGGGCCCCCGCGGCTTTTCAACCGTGGGTATGCTACTAACTGCGAGGGAAACGTAGACCAGTCATGTTGATCTCGTAGCCGCGTTAATAGTCTTTGTCTTGCACCCCGGAGTCCAGCATGATTGCCGATATATTATACACCTTCTACACAACTAATATGAAAGA",
+                "structure": "CCGCGGTATACGATCCCAGCTTACGTATGGCCCGCATGTCCTCCTTGCTACGGATGGGGATTTCCCCCCTAACCGCTTGTTATCGATGACTATGAATGGCCGGAGGAACTGGAAAGTTAGACGGCTGCAGATAGAGCTGCGCCGAAACGTAACTCGATGTTGCCAGGAATGATTGGAAAT(AATG)*AAGGAACTGGAGTTAGCGGGCCCCCGCGGCTTTTCAACCGTGGGTATGCTACTAACTGCGAGGGAAACGTAGACCAGTCATGTTGATCTCGTAGCCGCGTTAATAGTCTTTGTCTTGCACCCCGGAGTCCAGCATGATTGCCGATATATTATACACCTTCTACACAACTAATATGAAAGA"
+              },
+              "L1": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 563
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              },
+              "L2": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 1198
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              },
+              "L3": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 610
+                  }
+                ],
+                "graph_ready": true,
+                "left_bp": 180,
+                "right_bp": 180,
+                "motif": "AATG",
+                "left_sequence": "ATTGCATTCTTTGCTCGCTAAACTTATCTGCGAACACTGAATCATCAACTTCATAATAGTCACTAACGCGAAACGGTTGGTTGAGTTCATCTATGCTTTTGATGTGCAAGGGGTCCGTTACACCCTTAGGGGTATGGAGCACAGCTTTATATGGTTGCCCTAAGAATATGGCTATCCACG",
+                "right_sequence": "CCTCTTTTCTCCCATTCAGAGCAGAATTCTTTCATAACCGTGAAACATATGCTTTTCTTAGATGGCGGGTTCGGCAGTTCCCCGTATACCATATCTTCTCGCTACGTCGCCCGAGGGCTCCCGCCTAGTAACGATAGAGCCTCCCTAACCCGATGGGATCCTGCTACGCAGCACCTAATG",
+                "structure": "ATTGCATTCTTTGCTCGCTAAACTTATCTGCGAACACTGAATCATCAACTTCATAATAGTCACTAACGCGAAACGGTTGGTTGAGTTCATCTATGCTTTTGATGTGCAAGGGGTCCGTTACACCCTTAGGGGTATGGAGCACAGCTTTATATGGTTGCCCTAAGAATATGGCTATCCACG(AATG)*CCTCTTTTCTCCCATTCAGAGCAGAATTCTTTCATAACCGTGAAACATATGCTTTTCTTAGATGGCGGGTTCGGCAGTTCCCCGTATACCATATCTTCTCGCTACGTCGCCCGAGGGCTCCCGCCTAGTAACGATAGAGCCTCCCTAACCCGATGGGATCCTGCTACGCAGCACCTAATG"
+              },
+              "L4": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 1185
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              },
+              "L5": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 563
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              }
+            },
+            "stop_reason": "no_additional_pairs"
+          },
+          "sample_recruited_pairs": 4684,
+          "final_uniquely_recruited_pairs": 9001
+        },
+        "loci": {
+          "L3": {
+            "recovery_seconds": 3.948482875013724,
+            "evidence_molecules": 1000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED"
+          },
+          "L0": {
+            "recovery_seconds": 4.668421957991086,
+            "evidence_molecules": 2000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED"
+          },
+          "L1": {
+            "recovery_seconds": 5.539360792026855,
+            "evidence_molecules": 1001,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED"
+          },
+          "L2": {
+            "recovery_seconds": 7.57021779200295,
+            "evidence_molecules": 2000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED"
+          },
+          "L5": {
+            "recovery_seconds": 4.491030332981609,
+            "evidence_molecules": 1000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED"
+          },
+          "L4": {
+            "recovery_seconds": 5.624770333990455,
+            "evidence_molecules": 2000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED"
+          }
+        },
+        "output": {
+          "genotyping_seconds": 6.24579843133688e-05,
+          "product_tables_seconds": 0.0018458329723216593,
+          "canonical_alignments_seconds": 0.0034832090022973716,
+          "compatibility_tables_seconds": 0.017955625022295862
+        }
+      },
+      "counts": [
+        [
+          "L0",
+          "5",
+          "PASS"
+        ],
+        [
+          "L1",
+          "6",
+          "PASS"
+        ],
+        [
+          "L2",
+          "7",
+          "PASS"
+        ],
+        [
+          "L3",
+          "8",
+          "PASS"
+        ],
+        [
+          "L4",
+          "9",
+          "PASS"
+        ],
+        [
+          "L5",
+          "10",
+          "PASS"
+        ]
+      ],
+      "peak_rss": 153370624,
+      "peak_child_rss": 70795264
+    },
+    "after-4": {
+      "seconds": 7.092131874989718,
+      "threads": 4,
+      "performance": {
+        "stage_seconds": {
+          "template_loading": 5.6124990805983543e-05,
+          "recruitment": 0.8773740840260871,
+          "reconstruction_probe": 0.5423052500118501,
+          "sample_recruitment": 3.276666416961234,
+          "reconstruction_sassy_pcr": 0.15799329098081216,
+          "locus_recovery": 2.247263249999378,
+          "genotype_and_evidence_output": 0.01989783300086856
+        },
+        "recruitment": {
+          "template_contexts": 6,
+          "template_source": "locus_panel",
+          "primer_only_loci": [
+            "L0",
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5"
+          ],
+          "template_motif_lengths": {
+            "L0": 0,
+            "L1": 0,
+            "L2": 0,
+            "L3": 0,
+            "L4": 0,
+            "L5": 0
+          },
+          "pairs_examined": 12000,
+          "locus_tests": 72000,
+          "uniquely_recruited_pairs": 4317,
+          "ambiguous_pairs": 0,
+          "unmatched_pairs": 7683,
+          "skipped_locus_tests": 0,
+          "workers": 4,
+          "chunk_size": 256,
+          "audit_mode": "compact",
+          "pairs_per_second": 13677.176267772234,
+          "reconstruction_workers": 4,
+          "sample_recruitment": {
+            "rounds": [
+              {
+                "round": 1,
+                "examined": 12000,
+                "recruited": 4684,
+                "ambiguous": 0,
+                "index_seeds": 3965,
+                "capped_loci": []
+              },
+              {
+                "round": 2,
+                "examined": 12000,
+                "recruited": 0,
+                "ambiguous": 0,
+                "index_seeds": 2817,
+                "capped_loci": [
+                  "L0",
+                  "L1",
+                  "L2",
+                  "L3",
+                  "L4",
+                  "L5"
+                ]
+              }
+            ],
+            "loci": {
+              "L0": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 1187
+                  }
+                ],
+                "graph_ready": true,
+                "left_bp": 180,
+                "right_bp": 180,
+                "motif": "AATG",
+                "left_sequence": "CCGCGGTATACGATCCCAGCTTACGTATGGCCCGCATGTCCTCCTTGCTACGGATGGGGATTTCCCCCCTAACCGCTTGTTATCGATGACTATGAATGGCCGGAGGAACTGGAAAGTTAGACGGCTGCAGATAGAGCTGCGCCGAAACGTAACTCGATGTTGCCAGGAATGATTGGAAAT",
+                "right_sequence": "AAGGAACTGGAGTTAGCGGGCCCCCGCGGCTTTTCAACCGTGGGTATGCTACTAACTGCGAGGGAAACGTAGACCAGTCATGTTGATCTCGTAGCCGCGTTAATAGTCTTTGTCTTGCACCCCGGAGTCCAGCATGATTGCCGATATATTATACACCTTCTACACAACTAATATGAAAGA",
+                "structure": "CCGCGGTATACGATCCCAGCTTACGTATGGCCCGCATGTCCTCCTTGCTACGGATGGGGATTTCCCCCCTAACCGCTTGTTATCGATGACTATGAATGGCCGGAGGAACTGGAAAGTTAGACGGCTGCAGATAGAGCTGCGCCGAAACGTAACTCGATGTTGCCAGGAATGATTGGAAAT(AATG)*AAGGAACTGGAGTTAGCGGGCCCCCGCGGCTTTTCAACCGTGGGTATGCTACTAACTGCGAGGGAAACGTAGACCAGTCATGTTGATCTCGTAGCCGCGTTAATAGTCTTTGTCTTGCACCCCGGAGTCCAGCATGATTGCCGATATATTATACACCTTCTACACAACTAATATGAAAGA"
+              },
+              "L1": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 563
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              },
+              "L2": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 1198
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              },
+              "L3": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 610
+                  }
+                ],
+                "graph_ready": true,
+                "left_bp": 180,
+                "right_bp": 180,
+                "motif": "AATG",
+                "left_sequence": "ATTGCATTCTTTGCTCGCTAAACTTATCTGCGAACACTGAATCATCAACTTCATAATAGTCACTAACGCGAAACGGTTGGTTGAGTTCATCTATGCTTTTGATGTGCAAGGGGTCCGTTACACCCTTAGGGGTATGGAGCACAGCTTTATATGGTTGCCCTAAGAATATGGCTATCCACG",
+                "right_sequence": "CCTCTTTTCTCCCATTCAGAGCAGAATTCTTTCATAACCGTGAAACATATGCTTTTCTTAGATGGCGGGTTCGGCAGTTCCCCGTATACCATATCTTCTCGCTACGTCGCCCGAGGGCTCCCGCCTAGTAACGATAGAGCCTCCCTAACCCGATGGGATCCTGCTACGCAGCACCTAATG",
+                "structure": "ATTGCATTCTTTGCTCGCTAAACTTATCTGCGAACACTGAATCATCAACTTCATAATAGTCACTAACGCGAAACGGTTGGTTGAGTTCATCTATGCTTTTGATGTGCAAGGGGTCCGTTACACCCTTAGGGGTATGGAGCACAGCTTTATATGGTTGCCCTAAGAATATGGCTATCCACG(AATG)*CCTCTTTTCTCCCATTCAGAGCAGAATTCTTTCATAACCGTGAAACATATGCTTTTCTTAGATGGCGGGTTCGGCAGTTCCCCGTATACCATATCTTCTCGCTACGTCGCCCGAGGGCTCCCGCCTAGTAACGATAGAGCCTCCCTAACCCGATGGGATCCTGCTACGCAGCACCTAATG"
+              },
+              "L4": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 1185
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              },
+              "L5": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 563
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              }
+            },
+            "stop_reason": "no_additional_pairs"
+          },
+          "sample_recruited_pairs": 4684,
+          "final_uniquely_recruited_pairs": 9001
+        },
+        "loci": {
+          "L0": {
+            "recovery_seconds": 0.9345330410287715,
+            "evidence_molecules": 2000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58034,
+            "probe_seconds": 0.17922154202824458
+          },
+          "L1": {
+            "recovery_seconds": 0.8597107499954291,
+            "evidence_molecules": 1001,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58032,
+            "probe_seconds": 0.18637387501075864
+          },
+          "L2": {
+            "recovery_seconds": 1.109385541989468,
+            "evidence_molecules": 2000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58031,
+            "probe_seconds": 0.23050679097650573
+          },
+          "L3": {
+            "recovery_seconds": 0.9340297080343589,
+            "evidence_molecules": 1000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58033,
+            "probe_seconds": 0.15323137497762218
+          },
+          "L4": {
+            "recovery_seconds": 1.1395973330363631,
+            "evidence_molecules": 2000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58032,
+            "probe_seconds": 0.21076070895651355
+          },
+          "L5": {
+            "recovery_seconds": 0.9446732089854777,
+            "evidence_molecules": 1000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58034,
+            "probe_seconds": 0.17063612502533942
+          }
+        },
+        "output": {
+          "genotyping_seconds": 5.687499651685357e-05,
+          "product_tables_seconds": 0.0017017089994624257,
+          "canonical_alignments_seconds": 0.003041416988708079,
+          "compatibility_tables_seconds": 0.014126416994258761
+        }
+      },
+      "counts": [
+        [
+          "L0",
+          "5",
+          "PASS"
+        ],
+        [
+          "L1",
+          "6",
+          "PASS"
+        ],
+        [
+          "L2",
+          "7",
+          "PASS"
+        ],
+        [
+          "L3",
+          "8",
+          "PASS"
+        ],
+        [
+          "L4",
+          "9",
+          "PASS"
+        ],
+        [
+          "L5",
+          "10",
+          "PASS"
+        ]
+      ],
+      "peak_rss": 123109376,
+      "peak_child_rss": 97435648
+    },
+    "after-1": {
+      "seconds": 13.14553124998929,
+      "threads": 1,
+      "performance": {
+        "stage_seconds": {
+          "template_loading": 1.6667007002979517e-05,
+          "recruitment": 2.3497920419904403,
+          "reconstruction_probe": 1.052434666955378,
+          "sample_recruitment": 3.90303004195448,
+          "reconstruction_sassy_pcr": 0.13394866703310981,
+          "locus_recovery": 5.727766791998874,
+          "genotype_and_evidence_output": 0.019208584039006382
+        },
+        "recruitment": {
+          "template_contexts": 6,
+          "template_source": "locus_panel",
+          "primer_only_loci": [
+            "L0",
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5"
+          ],
+          "template_motif_lengths": {
+            "L0": 0,
+            "L1": 0,
+            "L2": 0,
+            "L3": 0,
+            "L4": 0,
+            "L5": 0
+          },
+          "pairs_examined": 12000,
+          "locus_tests": 72000,
+          "uniquely_recruited_pairs": 4317,
+          "ambiguous_pairs": 0,
+          "unmatched_pairs": 7683,
+          "skipped_locus_tests": 0,
+          "workers": 1,
+          "chunk_size": 256,
+          "audit_mode": "compact",
+          "pairs_per_second": 5106.834896689475,
+          "reconstruction_workers": 1,
+          "sample_recruitment": {
+            "rounds": [
+              {
+                "round": 1,
+                "examined": 12000,
+                "recruited": 4684,
+                "ambiguous": 0,
+                "index_seeds": 3965,
+                "capped_loci": []
+              },
+              {
+                "round": 2,
+                "examined": 12000,
+                "recruited": 0,
+                "ambiguous": 0,
+                "index_seeds": 2817,
+                "capped_loci": [
+                  "L0",
+                  "L1",
+                  "L2",
+                  "L3",
+                  "L4",
+                  "L5"
+                ]
+              }
+            ],
+            "loci": {
+              "L0": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 1187
+                  }
+                ],
+                "graph_ready": true,
+                "left_bp": 180,
+                "right_bp": 180,
+                "motif": "AATG",
+                "left_sequence": "CCGCGGTATACGATCCCAGCTTACGTATGGCCCGCATGTCCTCCTTGCTACGGATGGGGATTTCCCCCCTAACCGCTTGTTATCGATGACTATGAATGGCCGGAGGAACTGGAAAGTTAGACGGCTGCAGATAGAGCTGCGCCGAAACGTAACTCGATGTTGCCAGGAATGATTGGAAAT",
+                "right_sequence": "AAGGAACTGGAGTTAGCGGGCCCCCGCGGCTTTTCAACCGTGGGTATGCTACTAACTGCGAGGGAAACGTAGACCAGTCATGTTGATCTCGTAGCCGCGTTAATAGTCTTTGTCTTGCACCCCGGAGTCCAGCATGATTGCCGATATATTATACACCTTCTACACAACTAATATGAAAGA",
+                "structure": "CCGCGGTATACGATCCCAGCTTACGTATGGCCCGCATGTCCTCCTTGCTACGGATGGGGATTTCCCCCCTAACCGCTTGTTATCGATGACTATGAATGGCCGGAGGAACTGGAAAGTTAGACGGCTGCAGATAGAGCTGCGCCGAAACGTAACTCGATGTTGCCAGGAATGATTGGAAAT(AATG)*AAGGAACTGGAGTTAGCGGGCCCCCGCGGCTTTTCAACCGTGGGTATGCTACTAACTGCGAGGGAAACGTAGACCAGTCATGTTGATCTCGTAGCCGCGTTAATAGTCTTTGTCTTGCACCCCGGAGTCCAGCATGATTGCCGATATATTATACACCTTCTACACAACTAATATGAAAGA"
+              },
+              "L1": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 563
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              },
+              "L2": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 1198
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              },
+              "L3": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 610
+                  }
+                ],
+                "graph_ready": true,
+                "left_bp": 180,
+                "right_bp": 180,
+                "motif": "AATG",
+                "left_sequence": "ATTGCATTCTTTGCTCGCTAAACTTATCTGCGAACACTGAATCATCAACTTCATAATAGTCACTAACGCGAAACGGTTGGTTGAGTTCATCTATGCTTTTGATGTGCAAGGGGTCCGTTACACCCTTAGGGGTATGGAGCACAGCTTTATATGGTTGCCCTAAGAATATGGCTATCCACG",
+                "right_sequence": "CCTCTTTTCTCCCATTCAGAGCAGAATTCTTTCATAACCGTGAAACATATGCTTTTCTTAGATGGCGGGTTCGGCAGTTCCCCGTATACCATATCTTCTCGCTACGTCGCCCGAGGGCTCCCGCCTAGTAACGATAGAGCCTCCCTAACCCGATGGGATCCTGCTACGCAGCACCTAATG",
+                "structure": "ATTGCATTCTTTGCTCGCTAAACTTATCTGCGAACACTGAATCATCAACTTCATAATAGTCACTAACGCGAAACGGTTGGTTGAGTTCATCTATGCTTTTGATGTGCAAGGGGTCCGTTACACCCTTAGGGGTATGGAGCACAGCTTTATATGGTTGCCCTAAGAATATGGCTATCCACG(AATG)*CCTCTTTTCTCCCATTCAGAGCAGAATTCTTTCATAACCGTGAAACATATGCTTTTCTTAGATGGCGGGTTCGGCAGTTCCCCGTATACCATATCTTCTCGCTACGTCGCCCGAGGGCTCCCGCCTAGTAACGATAGAGCCTCCCTAACCCGATGGGATCCTGCTACGCAGCACCTAATG"
+              },
+              "L4": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 1185
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              },
+              "L5": {
+                "source": "sample",
+                "motifs": [
+                  {
+                    "sequence": "AATG",
+                    "molecules": 563
+                  }
+                ],
+                "graph_ready": false,
+                "reason": "incomplete_sample_repeat_boundaries"
+              }
+            },
+            "stop_reason": "no_additional_pairs"
+          },
+          "sample_recruited_pairs": 4684,
+          "final_uniquely_recruited_pairs": 9001
+        },
+        "loci": {
+          "L0": {
+            "recovery_seconds": 0.8591737090027891,
+            "evidence_molecules": 2000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58072,
+            "probe_seconds": 0.1638064999715425
+          },
+          "L1": {
+            "recovery_seconds": 0.8058610839652829,
+            "evidence_molecules": 1001,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58072,
+            "probe_seconds": 0.16632166603812948
+          },
+          "L2": {
+            "recovery_seconds": 1.0318778340006247,
+            "evidence_molecules": 2000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58072,
+            "probe_seconds": 0.21415895904647186
+          },
+          "L3": {
+            "recovery_seconds": 0.8639651670237072,
+            "evidence_molecules": 1000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58072,
+            "probe_seconds": 0.13606879097642377
+          },
+          "L4": {
+            "recovery_seconds": 1.1119088330306113,
+            "evidence_molecules": 2000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58072,
+            "probe_seconds": 0.20627537503605708
+          },
+          "L5": {
+            "recovery_seconds": 0.9203502500313334,
+            "evidence_molecules": 1000,
+            "candidate_states": 0,
+            "call_method": "RECONSTRUCTED",
+            "worker_pid": 58072,
+            "probe_seconds": 0.16488279204349965
+          }
+        },
+        "output": {
+          "genotyping_seconds": 5.83329820074141e-05,
+          "product_tables_seconds": 0.0017844579997472465,
+          "canonical_alignments_seconds": 0.0032405410311184824,
+          "compatibility_tables_seconds": 0.013150749960914254
+        }
+      },
+      "counts": [
+        [
+          "L0",
+          "5",
+          "PASS"
+        ],
+        [
+          "L1",
+          "6",
+          "PASS"
+        ],
+        [
+          "L2",
+          "7",
+          "PASS"
+        ],
+        [
+          "L3",
+          "8",
+          "PASS"
+        ],
+        [
+          "L4",
+          "9",
+          "PASS"
+        ],
+        [
+          "L5",
+          "10",
+          "PASS"
+        ]
+      ],
+      "peak_rss": 135675904,
+      "peak_child_rss": 2818048
+    }
+  }
+}
