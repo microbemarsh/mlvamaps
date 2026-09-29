@@ -173,6 +173,7 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
             "dominant_repeat": repeat,
             "num_variants": len(ranked), "num_secondary": max(0, len(meaningful)-1),
             "inference_method": inference.method if inference else "spanning_molecules",
+            "reason": inference.reason if inference else "",
             "n_spanning": counts.get("FLANK_PAIR", 0), "repeat_count_min": inference.interval[0] if inference and inference.interval else repeat,
             "repeat_count_max": inference.interval[1] if inference and inference.interval else repeat,
             "second_best_repeat_count": inference.second if inference else ""}

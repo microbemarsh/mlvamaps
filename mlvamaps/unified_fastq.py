@@ -193,6 +193,6 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
                 f"{row['molecule_support']} informative molecule(s); "
                 f"{row['direct_product_support']} direct product; "
                 f"{row['full_span_support']} full repeat span"
-            ),
+            ) + (f"; {row['reason']}" if row.get("reason") else ""),
         })
     return output

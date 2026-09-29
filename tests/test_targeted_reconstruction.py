@@ -67,6 +67,16 @@ def test_targeted_three_read_stitch_preserves_repeat_and_flank_snps(template):
     assert genotype_product(result.products[0], template.locus).combined_marker == expected.combined_marker
 
 
+def test_reconstruction_does_not_merge_different_repeat_lengths(template):
+    sequence = template.sequence(12)
+    longer = template.sequence(13)
+    items = evidence(template, [(sequence[:80], None), (sequence[50:190], None),
+                                (longer[50:194], None), (sequence[160:], None)]*3)
+    product, _, reason = microassemble(items, template)
+    assert not product
+    assert reason == 'multiple_reconstructions'
+
+
 @pytest.mark.parametrize('count', [30, 80, 160])
 def test_repeat_only_overlap_never_selects_arbitrary_copy_number(template, count):
     sequence = template.sequence(count)
@@ -238,13 +248,18 @@ def test_legacy_primer_only_recovery(template, scenario, monkeypatch):
         assert result.method == 'AMBIGUOUS'
         assert not result.products and not len(result.states)
         assert result.reason.startswith('primer_only_no_complete_product')
+        from mlvamaps.locus_reconstruction import _common_call
+        from mlvamaps.unified_fastq import common_calls_to_compatibility
+        call = _common_call(locus, [], len(pairs), 's', 'illumina', 2, .8, result)
+        assert result.reason in common_calls_to_compatibility([call])[0]['evidence']
     else:
         assert result.method == ('RECONSTRUCTED' if scenario == 'reconstruct' else 'DIRECT')
         assert result.products[0].sequence == sequence
         assert genotype_product(result.products[0], locus).repeat_count == 12
 
 
-def test_primer_only_reconstruction_uses_observed_reads_then_assembly_pcr(tmp_path, template):
+@pytest.mark.parametrize('duplicate_middle', [False, True])
+def test_primer_only_reconstruction_uses_observed_reads_then_assembly_pcr(tmp_path, template, duplicate_middle):
     import csv
     from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
     from mlvamaps.assembly_call import legacy_assembly_call_rows, pcr_rows_to_products
@@ -261,12 +276,22 @@ def test_primer_only_reconstruction_uses_observed_reads_then_assembly_pcr(tmp_pa
     for i in range(3):
         item = pair('TTTTT'+sequence[:120], revcomp(middle), str(i))
         pairs.append(replace(item, read1=replace(item.read1, quality='!!!!!'+'I'*120)))
+    if duplicate_middle:
+        # Same-coordinate reads with a substitution used to create reciprocal
+        # full-length overlap edges and abort with cyclic_overlap_graph.
+        altered = middle[:10] + next(b for b in 'ACGT' if b != middle[10]) + middle[11:]
+        pairs += [pair(sequence[:120], revcomp(altered), f'error{i}') for i in range(3)]
     pairs += [pair(sequence[140:], name=f'right{i}') for i in range(5)]
     calls, _, _, paths = run_reconstructed_fastq_inference(reads1=None, reads2=None,
         pairs=iter(pairs), loci=[locus], database_path=None, outdir=tmp_path/'sr', sample_id='s',
         technology='illumina', minimum_molecules=2, minimum_probability=.8)
     assert calls[0]['repeat_count'] == 12
     assert calls[0]['inference_method'] == 'RECONSTRUCTED'
+    with paths['reconstructed_locus_variants'].open() as handle:
+        reconstructed = next(csv.DictReader(handle, delimiter='\t'))
+    if duplicate_middle:
+        assert reconstructed['sequence'][70] == 'N'
+    assert len(reconstructed['sequence']) == len(sequence)
     with paths['reconstruction_pcr'].open() as handle:
         audit = next(csv.DictReader(handle, delimiter='\t'))
     assert audit['measurement_source'] == 'sassy_assembly_pcr'

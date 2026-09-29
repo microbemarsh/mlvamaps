@@ -173,7 +173,12 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
         for j, right in enumerate(nodes):
             if i == j:
                 continue
+            # Full coverage of the target adds no sequence. Near-duplicate
+            # reads can otherwise form reciprocal edges at the same genomic
+            # position, falsely appearing to be a repeat traversal cycle.
             overlaps = _overlaps(left, right, template.motif, unit=template.unit, mismatch_fraction=.02)
+            if len(right) in overlaps:
+                continue
             if len(overlaps) == 1:
                 edges[i].append((j, overlaps[0]))
             elif len(overlaps) > 1:
@@ -226,15 +231,25 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
                     if y < x or (insert and abs(fragment-insert.mean) > 4*insert.sd):
                         break
             else:
-                members = sorted(set().union(*(sequences[nodes[j]] for j in used)))
-                products[product] = members
+                members = set().union(*(sequences[nodes[j]] for j in used))
+                products.setdefault(product, set()).update(members)
             continue
         for j, overlap in edges[i]:
             if j in used:
                 return '', [], 'cyclic_overlap_graph'
             paths.append((j, sequence + nodes[j][overlap:], used + (j,)))
-    if len(products) == 1:
-        sequence, members = next(iter(products.items()))
+    if products and len({len(product) for product in products}) == 1:
+        # Base uncertainty need not discard an agreed primer-bounded length.
+        # Keep primer ends identical so this cannot hide differences in PCR
+        # size calibration. Mask disputed interior bases rather than selecting
+        # an arbitrary path/SNP or counting shared molecules more than once.
+        ends = {(p[:len(template.locus.forward_primer)],
+                 p[-len(template.locus.reverse_primer):]) for p in products}
+        if len(ends) > 1:
+            return '', [], 'multiple_reconstructions'
+        sequence = ''.join(column[0] if len(set(column)) == 1 else 'N'
+                           for column in zip(*products))
+        members = sorted(set().union(*products.values()))
         if len(members) >= 2:
             return sequence, members, ''
     return '', [], 'multiple_reconstructions' if products else 'no_complete_path'
