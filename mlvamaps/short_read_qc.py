@@ -9,6 +9,21 @@ from .progress import ProgressReporter
 from .short_reads import qc_read_pairs
 
 
+def replay_filtered_pairs(reads1, reads2, *, min_length, min_mean_quality,
+                          trim_quality, min_pair_retention, decompression_threads=(0, 0)):
+    """Replay identical QC without rewriting intermediates or counting twice."""
+    iterator = read_fastq_pairs(reads1, reads2, decompression_threads=decompression_threads)
+    try:
+        while chunk := list(islice(iterator, 5000)):
+            retained, _ = qc_read_pairs(chunk, min_length, min_mean_quality,
+                                        trim_quality, min_pair_retention)
+            for pair in retained:
+                # The initial QC stream names orphan molecules by read ID.
+                yield ReadPair(pair.read1.read_id, pair.read1) if reads2 and pair.read2 is None else pair
+    finally:
+        iterator.close()
+
+
 def filtered_pairs(reads1, reads2, filtered1, filtered2, orphans, *,
                    materialize, counters, statistics, min_length,
                    min_mean_quality, trim_quality, min_pair_retention,

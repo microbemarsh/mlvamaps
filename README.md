@@ -32,9 +32,11 @@ is performed separately after measurement.
 Illumina allele calling needs no reference database, including with legacy
 three-column primer panels (`locus_id forward_primer reverse_primer`). Names
 such as `vrrA_12bp_314bp_10U` provide product-length calibration. Primer-only
-calls use complete observed or locally reconstructed products; unresolved
-lengths stay uncalled. Rich panels additionally enable repeat-boundary evidence
-and candidate inference. Reference database sequences are never used for
+calls first use observed or locally reconstructed products. Unresolved loci
+trigger up to two combined recruitment rounds against sample-derived anchors.
+Supported motifs and primer-to-repeat arms form a small repeat graph for
+boundary measurement and candidate inference. Unidentifiable lengths stay
+uncalled. Reference database sequences are never used for
 Illumina recruitment or reconstruction.
 
 The evidence hierarchy is **direct → reconstructed → inferred**, with explicit

@@ -18,8 +18,10 @@ Legacy primer-only panels use full primer matches with up to two edits (capped
 for short primers), including IUPAC primer symbols. Mates without a primer are
 oriented using their anchored partner. Short or degenerate primers bypass the
 four-base seed filter when a valid match need not contain a concrete seed.
-Only complete observed products provide length calls for these panels;
-unknown internal flanks and motifs are not borrowed from reference sequences.
+Complete observed products provide the fast path for these panels. When a
+recruited locus cannot be recovered, additional sample-derived recruitment and
+repeat-graph inference run as described below. Unknown internal flanks and
+motifs are never borrowed from reference sequences.
 
 Assignment uses only non-repeat anchor scores. Multiple contexts of one locus
 count as one competitor. A winning locus must exceed the runner-up by both 12
@@ -34,6 +36,51 @@ small indels. `--short-repeat-fraction` (default 0.7) sets the matched-base
 fraction required for repeat-rich tagging. Unanchored repeat-only molecules
 cannot identify a locus and are excluded rather than assigned to every locus
 with that motif.
+
+## Sample-derived recruitment and repeat graphs
+
+If direct measurement and bounded local assembly cannot recover a recruited
+locus, the caller builds a frozen 21-mer index from Q20 sample sequences across
+all recruited loci, including competitors that already have calls. It excludes
+candidate repeat tracts, motif-only seeds, low-complexity seeds and sequences
+too short to inspect two repeat units. A new pair needs at least 40 matched
+bases (or two repeat units, whichever is larger), consistent orientation, and
+a winner margin of both 12 bases and 20%. Both mates are retained. Unanchored
+repeat-only reads and cross-locus ties do not establish a locus assignment.
+
+Up to two combined FASTQ replay passes recruit internal reads using these
+sample anchors. The index is rebuilt between rounds, never during a round;
+read order cannot change which seeds are available. Previously recruited pairs
+are not counted again. Recruitment stops when no pairs are added or the index
+does not change. Replays apply the original QC settings without changing QC
+totals or rewriting filtered FASTQs. Iterator-only API inputs use a temporary
+disk spool, closed on success and failure. The existing bounded process workers
+also perform sample recruitment; no external mapper or reference is required.
+
+Motif discovery uses the panel unit length and lagged sequence identity, with
+at least two units, 12 bases, 90% consensus identity, and two supporting
+molecules. Competing motifs of comparable molecule support remain ambiguous.
+Primer arms extend through unique nonperiodic overlaps only where extensions
+agree. At most 256 distinct quality-filtered sequences per locus and eight
+arm extensions are inspected. A graph is enabled only after both observed
+primer-to-repeat arms and a dominant motif are recovered. The two arms are
+placed at compatible motif phases. This is a small graph with one variable
+repeat edge; bounded path expansion reuses the native candidate alignments.
+Substitutions and small indels are alignment differences, not a fully learned
+graph of complex multi-motif alleles.
+
+Recruited reads are reclassified against the learned flanks. An internal read
+spanning both repeat boundaries can establish length even without a complete
+primer-bounded contig. Full reconstructed products still undergo Sassy PCR.
+Graph estimates require informative length evidence; repeat-rich reads alone
+do not determine an exact traversal count. No depth-only estimator is applied
+to this selected read pool. Empirical or supplied fragment statistics remain
+necessary for fragment-based estimates.
+
+`sample_repeat_graphs.json` records motif candidates and support, learned arm
+sequences, graph structure, recruitment rounds, caps and stopping reasons.
+`sample_recruitment.tsv` records recruited pairs and witnesses for ambiguous
+assignments in each round. These files are created only when rescue runs.
 
 ## Evidence definitions
 
@@ -99,10 +146,10 @@ repeat count and measurement source; raw PCR matches remain available for audit.
 
 ## Haploid candidate fallback
 
-Only unresolved loci with rich panel templates receive candidate scoring.
-Synthetic products resize the panel repeat interval across a bounded range.
-Primer-only loci skip this fallback and remain unresolved if direct observation
-and local reconstruction cannot establish a complete product.
+Unresolved loci with rich panel templates or successfully learned sample
+graphs receive candidate scoring. Graph paths resize the repeat interval
+between observed arms across a bounded range. Primer-only loci without both
+learned boundaries remain unresolved if reconstruction cannot establish length.
 The range starts from panel bounds plus padding and observed repeat lower
 bounds, expands when probability reaches its edge, and stops at
 `--short-max-candidate-repeat-count` (default 100). Half-repeat states are
@@ -113,6 +160,9 @@ Each molecule contributes native alignment scores from its reads, a penalty
 for violating its observed repeat lower bound, and, for inward flank pairs,
 a Student-t fragment-length likelihood. Scores are summed in log space and
 normalized across candidates. No diploid model or component EM is involved.
+Graph loop counts and uncertainty intervals are converted to the same
+product-length calibration used for the reported MLVA allele; motif phase
+choices do not change the reported allele coordinates.
 Boundary-only and repeat-rich evidence supply bounds but cannot establish an
 exact count. A ceiling-truncated likelihood is not an exact call. Widely
 separated, substantially supported fragment clusters are marked `MIXED`
@@ -160,7 +210,9 @@ is an evidence score, not an externally calibrated error probability.
 
 ## Performance and limits
 
-FASTQs are never rescanned per locus. Recruitment uses bounded process batches;
+FASTQs are never rescanned per locus. Unresolved pools can trigger up to two
+additional combined passes, with early stopping when anchors do not change.
+Recruitment uses bounded process batches;
 local reconstruction runs after recruitment within the same thread allocation.
 Only recruited locus pools are retained, not the complete input FASTQ dataset.
 Identical reads share cached anchor/motif work. Graph complexity is deliberately
@@ -179,3 +231,8 @@ describe observed repeat variation without asserting unique genome coordinates. 
 confidence require validation on real microbial libraries.
 
 See [Illumina commands and validation](../workflows/illumina.md).
+
+The synthetic internal-read rescue benchmark can be run with
+`python scripts/benchmark_reconstruction.py --scenario rescue --molecules 10000 --threads 1 --output /tmp/mlvamaps-rescue`.
+It tests primer-only panels with missing internal reads and off-target
+background; it does not establish accuracy or throughput on real libraries.

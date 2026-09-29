@@ -197,9 +197,9 @@ class ShortReadRecruiter:
 _WORKER_RECRUITER = None
 
 
-def _initialize_worker(templates, sample_id, audit_fields, audit_mode, repeat_threshold):
+def _initialize_worker(templates, sample_id, audit_fields, audit_mode, repeat_threshold, recruiter=None):
     global _WORKER_RECRUITER
-    _WORKER_RECRUITER = ShortReadRecruiter(templates, sample_id, audit_fields, audit_mode, repeat_threshold)
+    _WORKER_RECRUITER = recruiter or ShortReadRecruiter(templates, sample_id, audit_fields, audit_mode, repeat_threshold)
 
 
 def _recruit_chunk(pairs):
@@ -207,7 +207,8 @@ def _recruit_chunk(pairs):
 
 
 def recruit_short_reads(pairs, templates, sample_id, threads=1, chunk_size=256,
-                        statistics=None, audit_fields=None, audit_mode="full", repeat_threshold=.7):
+                        statistics=None, audit_fields=None, audit_mode="full", repeat_threshold=.7,
+                        recruiter=None):
     """Yield ordered batches; at most two chunks per allocated CPU are queued."""
     if chunk_size < 1:
         raise ValueError("chunk_size must be positive")
@@ -227,13 +228,13 @@ def recruit_short_reads(pairs, templates, sample_id, threads=1, chunk_size=256,
         statistics["chunk_size"] = chunk_size
         statistics["audit_mode"] = audit_mode
     if workers <= 1:
-        recruiter = ShortReadRecruiter(templates, sample_id, audit_fields, audit_mode, repeat_threshold)
+        recruiter = recruiter or ShortReadRecruiter(templates, sample_id, audit_fields, audit_mode, repeat_threshold)
         for batch in chain(initial, batches):
             yield recruiter.recruit(batch)
         return
     # Batch samples already run in threads. Explicit spawn is safe there and
     # does not inherit BLAS/Sassy state from a multithreaded parent via fork.
     with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
-                             initializer=_initialize_worker, initargs=(templates, sample_id, audit_fields, audit_mode, repeat_threshold)) as executor:
+                             initializer=_initialize_worker, initargs=(templates, sample_id, audit_fields, audit_mode, repeat_threshold, recruiter)) as executor:
         yield from bounded_ordered_map(executor, _recruit_chunk, chain(initial, batches),
                                        max_pending=2 * workers)

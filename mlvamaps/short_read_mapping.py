@@ -113,6 +113,13 @@ def run_mapping_short_read_call(
                  "min_fraction": min_mixture_fraction, "min_secondary_reads": min_secondary_reads,
                  "minimum_spanning_pairs": short_min_spanning_pairs, "round_tolerance": round_tolerance,
                  "show_progress": show_progress, "stream_molecule_evidence": True}
+        if technology == 'illumina':
+            from functools import partial
+            from .short_read_qc import replay_filtered_pairs
+            extra['replay_pairs'] = partial(replay_filtered_pairs, reads1_path, reads2_path,
+                min_length=short_min_read_length, min_mean_quality=short_min_mean_quality,
+                trim_quality=short_trim_quality, min_pair_retention=short_min_pair_retention,
+                decompression_threads=tuple(io_plan['decoder_threads']))
         method = "targeted_locus_reconstruction" if technology == "illumina" else "spanning_molecules"
         if show_progress:
             print(f"[{sample_id}] Recovering loci using {method}", flush=True)

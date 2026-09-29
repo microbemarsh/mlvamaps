@@ -192,6 +192,26 @@ def run_reconstructed_fastq_inference(*, outdir, stream_molecule_evidence=False,
         output = Path(outdir)
         output.mkdir(parents=True, exist_ok=True)
         with ExitStack() as stack:
+            if kwargs.get('pairs') is not None and kwargs.get('replay_pairs') is None:
+                # Iterator-only API callers have no input path to replay.
+                # Spool to disk, never retain all background reads in memory.
+                import pickle
+                import tempfile
+                spool = stack.enter_context(tempfile.TemporaryFile())
+                original_pairs = kwargs['pairs']
+                def recording_pairs():
+                    for pair in original_pairs:
+                        pickle.dump(pair, spool, protocol=pickle.HIGHEST_PROTOCOL)
+                        yield pair
+                def replay_pairs():
+                    spool.seek(0)
+                    while True:
+                        try:
+                            pair = pickle.load(spool)
+                        except EOFError:
+                            break
+                        yield pair
+                kwargs.update(pairs=recording_pairs(), replay_pairs=replay_pairs)
             if stream_molecule_evidence:
                 handle = stack.enter_context((output / "molecule_candidate_evidence.tsv").open("w", newline=""))
                 writer = csv.DictWriter(handle, fieldnames=MOLECULE_AUDIT_FIELDS, delimiter="\t", extrasaction="ignore")
@@ -211,13 +231,18 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         insert_mean=None, insert_sd=None, orphan_path=None, min_fraction=.01, min_secondary_reads=2,
         max_anchor_edits=3, threads=1, minimum_spanning_pairs=2, round_tolerance=.25,
         show_progress=False, audit_writer=None, audit_handle=None, pairs=None,
-        recruitment_threads=None, sr_recruitment_audit="full", ambiguity_writer=None, repeat_threshold=.7, **_unused):
+        recruitment_threads=None, sr_recruitment_audit="full", ambiguity_writer=None, repeat_threshold=.7,
+        replay_pairs=None, **_unused):
     progress = ProgressReporter(enabled=show_progress, stream=sys.stdout)
     stage_seconds, recruitment_stats, locus_stats = {}, {}, {}
     output = Path(outdir)
     output.mkdir(parents=True, exist_ok=True)
     if pairs is None:
         pairs = read_fastq_pairs(reads1, reads2)
+        def replay_pairs():
+            yield from read_fastq_pairs(reads1, reads2)
+            if orphan_path:
+                yield from (ReadPair(r.read_id, r) for r in read_fastq(orphan_path))
     if orphan_path:
         from itertools import chain
         pairs = chain(pairs, (ReadPair(r.read_id, r) for r in read_fastq(orphan_path)))
@@ -274,7 +299,32 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                                   f"{recruitment_stats['ambiguous_pairs']:,} ambiguous; {rate:,.0f} pairs/s")
         stage_seconds["recruitment"] = time.perf_counter() - started
         recruitment_stats["pairs_per_second"] = recruitment_stats["pairs_examined"] / max(stage_seconds["recruitment"], 1e-9)
-        progress.step(f"[{sample_id}] Recruitment finished in {stage_seconds['recruitment']:.1f}s; fitting {len(loci)} loci")
+        progress.step(f"[{sample_id}] Primer recruitment finished in {stage_seconds['recruitment']:.1f}s")
+        from .targeted_reconstruction import direct_products, microassemble
+        def incomplete(name, items):
+            usable = [item for item in items if 'discordant' not in item.classes]
+            if not usable:
+                return False
+            observed = direct_products(usable, templates[name], sample_id, min_fraction, min_secondary_reads)
+            if observed and observed[0].reconstruction_confidence >= minimum_probability:
+                return False
+            return not microassemble(usable, templates[name])[0]
+        needs_rescue = any(incomplete(name, items) for name, items in list(evidence.items()))
+        if needs_rescue and replay_pairs is not None:
+            from .sample_reconstruction import recruit_sample_reads
+            started = time.perf_counter()
+            reconstruction_paths['sample_recruitment'] = output/'sample_recruitment.tsv'
+            with reconstruction_paths['sample_recruitment'].open('w', newline='') as handle:
+                writer = csv.writer(handle, delimiter='\t')
+                writer.writerow(['sample_id', 'round', 'molecule_id', 'state', 'locus_id', 'competing_locus'])
+                templates, sample_metadata = recruit_sample_reads(evidence, templates, replay_pairs, progress,
+                    sample_id, threads=recruitment_threads, audit_writer=writer)
+            stage_seconds['sample_recruitment'] = time.perf_counter()-started
+            recruitment_stats['sample_recruitment'] = sample_metadata
+            recruitment_stats['sample_recruited_pairs'] = sum(row['recruited'] for row in sample_metadata['rounds'])
+            recruitment_stats['final_uniquely_recruited_pairs'] = sum(map(len, evidence.values()))
+            reconstruction_paths['sample_repeat_graphs'] = output/'sample_repeat_graphs.json'
+            reconstruction_paths['sample_repeat_graphs'].write_text(json.dumps(sample_metadata, indent=2)+'\n')
         insert = estimate_insert_distribution(insert_lengths, insert_mean, insert_sd)
         from .targeted_reconstruction import recover_locus, EVIDENCE_CLASSES
         def fit_locus(locus):
@@ -283,6 +333,24 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             result = recover_locus(items, templates[locus.locus_id], sample_id, insert,
                 maximum_candidate_repeat_count, minimum_probability, minimum_spanning_pairs,
                 min_fraction, min_secondary_reads)
+            if len(result.states):
+                # Graph loop counts depend on the chosen motif phase/arm
+                # boundary. Export calibrated MLVA alleles, just as products
+                # do, rather than leaking that internal coordinate system.
+                from .repeat_calibration import assembly_equivalent_product_allele
+                target = templates[locus.locus_id]
+                calibrated = {float(n): assembly_equivalent_product_allele(locus,
+                    len(target.left)+len(target.right)+round(n*target.unit), round_tolerance)[0]
+                    for n in result.states}
+                if all(value is not None for value in calibrated.values()):
+                    result.states = np.asarray([calibrated[float(n)] for n in result.states])
+                    result.best = calibrated.get(result.best)
+                    result.second = calibrated.get(result.second)
+                    if result.interval:
+                        bounds = [value for n, value in calibrated.items() if result.interval[0] <= n <= result.interval[1]]
+                        result.interval = min(bounds), max(bounds)
+                    result.products = [replace(product, repeat_likelihoods={calibrated[n]: value
+                        for n, value in product.repeat_likelihoods.items()}) for product in result.products]
             locus_stats[locus.locus_id] = {"recovery_seconds": time.perf_counter()-started,
                 "evidence_molecules": len(items), "candidate_states": len(result.states), "call_method": result.method}
             return result
@@ -296,8 +364,8 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         progress.step(f"[{sample_id}] Measuring reconstructed loci with assembly Sassy PCR")
         pcr_started = time.perf_counter()
         from .local_assembly import measure_reconstructed_loci
-        reconstruction_paths = measure_reconstructed_loci(fitted, loci, output/'locus_reconstruction',
-            sample_id, max_anchor_edits, round_tolerance)
+        reconstruction_paths.update(measure_reconstructed_loci(fitted, loci, output/'locus_reconstruction',
+            sample_id, max_anchor_edits, round_tolerance))
         stage_seconds['reconstruction_sassy_pcr'] = time.perf_counter() - pcr_started
         for locus, result in zip(loci, fitted):
             locus_stats[locus.locus_id]['call_method'] = result.method

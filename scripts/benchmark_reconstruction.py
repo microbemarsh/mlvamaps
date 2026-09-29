@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
 import random
@@ -28,12 +28,16 @@ def make_inputs(output, molecules, scenario):
     loci, sequences = [], []
     for i in range(6):
         locus = Locus(f'L{i}', forward_primer=dna(20), reverse_primer=dna(20),
-            left_flank_sequence=dna(35), right_flank_sequence=dna(35), repeat_motif='AATG',
+            left_flank_sequence=dna(160 if scenario == 'rescue' else 35),
+            right_flank_sequence=dna(160 if scenario == 'rescue' else 35), repeat_motif='AATG',
             repeat_unit_length_bp=4, expected_max_repeats=15)
-        loci.append(locus)
-        repeat = (5+i) if scenario == 'direct' else (70+i)
+        repeat = (5+i) if scenario in ('direct', 'rescue') else (70+i)
         sequences.append(locus.forward_primer+locus.left_flank_sequence+'AATG'*repeat+
                          locus.right_flank_sequence+revcomp(locus.reverse_primer))
+        if scenario == 'rescue':
+            locus = replace(locus, left_flank_sequence='', right_flank_sequence='', repeat_motif='NNNN',
+                            expected_product_size_bp=len(sequences[-1]), nominal_repeat_units=repeat)
+        loci.append(locus)
     panel = output/'panel.tsv'
     with panel.open('w') as handle:
         writer = csv.DictWriter(handle, fieldnames=list(asdict(loci[0])), delimiter='\t')
@@ -45,6 +49,11 @@ def make_inputs(output, molecules, scenario):
             # Include off-target background, with no per-locus input rescans.
             seq = dna(400) if i % 4 == 3 else sequences[i % len(sequences)]
             r1, r2 = seq[:150], revcomp(seq[-150:])
+            if scenario == 'rescue' and i % 4 != 3:
+                r1, mate_sequence = ((seq[:120], seq[70:210]),
+                              (seq[-210:-70], seq[-120:]),
+                              (seq[140:-140], seq[145:-135]))[(i//6) % 3]
+                r2 = revcomp(mate_sequence)
             a.write(f'@r{i}/1\n{r1}\n+\n'+ 'I'*len(r1)+'\n')
             b.write(f'@r{i}/2\n{r2}\n+\n'+ 'I'*len(r2)+'\n')
     return first, second, panel
@@ -55,7 +64,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--molecules', type=int, default=10000)
     parser.add_argument('--threads', type=int, default=1)
-    parser.add_argument('--scenario', choices=['direct', 'unresolved'], default='direct')
+    parser.add_argument('--scenario', choices=['direct', 'unresolved', 'rescue'], default='direct')
     args = parser.parse_args()
     if args.molecules < 1 or args.threads < 1:
         parser.error('molecules and threads must be positive')
