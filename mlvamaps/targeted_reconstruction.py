@@ -38,11 +38,15 @@ class LocusRecovery:
 
 
 @lru_cache(maxsize=4096)
-def _overlaps(left, right, motif, minimum=20):
+def _overlaps(left, right, motif, minimum=20, unit=0):
     # Every valid offset is considered. A repeat-only overlap is incapable of
     # determining the number of traversals and must never stitch an allele.
+    # Without a supplied motif, require enough observed sequence to test two
+    # repeat units. Shorter overlaps cannot rule out a repeat-only join.
     return tuple(size for size in range(minimum, min(len(left), len(right)) + 1)
-                 if left[-size:] == right[:size] and not repetitive(left[-size:], motif))
+                 if left[-size:] == right[:size]
+                 and (bool(motif) or unit > 0 and size >= 2*unit)
+                 and not repetitive(left[-size:], motif or right[:unit]))
 
 
 def merge_molecule(item, template):
@@ -50,7 +54,7 @@ def merge_molecule(item, template):
         return ''
     i = item.orientations.index('+')
     left, right = item.sequences[i], item.sequences[1-i]
-    overlaps = _overlaps(left, right, template.motif)
+    overlaps = _overlaps(left, right, template.motif, unit=template.unit)
     if len(overlaps) != 1:
         return ''
     merged = left + right[overlaps[0]:]
@@ -149,7 +153,7 @@ def microassemble(items, template, insert=None, max_nodes=256, max_paths=64):
         for j, right in enumerate(nodes):
             if i == j:
                 continue
-            overlaps = _overlaps(left, right, template.motif)
+            overlaps = _overlaps(left, right, template.motif, unit=template.unit)
             if len(overlaps) == 1:
                 edges[i].append((j, overlaps[0]))
             elif len(overlaps) > 1:
@@ -296,6 +300,9 @@ def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_
             sequence, support_count=len(members), effective_depth=len(members), reconstruction_confidence=.99,
             evidence={'call_method': 'RECONSTRUCTED', 'meaningful': 'yes', 'molecule_ids': members})
         return LocusRecovery(products=[product], method='RECONSTRUCTED', confidence=.99, identifiable=True, counts=counts)
+    if template.primer_only:
+        return LocusRecovery(method='AMBIGUOUS', counts=counts,
+            reason='primer_only_no_complete_product:' + reason)
     result = candidate_likelihood(usable, template, insert, maximum, minimum_probability, context_templates)
     result.counts, result.reason = counts, result.reason or reason
     if counts.get('FLANK_PAIR', 0) < minimum_spanning_pairs:

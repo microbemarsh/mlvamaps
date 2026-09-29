@@ -99,7 +99,7 @@ Run it in the installed mlvamaps environment and within your CPU allocation:
 ```bash
 python scripts/benchmark_short_read_recruitment.py \
   --reads1 R1.fastq.gz --reads2 R2.fastq.gz --primers panel.tsv \
-  --database reference_build --pairs 10000 --threads 1 4 8 \
+  --pairs 10000 --threads 1 4 8 \
   --output recruitment_timing.json
 ```
 

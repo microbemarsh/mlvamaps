@@ -51,6 +51,12 @@ class ProductGenotype:
 
 def product_repeat_allele(product: LocusProduct, locus: Locus, tolerance: float | None = None):
     """Measure repeat count without computing an unused SNP haplotype."""
+    if (product.source_type == 'short_read'
+            and not (locus.left_flank_sequence and locus.right_flank_sequence)
+            and not (locus.expected_product_size_bp and locus.nominal_repeat_units)):
+        # Primer-only products contain unknown internal non-repeat sequence.
+        # Unit size alone cannot convert their total length into a repeat count.
+        return None, None
     return assembly_equivalent_product_allele(
         locus, product.calibrated_product_size_bp or len(product.sequence),
         product.round_tolerance if tolerance is None else tolerance,

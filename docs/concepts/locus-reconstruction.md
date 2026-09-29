@@ -8,11 +8,18 @@ same `LocusProduct` and `genotype_product` interpreter.
 ## Recruitment and mate rescue
 
 One streaming pass reads paired FASTQ, applies QC, and looks up both strands in
-a combined hash index of non-repeat flanks. The collection includes the panel
-and distinct database locus contexts, including natural repeat haplotypes.
+a combined hash index of panel anchors. Each locus contributes one panel
+template; reference database sequences never supply or expand these templates.
 Native SIMD flank alignments verify seed hits. A pair retains both mates even
 when only one has an anchor; the second mate need not map at all. Full and
 compact ambiguity audits are available with `--sr-recruitment-audit`.
+
+Legacy primer-only panels use full primer matches with up to two edits (capped
+for short primers), including IUPAC primer symbols. Mates without a primer are
+oriented using their anchored partner. Short or degenerate primers bypass the
+four-base seed filter when a valid match need not contain a concrete seed.
+Only complete observed products provide length calls for these panels;
+unknown internal flanks and motifs are not borrowed from reference sequences.
 
 Assignment uses only non-repeat anchor scores. Multiple contexts of one locus
 count as one competitor. A winning locus must exceed the runner-up by both 12
@@ -76,9 +83,10 @@ repeat traversal. No whole-genome assembly or external assembler is used.
 
 ## Haploid candidate fallback
 
-Only unresolved loci receive candidate scoring. Synthetic products resize
-repeat intervals across a bounded range, including counts absent from the
-database, with distinct natural sequence contexts marginalized at each length.
+Only unresolved loci with rich panel templates receive candidate scoring.
+Synthetic products resize the panel repeat interval across a bounded range.
+Primer-only loci skip this fallback and remain unresolved if direct observation
+and local reconstruction cannot establish a complete product.
 The range starts from panel bounds plus padding and observed repeat lower
 bounds, expands when probability reaches its edge, and stops at
 `--short-max-candidate-repeat-count` (default 100). Half-repeat states are

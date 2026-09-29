@@ -129,3 +129,25 @@ def test_canonical_short_read_pipeline_calls_recoverable_product(tmp_path):
     assert call["repeat_count"] == "4"
     assert call["mlva_method"] == "targeted_locus_reconstruction"
     assert not (tmp_path / "out" / "short_read_assembly_summary.tsv").exists()
+
+
+def test_legacy_primer_cli_calls_without_database(tmp_path, monkeypatch):
+    from mlvamaps.cli import main
+    def forbidden(*args, **kwargs):
+        pytest.fail('Database sequences requested by a primer-only call')
+    monkeypatch.setattr('mlvamaps.candidate_contexts._base_contexts', forbidden)
+    panel = tmp_path/'primers.tsv'
+    locus = _locus()
+    product = _product()
+    panel.write_text(f'L1_4bp_{len(product)}bp_4U\t{locus.forward_primer}\t{locus.reverse_primer}\n')
+    first, second = tmp_path/'r1.fq', tmp_path/'r2.fq'
+    _write_fastq(first, [(f'm{i}/1', product[:60]) for i in range(4)])
+    _write_fastq(second, [(f'm{i}/2', revcomp(product[-60:])) for i in range(4)])
+    out = tmp_path/'out'
+    assert main(['call', '-p', str(panel), '-i', 'sr', '--fq1', str(first), '--fq2', str(second),
+                 '-o', str(out), '--sample-id', 'legacy', '-t', '1']) == 0
+    with (out/'calls.tsv').open() as handle:
+        call = next(csv.DictReader(handle, delimiter='\t'))
+    assert call['repeat_count'] == '4'
+    assert call['call_method'] == 'DIRECT'
+    assert not list(out.glob('filtered*.fastq.gz'))

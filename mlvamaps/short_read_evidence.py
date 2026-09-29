@@ -8,6 +8,7 @@ import math
 
 import numpy as np
 import parasail
+import regex
 
 from .models import Locus, ReadPair
 from .sequence import revcomp
@@ -24,8 +25,11 @@ class RepeatTemplate:
     right: str
     motif: str
     unit: int
+    primer_only: bool = False
 
     def sequence(self, count: float) -> str:
+        if self.primer_only:
+            raise ValueError('Primer-only templates cannot synthesize unobserved locus sequence')
         length = round(count * self.unit)
         return self.left + (self.motif * math.ceil(length / len(self.motif)))[:length] + self.right
 
@@ -49,9 +53,8 @@ def primer_bounds(sequence: str, primer: str, start: int = 0):
     if position >= 0:
         return position, position+len(primer)
     if set(primer)-set('ACGT'):
-        from .locus_measurement import find_anchor
-        hit = find_anchor(primer, sequence, 2, start)
-        return (hit.start, hit.end) if hit else None
+        hit = _primer_hit(sequence[start:], primer)
+        return (start + hit.query_start, start + hit.query_end) if hit else None
     maximum_edits = min(2, max(1, len(primer)//5))
     hit = flank_hit(sequence[start:], primer, max(1, len(primer)-maximum_edits))
     if not hit:
@@ -294,10 +297,50 @@ def pair_has_anchor(pair: ReadPair, template: RepeatTemplate) -> bool:
 
 
 @lru_cache(maxsize=4096)
-def _oriented_anchors(sequence: str, motif: str, left_flank: str, right_flank: str):
+def _primer_hit(sequence: str, primer: str):
+    if not sequence or not primer:
+        return None
+    if not set(primer)-set('ACGT'):
+        exact = sequence.find(primer)
+        if exact >= 0:
+            return FlankHit(exact, exact+len(primer), 0, len(primer), 2*len(primer), 0)
+        # With k edits, one of k+1 disjoint primer pieces must be exact,
+        # including indels. Native substring searches reject most background.
+        pieces = min(2, max(1, len(primer)//5)) + 1
+        if not any(primer[i*len(primer)//pieces:(i+1)*len(primer)//pieces] in sequence
+                   for i in range(pieces)):
+            return None
+    pattern = _primer_pattern(primer)
+    best = None
+    # Separate concrete runs so an unknown read base cannot become a fuzzy
+    # wildcard match. Matching stays in-process, including degenerate primers.
+    for segment in regex.finditer('[ACGT]+', sequence):
+        hit = pattern.search(segment.group())
+        if hit:
+            candidate = (sum(hit.fuzzy_counts), segment.start()+hit.start(), segment.start()+hit.end())
+            if best is None or candidate < best:
+                best = candidate
+    if best is not None:
+        edits, start, end = best
+        return FlankHit(start, end, 0, len(primer), max(1, 2*len(primer)-6*edits), edits)
+
+
+@lru_cache(maxsize=256)
+def _primer_pattern(primer):
+    from .locus_measurement import _IUPAC
+    pattern = ''.join('[' + ''.join(sorted(_IUPAC.get(base, {base}))) + ']' for base in primer)
+    return regex.compile('(?:' + pattern + '){e<=' + str(min(2, max(1, len(primer)//5))) + '}', regex.BESTMATCH)
+
+
+@lru_cache(maxsize=4096)
+def _oriented_anchors(sequence: str, motif: str, left_flank: str, right_flank: str, primer_only=False):
     """Cache quality-independent anchors for scoring and final classification."""
     choices = []
     for strand, seq in (("+", sequence.upper()), ("-", revcomp(sequence))):
+        if primer_only:
+            left, right = _primer_hit(seq, left_flank), _primer_hit(seq, right_flank)
+            choices.append((sum(h.score for h in (left, right) if h), strand, seq, left, right, False))
+            continue
         is_repeat = repetitive(seq, motif)
         left = None if is_repeat else flank_hit(seq, left_flank)
         right = None if is_repeat else flank_hit(seq, right_flank)
@@ -322,7 +365,7 @@ def pair_anchor_score(pair: ReadPair, template: RepeatTemplate) -> int:
     for read in (pair.read1, pair.read2):
         if read is not None:
             _, _, _, left, right, _ = _oriented_anchors(
-                read.sequence, template.motif, template.left, template.right)
+                read.sequence, template.motif, template.left, template.right, template.primer_only)
             score += max(left.score if left else 0, right.score if right else 0)
     return score
 
@@ -337,7 +380,7 @@ def classify_pair(pair: ReadPair, template: RepeatTemplate, repeat_threshold: fl
     qualities = []
     for read in reads:
         _, strand, seq, left, right, is_repeat = _oriented_anchors(
-            read.sequence, template.motif, template.left, template.right)
+            read.sequence, template.motif, template.left, template.right, template.primer_only)
         oriented.append(seq)
         hits.append((left, right))
         strands.append(strand)
@@ -345,6 +388,24 @@ def classify_pair(pair: ReadPair, template: RepeatTemplate, repeat_threshold: fl
         repeat_only.append(is_repeat)
     if not any(left or right for left, right in hits):
         return None  # Repeat-only molecules cannot identify a microbial locus.
+    if template.primer_only:
+        if len(reads) == 2:
+            for i, j in ((0, 1), (1, 0)):
+                if not any(hits[i]) and any(hits[j]):
+                    strands[i] = '-' if strands[j] == '+' else '+'
+                    oriented[i] = revcomp(reads[i].sequence) if strands[i] == '-' else reads[i].sequence.upper()
+                    qualities[i] = reads[i].quality[::-1] if strands[i] == '-' and reads[i].quality else reads[i].quality
+        products = set()
+        for seq, quality, (left, right) in zip(oriented, qualities, hits):
+            if left and right and left.query_end <= right.query_start:
+                start, end = left.query_start, right.query_end
+                if quality is None or min(quality[start:end], default='I') >= '5':
+                    products.add(seq[start:end])
+        classes = ('discordant',) if len(products) > 1 else ('FULL_SPAN',) if products else ('UNINFORMATIVE',)
+        return MoleculeEvidence(pair.molecule_id, template.locus.locus_id, classes,
+            tuple(oriented), tuple(strands), product_sequence=next(iter(products)) if len(products) == 1 else '',
+            alignment={str(i): {side: vars(hit) if hit else None for side, hit in zip(('left', 'right'), pair_hits)}
+                       for i, pair_hits in enumerate(hits)}, qualities=tuple(qualities), template=template)
     classes = set()
     observed = []
     lower = 0.0

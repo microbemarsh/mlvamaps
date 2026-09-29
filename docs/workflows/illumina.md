@@ -5,13 +5,29 @@ There is one standard short-read pathway.
 
 ```bash
 mlvamaps call -i sr --fq1 sample_R1.fastq.gz --fq2 sample_R2.fastq.gz \
-  -p panel.tsv --database reference_db -o results -t 8
+  -p primers.tsv -o results -t 8
 mlvamaps call -p panel.tsv -i reads/ --short-reads -o results -t 8
 ```
 
-The database supplies competing biological contexts; a rich panel can also run
-without a database. Mate 2 is optional. Paired mates are recruited together,
-including repeat-rich mates without a flank alignment.
+No reference database is needed. Recruitment and reconstruction use only the
+supplied panel and observed reads, even when `--database` is supplied for later
+reference classification. Mate 2 is optional; recruited pairs retain both mates.
+
+Legacy three-column primer panels are supported, including names such as
+`vrrA_12bp_314bp_10U`. The name supplies repeat-unit length, nominal product
+length and nominal repeat count for the shared MLVA length calibration; those
+values may also be supplied as panel columns. Complete primer-bounded reads,
+uniquely overlapping pairs and uniquely reconstructed products can be called
+without knowing the motif or internal flank sequences.
+Without product-length calibration, recovered sequences are retained but their
+numeric repeat counts remain blank; repeat-unit size alone is insufficient.
+
+Primer-only loci remain unresolved when a complete product cannot be recovered.
+They do not use synthetic repeat candidates or treat the entire sequence
+between primers as a repeat tract. When the motif is unknown, overlaps must
+span at least two configured repeat units and pass an observed periodicity
+check. A rich panel with concrete motifs and repeat-boundary flanks additionally
+supports partial boundary evidence and the likelihood fallback below.
 
 1. Stream QC and competitive recruitment against a combined flank index.
 2. Classify spans, boundaries, flank pairs and anchored repeat-rich reads.
@@ -91,7 +107,7 @@ SRR000002\t/path/SRR000002.fastq.gz\t.\tSAMN000002
 ```bash
 mlvamaps call -p panel.tsv -i sr --manifest samples.tsv \
   --sample-metadata metadata.tsv \
-  --profiles profiles.tsv --database reference_build \
+  --profiles profiles.tsv \
   -o results -t 32
 ```
 
@@ -111,12 +127,12 @@ large samples or memory-constrained nodes:
 ```bash
 export MLVAMAPS_MAX_CONCURRENT_SAMPLES=2
 mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads \
-  --database reference_build -o results -t 32
+  -o results -t 32
 ```
 
 Completion order does not change combined output order. Within each sample,
-FASTQ/QC streams in bounded chunks and minimap2 performs the allocated
-multithreaded alignment. Progress reports sample/worker allocation and stage
+FASTQ/QC streams in bounded chunks and process workers recruit molecules
+against panel anchors. Progress reports sample/worker allocation and stage
 transitions unless `--quiet` is selected.
 
 For Slurm arrays, split the manifest by row while preserving its header and run
@@ -155,12 +171,12 @@ mlvamaps call -p examples/illumina_demo/panel.tsv \
 
 - **Different FASTQ counts or IDs:** regenerate mates together; do not sort one
   file independently.
-- **Many ambiguous pairs:** provide a reference build with longer, divergent
-  locus flanks and review similar loci in the panel.
+- **Many ambiguous pairs:** review similar primers in the panel. Where known,
+  provide longer, divergent locus flanks in a rich panel.
 - **Presence-only locus:** this is expected when neither reads nor the local
   graph resolve both boundaries. Do not replace the blank call with the
   expected-range midpoint.
-- **Database predates the context schema:** rebuild it with the current
-  `build-reference` command, or omit `--database` and provide a rich panel.
+- **Database predates the context schema:** omit `--database` for allele calling;
+  rebuild it only if reference classification is wanted.
 - **MYOGA row does not attach to a tip:** make `genome_id` exactly equal to the
   Newick label, including suffixes and case.

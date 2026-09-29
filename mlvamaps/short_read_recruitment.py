@@ -76,17 +76,23 @@ class ShortReadRecruiter:
         # Duplicate contexts share cached anchors already; a bound pass cannot
         # separate them and only adds overhead to full ambiguity audits.
         self.use_bounds = (len({(t.left, t.right) for t in self.templates}) > 3
-                           and len({t.locus.locus_id for t in self.templates}) == len(self.templates))
+                           and len({t.locus.locus_id for t in self.templates}) == len(self.templates)
+                           and not any(t.primer_only for t in self.templates))
         self.sample_id = sample_id
         self.repeat_threshold = repeat_threshold
         self.audit_fields = audit_fields
         self.audit_mode = audit_mode
         self.all_candidates = (1 << len(self.templates)) - 1
         self.seeds: dict[str, int] = {}
+        self.unseeded_candidates = 0
         # Bit masks replace repeated set unions without lengthening seeds or
         # losing the short/error-bearing anchors accepted by the original code.
         for index, template in enumerate(self.templates):
             for flank in (template.left, template.right):
+                # Full primer matches with at most two edits guarantee a
+                # concrete four-base seed only for sufficiently long primers.
+                if template.primer_only and (len(flank) < 12 or set(flank)-set('ACGT')):
+                    self.unseeded_candidates |= 1 << index
                 for position in range(len(flank) - 3):
                     seed = flank[position:position + 4]
                     self.seeds[seed] = self.seeds.get(seed, 0) | (1 << index)
@@ -98,7 +104,7 @@ class ShortReadRecruiter:
                                      delimiter="\t", extrasaction="ignore") if audit_buffer is not None else None
         for pair in pairs:
             result.examined += 1
-            candidates = 0
+            candidates = self.unseeded_candidates
             reads = (pair.read1, pair.read2) if pair.read2 else (pair.read1,)
             for read in reads:
                 for sequence in (read.sequence.upper(), revcomp(read.sequence)):

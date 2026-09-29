@@ -183,14 +183,138 @@ def test_conflicting_singleton_lengths_withhold_precise_call(template):
     assert result.confidence < .8
 
 
-def test_database_natural_motif_and_flanks_are_retained(tmp_path, template):
-    from mlvamaps.locus_reconstruction import recruitment_templates
-    natural = template.sequence(8)
-    natural = natural[:110]+'C'+natural[111:]
-    (tmp_path/'L.fasta').write_text('>known\n'+natural+'\n')
-    contexts = recruitment_templates([template.locus], tmp_path, {'L': template})
-    assert any(t.sequence(8) == natural for t in contexts.values())
-    assert len(contexts) == 2
+@pytest.mark.parametrize('primer_only', [False, True])
+def test_reconstruction_never_loads_database_sequences(tmp_path, template, monkeypatch, primer_only):
+    from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
+    import json
+    locus = template.locus
+    if primer_only:
+        locus = replace(locus, left_flank_sequence='', right_flank_sequence='', repeat_motif='NNNN',
+                        expected_product_size_bp=len(template.sequence(8)), nominal_repeat_units=8)
+    def forbidden(*args, **kwargs):
+        pytest.fail('Illumina recovery accessed database sequences')
+    monkeypatch.setattr('mlvamaps.candidate_contexts._base_contexts', forbidden)
+    results = []
+    for index, database in enumerate((None, tmp_path/'absent_database')):
+        result = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+            pairs=iter([pair(template.sequence(12), name=str(i)) for i in range(3)]),
+            loci=[locus], database_path=database, outdir=tmp_path/str(index), sample_id='s',
+            technology='illumina', minimum_molecules=2, minimum_probability=.8)
+        results.append(result[0])
+        metadata = json.loads(result[3]['reconstruction_metadata'].read_text())
+        assert metadata['performance']['recruitment']['template_source'] == 'locus_panel'
+        assert metadata['performance']['recruitment']['template_contexts'] == 1
+    assert results[0] == results[1]
+    assert results[0][0]['repeat_count'] == 12
+
+
+@pytest.mark.parametrize('scenario', ['span', 'overlap', 'reconstruct', 'repeat_only', 'unlinked'])
+def test_legacy_primer_only_recovery(template, scenario, monkeypatch):
+    from mlvamaps.locus_reconstruction import locus_templates
+    from mlvamaps.primers import _locus_from_primer_row
+    locus = _locus_from_primer_row('L_4bp_232bp_8U', template.locus.forward_primer,
+                                   template.locus.reverse_primer)
+    target = locus_templates([locus])[locus.locus_id]
+    sequence = template.sequence(12)
+    cases = {
+        'span': [(sequence, None)],
+        'overlap': [(sequence[:170], revcomp(sequence[70:]))],
+        # Only the first mate in each pair has a primer. Rescued mates bridge
+        # the gap using observed unique overlaps outside the repeat tract.
+        'reconstruct': [(sequence[:80], revcomp(sequence[50:160])),
+                        (revcomp(sequence[180:]), sequence[135:205])],
+        'repeat_only': [(template.sequence(80)[:150], revcomp(template.sequence(80)[-150:]))],
+        'unlinked': [(sequence[:70], revcomp(sequence[-70:]))],
+    }
+    def forbidden(*args, **kwargs):
+        pytest.fail('Primer-only reads must not synthesize a candidate repeat interval')
+    monkeypatch.setattr('mlvamaps.targeted_reconstruction.candidate_likelihood', forbidden)
+    pairs = [pair(a, b, str(i)) for i, (a, b) in enumerate(cases[scenario]*3)]
+    chunk = ShortReadRecruiter({locus.locus_id: target}, 's', audit_mode='compact').recruit(pairs)
+    assert len(chunk.evidence) == len(pairs)
+    insert = InsertDistribution(300, 10, 0, 'override') if scenario in ('repeat_only', 'unlinked') else None
+    result = recover_locus(chunk.evidence, target, 's', insert=insert)
+    if scenario in ('repeat_only', 'unlinked'):
+        assert result.method == 'AMBIGUOUS'
+        assert not result.products and not len(result.states)
+        assert result.reason.startswith('primer_only_no_complete_product')
+    else:
+        assert result.method == ('RECONSTRUCTED' if scenario == 'reconstruct' else 'DIRECT')
+        assert result.products[0].sequence == sequence
+        assert genotype_product(result.products[0], locus).repeat_count == 12
+
+
+
+@pytest.mark.parametrize('unit', [0, 4])
+def test_primer_only_without_length_calibration_preserves_sequence_but_not_count(tmp_path, template, unit):
+    from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
+    import csv
+    locus = replace(template.locus, left_flank_sequence='', right_flank_sequence='',
+                    repeat_motif='', repeat_unit_length_bp=unit)
+    calls, _, _, paths = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+        pairs=iter([pair(template.sequence(8), name=str(i)) for i in range(3)]),
+        loci=[locus], database_path=None, outdir=tmp_path, sample_id='s',
+        technology='illumina', minimum_molecules=2, minimum_probability=.8)
+    assert calls[0]['status'] == 'detected_unresolved'
+    assert calls[0]['repeat_count'] == calls[0]['candidate_distribution'] == ''
+    with paths['reconstructed_locus_variants'].open() as handle:
+        product = next(csv.DictReader(handle, delimiter='\t'))
+    assert product['sequence'] == template.sequence(8)
+    assert product['repeat_count'] == ''
+
+
+@pytest.mark.parametrize('primer,sequence', [('ACGTACGA', 'ACTTACGA'), ('ARYTACGTARYT', 'AGCTACGTAGCT')])
+def test_short_and_degenerate_primer_matches_survive_seed_filter(primer, sequence, monkeypatch):
+    from mlvamaps.locus_reconstruction import locus_templates
+    def forbidden(*args, **kwargs):
+        pytest.fail('Recruitment must not launch an external primer matcher')
+    monkeypatch.setattr('mlvamaps.locus_measurement.find_anchor', forbidden)
+    target = locus_templates([Locus('L', forward_primer=primer, reverse_primer='CCGTGGTCCGTT')])['L']
+    reads = [pair(sequence, name=str(i)) for i in range(5)]
+    expected = [classify_pair(p, target) for p in reads]
+    assert all(expected)
+    from mlvamaps.short_read_recruitment import recruit_short_reads
+    for threads in (1, 2):
+        chunks = list(recruit_short_reads(reads, {'L': target}, 's', threads=threads, chunk_size=2))
+        assert [item for chunk in chunks for item in chunk.evidence] == expected
+
+
+@pytest.mark.parametrize('change', ['mismatch', 'insertion', 'deletion', 'unknown'])
+def test_primer_only_matching_accepts_indels_but_not_unknown_bases(template, change):
+    from mlvamaps.short_read_evidence import _primer_hit
+    primer = template.locus.forward_primer
+    altered = {
+        'mismatch': primer[:8] + next(b for b in 'ACGT' if b != primer[8]) + primer[9:],
+        'insertion': primer[:8] + 'C' + primer[8:],
+        'deletion': primer[:8] + primer[9:],
+        'unknown': primer[:8] + 'N' + primer[9:],
+    }[change]
+    hit = _primer_hit('GGG' + altered + 'TTT', primer)
+    if change == 'unknown':
+        assert hit is None
+    else:
+        assert hit is not None and hit.edits == 1
+        assert hit.query_start == 3 and hit.query_end == 3 + len(altered)
+
+
+def test_primer_seed_prefilter_retains_matches_at_edit_limit():
+    from mlvamaps.short_read_evidence import _primer_hit
+    rng = random.Random(461)
+    for length in (8, 12, 20, 31):
+        for trial in range(30):
+            primer = ''.join(rng.choices('ACGT', k=length))
+            sequence = primer
+            errors = min(2, max(1, length//5))
+            for _ in range(errors):
+                position = rng.randrange(len(sequence))
+                if trial % 3 == 0:
+                    sequence = sequence[:position] + sequence[position+1:]
+                elif trial % 3 == 1:
+                    sequence = sequence[:position] + rng.choice('ACGT') + sequence[position:]
+                else:
+                    sequence = sequence[:position] + rng.choice('ACGT') + sequence[position+1:]
+            hit = _primer_hit(sequence, primer)
+            assert hit is not None and hit.edits <= errors
 
 
 def test_reconstruction_failure_cleans_temporary_fastqs(tmp_path, template, monkeypatch):

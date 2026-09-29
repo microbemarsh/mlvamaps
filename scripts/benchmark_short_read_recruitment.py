@@ -3,7 +3,7 @@
 
 Example (run in the installed mlvamaps environment):
   python scripts/benchmark_short_read_recruitment.py --reads1 R1.fq.gz \
-    --reads2 R2.fq.gz --primers panel.tsv --database reference_build \
+    --reads2 R2.fq.gz --primers panel.tsv \
     --pairs 10000 --threads 1 4 8 --output recruitment_timing.json
 
 This benchmarks recruitment, not QC, repeat inference, classification or reports.
@@ -27,11 +27,11 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mlvamaps.io import read_fastq_pairs
-from mlvamaps.locus_reconstruction import locus_templates, recruitment_templates
+from mlvamaps.locus_reconstruction import locus_templates
 from mlvamaps.primers import read_loci_or_primers
 from mlvamaps.short_read_evidence import (
     _cyclic_search_text, _flank_profile, _motif_phases, _oriented_anchors,
-    _primitive_motif, _read_profile, flank_hit, flank_score_bound, read_anchor_bound, cyclic_match, repeat_fraction, primer_product, primer_bounds,
+    _primitive_motif, _primer_hit, _primer_pattern, _read_profile, flank_hit, flank_score_bound, read_anchor_bound, cyclic_match, repeat_fraction, primer_product, primer_bounds,
 )
 from mlvamaps.short_read_recruitment import recruit_short_reads
 from mlvamaps.short_reads import qc_read_pairs
@@ -48,7 +48,7 @@ def benchmark(pairs, templates, threads, audit_mode="compact"):
     # Prevent an earlier serial run from warming the next one's caches.
     for function in (_cyclic_search_text, _motif_phases, _primitive_motif, _read_profile,
                      _flank_profile, flank_hit, flank_score_bound, read_anchor_bound,
-                     _oriented_anchors, cyclic_match, repeat_fraction, primer_product, primer_bounds):
+                     _oriented_anchors, _primer_hit, _primer_pattern, cyclic_match, repeat_fraction, primer_product, primer_bounds):
         function.cache_clear()
     digest = hashlib.sha256()
     audit_digest = hashlib.sha256()
@@ -83,14 +83,13 @@ def main():
     panel = parser.add_mutually_exclusive_group(required=True)
     panel.add_argument('--primers')
     panel.add_argument('--loci')
-    parser.add_argument('--database')
     parser.add_argument('--pairs', type=positive_int, default=10000)
     parser.add_argument('--threads', type=positive_int, nargs='+', default=[1, 4])
     parser.add_argument('--audit-modes', choices=['compact', 'full'], nargs='+', default=['full', 'compact'])
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     loci = read_loci_or_primers(args.loci, args.primers)
-    templates = recruitment_templates(loci, args.database, locus_templates(loci, args.database))
+    templates = locus_templates(loci)
     pairs, qc = qc_read_pairs(list(islice(read_fastq_pairs(args.reads1, args.reads2), args.pairs)),
                              min_length=40, min_mean_quality=15, trim_quality=0, min_pair_retention=.5)
     results = []

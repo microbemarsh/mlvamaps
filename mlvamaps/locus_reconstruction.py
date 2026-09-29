@@ -26,45 +26,21 @@ from .short_read_evidence import (
 from .sequence import revcomp
 
 
-def locus_templates(loci, database_path=None):
-    """Prefer rich panels; borrow sequence context only for incomplete panels."""
-    templates = {l.locus_id: panel_template(l) for l in loci}
-    missing = [l for l in loci if templates[l.locus_id] is None]
-    if missing and database_path:
-        from .candidate_contexts import _base_contexts, _repeat_template
-        contexts = _base_contexts(missing, database_path)
-        by_id = {l.locus_id: l for l in loci}
-        for context in contexts:
-            if templates[context.locus_id] is not None:
-                continue
-            locus = by_id[context.locus_id]
-            motif = _repeat_template(context, locus)
-            if motif and context.repeat_unit_length:
-                templates[locus.locus_id] = RepeatTemplate(
-                    locus, context.sequence[:context.repeat_start], context.sequence[context.repeat_end:],
-                    motif, context.repeat_unit_length,
-                )
+def locus_templates(loci):
+    """Build Illumina anchors exclusively from the supplied locus panel."""
+    from .repeat_calibration import repeat_unit_length
+    templates = {}
+    for locus in loci:
+        template = panel_template(locus)
+        if template is None:
+            if not locus.forward_primer or not locus.reverse_primer:
+                raise ValueError(f"Illumina primer-only reconstruction requires both primers for {locus.locus_id}")
+            motif = locus.repeat_motif.upper()
+            template = RepeatTemplate(locus, locus.forward_primer, revcomp(locus.reverse_primer),
+                motif if motif and not set(motif)-set('ACGT') else '', repeat_unit_length(locus),
+                primer_only=True)
+        templates[locus.locus_id] = template
     return templates
-
-
-def recruitment_templates(loci, database_path, templates):
-    """One combined context collection; duplicate haplotypes do not gain votes."""
-    result = {name: t for name, t in templates.items() if t is not None}
-    if database_path:
-        from .candidate_contexts import _base_contexts, _repeat_template
-        by_id = {l.locus_id: l for l in loci}
-        seen = {(t.locus.locus_id, t.left, t.right, t.motif) for t in result.values()}
-        for context in _base_contexts(loci, database_path):
-            locus = by_id[context.locus_id]
-            from .short_read_evidence import _primitive_motif
-            observed = context.sequence[context.repeat_start:context.repeat_end]
-            motif = _primitive_motif(observed) if observed and not set(observed)-set('ACGT') else _repeat_template(context, locus)
-            key = (locus.locus_id, context.sequence[:context.repeat_start],
-                   context.sequence[context.repeat_end:], motif)
-            if motif and context.repeat_unit_length and key not in seen:
-                result[f"context:{len(result)}"] = RepeatTemplate(locus, key[1], key[2], motif, context.repeat_unit_length)
-                seen.add(key)
-    return result
 
 
 def recover_long_reads(pairs, loci, sample_id, min_fraction=0.01, min_secondary_reads=2,
@@ -174,9 +150,14 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
     if inference and inference.method == "MIXED":
         status = "mixed"
     repeat = product_repeat_allele(best, locus)[1] if best else ""
+    if repeat is None:
+        repeat = ""
+        status = "detected_unresolved"
     count_distribution = defaultdict(float)
     for product in ranked:
-        count_distribution[product_repeat_allele(product, locus)[1]] += product.estimated_fraction
+        count = product_repeat_allele(product, locus)[1]
+        if count is not None:
+            count_distribution[count] += product.estimated_fraction
     counts = inference.counts if inference else {"FULL_SPAN": sum(p.support_count for p in ranked)}
     return {"sample": sample_id, "locus": locus.locus_id, "technology": technology,
             "repeat_count": repeat, "status": status, "best_probability": confidence,
@@ -250,13 +231,15 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
     else:
         progress.step(f"[{sample_id}] Loading repeat templates for {len(loci)} loci")
         started = time.perf_counter()
-        templates = locus_templates(loci, database_path)
-        contexts = recruitment_templates(loci, database_path, templates)
+        templates = locus_templates(loci)
         stage_seconds["template_loading"] = time.perf_counter() - started
+        recruitment_stats["template_contexts"] = len(templates)
+        recruitment_stats["template_source"] = "locus_panel"
+        recruitment_stats["primer_only_loci"] = [name for name, t in templates.items() if t.primer_only]
         recruitment_stats["template_motif_lengths"] = {
             name: len(template.motif) for name, template in templates.items() if template is not None
         }
-        progress.step(f"[{sample_id}] Repeat templates loaded in {stage_seconds['template_loading']:.1f}s")
+        progress.step(f"[{sample_id}] Repeat templates loaded in {stage_seconds['template_loading']:.1f}s; {len(templates):,} panel templates (no reference database sequences)")
         evidence = defaultdict(list)
         insert_lengths = []
         from .short_read_recruitment import recruit_short_reads
@@ -265,7 +248,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         started = time.perf_counter()
         recruitment_stats.update(pairs_examined=0, locus_tests=0, uniquely_recruited_pairs=0,
                                  ambiguous_pairs=0, unmatched_pairs=0, skipped_locus_tests=0)
-        for chunk in recruit_short_reads(pairs, contexts, sample_id, recruitment_threads, statistics=recruitment_stats,
+        for chunk in recruit_short_reads(pairs, templates, sample_id, recruitment_threads, statistics=recruitment_stats,
                                         audit_fields=MOLECULE_AUDIT_FIELDS if audit_handle is not None else None,
                                         audit_mode=sr_recruitment_audit, repeat_threshold=repeat_threshold):
             recruitment_stats["pairs_examined"] += chunk.examined
@@ -297,8 +280,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             items = evidence[locus.locus_id]
             result = recover_locus(items, templates[locus.locus_id], sample_id, insert,
                 maximum_candidate_repeat_count, minimum_probability, minimum_spanning_pairs,
-                min_fraction, min_secondary_reads,
-                context_templates=[t for t in contexts.values() if t.locus.locus_id == locus.locus_id])
+                min_fraction, min_secondary_reads)
             locus_stats[locus.locus_id] = {"recovery_seconds": time.perf_counter()-started,
                 "evidence_molecules": len(items), "candidate_states": len(result.states), "call_method": result.method}
             return result
@@ -330,7 +312,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 "effective_depth": len(usable), "limit_reached": result.limit_reached,
                 "read_length": float(np.median(read_lengths)) if read_lengths else '',
                 "motif_length": template.unit if template else '', "amplicon_length": product_length or '',
-                "vntr_length": product_length-len(template.left)-len(template.right) if product_length and template else '',
+                "vntr_length": product_length-len(template.left)-len(template.right) if product_length and template and not template.primer_only else '',
                 "amplicon_insert_ratio": product_length/insert.mean if product_length and insert else '',
                 "reason": result.reason})
             likelihood_rows.extend({"sample_id": sample_id, "locus_id": locus.locus_id,

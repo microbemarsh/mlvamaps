@@ -29,6 +29,14 @@ Recovered sequence uses the shared repeat/SNP interpreter. A bounded haploid
 candidate likelihood fallback handles unresolved loci; reference classification
 is performed separately after measurement.
 
+Illumina allele calling needs no reference database, including with legacy
+three-column primer panels (`locus_id forward_primer reverse_primer`). Names
+such as `vrrA_12bp_314bp_10U` provide product-length calibration. Primer-only
+calls use complete observed or locally reconstructed products; unresolved
+lengths stay uncalled. Rich panels additionally enable repeat-boundary evidence
+and candidate inference. Reference database sequences are never used for
+Illumina recruitment or reconstruction.
+
 The evidence hierarchy is **direct → reconstructed → inferred**, with explicit
 ambiguous, no-call and mixed outcomes. There is one short-read pathway. The
 long-read default remains `--lr-engine spanning`. See the [Illumina workflow](docs/workflows/illumina.md)
@@ -224,9 +232,9 @@ mlvamaps call \
 
 Current databases store reusable `competitive_mapping/candidate_contexts.fasta`,
 `candidate_metadata.tsv`, short/long minimap2 indexes, and a broad real-genome
-Deacon recruitment index. A rich panel may still be used without a
-database; bounded contexts are then synthesized from its primers, flanks,
-repeat motif, expected range, and observed database states when available.
+Deacon recruitment index. These resources support optional reference
+classification. Illumina allele recovery uses the supplied primer/locus panel
+and reads independently of these database sequences.
 
 For a multi-taxid build, that command automatically loads the saved panel and
 taxon metadata, then identifies the closest reference IDs with taxon annotations. No separate panel,
