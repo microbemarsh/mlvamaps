@@ -136,6 +136,41 @@ def test_bit_mask_seed_filter_preserves_exhaustive_matches():
     assert [(row['molecule_id'],row['locus_id']) for row in chunk.ambiguous] == expected_ambiguous
 
 
+def test_disjoint_primer_seeds_preserve_exhaustive_edit_and_strand_matches():
+    from mlvamaps.locus_reconstruction import locus_templates
+    rng = random.Random(859)
+    primers = [''.join(rng.choices('ACGT', k=n)) for n in (21, 23, 25)]
+    primers += ['ACGTACGT', 'ACGTACGTRCGTACGTACGTA']
+    loci = [Locus(str(i), forward_primer=p, reverse_primer=p,
+                  repeat_unit_length_bp=9) for i, p in enumerate(primers)]
+    ts = locus_templates(loci)
+    pairs = []
+    for primer in primers:
+        primer = primer.replace('R', 'A')
+        variants = [primer]
+        for first, second in ((0, 1), (5, 6), (6, 14), (19, 20)):
+            if second >= len(primer):
+                continue
+            changed = list(primer)
+            for i in (first, second):
+                changed[i] = next(b for b in 'ACGT' if b != changed[i])
+            variants.extend((''.join(changed), primer[:first]+primer[first+1:second]+primer[second+1:],
+                             primer[:first]+'A'+primer[first:second]+'C'+primer[second:]))
+        for sequence in variants:
+            for oriented in (sequence, revcomp(sequence)):
+                name = str(len(pairs))
+                pairs.append(ReadPair(name, ReadRecord(name, 'TTGCA'+oriented+'CCGTA')))
+    pairs += [ReadPair(f'noise{i}', ReadRecord(f'noise{i}', ''.join(rng.choices('ACGTN', k=150))))
+              for i in range(100)]
+    screened = ShortReadRecruiter(ts, 's')
+    exhaustive = ShortReadRecruiter(ts, 's')
+    exhaustive.unseeded_candidates = exhaustive.all_candidates
+    assert screened.seed_size == 7
+    actual, expected = asdict(screened.recruit(pairs)), asdict(exhaustive.recruit(pairs))
+    assert actual.pop('locus_tests') < expected.pop('locus_tests')
+    assert actual == expected
+
+
 @pytest.mark.parametrize('audit_mode', ['full', 'compact'])
 def test_parallel_recruitment_is_ordered_and_matches_serial(audit_mode):
     pairs = list(reads())

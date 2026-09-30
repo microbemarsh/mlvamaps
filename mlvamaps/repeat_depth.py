@@ -9,6 +9,9 @@ from collections import Counter, defaultdict, deque
 from functools import lru_cache
 from itertools import islice
 import math
+import time
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import regex
@@ -137,27 +140,39 @@ def _encoded_kmers(sequence, k):
     return codes[invalid[k:] == invalid[:-k]]
 
 
-@lru_cache(maxsize=8)
 def _depth_targets(keys, k):
     # A/C/G/T lexical order is also two-bit numeric order.
-    return _encoded_kmers(b'N'.join(key.encode('ascii') for key in keys), k)
+    bases = np.frombuffer(''.join(keys).encode('ascii').translate(_DNA_CODES),
+                          dtype=np.uint8).reshape(-1, k)
+    codes = np.zeros(len(keys), dtype=np.uint64)
+    for offset in range(k):
+        np.left_shift(codes, 2, out=codes)
+        np.bitwise_or(codes, bases[:, offset], out=codes)
+    return codes
+
+
+@lru_cache(maxsize=2)
+def _depth_index(paths):
+    # Unique temporary paths isolate samples and rounds. Each process attaches
+    # once; the OS shares read-only pages instead of copying the index per task.
+    return {k: np.load(path, mmap_mode='r', allow_pickle=False) for k, path in paths}
 
 
 def _count_depth_chunk(task):
-    pairs, wanted = task
-    minimum = min(wanted)
+    pairs, paths = task
+    targets_by_k = _depth_index(paths)
+    minimum = min(targets_by_k)
     sequence = b'N'.join(segment.encode('ascii') for pair in pairs
         for read in (pair.read1, pair.read2) if read is not None
         for segment in _segments(read.sequence.upper(), read.quality, minimum))
-    counts = Counter()
-    for k, keys in wanted.items():
-        targets = _depth_targets(keys, k)
+    counts = {}
+    for k, targets in targets_by_k.items():
         codes = _encoded_kmers(sequence, k)
         offsets = np.searchsorted(targets, codes)
         np.minimum(offsets, len(targets)-1, out=offsets)
         matched = offsets[targets[offsets] == codes]
-        hits = np.bincount(matched, minlength=len(targets))
-        counts.update({keys[i]: int(hits[i]) for i in np.flatnonzero(hits)})
+        # Work scales with this batch's hits, not the entire graph index.
+        counts[k] = np.unique(matched, return_counts=True)
     return len(pairs), counts
 
 
@@ -189,25 +204,32 @@ def estimate_graph_lengths(recoveries, loci, templates, evidence, replay_pairs,
     wanted = {k: tuple(sorted(keys)) for k, keys in wanted.items()}
     counts = Counter()
     if progress:
-        progress.step(f'[{sample_id}] Estimating {len(graphs)} unresolved locus lengths from whole-input k-mer depth')
-    iterator = iter(replay_pairs())
-    def chunks():
-        while chunk := list(islice(iterator, 1024)):
-            yield chunk, wanted
-    try:
-        # Reuse idle locus processes, retaining one bounded chunk per CPU.
-        # The parent alone reads the input; workers return only target counts.
-        results = (bounded_ordered_map(locus_executor, _count_depth_chunk, chunks(), resolve_threads(threads))
-                   if locus_executor else map(_count_depth_chunk, chunks()))
-        examined = 0
-        for size, hits in results:
-            examined += size
-            counts.update(hits)
-            if progress:
-                progress.count(f'[{sample_id}] Read pairs counted for repeat depth', examined)
-    finally:
-        if hasattr(iterator, 'close'):
-            iterator.close()
+        progress.step(f'[{sample_id}] Estimating {len(graphs)} unresolved locus lengths from whole-input k-mer depth; '
+                      f'{sum(map(len, wanted.values())):,} target k-mers in a shared native index')
+    started = time.perf_counter()
+    with TemporaryDirectory(prefix='mlvamaps-depth-') as temporary:
+        paths = tuple((k, str(Path(temporary)/f'{k}.npy')) for k in wanted)
+        for k, path in paths:
+            np.save(path, _depth_targets(wanted[k], k), allow_pickle=False)
+        iterator = iter(replay_pairs())
+        def chunks():
+            while chunk := list(islice(iterator, 1024)):
+                yield chunk, paths
+        try:
+            results = (bounded_ordered_map(locus_executor, _count_depth_chunk, chunks(), resolve_threads(threads))
+                       if locus_executor else map(_count_depth_chunk, chunks()))
+            examined = 0
+            for size, hits in results:
+                examined += size
+                for k, (positions, multiplicities) in hits.items():
+                    counts.update({wanted[k][i]: int(n) for i, n in zip(positions, multiplicities)})
+                if progress:
+                    progress.count(f'[{sample_id}] Read pairs counted for repeat depth', examined,
+                                   detail=f'{examined/max(time.perf_counter()-started, 1e-9):,.0f} pairs/s')
+        finally:
+            if hasattr(iterator, 'close'):
+                iterator.close()
+            _depth_index.cache_clear()
     owners = Counter(e for g in graphs.values() for e in {min(e, revcomp(e)) for e in g['edges']})
     for locus, recovery in zip(loci, recoveries):
         name = locus.locus_id

@@ -9,6 +9,7 @@ from functools import lru_cache
 from os.path import commonprefix
 import time
 
+import numpy as np
 import regex
 
 from .concurrency import bounded_ordered_map, resolve_threads
@@ -16,6 +17,7 @@ from .models import ReadPair, ReadRecord
 from .sequence import revcomp
 from .short_read_evidence import MoleculeEvidence, RepeatTemplate, classify_pair, cyclic_match, primer_bounds
 from .targeted_reconstruction import _overlaps, _pileup_consensuses, _pileup_sequences
+from .repeat_depth import _DNA_CODES
 
 
 def reliable_sequences(items):
@@ -224,13 +226,14 @@ class SampleRecruiter:
                     entry = self.index[key]
                     previous = entry.get(locus_id, strand)
                     entry[locus_id] = strand if previous == strand else '?'
+        self.seed_keys = np.array(sorted(self.index), dtype=np.uint64)
 
-    def recruit_pair(self, pair):
+    def recruit_pair(self, pair, seeds=None):
         hits = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: [0, 0])))
         reads = [pair.read1] + ([pair.read2] if pair.read2 else [])
         for i, read in enumerate(reads):
             sequence = read.sequence.upper()
-            for start, key, strand in _kmers(sequence, read.quality):
+            for start, key, strand in (_kmers(sequence, read.quality) if seeds is None else seeds[i]):
                 for locus_id, target_strand in self.index.get(key, {}).items():
                     if target_strand != '?':
                         orientation = '+' if strand == target_strand else '-'
@@ -270,12 +273,50 @@ class SampleRecruiter:
         return item, []
 
 
+    def _matching_seeds(self, reads):
+        """Batch canonical seed lookup in NumPy; return only indexed hits."""
+        hits = defaultdict(list)
+        if not len(self.seed_keys) or not reads:
+            return hits
+        sequence = 'N'.join(read.sequence.upper() for read in reads).encode('ascii', 'replace')
+        quality = '!'.join(read.quality if read.quality is not None else 'I'*len(read.sequence)
+                           for read in reads).encode('ascii', 'replace')
+        size = len(sequence)-20
+        if size <= 0:
+            return hits
+        bases = np.frombuffer(sequence.translate(_DNA_CODES), dtype=np.uint8)
+        invalid = np.concatenate(([0], np.cumsum((bases > 3) | (np.frombuffer(quality, dtype=np.uint8) < 53))))
+        positions = np.flatnonzero(invalid[21:] == invalid[:-21])
+        forward, reverse = np.zeros(size, dtype=np.uint64), np.zeros(size, dtype=np.uint64)
+        for offset in range(21):
+            np.left_shift(forward, 2, out=forward)
+            np.bitwise_or(forward, bases[offset:offset+size], out=forward)
+            reverse |= np.left_shift(3-bases[offset:offset+size], 2*offset, dtype=np.uint64)
+        forward, reverse = forward[positions], reverse[positions]
+        keys = np.minimum(forward, reverse)
+        indexes = np.searchsorted(self.seed_keys, keys)
+        np.minimum(indexes, len(self.seed_keys)-1, out=indexes)
+        matched = np.flatnonzero(self.seed_keys[indexes] == keys)
+        starts = np.cumsum([0]+[len(read.sequence)+1 for read in reads[:-1]])
+        owners = np.searchsorted(starts, positions[matched], side='right')-1
+        for owner, match in zip(owners, matched):
+            hits[int(owner)].append((int(positions[match]-starts[owner]), int(keys[match]),
+                                     '+' if forward[match] <= reverse[match] else '-'))
+        return hits
+
+
     def recruit(self, pairs):
         from .short_read_recruitment import RecruitmentChunk
+        pairs = list(pairs)
         result = RecruitmentChunk()
+        reads = [read for pair in pairs for read in (pair.read1, pair.read2) if read is not None]
+        hits = self._matching_seeds(reads)
+        cursor = 0
         for pair in pairs:
             result.examined += 1
-            item, ambiguous = self.recruit_pair(pair)
+            mates = 1 if pair.read2 is None else 2
+            item, ambiguous = self.recruit_pair(pair, [hits.get(cursor+i, ()) for i in range(mates)])
+            cursor += mates
             if item:
                 result.evidence.append(item)
             elif ambiguous:

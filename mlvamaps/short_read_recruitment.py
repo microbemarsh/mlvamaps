@@ -85,17 +85,27 @@ class ShortReadRecruiter:
         self.all_candidates = (1 << len(self.templates)) - 1
         self.seeds: dict[str, int] = {}
         self.unseeded_candidates = 0
-        # Bit masks replace repeated set unions without lengthening seeds or
-        # losing the short/error-bearing anchors accepted by the original code.
+        self.primer_seeds = bool(self.templates) and all(t.primer_only for t in self.templates)
+        concrete = [flank for t in self.templates for flank in (t.left, t.right)
+                    if len(flank) >= 12 and not set(flank)-set('ACGT')]
+        self.seed_size = min((len(flank)//3 for flank in concrete), default=4) if self.primer_seeds else 4
+        # Bit masks retain every candidate. Partial-flank panels keep their
+        # four-base seeds; primer-only panels use guaranteed disjoint pieces.
         for index, template in enumerate(self.templates):
             for flank in (template.left, template.right):
                 # Full primer matches with at most two edits guarantee a
                 # concrete four-base seed only for sufficiently long primers.
                 if template.primer_only and (len(flank) < 12 or set(flank)-set('ACGT')):
                     self.unseeded_candidates |= 1 << index
-                for position in range(len(flank) - 3):
-                    seed = flank[position:position + 4]
-                    self.seeds[seed] = self.seeds.get(seed, 0) | (1 << index)
+                    if self.primer_seeds:
+                        continue
+                # With <=2 edits, one of three disjoint primer pieces survives.
+                # Index a same-length prefix of each piece, on both strands.
+                positions = (i*len(flank)//3 for i in range(3)) if self.primer_seeds else range(len(flank)-3)
+                for position in positions:
+                    seed = flank[position:position+self.seed_size]
+                    for spelling in (seed, revcomp(seed)) if self.primer_seeds else (seed,):
+                        self.seeds[spelling] = self.seeds.get(spelling, 0) | (1 << index)
 
     def recruit(self, pairs) -> RecruitmentChunk:
         result = RecruitmentChunk()
@@ -107,9 +117,10 @@ class ShortReadRecruiter:
             candidates = self.unseeded_candidates
             reads = (pair.read1, pair.read2) if pair.read2 else (pair.read1,)
             for read in reads:
-                for sequence in (read.sequence.upper(), revcomp(read.sequence)):
-                    for position in range(len(sequence) - 3):
-                        candidates |= self.seeds.get(sequence[position:position + 4], 0)
+                for sequence in ((read.sequence.upper(),) if self.primer_seeds else
+                                 (read.sequence.upper(), revcomp(read.sequence))):
+                    for position in range(len(sequence)-self.seed_size+1):
+                        candidates |= self.seeds.get(sequence[position:position+self.seed_size], 0)
                         if candidates == self.all_candidates:
                             break
                     if candidates == self.all_candidates:

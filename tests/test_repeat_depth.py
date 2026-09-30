@@ -210,9 +210,9 @@ def test_single_pair_and_singleton_graph_edges_can_estimate_length():
     assert recovery.confidence == 0 and not recovery.products
 
 
-def test_native_depth_counts_match_scalar_across_boundaries_and_quality():
+def test_native_depth_counts_match_scalar_across_boundaries_and_quality(tmp_path):
     from collections import Counter
-    from mlvamaps.repeat_depth import _count_depth_chunk, _segments
+    from mlvamaps.repeat_depth import _count_depth_chunk, _segments, _depth_targets, _depth_index
     rng = random.Random(912)
     sequences = [''.join(rng.choices('ACGT', k=150)) for _ in range(40)]
     sequences += ['A'*21, 'C'*14, 'G'*15, 'T'*21, '', 'N'*40,
@@ -237,12 +237,19 @@ def test_native_depth_counts_match_scalar_across_boundaries_and_quality():
                         expected.update(segment[j:j+k] for j in range(len(segment)-k+1)
                                         if segment[j:j+k] in keys)
     observed = Counter()
+    paths = tuple((k, str(tmp_path/f'{k}.npy')) for k in wanted)
+    for k, path in paths:
+        np.save(path, _depth_targets(wanted[k], k))
     for start in range(0, len(pairs), 7):
-        size, counts = _count_depth_chunk((pairs[start:start+7], wanted))
+        size, counts = _count_depth_chunk((pairs[start:start+7], paths))
         assert size == len(pairs[start:start+7])
-        observed.update(counts)
+        for k, (positions, multiplicities) in counts.items():
+            observed.update({wanted[k][i]: int(n) for i, n in zip(positions, multiplicities)})
     assert observed == expected
-    assert _count_depth_chunk(([], wanted)) == (0, Counter())
+    size, counts = _count_depth_chunk(([], paths))
+    assert size == 0 and all(not len(positions) for positions, _ in counts.values())
+    assert all(isinstance(index, np.memmap) and not index.flags.writeable
+               for index in _depth_index(paths).values())
 
 
 def test_process_depth_graphs_and_counts_match_serial():

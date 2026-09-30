@@ -400,6 +400,36 @@ def test_sample_recruitment_preserves_mates_and_filters_low_quality():
     assert recruiter.recruit_pair(poor)[0] is None
 
 
+def test_native_sample_seed_lookup_matches_scalar_positions_quality_and_strands():
+    import numpy as np
+    from mlvamaps.sample_reconstruction import _kmers
+    rng = random.Random(215)
+    sequences = [''.join(rng.choices('ACGT', k=150)) for _ in range(30)]
+    sequences += [revcomp(s) for s in sequences[:5]]
+    sequences += ['A'*60, 'T'*60, 'N'*80, '', 'ACGT', 'acgt'*40]
+    reads = [ReadRecord(str(i), sequence[:40]+'N'+sequence[41:] if i % 3 == 0 and len(sequence)>40 else sequence,
+                        ''.join('4' if j % 51 == 0 else '5' for j in range(len(sequence))) if i % 2 else None)
+             for i, sequence in enumerate(sequences)]
+    recruiter = SampleRecruiter({}, {})
+    keys = {key for sequence in sequences for _, key, _ in _kmers(sequence.upper())}
+    recruiter.seed_keys = np.array(sorted(keys), dtype=np.uint64)
+    expected = {i: [(p, key, strand) for p, key, strand in _kmers(r.sequence.upper(), r.quality) if key in keys]
+                for i, r in enumerate(reads)}
+    assert dict(recruiter._matching_seeds(reads)) == {i: hits for i, hits in expected.items() if hits}
+
+
+def test_native_sample_recruitment_preserves_scalar_evidence_and_ambiguity():
+    from dataclasses import asdict
+    locus, template, sequence, pairs = fixture()
+    items = ShortReadRecruiter({locus.locus_id: template}, 's').recruit(pairs).evidence
+    recruiter = SampleRecruiter({locus.locus_id: items}, {locus.locus_id: template})
+    pairs += [pair(sequence[40:140], 'ATGACCGTA'*12, 'rescue'), pair('N'*150, name='unknown')]
+    expected = [recruiter.recruit_pair(p) for p in pairs]
+    actual = recruiter.recruit(iter(pairs))
+    assert [asdict(e) for e in actual.evidence] == [asdict(item) for item, _ in expected if item]
+    assert actual.ambiguous_pairs == sum(item is None and bool(ambiguous) for item, ambiguous in expected)
+
+
 def test_two_round_rescue_is_order_and_worker_independent(tmp_path):
     rng = random.Random(3491)
     def dna(n):
