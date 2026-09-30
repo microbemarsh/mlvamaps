@@ -54,6 +54,35 @@ def test_repeat_indels_count_once_and_partial_flanks_do_not_imply_length():
     assert partial[("L1", "m1")]["A"] == partial[("L1", "m1")]["B"] == 0
 
 
+def test_alignment_statistics_reuse_preserves_context_and_each_molecule(monkeypatch):
+    from mlvamaps import mapping_classification as module
+    a = context('a')
+    contexts = [a, replace(a, candidate_id='b', repeat_start=8),
+                replace(a, candidate_id='c', repeat_unit_length=4),
+                replace(a, candidate_id='d', repeat_count=None)]
+    rows = [alignment(c, molecule=f'm{i}', cs=':6-ga:12') for i in range(4) for c in contexts]
+    members = {c.candidate_id: [c.candidate_id.upper()] for c in contexts}
+    calls = []
+    def tracked(row, c):
+        calls.append((row, c))
+        return alignment_statistics(row, c)
+    monkeypatch.setattr(module, 'alignment_statistics', tracked)
+    scores, errors = molecule_log_likelihoods(rows, contexts, members)
+    assert len(calls) == 4
+    import math
+    for observed in scores.values():
+        assert observed == {'A': -1., 'B': 2*math.log(errors['deletions']),
+                            'C': -.5, 'D': 0., UNKNOWN: -4.}
+    assert len(scores) == 4
+
+
+def test_reference_column_signatures_preserve_signed_zero_and_rounding():
+    likelihoods = {('L', f'm{i}'): {'A': 0., 'B': -1e-12, 'C': -1e-8, UNKNOWN: -4.}
+                   for i in range(3)}
+    groups, _ = classify_molecules(likelihoods, ['A', 'B', 'C'])
+    assert sorted(tuple(g['references']) for g in groups) == [('A', 'B'), ('C',), (UNKNOWN,)]
+
+
 def test_sequence_mismatches_and_nonrepeat_gaps_still_contribute():
     a = context("a")
     perfect = alignment(a)

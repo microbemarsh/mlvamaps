@@ -12,6 +12,45 @@ from mlvamaps.targeted_reconstruction import recover_locus, microassemble
 from mlvamaps.locus_products import genotype_product, LocusProduct
 
 
+def test_bounded_overlap_seed_search_matches_exhaustive_offsets():
+    from mlvamaps.targeted_reconstruction import _overlaps
+    from mlvamaps.short_read_evidence import repetitive
+    rng = random.Random(2981)
+    for size in (20, 49, 50, 99, 100, 149, 150, 200):
+        overlap = ''.join(rng.choices('ACGT', k=size))
+        for errors in (0, int(size*.02), int(size*.02)+1):
+            changed = list(overlap)
+            # Damage consecutive seed blocks to exercise the last required one.
+            for offset in range(errors):
+                position = offset*15
+                changed[position] = next(b for b in 'ACGT' if b != changed[position])
+            left, right = 'ACTG'*10+overlap, ''.join(changed)+'GTCA'*10
+            expected = tuple(n for n in range(20, min(len(left), len(right))+1)
+                if sum(a != b for a, b in zip(left[-n:], right[:n])) <= int(n*.02)
+                and not repetitive(left[-n:], 'AATG') and not repetitive(right[:n], 'AATG'))
+            assert _overlaps(left, right, 'AATG', unit=4, mismatch_fraction=.02) == expected
+
+
+def test_native_overlap_end_masks_match_scalar_at_every_length():
+    from mlvamaps.targeted_reconstruction import _nonrepeat_overlap_sizes
+    from mlvamaps.short_read_evidence import repetitive
+    rng = random.Random(843)
+    cases = [('', ''), ('AAAA', ''), ('éééAééé', 'é'), ('N'*60, 'N')]
+    for unit in (1, 4, 9, 39, 150, 1800):
+        motif = ''.join(rng.choices('ACGT', k=unit))
+        sequence = (motif*200)[3:153]
+        cases += [(sequence, motif), ('ACGT'+sequence+'TGCA', motif)]
+        mutated = list(sequence)
+        for position in range(0, len(mutated), 10):
+            mutated[position] = next(b for b in 'ACGT' if b != mutated[position])
+        cases.append((''.join(mutated), motif))
+    for sequence, motif in cases:
+        for suffix in (True, False):
+            expected = frozenset(n for n in range(1, len(sequence)+1)
+                if not repetitive(sequence[-n:] if suffix else sequence[:n], motif))
+            assert _nonrepeat_overlap_sizes(sequence, motif, suffix) == expected
+
+
 @pytest.fixture
 def template():
     rng = random.Random(761)

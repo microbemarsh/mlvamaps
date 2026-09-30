@@ -302,6 +302,27 @@ def test_sample_learning_reuses_unchanged_pileups(monkeypatch):
     assert prepared == [len(items)]
 
 
+def test_process_sample_learning_matches_serial():
+    from concurrent.futures import ProcessPoolExecutor
+    import copy
+    import multiprocessing
+    from mlvamaps.sample_reconstruction import recruit_sample_reads
+    from mlvamaps.progress import ProgressReporter
+    locus, template, sequence, pairs = fixture()
+    evidence = {locus.locus_id: ShortReadRecruiter({locus.locus_id: template}, 's').recruit(pairs).evidence}
+    # Force an updated final template after the last recruitment round.
+    extra = pair(sequence[140:290], sequence[145:295], 'bridge')
+    def run(executor):
+        items = copy.deepcopy(evidence)
+        result = recruit_sample_reads(items, {locus.locus_id: template}, lambda: iter(pairs+[extra]),
+            ProgressReporter(enabled=False), 's', max_rounds=1, threads=1, locus_executor=executor)
+        return result, items
+    expected = run(None)
+    assert expected[0][1]['rounds'][0]['recruited'] == 1
+    with ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context('spawn')) as executor:
+        assert run(executor) == expected
+
+
 def test_changed_sample_template_drops_stale_repeat_measurements():
     from mlvamaps.sample_reconstruction import recruit_sample_reads
     from mlvamaps.short_read_evidence import classify_pair

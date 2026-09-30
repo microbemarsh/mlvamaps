@@ -208,3 +208,53 @@ def test_single_pair_and_singleton_graph_edges_can_estimate_length():
     assert recovery.method == 'KMER_DEPTH' and recovery.product_size_bp > 0
     assert diagnostics['L']['read_start_positions'] == [1, 1]
     assert recovery.confidence == 0 and not recovery.products
+
+
+def test_native_depth_counts_match_scalar_across_boundaries_and_quality():
+    from collections import Counter
+    from mlvamaps.repeat_depth import _count_depth_chunk, _segments
+    rng = random.Random(912)
+    sequences = [''.join(rng.choices('ACGT', k=150)) for _ in range(40)]
+    sequences += ['A'*21, 'C'*14, 'G'*15, 'T'*21, '', 'N'*40,
+                  'ACGT'*12+'N'+'TGCA'*12, 'acgt'*30]
+    pairs, wanted = [], {k: set() for k in (15, 21)}
+    for i, seq in enumerate(sequences):
+        # Include absent targets, overlapping hits, missing mates and qualities.
+        quality = ''.join('!' if j % 47 == 0 else 'I' for j in range(len(seq))) if i % 2 else None
+        pairs.append(ReadPair(str(i), ReadRecord(str(i), seq, quality),
+                              ReadRecord(str(i)+'b', revcomp(seq), quality[::-1] if quality else None)))
+        for k, keys in wanted.items():
+            keys.update(seq.upper()[j:j+k] for j in range(len(seq)-k+1)
+                        if set(seq.upper()[j:j+k]) <= set('ACGT'))
+    wanted = {k: tuple(sorted(keys | {'A'*k, 'T'*k})) for k, keys in wanted.items()}
+    expected = Counter()
+    pairs.append(ReadPair('orphan', ReadRecord('orphan', 'A'*70, 'I'*70)))
+    for pair in pairs:
+        for read in (pair.read1, pair.read2):
+            if read is not None:
+                for k, keys in wanted.items():
+                    for segment in _segments(read.sequence.upper(), read.quality, k):
+                        expected.update(segment[j:j+k] for j in range(len(segment)-k+1)
+                                        if segment[j:j+k] in keys)
+    observed = Counter()
+    for start in range(0, len(pairs), 7):
+        size, counts = _count_depth_chunk((pairs[start:start+7], wanted))
+        assert size == len(pairs[start:start+7])
+        observed.update(counts)
+    assert observed == expected
+    assert _count_depth_chunk(([], wanted)) == (0, Counter())
+
+
+def test_process_depth_graphs_and_counts_match_serial():
+    from concurrent.futures import ProcessPoolExecutor
+    import multiprocessing
+    locus, _, pairs, items = reads(30)
+    templates, evidence = locus_templates([locus]), {'L': items}
+    serial, parallel = LocusRecovery(), LocusRecovery()
+    expected = estimate_graph_lengths([serial], [locus], templates, evidence, lambda: iter(pairs))
+    with ProcessPoolExecutor(max_workers=2, mp_context=multiprocessing.get_context('spawn')) as executor:
+        observed = estimate_graph_lengths([parallel], [locus], templates, evidence, lambda: iter(pairs),
+                                         locus_executor=executor, threads=2)
+    assert observed == expected
+    assert (parallel.best, parallel.interval, parallel.product_size_bp, parallel.reason) == (
+        serial.best, serial.interval, serial.product_size_bp, serial.reason)

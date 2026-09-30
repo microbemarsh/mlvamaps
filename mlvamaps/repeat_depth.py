@@ -6,11 +6,14 @@ their multiplicity. Count coverage in the *whole input*, not the anchor-selected
 recruitment pool, which systematically excludes internal repeat reads.
 """
 from collections import Counter, defaultdict, deque
+from functools import lru_cache
+from itertools import islice
 import math
 
 import numpy as np
 import regex
 
+from .concurrency import bounded_ordered_map, resolve_threads
 from .sequence import revcomp
 from .short_read_evidence import primer_bounds
 from .repeat_calibration import assembly_equivalent_product_allele, expected_nonrepeat_bp
@@ -111,21 +114,66 @@ def _graph(items, template, k=21):
             'read_start_positions': [len(left_positions), len(right_positions)]}
 
 
+def _locus_graph(task):
+    name, items, template = task
+    graph = _graph(items, template)
+    return name, graph if graph is not None else _graph(items, template, k=15)
+
+
+_DNA_CODES = bytes('ACGT'.find(chr(i)) if chr(i) in 'ACGT' else 4 for i in range(256))
+
+
+def _encoded_kmers(sequence, k):
+    """Exact two-bit keys for our 15/21-mers; exclude ambiguous/boundary bases."""
+    bases = np.frombuffer(sequence.translate(_DNA_CODES), dtype=np.uint8)
+    size = len(bases)-k+1
+    if size <= 0:
+        return np.array([], dtype=np.uint64)
+    codes = np.zeros(size, dtype=np.uint64)
+    for offset in range(k):
+        np.left_shift(codes, 2, out=codes)
+        np.bitwise_or(codes, bases[offset:offset+size], out=codes)
+    invalid = np.concatenate(([0], np.cumsum(bases > 3)))
+    return codes[invalid[k:] == invalid[:-k]]
+
+
+@lru_cache(maxsize=8)
+def _depth_targets(keys, k):
+    # A/C/G/T lexical order is also two-bit numeric order.
+    return _encoded_kmers(b'N'.join(key.encode('ascii') for key in keys), k)
+
+
+def _count_depth_chunk(task):
+    pairs, wanted = task
+    minimum = min(wanted)
+    sequence = b'N'.join(segment.encode('ascii') for pair in pairs
+        for read in (pair.read1, pair.read2) if read is not None
+        for segment in _segments(read.sequence.upper(), read.quality, minimum))
+    counts = Counter()
+    for k, keys in wanted.items():
+        targets = _depth_targets(keys, k)
+        codes = _encoded_kmers(sequence, k)
+        offsets = np.searchsorted(targets, codes)
+        np.minimum(offsets, len(targets)-1, out=offsets)
+        matched = offsets[targets[offsets] == codes]
+        hits = np.bincount(matched, minlength=len(targets))
+        counts.update({keys[i]: int(hits[i]) for i in np.flatnonzero(hits)})
+    return len(pairs), counts
+
+
 def estimate_graph_lengths(recoveries, loci, templates, evidence, replay_pairs,
-                           round_tolerance=.25, progress=None, sample_id=''):
+                           round_tolerance=.25, progress=None, sample_id='',
+                           *, locus_executor=None, threads=1):
     """Populate provisional counts/lengths; never manufacture a contig or SNPs."""
     graphs = {}
     diagnostics = {}
-    for locus, recovery in zip(loci, recoveries):
-        name = locus.locus_id
-        if recovery.products or recovery.identifiable or recovery.method == 'MIXED' or not evidence[name]:
-            continue
-        template = templates[name]
-        if template.unit <= 0:
-            continue
-        graph = _graph(evidence[name], template)
-        if graph is None:
-            graph = _graph(evidence[name], template, k=15)
+    tasks = ((locus.locus_id, evidence[locus.locus_id], templates[locus.locus_id])
+             for locus, recovery in zip(loci, recoveries)
+             if not (recovery.products or recovery.identifiable or recovery.method == 'MIXED')
+             and evidence[locus.locus_id] and templates[locus.locus_id].unit > 0)
+    results = (bounded_ordered_map(locus_executor, _locus_graph, tasks, resolve_threads(threads))
+               if locus_executor else map(_locus_graph, tasks))
+    for name, graph in results:
         if graph is not None:
             graphs[name] = graph
         else:
@@ -138,21 +186,28 @@ def estimate_graph_lengths(recoveries, loci, templates, evidence, replay_pairs,
     for graph in graphs.values():
         for edge in graph['edges']:
             wanted[graph['k']].update((edge, revcomp(edge)))
+    wanted = {k: tuple(sorted(keys)) for k, keys in wanted.items()}
     counts = Counter()
     if progress:
         progress.step(f'[{sample_id}] Estimating {len(graphs)} unresolved locus lengths from whole-input k-mer depth')
-    for examined, pair in enumerate(replay_pairs(), 1):
-        for read in (pair.read1, pair.read2):
-            if read is None:
-                continue
-            for k, keys in wanted.items():
-                for segment in _segments(read.sequence.upper(), read.quality, k):
-                    for i in range(len(segment)-k+1):
-                        edge = segment[i:i+k]
-                        if edge in keys:
-                            counts[edge] += 1
-        if progress and examined % 10000 == 0:
-            progress.count(f'[{sample_id}] Read pairs counted for repeat depth', examined)
+    iterator = iter(replay_pairs())
+    def chunks():
+        while chunk := list(islice(iterator, 1024)):
+            yield chunk, wanted
+    try:
+        # Reuse idle locus processes, retaining one bounded chunk per CPU.
+        # The parent alone reads the input; workers return only target counts.
+        results = (bounded_ordered_map(locus_executor, _count_depth_chunk, chunks(), resolve_threads(threads))
+                   if locus_executor else map(_count_depth_chunk, chunks()))
+        examined = 0
+        for size, hits in results:
+            examined += size
+            counts.update(hits)
+            if progress:
+                progress.count(f'[{sample_id}] Read pairs counted for repeat depth', examined)
+    finally:
+        if hasattr(iterator, 'close'):
+            iterator.close()
     owners = Counter(e for g in graphs.values() for e in {min(e, revcomp(e)) for e in g['edges']})
     for locus, recovery in zip(loci, recoveries):
         name = locus.locus_id

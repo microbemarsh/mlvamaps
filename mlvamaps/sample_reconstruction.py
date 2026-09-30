@@ -7,9 +7,11 @@ targeted_reconstruction scores its bounded paths with native alignments.
 from collections import Counter, defaultdict
 from functools import lru_cache
 from os.path import commonprefix
+import time
 
 import regex
 
+from .concurrency import bounded_ordered_map, resolve_threads
 from .models import ReadPair, ReadRecord
 from .sequence import revcomp
 from .short_read_evidence import MoleculeEvidence, RepeatTemplate, classify_pair, cyclic_match, primer_bounds
@@ -298,6 +300,14 @@ def _reclassify_locus(task):
     return locus_id, updated
 
 
+def _learn_locus(task):
+    locus_id, items, template = task
+    started = time.perf_counter()
+    sequences = reliable_sequences(items)
+    learned, info = learn_template(items, template, sequences)
+    return locus_id, sequences, learned, info, time.perf_counter()-started
+
+
 def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_rounds=2,
                         threads=1, audit_writer=None, locus_executor=None):
     """Freeze the index per round; skip pairs already assigned to any locus."""
@@ -306,15 +316,24 @@ def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_r
     metadata = {'rounds': [], 'loci': {}}
     previous_index = None
     learned_sizes, sequence_pools = {}, {}
-    for round_index in range(max_rounds):
-        for locus_id, template in templates.items():
-            with progress.phase(f'[{sample_id}] Sample anchor learning {locus_id}',
-                                f"round {round_index+1}; {len(evidence[locus_id]):,} molecules"):
+
+    def update_templates(label, detail=''):
+        def tasks():
+            for locus_id, template in templates.items():
                 if learned_sizes.get(locus_id) != len(evidence[locus_id]):
-                    sequence_pools[locus_id] = reliable_sequences(evidence[locus_id])
-                    learned[locus_id], metadata['loci'][locus_id] = learn_template(
-                        evidence[locus_id], template, sequence_pools[locus_id])
-                    learned_sizes[locus_id] = len(evidence[locus_id])
+                    progress.step(f'Phase [{sample_id}] {label} {locus_id} started: '
+                                  f'{detail}{len(evidence[locus_id]):,} molecules')
+                    yield locus_id, evidence[locus_id], template
+        updates = (bounded_ordered_map(locus_executor, _learn_locus, tasks(), resolve_threads(threads))
+                   if locus_executor else map(_learn_locus, tasks()))
+        for locus_id, sequences, template, info, seconds in updates:
+            sequence_pools[locus_id] = sequences
+            learned[locus_id], metadata['loci'][locus_id] = template, info
+            learned_sizes[locus_id] = len(evidence[locus_id])
+            progress.step(f'Phase [{sample_id}] {label} {locus_id} finished in {seconds:.1f}s')
+
+    for round_index in range(max_rounds):
+        update_templates('Sample anchor learning', f'round {round_index+1}; ')
         with progress.phase(f'[{sample_id}] Sample anchor index', f'round {round_index+1}'):
             recruiter = SampleRecruiter(evidence, learned, sequence_pools)
         if not recruiter.index:
@@ -363,18 +382,16 @@ def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_r
             break
     else:
         metadata['stop_reason'] = 'round_limit'
+    update_templates('Final sample template')
     reclassify = []
     for locus_id, template in templates.items():
         with progress.phase(f'[{sample_id}] Final sample template {locus_id}',
                             f'{len(evidence[locus_id]):,} molecules'):
-            if learned_sizes.get(locus_id) != len(evidence[locus_id]):
-                learned[locus_id], metadata['loci'][locus_id] = learn_template(evidence[locus_id], template)
             if learned[locus_id] != template or any(item.template != learned[locus_id]
                                                      for item in evidence[locus_id]):
                 reclassify.append((locus_id, evidence[locus_id], learned[locus_id]))
     # Reuse the allocated locus workers; recovering more graphs must not force
     # every newly informative molecule through serial native alignments.
-    from .concurrency import bounded_ordered_map, resolve_threads
     with progress.phase(f'[{sample_id}] Classifying learned repeat boundaries'):
         updates = (bounded_ordered_map(locus_executor, _reclassify_locus, reclassify, resolve_threads(threads))
                    if locus_executor else map(_reclassify_locus, reclassify))

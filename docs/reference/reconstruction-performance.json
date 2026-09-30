@@ -1646,5 +1646,157 @@
         "primer_linked_arms": 2.341672083508456
       }
     }
+  },
+  "competitive_audit": {
+    "baseline_revision": "b7f6a60",
+    "revised_revision": "working_tree_after_b7f6a60",
+    "scenario": "depth",
+    "molecules": 12000,
+    "loci": 6,
+    "runs_per_configuration": 1,
+    "environment": {
+      "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "python": "3.13.13",
+      "numpy": "2.5.2"
+    },
+    "timing_scope": "call including output; input generation and initial imports excluded",
+    "equivalence": "Biological TSV/FASTA, learned graph and depth estimates equal; summary input paths differ",
+    "measurements": {
+      "before_4": {
+        "synthetic": true,
+        "scenario": "depth",
+        "molecules": 12000,
+        "threads": 4,
+        "sr_engine": "competitive",
+        "seconds": 14.851291084080003,
+        "peak_rss_bytes": 196542464,
+        "peak_child_rss_bytes": 122978304,
+        "repeat_counts": {
+          "L0": "69",
+          "L1": "24.5",
+          "L2": "5",
+          "L3": "12",
+          "L4": "14",
+          "L5": "9.5"
+        },
+        "expected_repeat_counts": {
+          "L0": 70,
+          "L1": 26,
+          "L2": 5,
+          "L3": 11,
+          "L4": 14,
+          "L5": 9
+        },
+        "reconstruction_stage_seconds": {
+          "template_loading": 2.8374954126775265e-05,
+          "recruitment": 1.4877731249434873,
+          "reconstruction_probe": 0.33122770802583545,
+          "sample_recruitment": 4.242848625057377,
+          "repeat_length_estimation": 1.643983417074196,
+          "reconstruction_sassy_pcr": 0.008824041928164661,
+          "locus_recovery": 8.601989999995567,
+          "genotype_and_evidence_output": 0.0051172919338569045
+        },
+        "recruitment_workers": 4,
+        "reconstruction_workers": 4
+      },
+      "after_4": {
+        "synthetic": true,
+        "scenario": "depth",
+        "molecules": 12000,
+        "threads": 4,
+        "sr_engine": "competitive",
+        "seconds": 10.352756834006868,
+        "peak_rss_bytes": 126435328,
+        "peak_child_rss_bytes": 156254208,
+        "repeat_counts": {
+          "L0": "69",
+          "L1": "24.5",
+          "L2": "5",
+          "L3": "12",
+          "L4": "14",
+          "L5": "9.5"
+        },
+        "expected_repeat_counts": {
+          "L0": 70,
+          "L1": 26,
+          "L2": 5,
+          "L3": 11,
+          "L4": 14,
+          "L5": 9
+        },
+        "reconstruction_stage_seconds": {
+          "template_loading": 2.354104071855545e-05,
+          "recruitment": 1.4202747080707923,
+          "reconstruction_probe": 0.2578466250561178,
+          "sample_recruitment": 2.9434690410271287,
+          "repeat_length_estimation": 0.569766000029631,
+          "reconstruction_sassy_pcr": 0.001683166017755866,
+          "locus_recovery": 5.580791957909241,
+          "genotype_and_evidence_output": 0.006154124974273145
+        },
+        "recruitment_workers": 4,
+        "reconstruction_workers": 4
+      }
+    }
+  },
+  "reuse_audit": {
+    "depth": {
+      "synthetic": true,
+      "scenario": "depth",
+      "molecules": 12000,
+      "threads": 4,
+      "sr_engine": "competitive",
+      "seconds": 8.242911082925275,
+      "peak_rss_bytes": 135364608,
+      "peak_child_rss_bytes": 179552256,
+      "repeat_counts": {
+        "L0": "69",
+        "L1": "24.5",
+        "L2": "5",
+        "L3": "12",
+        "L4": "14",
+        "L5": "9.5"
+      },
+      "expected_repeat_counts": {
+        "L0": 70,
+        "L1": 26,
+        "L2": 5,
+        "L3": 11,
+        "L4": 14,
+        "L5": 9
+      },
+      "reconstruction_stage_seconds": {
+        "template_loading": 2.216699067503214e-05,
+        "recruitment": 1.4649857500335202,
+        "reconstruction_probe": 0.31869745801668614,
+        "sample_recruitment": 2.9794187910156325,
+        "repeat_length_estimation": 0.5761214999947697,
+        "reconstruction_sassy_pcr": 0.001612833933904767,
+        "locus_recovery": 3.3281137499725446,
+        "genotype_and_evidence_output": 0.005000540986657143
+      }
+    },
+    "biological_outputs_equal_to_first_audit": true,
+    "classification": {
+      "synthetic": true,
+      "alignments": 80000,
+      "molecules": 1000,
+      "references": 80,
+      "baseline_revision": "b7f6a60",
+      "outputs_exactly_equal": true,
+      "measurements": {
+        "before": {
+          "likelihood_seconds": 0.4214773339917883,
+          "grouping_seconds": 0.00818000000435859,
+          "total_seconds": 0.4296573339961469
+        },
+        "after": {
+          "likelihood_seconds": 0.2276877500116825,
+          "grouping_seconds": 0.005816375021822751,
+          "total_seconds": 0.23350412503350526
+        }
+      }
+    }
   }
 }

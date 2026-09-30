@@ -207,7 +207,17 @@ def molecule_log_likelihoods(alignments, contexts, members, repeat_scale=1.0):
         key = (alignment.molecule_id, alignment.mate, alignment.candidate_id)
         if key not in best or alignment.alignment_score > best[key].alignment_score:
             best[key] = alignment
-    stats = {key: alignment_statistics(row, context_by_id[row.candidate_id]) for key, row in best.items()}
+    stats, statistics_cache = {}, {}
+    for key, row in best.items():
+        context = context_by_id[row.candidate_id]
+        signature = (row.cs, row.cigar, row.reference_start, row.reference_end,
+                     context.repeat_start, context.repeat_end, context.repeat_unit_length,
+                     context.repeat_count is not None)
+        if signature not in statistics_cache:
+            if len(statistics_cache) >= 4096:
+                statistics_cache.clear()
+            statistics_cache[signature] = alignment_statistics(row, context)
+        stats[key] = statistics_cache[signature]
     best = {key: row for key, row in best.items() if stats[key]["outside_bases"] >= 6}
     # Estimate errors from the best observed alignment per read, with pseudocounts.
     primary = {}
@@ -323,7 +333,9 @@ def classify_molecules(likelihoods, reference_ids, *, sample_mode="isolate", pen
     # references must not add taxon support just because the catalog is larger.
     equivalent = {}
     for j, ref in enumerate(references):
-        signature = (ref == UNKNOWN, tuple(np.round(matrix[:, j], 10)))
+        rounded = np.round(matrix[:, j], 10)
+        rounded[rounded == 0] = 0  # Preserve numeric equality of signed zero.
+        signature = (ref == UNKNOWN, rounded.tobytes())
         equivalent.setdefault(signature, []).append(j)
     groups = list(equivalent.values())
     grouped_matrix = matrix[:, [indexes[0] for indexes in groups]]

@@ -374,7 +374,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             from concurrent.futures import ProcessPoolExecutor
             import multiprocessing
             # Spawn is safe inside batch sample threads. Recruitment has
-            # finished; reuse these workers across the two locus stages.
+            # finished; reuse these workers for learning, recovery and depth.
             locus_executor = locus_stack.enter_context(ProcessPoolExecutor(
                 max_workers=reconstruction_workers, mp_context=multiprocessing.get_context('spawn')))
         else:
@@ -438,7 +438,8 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             from .repeat_depth import estimate_graph_lengths
             depth_started = time.perf_counter()
             estimates = estimate_graph_lengths(fitted, loci, templates, evidence,
-                replay_pairs, round_tolerance, progress, sample_id)
+                replay_pairs, round_tolerance, progress, sample_id,
+                locus_executor=locus_executor, threads=recruitment_threads)
             stage_seconds['repeat_length_estimation'] = time.perf_counter()-depth_started
             if estimates:
                 reconstruction_paths['repeat_length_estimates'] = output/'repeat_length_estimates.json'

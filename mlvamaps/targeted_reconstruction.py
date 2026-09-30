@@ -17,7 +17,7 @@ import regex
 
 from .competitive_short_reads import candidate_likelihood
 from .locus_products import LocusProduct, product_repeat_allele
-from .short_read_evidence import MoleculeEvidence, RepeatTemplate, InsertDistribution, repetitive, primer_product, primer_bounds
+from .short_read_evidence import MoleculeEvidence, RepeatTemplate, InsertDistribution, repetitive, primer_product, primer_bounds, _motif_phases, _primitive_motif
 
 EVIDENCE_CLASSES = ('FULL_SPAN', 'LEFT_BOUNDARY', 'RIGHT_BOUNDARY', 'FLANK_PAIR',
                     'REPEAT_RICH', 'ANCHORED_REPEAT', 'SOFTCLIP_LEFT', 'SOFTCLIP_RIGHT', 'UNINFORMATIVE')
@@ -42,6 +42,28 @@ class LocusRecovery:
 
 
 @lru_cache(maxsize=4096)
+def _nonrepeat_overlap_sizes(sequence, motif, suffix):
+    """Evaluate all prefix/suffix lengths once per node, using the same 90% rule."""
+    motif = _primitive_motif(motif) if motif else ''
+    if not motif or not sequence:
+        return frozenset(range(1, len(sequence)+1))
+    if not (sequence.isascii() and motif.isascii()) or len(sequence)*len(motif) > 250_000:
+        return frozenset(size for size in range(1, len(sequence)+1)
+                         if not repetitive(sequence[-size:] if suffix else sequence[:size], motif))
+    matches = _motif_phases(motif, len(sequence)) == np.frombuffer(sequence.encode('ascii'), dtype=np.uint8)
+    counts = np.cumsum(matches[:, ::-1] if suffix else matches, axis=1).max(axis=0)
+    return frozenset((np.flatnonzero(counts / np.arange(1, len(sequence)+1) < .9)+1).tolist())
+
+
+@lru_cache(maxsize=8)
+def _overlap_seed_positions(sequence):
+    positions = defaultdict(list)
+    for start in range(len(sequence)-14):
+        positions[sequence[start:start+15]].append(start)
+    return positions
+
+
+@lru_cache(maxsize=4096)
 def _overlaps(left, right, motif, minimum=20, unit=0, mismatch_fraction=0):
     # Every valid offset is considered. A repeat-only overlap is incapable of
     # determining the number of traversals and must never stitch an allele.
@@ -49,25 +71,32 @@ def _overlaps(left, right, motif, minimum=20, unit=0, mismatch_fraction=0):
     # repeat units. Shorter overlaps cannot rule out a repeat-only join.
     candidates = range(minimum, min(len(left), len(right)) + 1)
     if mismatch_fraction:
+        repeat = motif or right[:unit]
+        left_sizes = _nonrepeat_overlap_sizes(left, repeat, True)
+        right_sizes = _nonrepeat_overlap_sizes(right, repeat, False)
+        if not left_sizes or not right_sizes:
+            return ()
         left_bases = np.frombuffer(left.encode('ascii'), dtype=np.uint8)
         right_bases = np.frombuffer(right.encode('ascii'), dtype=np.uint8)
         candidates = set()
         # At 2% substitutions, every accepted >=20 bp overlap contains an
-        # intact 15-base block. Native substring searches bound verification.
-        for start in range(0, len(right)-14, 15):
+        # intact 15-base block. Reuse exact seed positions across node pairs.
+        # More than the maximum number of substitutions guarantees an intact
+        # block; searching the rest repeats work in periodic read tails.
+        stop = min(len(right)-14, 15*(int(min(len(left), len(right))*mismatch_fraction)+1))
+        positions = _overlap_seed_positions(left)
+        for start in range(0, stop, 15):
             seed = right[start:start+15]
-            position = left.find(seed)
-            while position >= 0:
+            for position in positions.get(seed, ()):
                 size = len(left)-position+start
-                if minimum <= size <= min(len(left), len(right)):
+                if minimum <= size <= min(len(left), len(right)) and size in left_sizes and size in right_sizes:
                     candidates.add(size)
-                position = left.find(seed, position+1)
     return tuple(size for size in sorted(candidates)
                  if (left[-size:] == right[:size] or mismatch_fraction and
                      np.count_nonzero(left_bases[-size:] != right_bases[:size]) <= int(size*mismatch_fraction))
                  and (bool(motif) or unit > 0 and size >= 2*unit)
-                 and not repetitive(left[-size:], motif or right[:unit])
-                 and not repetitive(right[:size], motif or right[:unit]))
+                 and (mismatch_fraction or not repetitive(left[-size:], motif or right[:unit])
+                      and not repetitive(right[:size], motif or right[:unit])))
 
 
 def merge_molecule(item, template):
@@ -518,8 +547,9 @@ def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_
         from .locus_reconstruction import _project_flanks
         synthetic = template.sequence(result.best)
         votes = defaultdict(Counter)
+        alignment_cache = {}
         for item in usable:
-            for pos, allele in _project_flanks(item, synthetic, template, result.best).items():
+            for pos, allele in _project_flanks(item, synthetic, template, result.best, alignment_cache).items():
                 votes[pos][allele] += 1
         seq = []
         for pos in range(len(synthetic)):
