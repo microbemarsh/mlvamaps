@@ -17,6 +17,7 @@ def extract_long_read_evidence(
     contexts: list[CandidateContext],
     loci: list[Locus],
     technology: str,
+    *, round_tolerance: float = 0.25,
 ) -> list[CandidateEvidence]:
     context_by_id = {context.candidate_id: context for context in contexts}
     locus_by_id = {locus.locus_id: locus for locus in loci}
@@ -27,8 +28,8 @@ def extract_long_read_evidence(
     for (molecule, locus_id, _repeat), rows in grouped.items():
         best = max(rows, key=lambda row: (row.alignment_score, row.alignment_identity))
         observations = (
-            measure_locus_product(best.query_sequence, locus_by_id[locus_id], best.query_quality, source="long_read_molecule"),
-            measure_locus_product(revcomp(best.query_sequence), locus_by_id[locus_id], best.query_quality[::-1] if best.query_quality else None, source="long_read_molecule"),
+            measure_locus_product(best.query_sequence, locus_by_id[locus_id], best.query_quality, source="long_read_molecule", round_tolerance=round_tolerance),
+            measure_locus_product(revcomp(best.query_sequence), locus_by_id[locus_id], best.query_quality[::-1] if best.query_quality else None, source="long_read_molecule", round_tolerance=round_tolerance),
         )
         observation = max(observations, key=lambda item: (item.status == "FULL_PRODUCT", item.status == "REPEAT_INFORMATIVE", item.confidence or 0))
         if observation.called_allele is not None and observation.status in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:

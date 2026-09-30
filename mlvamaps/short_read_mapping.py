@@ -49,6 +49,7 @@ def run_mapping_short_read_call(
     missing_locus_penalty: float = 8.0,
     show_progress: bool = True,
     classification_repeat_scale: float = 1.0,
+    assembly_round_tolerance: float = 0.25,
 ) -> dict[str, Path]:
     """Run competitive minimap2 mapping and emit established output views."""
     # Lazy imports avoid a module cycle with the shared Illumina helpers.
@@ -121,6 +122,7 @@ def run_mapping_short_read_call(
         minimum_probability=short_confidence_threshold,
         maximum_candidate_repeat_count=short_max_candidate_repeat_count,
         keep_alignments=keep_intermediates,
+        round_tolerance=assembly_round_tolerance,
     )
     calls = common_calls_to_compatibility(common_calls)
     by_locus = {str(row["locus"]): row for row in common_calls}

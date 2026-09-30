@@ -126,11 +126,13 @@ def legacy_round_repeat_count(value: float, tolerance: float = 0.25) -> int | fl
     """Round an assembly allele with the historical MLVA_finder convention.
 
     Values within ``tolerance`` of an integer become that integer; all other
-    values become the intervening half allele.  The old default tolerance was
-    0.25.
+    values become the intervening half allele. The default tolerance is 0.25;
+    zero disables rounding, matching MLVA_finder's ``-r 0``.
     """
     if not 0 <= tolerance <= 0.5:
         raise ValueError("repeat-count rounding tolerance must be between 0 and 0.5")
+    if tolerance == 0:
+        return normalize_allele(value)
     lower = math.floor(value)
     upper = math.ceil(value)
     if value < lower + tolerance:

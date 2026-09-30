@@ -498,6 +498,7 @@ def run_call(
                 minimum_molecules=min_depth,
                 minimum_probability=min_posterior,
                 keep_alignments=debug_disagreements,
+                round_tolerance=assembly_round_tolerance,
             )
         )
 

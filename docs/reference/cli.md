@@ -184,7 +184,7 @@ retain the original detection uncertainty.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--assembly-round-tolerance FRACTION` | `0.25` | Integer tolerance for MLVA_finder-compatible assembly calls and compatibility CSVs. |
+| `--assembly-round-tolerance FRACTION` | `0.25` | Integer tolerance for assembly and directly measured FASTQ alleles; `0` disables rounding, matching MLVA_finder `-r 0`. |
 | `--reads FASTQ` | None | Map reads to extracted products with minimap2. |
 | `--bam BAM_OR_SAM` | None | Measure support from existing assembly alignments. |
 | `--alignments BAM_OR_SAM` | None | Alias for `--bam`. |

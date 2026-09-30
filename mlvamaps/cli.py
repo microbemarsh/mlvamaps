@@ -459,7 +459,7 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         type=_round_tolerance,
         default=0.25,
         metavar="FRACTION",
-        help="Legacy integer-rounding tolerance (default: %(default)s)",
+        help="FASTA/FASTQ integer-rounding tolerance; 0 keeps unrounded alleles (default: %(default)s)",
     )
     call.add_argument(
         "--sample-mode",
@@ -998,6 +998,7 @@ def _run_short_input(
         short_confidence_threshold=args.short_confidence_threshold,
         short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
         short_consider_secondary=not args.no_short_secondary_alignments,
+        assembly_round_tolerance=args.assembly_round_tolerance,
         missing_locus_min_depth=args.missing_locus_min_depth,
         missing_locus_min_fraction=args.missing_locus_min_fraction,
         missing_locus_penalty=args.missing_locus_penalty,

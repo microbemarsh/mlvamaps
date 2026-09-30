@@ -90,11 +90,17 @@ def infer_alleles(
     for context in contexts:
         if context.repeat_count is not None and context.repeat_count not in states_by_locus[context.locus_id]:
             states_by_locus[context.locus_id].append(context.repeat_count)
-    for states in states_by_locus.values():
-        states.sort(key=float)
     by_locus_molecule: dict[tuple[str, str], list[CandidateEvidence]] = defaultdict(list)
     for row in evidence:
         by_locus_molecule[(row.locus_id, row.molecule_id)].append(row)
+        # Mapping candidates recruit molecules; they must not censor measured
+        # half alleles or products outside the reference bank's repeat range.
+        measured = row.measured_repeat_count
+        states = states_by_locus[row.locus_id]
+        if measured is not None and measured not in states:
+            states.append(measured)
+    for states in states_by_locus.values():
+        states.sort(key=float)
 
     calls: list[dict[str, object]] = []
     molecule_calls: dict[tuple[str, str], int | float] = {}

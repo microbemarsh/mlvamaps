@@ -91,6 +91,77 @@ materialized as text SAM. `--keep-intermediates` retains the filtered reads and
 compressed `candidate_mapping/candidate_alignments.bam`; with a database, the
 candidate bank and index continue to reside in the database.
 
+## Matching assembly fingerprints
+
+Directly observed primer-bounded products use the assembly/MLVA_finder product
+length convention, including configured primer lengths when a primer match
+contains an insertion or deletion. The final allele states include measured
+half alleles and counts outside the mapping candidate range. Exact ordered repeat
+flanks can also measure expansions, contractions and zero-repeat alleles
+outside the panel's expected range. Fuzzy flank matches retain the plausibility
+check to avoid mistaking partial repeat sequence for a novel allele.
+
+`--assembly-round-tolerance` applies to direct FASTQ measurements as well as
+assembly calls. Its default of `0.25` matches MLVA_finder `-r 0.25`: raw values
+exactly at `.25` and `.75` become half alleles. Set it to `0` to retain
+unrounded values. Use the same panel calibration and rounding setting when
+comparing `mlva_fingerprint.tsv` between modes.
+
+The regression check uses matched synthetic FASTA and FASTQ molecules and
+compares their final fingerprints against MLVA_finder-verified expected calls:
+
+```bash
+python -m pytest -q tests/test_fastq_assembly_concordance.py
+```
+
+This checks single reads, paired reads, overlapping pairs and fragmented
+paired reads, including partial alleles and primer indels. It does not establish
+concordance for a real dataset. On matched culture samples, compare both final
+fingerprints using the same sample ID, locus panel and rounding option. For
+example, from their common parent directory:
+
+```bash
+diff -u assembly/mlva_fingerprint.tsv fastq/mlva_fingerprint.tsv
+```
+
+Inspect discordant loci in `assembly_amplicons.tsv`, `common_locus_calls.tsv`
+and `molecule_candidate_evidence.tsv`. Reads that do not span the informative
+interval, collapsed or broken assembly repeats, and multiple alleles can still
+produce different calls. A mixed sample's read-supported allele need not equal
+MLVA_finder's selected assembly product. Custom MLVA_finder binning corrections
+are not applied by this FASTQ caller.
+
+## Runtime checks
+
+Anchor measurement rejects impossible matches before starting Sassy: a window
+must be long enough, and a concrete primer with at most `k` edits must retain
+at least one of `k+1` disjoint exact pieces. Possible matches still use the
+existing native matcher. Short-read extraction also reuses up to 512 compact
+measurement results per call, keyed by locus, sequence and quality. Independent
+molecules retain their individual evidence and support counts.
+
+A local benchmark on 2026-09-30 used 1,160 synthetic paired 100 bp reads from
+11 loci, two threads and three fresh-process trials per version:
+
+| Implementation | Median runtime | Median peak RSS |
+| --- | ---: | ---: |
+| Restored `16f786f8` | 40.67 s | 70.44 MiB |
+| Concordance fixes with runtime optimizations | 12.16 s | 69.66 MiB |
+
+All 18 TSV/CSV outputs matched the concordance implementation before runtime
+optimization in every trial. This small workload emphasizes anchor measurement;
+whole-genome I/O, database classification and server hardware can change the
+gain. [Raw timings, input hashes and measurement details](../reference/short-read-runtime.json)
+record the benchmark's scope. Peak RSS describes the larger of the Python
+process and its largest native child, rather than combined concurrent memory.
+
+The regression check verifies rejection of impossible searches, retention of
+valid edit matches, and measurement reuse without merging molecule support:
+
+```bash
+python -m pytest -q tests/test_short_read_runtime.py
+```
+
 ## Automatic taxon identification
 
 With `--database`, the original retained molecules are aligned competitively

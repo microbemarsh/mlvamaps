@@ -56,7 +56,8 @@ def find_anchor(pattern: str, sequence: str, max_edits: int = 3, search_start: i
     search_end = len(sequence) if search_end is None else min(search_end, len(sequence))
     if not pattern or search_start >= search_end:
         return None
-    exact_start = sequence.find(pattern, max(0, search_start), search_end) if set(pattern) <= set("ACGT") else -1
+    concrete = set(pattern) <= set("ACGT")
+    exact_start = sequence.find(pattern, max(0, search_start), search_end) if concrete else -1
     if exact_start >= 0:
         return AnchorMeasurement(exact_start, exact_start + len(pattern), 1.0, 0, 0, 0, 0, True)
     # Short flanks cannot tolerate the same absolute error count as a 20--25 bp
@@ -64,6 +65,17 @@ def find_anchor(pattern: str, sequence: str, max_edits: int = 3, search_start: i
     max_edits = min(max_edits, max(1, len(pattern) // 5))
     offset = max(0, search_start)
     window = sequence[offset:search_end]
+    if len(window) < len(pattern) - max_edits:
+        return None
+    # With at most k edits, one of k+1 disjoint pattern pieces must survive
+    # unchanged. This only rejects impossible matches; Sassy still resolves
+    # every possible match, including indels and ambiguous primer bases.
+    pieces = max_edits + 1
+    if concrete and 0 < pieces <= len(pattern) and not any(
+        pattern[index * len(pattern) // pieces:(index + 1) * len(pattern) // pieces] in window
+        for index in range(pieces)
+    ):
+        return None
     searcher = _sassy_searcher("iupac")
     matches = searcher.search(
         pattern.encode("ascii"),
@@ -200,9 +212,15 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
         (locus_model.expected_max_repeats + 1) * unit_length
         if unit_length else len(sequence)
     )
+    # Exact ordered flanks can establish novel/zero alleles. Retain the range
+    # guard for fuzzy anchors, which can match repeat-like partial sequences.
     flanks_resolved = bool(
         left and right and flank_repeat_length is not None
-        and plausible_minimum <= flank_repeat_length <= plausible_maximum
+        and flank_repeat_length >= 0
+        and (
+            left.edit_distance == right.edit_distance == 0
+            or plausible_minimum <= flank_repeat_length <= plausible_maximum
+        )
     )
     repeat_start = left.end if flanks_resolved else inner_start if forward and reverse else None
     repeat_end = right.start if flanks_resolved else inner_end if forward and reverse else None
@@ -213,7 +231,15 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
     raw_count = None
     method = ""
     if forward and reverse and repeat_length is not None:
-        raw_count, method = estimate_repeat_count_from_spanning_read(locus_model, calibrated_product_size_bp or (reverse.end - forward.start), repeat_length, flanks_resolved=flanks_resolved)
+        # Match assembly PCR/MLVA_finder: primer indels do not change the
+        # calibrated product size, which uses the configured primer lengths.
+        product_size = calibrated_product_size_bp
+        if product_size is None:
+            product_size = (
+                reverse.start - forward.end
+                + len(locus_model.forward_primer) + len(locus_model.reverse_primer)
+            )
+        raw_count, method = estimate_repeat_count_from_spanning_read(locus_model, product_size, repeat_length, flanks_resolved=flanks_resolved)
     elif flanks_resolved and unit_length:
         raw_count, method = repeat_length / unit_length, "flank_bounded_repeat_length"
     motif_identity = None

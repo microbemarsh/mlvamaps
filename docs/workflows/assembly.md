@@ -71,6 +71,8 @@ repeat-unit length, nominal repeat units, and expected product size. It retains
 the raw estimate and applies MLVA_finder's strict
 integer tolerance (configured with `--assembly-round-tolerance`) and otherwise
 uses the intervening half allele.
+Set `--assembly-round-tolerance 0` to retain unrounded counts, equivalent to
+MLVA_finder's `-r 0`. The same option applies to direct FASTQ measurements.
 
 FASTQ or BAM support records depth for the selected product but does not alter
 the historical product selection or repeat count.

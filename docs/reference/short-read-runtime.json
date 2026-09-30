@@ -1,0 +1,97 @@
+{
+  "date": "2026-09-30",
+  "baseline_commit": "16f786f8a8d9dd74d34d5833aed9919f76459be2",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "architecture": "arm64",
+  "python": "3.13.15",
+  "dependencies": {
+    "pysam": "0.24.0",
+    "numpy": "2.5.2",
+    "parasail": "1.3.4"
+  },
+  "workload": {
+    "kind": "synthetic targeted paired reads; no reference classification",
+    "loci": 11,
+    "pairs": 1160,
+    "read_length_bp": 100,
+    "fragment_length_bp": 180,
+    "threads": 2,
+    "input_compression": "none",
+    "keep_intermediates": true,
+    "generator": "tests/test_fastq_assembly_concordance.py::_sample; shotgun windows every 5 bp with 100 bp exterior flanks; four copies per fragment at Q35..Q38"
+  },
+  "method": "Three serial fresh-process trials per version, baseline then optimized each round; wall time inside run_short_read_call includes QC, native tools and output writing, excludes Python startup/imports. OS caches were not cleared. Peak RSS is the larger of the Python process and its largest native child; not aggregate concurrent memory.",
+  "inputs_sha256": {
+    "r1.fastq": "70b71336332fd5c989392044c49979a493029aead6b588da9dec6da46ebe9b66",
+    "r2.fastq": "88872c3f0fb04a4372449b72f1154e179c62d7ba5ab0f9e5c565cec680371ce2",
+    "panel.tsv": "4375d437dfbd9a48558d93520c3fc9c0395affbd636a4a323692f11b5b5425f8"
+  },
+  "optimized_source_sha256": {
+    "mlvamaps/locus_measurement.py": "38b4a891225cb48d9e8c0428759f268916678381a91c03c950798b85f15d659f",
+    "mlvamaps/short_read_evidence.py": "440e08f85e8bcec73a21e25baf91a2c4712d60b542fb0c97a1b96ee2a7ba1f3f"
+  },
+  "results": {
+    "baseline": {
+      "trials": [
+        {
+          "seconds": 40.67189008300193,
+          "peak_rss_mib": 73.6875
+        },
+        {
+          "seconds": 40.918736333958805,
+          "peak_rss_mib": 69.640625
+        },
+        {
+          "seconds": 40.62195816694293,
+          "peak_rss_mib": 70.4375
+        }
+      ],
+      "median_seconds": 40.67189008300193,
+      "median_peak_rss_mib": 70.4375
+    },
+    "optimized": {
+      "trials": [
+        {
+          "seconds": 10.660227334010415,
+          "peak_rss_mib": 71.46875
+        },
+        {
+          "seconds": 12.174438541056588,
+          "peak_rss_mib": 69.515625
+        },
+        {
+          "seconds": 12.162444166955538,
+          "peak_rss_mib": 69.65625
+        }
+      ],
+      "median_seconds": 12.162444166955538,
+      "median_peak_rss_mib": 69.65625
+    }
+  },
+  "speedup": 3.3440556457808412,
+  "verification": {
+    "unchanged_tsv_csv_files_per_optimized_trial": 18,
+    "compared_to": "concordance implementation immediately before runtime optimizations",
+    "files": [
+      "allele_probability_distribution.tsv",
+      "calls.tsv",
+      "candidate_mapping/candidate_metadata.tsv",
+      "candidate_mapping/candidate_provenance.tsv",
+      "common_locus_calls.tsv",
+      "locus_presence.tsv",
+      "locus_repeat_counts.tsv",
+      "mlva_fingerprint.tsv",
+      "mlva_fingerprint_probabilistic.tsv",
+      "molecule_candidate_evidence.tsv",
+      "myoga_loci.csv",
+      "myoga_samples.csv",
+      "profile_match_loci.tsv",
+      "profile_matches.tsv",
+      "sample_summary.tsv",
+      "short_read_mapping_evidence.tsv",
+      "short_read_qc_summary.tsv",
+      "short_read_recruitment_summary.tsv"
+    ]
+  },
+  "limitation": "Small synthetic workload dominated by anchor measurement; this is not a whole-genome or server throughput estimate."
+}

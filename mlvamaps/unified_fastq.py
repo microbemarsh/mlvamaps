@@ -84,6 +84,7 @@ def run_unified_fastq_inference(
     minimum_probability: float,
     maximum_candidate_repeat_count: int = 100,
     keep_alignments: bool = False,
+    round_tolerance: float = 0.25,
 ) -> tuple[list[dict[str, object]], list[CandidateEvidence], dict[tuple[str, str], int | float], dict[str, Path]]:
     outdir = Path(outdir)
     work = outdir / "candidate_mapping"
@@ -117,9 +118,9 @@ def run_unified_fastq_inference(
         executable=minimap2_bin,
     )
     if technology == "illumina":
-        evidence = extract_short_read_evidence(alignments, contexts, loci)
+        evidence = extract_short_read_evidence(alignments, contexts, loci, round_tolerance=round_tolerance)
     else:
-        evidence = extract_long_read_evidence(alignments, contexts, loci, technology)
+        evidence = extract_long_read_evidence(alignments, contexts, loci, technology, round_tolerance=round_tolerance)
     calls, molecule_calls = infer_alleles(
         evidence, loci, contexts, sample_id, technology,
         InferenceThresholds(

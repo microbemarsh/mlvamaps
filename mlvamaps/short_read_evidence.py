@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections import defaultdict
+from functools import lru_cache
 
 from .alignment_evidence import CandidateAlignment, CandidateEvidence
 from .candidate_contexts import CandidateContext
@@ -39,9 +40,23 @@ def extract_short_read_evidence(
     alignments: list[CandidateAlignment],
     contexts: list[CandidateContext],
     loci: list[Locus],
+    *, round_tolerance: float = 0.25,
 ) -> list[CandidateEvidence]:
     context_by_id = {context.candidate_id: context for context in contexts}
     locus_by_id = {locus.locus_id: locus for locus in loci}
+
+    @lru_cache(maxsize=512)
+    def measure_sequence(locus_id: str, sequence: str, quality: str | None):
+        # Cache only the compact outcome, including failed measurements.
+        # The cache is bounded and local to this sample/rounding setting;
+        # quality and locus remain part of the key, and molecules stay distinct.
+        measurements = (
+            measure_locus_product(sequence, locus_by_id[locus_id], quality, source="illumina_molecule", round_tolerance=round_tolerance),
+            measure_locus_product(revcomp(sequence), locus_by_id[locus_id], quality[::-1] if quality else None, source="illumina_molecule", round_tolerance=round_tolerance),
+        )
+        best = max(measurements, key=lambda item: (item.status == "FULL_PRODUCT", item.status == "REPEAT_INFORMATIVE", item.confidence or 0))
+        return best.called_allele, best.status, best.confidence or 0
+
     grouped: dict[tuple[str, str, int | float], list[CandidateAlignment]] = defaultdict(list)
     for alignment in alignments:
         grouped[(alignment.molecule_id, alignment.locus_id, alignment.repeat_count)].append(alignment)
@@ -62,15 +77,10 @@ def extract_short_read_evidence(
             if merged is not None and not _merge_overlap_is_repeat_only(pair, merged, locus_by_id[locus_id]):
                 sequences.append(merged)
         sequences.extend(ReadRecord(row.read_id, row.query_sequence, row.query_quality) for row in rows)
-        measurements = []
-        for sequence in sequences:
-            measurements.extend((
-                measure_locus_product(sequence.sequence, locus_by_id[locus_id], sequence.quality, source="illumina_molecule"),
-                measure_locus_product(revcomp(sequence.sequence), locus_by_id[locus_id], sequence.quality[::-1] if sequence.quality else None, source="illumina_molecule"),
-            ))
-        measured = max(measurements, key=lambda item: (item.status == "FULL_PRODUCT", item.status == "REPEAT_INFORMATIVE", item.confidence or 0), default=None)
-        if measured and measured.called_allele is not None and measured.status in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:
-            direct_by_molecule[(molecule, locus_id)] = (measured.called_allele, measured.status)
+        measurements = (measure_sequence(locus_id, read.sequence, read.quality) for read in sequences)
+        measured = max(measurements, key=lambda item: (item[1] == "FULL_PRODUCT", item[1] == "REPEAT_INFORMATIVE", item[2]), default=None)
+        if measured and measured[0] is not None and measured[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:
+            direct_by_molecule[(molecule, locus_id)] = measured[:2]
 
     for (molecule, locus_id, repeat), rows in grouped.items():
         best = max(rows, key=lambda row: (row.alignment_score, row.alignment_identity))
