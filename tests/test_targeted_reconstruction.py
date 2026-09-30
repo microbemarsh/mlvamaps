@@ -193,6 +193,17 @@ def test_bounded_graph_reports_limit(template):
     assert microassemble(items, template, max_nodes=0)[2] == 'assembly_node_limit'
 
 
+@pytest.mark.parametrize('primer_only', [False, True])
+@pytest.mark.parametrize('reason', ['assembly_node_limit', 'assembly_path_limit'])
+def test_assembly_limits_survive_likelihood_fallback(template, primer_only, reason):
+    items = evidence(template, [(template.left, None)])
+    result = recover_locus(items, replace(template, primer_only=primer_only), 's',
+                           precomputed=([], ('', [], reason)))
+    assert result.limit_reached
+    assert reason in result.reason
+    assert not result.products and result.best is None
+
+
 def test_contained_flank_reads_do_not_vote_for_uncovered_bases(template):
     sequence = template.sequence(8)
     first = sequence[:90]+next(base for base in 'ACGT' if base != sequence[90])+sequence[91:120]
@@ -221,6 +232,28 @@ def test_htslib_pileup_preserves_uncovered_bases_and_overlapping_molecule_votes(
     assert _pileup_consensus(reversed(rows), 9) == 'NNNNNTCNN'
 
 
+def test_native_batch_preserves_threshold_and_unknown_votes(monkeypatch):
+    from mlvamaps.targeted_reconstruction import _pileup_consensus, _pileup_consensuses
+    import pysam
+    calls = []
+    original = pysam.samtools.consensus
+    def consensus(*args, **kwargs):
+        calls.append(args)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(pysam.samtools, 'consensus', consensus)
+    pools, expected = [], []
+    for bases, base in [('N', 'N'), ('AAAAAAACCC', 'A'), ('AAAAAACCCC', 'N'),
+                        ('AAAAAAANNN', 'A'), ('AAAAAANNNN', 'N')]:
+        rows = [(b*4, 2, {i}) for i, b in enumerate(bases)]
+        pools.append((rows, 8))
+        expected.append('NN'+base*4+'NN')
+    pools.append(([('AAAA', 2, set(range(8000))), ('CCCC', 2, set(range(8000, 12001)))], 8))
+    expected.append('N'*8)  # Native consensus must include reads beyond depth 8,000.
+    assert _pileup_consensuses(pools) == expected
+    assert [_pileup_consensus(rows, length) for rows, length in pools] == expected
+    assert len(calls) == 1
+
+
 def test_pileup_preserves_trim_coordinates_support_and_ambiguous_seeds():
     from mlvamaps.targeted_reconstruction import _pileup_sequences
     rng = random.Random(918)
@@ -242,6 +275,19 @@ def test_pileup_preserves_trim_coordinates_support_and_ambiguous_seeds():
         sequences[sequence] = {sequence}
         expected[sequence] = {sequence}
     assert _pileup_sequences(sequences) == expected
+
+
+def test_trimmed_pileup_support_cannot_vote_outside_observed_bases():
+    from mlvamaps.targeted_reconstruction import _pileup_consensus, _pileup_sequences
+    rng = random.Random(189)
+    truth = ''.join(rng.choices('ACGT', k=200))
+    error = truth[:190]+next(b for b in 'ACGT' if b != truth[190])+truth[191:]
+    sequences = {truth: {'a', 'b'}, error: {'c'}, truth[20:100]: set(range(1000))}
+    rows = {}
+    result = _pileup_sequences(sequences, rows)
+    consensus = truth[:190]+'N'+truth[191:]
+    assert list(result) == [consensus]
+    assert _pileup_consensus(rows[consensus]+[(truth[100:], 100, {'extra'})], 200) == truth
 
 
 def test_assembly_node_limit_applies_after_containment(template):

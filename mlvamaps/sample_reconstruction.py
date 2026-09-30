@@ -14,7 +14,7 @@ import regex
 from .models import ReadPair, ReadRecord
 from .sequence import revcomp
 from .short_read_evidence import MoleculeEvidence, RepeatTemplate, classify_pair, primer_bounds
-from .targeted_reconstruction import _overlaps, _pileup_sequences
+from .targeted_reconstruction import _overlaps, _pileup_consensus, _pileup_sequences
 
 
 def reliable_sequences(items):
@@ -61,13 +61,15 @@ def _arms(sequences, template, motif):
     """Extend primer anchors only through agreed non-periodic overlaps."""
     def extend(pool, primer, repeat):
         starts = []
-        for seq in pool:
+        for seq, members in pool.items():
             bounds = primer_bounds(seq, primer)
             if bounds:
-                starts.append(seq[bounds[0]:])
+                starts.append((seq[bounds[0]:], 0, members))
         if not starts:
             return ''
-        arm = commonprefix(starts)
+        length = min(len(seq) for seq, _, _ in starts)
+        arm = _pileup_consensus(((seq[:length], offset, members)
+                                 for seq, offset, members in starts), length).split('N', 1)[0]
         # ponytail: at most eight extensions and 256 pool sequences. This is
         # a conservative arm builder, not a whole-genome assembler.
         for _ in range(8):
@@ -84,15 +86,16 @@ def _arms(sequences, template, motif):
             arm = extended
         return arm
     left = extend(sequences, template.locus.forward_primer, motif)
-    right = extend([revcomp(s) for s in sequences], template.locus.reverse_primer, revcomp(motif))
+    right = extend({revcomp(s): members for s, members in sequences.items()},
+                   template.locus.reverse_primer, revcomp(motif))
     return left, revcomp(right)
 
 
-def learn_template(items, template):
+def learn_template(items, template, sequences=None):
     """Require independently supported motif and both observed primer arms."""
     if not template.primer_only or not template.unit:
         return template, {'source': 'panel', 'motifs': []}
-    sequences = reliable_sequences(items)
+    sequences = reliable_sequences(items) if sequences is None else sequences
     votes = defaultdict(set)
     for seq, members in sequences.items():
         for start, end, motif in repeat_runs(seq, template.unit):
@@ -109,7 +112,7 @@ def learn_template(items, template):
         return template, info
     # Deterministic depth-first ordering bounds noisy pools without selecting
     # a nominal allele. A capped pool may learn less sequence, never more.
-    pool = sorted(sequences, key=lambda s: (-len(sequences[s]), -len(s), s))[:256]
+    pool = {s: sequences[s] for s in sorted(sequences, key=lambda s: (-len(sequences[s]), -len(s), s))[:256]}
     left_arm, right_arm = _arms(pool, template, motif)
     left, right = set(), set()
     for start, end, found in repeat_runs(left_arm, template.unit):
@@ -166,13 +169,13 @@ class SampleRecruiter:
     recruit. Both mates vote; shared-locus ties and strand conflicts abstain.
     This is exact seed mapping, so divergent reads can remain unrecruited.
     """
-    def __init__(self, evidence, templates):
+    def __init__(self, evidence, templates, sequence_pools=None):
         self.templates = templates
         self.index = defaultdict(dict)
         self.capped_loci = []
         for locus_id, items in sorted(evidence.items()):
             template = templates[locus_id]
-            sequences = reliable_sequences(items)
+            sequences = reliable_sequences(items) if sequence_pools is None else sequence_pools[locus_id]
             if len(sequences) > 256:
                 self.capped_loci.append(locus_id)
             pool = sorted(sequences, key=lambda s: (-len(sequences[s]), -len(s), s))[:256]
@@ -263,13 +266,18 @@ def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_r
     learned = dict(templates)
     metadata = {'rounds': [], 'loci': {}}
     previous_index = None
+    learned_sizes, sequence_pools = {}, {}
     for round_index in range(max_rounds):
         for locus_id, template in templates.items():
             with progress.phase(f'[{sample_id}] Sample anchor learning {locus_id}',
                                 f"round {round_index+1}; {len(evidence[locus_id]):,} molecules"):
-                learned[locus_id], metadata['loci'][locus_id] = learn_template(evidence[locus_id], template)
+                if learned_sizes.get(locus_id) != len(evidence[locus_id]):
+                    sequence_pools[locus_id] = reliable_sequences(evidence[locus_id])
+                    learned[locus_id], metadata['loci'][locus_id] = learn_template(
+                        evidence[locus_id], template, sequence_pools[locus_id])
+                    learned_sizes[locus_id] = len(evidence[locus_id])
         with progress.phase(f'[{sample_id}] Sample anchor index', f'round {round_index+1}'):
-            recruiter = SampleRecruiter(evidence, learned)
+            recruiter = SampleRecruiter(evidence, learned, sequence_pools)
         if not recruiter.index:
             metadata['stop_reason'] = 'no_unique_sample_anchors'
             break
@@ -319,11 +327,18 @@ def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_r
     for locus_id, template in templates.items():
         with progress.phase(f'[{sample_id}] Final sample template {locus_id}',
                             f'{len(evidence[locus_id]):,} molecules'):
-            learned[locus_id], metadata['loci'][locus_id] = learn_template(evidence[locus_id], template)
-            if learned[locus_id] != template:
+            if learned_sizes.get(locus_id) != len(evidence[locus_id]):
+                learned[locus_id], metadata['loci'][locus_id] = learn_template(evidence[locus_id], template)
+            if learned[locus_id] != template or any(item.template != learned[locus_id]
+                                                     for item in evidence[locus_id]):
                 updated = []
                 for item in evidence[locus_id]:
                     classified = classify_pair(evidence_pair(item), learned[locus_id])
-                    updated.append(classified or replace(item, template=learned[locus_id]))
+                    # Measurements and flank coordinates belong to the template
+                    # that produced them. Keep unanchored reads for assembly,
+                    # but never reinterpret stale coordinates in a new template.
+                    updated.append(classified or MoleculeEvidence(item.molecule_id, item.locus_id,
+                        ('UNINFORMATIVE',), item.sequences, item.orientations,
+                        qualities=item.qualities, template=learned[locus_id]))
                 evidence[locus_id] = updated
     return learned, metadata

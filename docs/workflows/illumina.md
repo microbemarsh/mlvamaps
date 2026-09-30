@@ -22,9 +22,12 @@ without knowing the motif or internal flank sequences.
 Without product-length calibration, recovered sequences are retained but their
 numeric repeat counts remain blank; repeat-unit size alone is insufficient.
 
-Primer-only loci remain unresolved when a complete product cannot be recovered.
-They do not use synthetic repeat candidates or treat the entire sequence
-between primers as a repeat tract. When the motif is unknown, overlaps must
+Primer-only loci can learn repeat motifs and both boundary flanks from recruited
+sample reads. Primer-anchored consensus tolerates isolated sequencing errors;
+once both boundaries are learned, partial reads can support likelihood estimates.
+Without those boundaries or a complete product, the locus remains unresolved.
+The caller does not treat the entire sequence between primers as a repeat tract.
+When the motif is unknown, overlaps must
 span at least two configured repeat units and pass an observed periodicity
 check. A rich panel with concrete motifs and repeat-boundary flanks additionally
 supports partial boundary evidence and the likelihood fallback below.
@@ -35,7 +38,7 @@ supports partial boundary evidence and the likelihood fallback below.
 4. Pile up recruited reads, consolidate substitution errors, and reconstruct
    unresolved loci through unique overlaps.
 5. Measure recovered contigs with the same Sassy PCR and length calibration as assembly.
-6. Use haploid candidate likelihoods only for unresolved rich-panel loci, then
+6. Use haploid candidate likelihoods for unresolved loci with panel or sample-learned boundaries, then
    interpret products through the shared repeat/SNP layer.
 
 The graph retains contiguous high-quality segments rather than discarding a
@@ -43,6 +46,10 @@ whole read for one bad base. Overlaps tolerate up to 2% substitutions but must
 have a unique non-repeat offset; ambiguous consensus bases remain `N`.
 Read and path redundancy is consolidated before applying reconstruction limits,
 so thousands of recruited molecules can contribute to a primer-bounded consensus.
+Different-length quality-trimmed fragments can join a containing read through a
+unique ungapped placement, retaining their original coordinates and base votes.
+They contribute no support outside their observed bases. The 2,048-node cap
+applies after this consolidation; node/path failures set `limit_reached=true`.
 Consensus retains the length established by the overlap coordinates.
 Separate recovered components with the same product length and primer ends
 also retain their repeat count; disputed interior bases are masked as `N`.
@@ -82,9 +89,18 @@ coordinates, without realigning repeat lengths. Overlapping mates contribute
 one molecule vote; conflicts become `N`, and consensus bases require 70%
 agreement. The read-depth limit is set to the complete input pool, avoiding
 HTSlib's default depth truncation. Overlap mismatch counts use NumPy.
+Independent A/C/G/T-only pools without shared molecules are batched into one
+native `pysam.samtools.consensus` call per consolidation. Pools containing `N`
+or overlapping molecular observations use `AlignmentFile.pileup`, preserving
+conflict votes and exact molecule weights. Identical observation patterns share
+one pileup entry with their full multiplicity; reads are not subsampled.
 Independent loci use process workers for reconstruction preparation and final
 recovery, capped by the sample's thread allocation and number of loci. Completed
 preparations are reused when recruitment has not changed the reads or template.
+Sample-anchor learning and indexing share each prepared sequence pool, and
+unchanged loci reuse their learned templates between rescue rounds.
+When a template changes, reads are reclassified and obsolete boundary
+coordinates and length measurements are discarded.
 Pileups use temporary uncompressed BAMs in the system temporary directory;
 memory scales with the active pileup depth and retained read evidence. Stage
 timings, pileup backend and worker allocation are recorded in

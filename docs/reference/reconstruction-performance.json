@@ -731,5 +731,250 @@
       "peak_rss": 135675904,
       "peak_child_rss": 2818048
     }
+  },
+  "pysam_regression_validation": {
+    "environment": {
+      "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "python": "3.13.13",
+      "pysam": "0.24.0",
+      "samtools": "1.23.1"
+    },
+    "molecules": 12000,
+    "threads": 4,
+    "timing_scope": "Sequential runs, no profiling; call execution including outputs, excluding input generation and imports",
+    "measurements": [
+      {
+        "revision": "numpy_6cc7f66",
+        "scenario": "direct",
+        "repeat": 1,
+        "seconds": 2.5415876660263166,
+        "peak_rss_bytes": 103186432,
+        "peak_child_rss_bytes": 75087872,
+        "stage_seconds": {
+          "template_loading": 2.19999928958714e-05,
+          "recruitment": 1.1436987500055693,
+          "reconstruction_probe": 0.2488702909904532,
+          "reconstruction_sassy_pcr": 0.7929511669790372,
+          "locus_recovery": 0.8201187080121599,
+          "genotype_and_evidence_output": 0.027108000009320676
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "pysam_ce0800d",
+        "scenario": "direct",
+        "repeat": 1,
+        "seconds": 2.0438162090140395,
+        "peak_rss_bytes": 101761024,
+        "peak_child_rss_bytes": 73711616,
+        "stage_seconds": {
+          "template_loading": 2.195802517235279e-05,
+          "recruitment": 1.0580338329891674,
+          "reconstruction_probe": 0.271783875010442,
+          "reconstruction_sassy_pcr": 0.4438924170099199,
+          "locus_recovery": 0.47074541699839756,
+          "genotype_and_evidence_output": 0.026091790990903974
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "fixed",
+        "scenario": "direct",
+        "repeat": 1,
+        "seconds": 1.7855560000170954,
+        "peak_rss_bytes": 99811328,
+        "peak_child_rss_bytes": 74055680,
+        "stage_seconds": {
+          "template_loading": 2.2292020730674267e-05,
+          "recruitment": 1.0834080830099992,
+          "reconstruction_probe": 0.24952841602498665,
+          "reconstruction_sassy_pcr": 0.1782402079552412,
+          "locus_recovery": 0.20553995901718736,
+          "genotype_and_evidence_output": 0.02464329096255824
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "numpy_6cc7f66",
+        "scenario": "direct",
+        "repeat": 2,
+        "seconds": 1.9222889579832554,
+        "peak_rss_bytes": 101711872,
+        "peak_child_rss_bytes": 74743808,
+        "stage_seconds": {
+          "template_loading": 2.2249994799494743e-05,
+          "recruitment": 1.0557622499763966,
+          "reconstruction_probe": 0.2752733750385232,
+          "reconstruction_sassy_pcr": 0.18759362498531118,
+          "locus_recovery": 0.21503591700457036,
+          "genotype_and_evidence_output": 0.025338375009596348
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "pysam_ce0800d",
+        "scenario": "direct",
+        "repeat": 2,
+        "seconds": 1.768316166009754,
+        "peak_rss_bytes": 99450880,
+        "peak_child_rss_bytes": 74170368,
+        "stage_seconds": {
+          "template_loading": 2.216699067503214e-05,
+          "recruitment": 1.0665504169883206,
+          "reconstruction_probe": 0.2484759580111131,
+          "reconstruction_sassy_pcr": 0.17942075000610203,
+          "locus_recovery": 0.20630870800232515,
+          "genotype_and_evidence_output": 0.02468508400488645
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "fixed",
+        "scenario": "direct",
+        "repeat": 2,
+        "seconds": 1.974748125008773,
+        "peak_rss_bytes": 96010240,
+        "peak_child_rss_bytes": 74366976,
+        "stage_seconds": {
+          "template_loading": 2.745899837464094e-05,
+          "recruitment": 1.0592607920407318,
+          "reconstruction_probe": 0.27160287502920255,
+          "reconstruction_sassy_pcr": 0.37351008399855345,
+          "locus_recovery": 0.401008999964688,
+          "genotype_and_evidence_output": 0.024713208025787026
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "numpy_6cc7f66",
+        "scenario": "pileup",
+        "repeat": 1,
+        "seconds": 11.03494016599143,
+        "peak_rss_bytes": 119570432,
+        "peak_child_rss_bytes": 99254272,
+        "stage_seconds": {
+          "template_loading": 2.258300082758069e-05,
+          "recruitment": 1.319518749951385,
+          "reconstruction_probe": 0.8353432500152849,
+          "sample_recruitment": 5.065668833034579,
+          "reconstruction_sassy_pcr": 0.3949258340289816,
+          "locus_recovery": 3.6227262089960277,
+          "genotype_and_evidence_output": 0.02581337495939806
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "pysam_ce0800d",
+        "scenario": "pileup",
+        "repeat": 1,
+        "seconds": 33.0251389159821,
+        "peak_rss_bytes": 149405696,
+        "peak_child_rss_bytes": 106135552,
+        "stage_seconds": {
+          "template_loading": 2.099998528137803e-05,
+          "recruitment": 1.2812333749607205,
+          "reconstruction_probe": 2.125056000018958,
+          "sample_recruitment": 23.941026457992848,
+          "reconstruction_sassy_pcr": 0.25142670795321465,
+          "locus_recovery": 5.3435383749892935,
+          "genotype_and_evidence_output": 0.09615054196910933
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "fixed",
+        "scenario": "pileup",
+        "repeat": 1,
+        "seconds": 11.262077749997843,
+        "peak_rss_bytes": 136921088,
+        "peak_child_rss_bytes": 99352576,
+        "stage_seconds": {
+          "template_loading": 3.0916009563952684e-05,
+          "recruitment": 1.353704958979506,
+          "reconstruction_probe": 1.0195777080371045,
+          "sample_recruitment": 4.4986323330085725,
+          "reconstruction_sassy_pcr": 0.3456561249913648,
+          "locus_recovery": 3.823435083962977,
+          "genotype_and_evidence_output": 0.09884358401177451
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "numpy_6cc7f66",
+        "scenario": "pileup",
+        "repeat": 2,
+        "seconds": 11.313867749995552,
+        "peak_rss_bytes": 129843200,
+        "peak_child_rss_bytes": 97665024,
+        "stage_seconds": {
+          "template_loading": 3.183301305398345e-05,
+          "recruitment": 1.3541160830063745,
+          "reconstruction_probe": 0.9028386250138283,
+          "sample_recruitment": 5.173900207970291,
+          "reconstruction_sassy_pcr": 0.41039395797997713,
+          "locus_recovery": 3.625762832991313,
+          "genotype_and_evidence_output": 0.029357208055444062
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "pysam_ce0800d",
+        "scenario": "pileup",
+        "repeat": 2,
+        "seconds": 30.35624612501124,
+        "peak_rss_bytes": 154681344,
+        "peak_child_rss_bytes": 105267200,
+        "stage_seconds": {
+          "template_loading": 2.1041021682322025e-05,
+          "recruitment": 1.3394876660313457,
+          "reconstruction_probe": 1.9344662920339033,
+          "sample_recruitment": 21.57282350002788,
+          "reconstruction_sassy_pcr": 0.2520232090028003,
+          "locus_recovery": 5.265326958033256,
+          "genotype_and_evidence_output": 0.024052250024396926
+        },
+        "expected_counts_verified": true
+      },
+      {
+        "revision": "fixed",
+        "scenario": "pileup",
+        "repeat": 2,
+        "seconds": 10.858487458026502,
+        "peak_rss_bytes": 144048128,
+        "peak_child_rss_bytes": 97173504,
+        "stage_seconds": {
+          "template_loading": 2.3042026441544294e-05,
+          "recruitment": 1.3509724999894388,
+          "reconstruction_probe": 1.0178437500144355,
+          "sample_recruitment": 4.501964166003745,
+          "reconstruction_sassy_pcr": 0.18589229101780802,
+          "locus_recovery": 3.651576084026601,
+          "genotype_and_evidence_output": 0.025301875022705644
+        },
+        "expected_counts_verified": true
+      }
+    ],
+    "expected_repeat_counts": {
+      "L0": "5",
+      "L1": "6",
+      "L2": "7",
+      "L3": "8",
+      "L4": "9",
+      "L5": "10"
+    },
+    "tested_working_tree_base": "ce0800d",
+    "runs_per_configuration": 2,
+    "median_seconds": {
+      "direct": {
+        "numpy_6cc7f66": 2.231938312004786,
+        "pysam_ce0800d": 1.9060661875118967,
+        "fixed": 1.8801520625129342
+      },
+      "pileup": {
+        "numpy_6cc7f66": 11.17440395799349,
+        "pysam_ce0800d": 31.69069252049667,
+        "fixed": 11.060282604012173
+      }
+    }
   }
 }

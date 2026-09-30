@@ -85,6 +85,38 @@ as avoidable costs. These were addressed rather than accepting a several-fold
 slowdown. Real-library throughput, large reference panels and classification
 runtime still need independent measurement.
 
+## Pysam regression and reconstruction-limit validation
+
+The `ce0800d` pysam migration regressed the high-depth reconstruction fixture.
+Batching independent coordinate pools into native samtools consensus, retaining
+weighted molecule-aware HTSlib pileups for conflicts, and reusing unchanged
+sample-learning pools restores the earlier runtime while keeping pysam.
+
+Two sequential runs per configuration used 12,000 pairs, six loci and four
+threads, without profiling or concurrent test workloads. Median call wall time
+includes outputs and excludes input generation/imports:
+
+| Synthetic workload | NumPy `6cc7f66` | Pysam `ce0800d` | Corrected pysam |
+| --- | ---: | ---: | ---: |
+| Direct | 2.23 s | 1.91 s | 1.88 s |
+| Pileup | 11.17 s | 31.69 s | 11.06 s |
+
+Every run retained the six expected counts (5–10); corrected HTML reports were
+also checked. Individual runs, stage timings, peak memory and environment are
+under `pysam_regression_validation` in
+[the reconstruction measurements](reconstruction-performance.json).
+The benchmark now exports counts and checks them for sufficiently covered
+direct, rescue and pileup fixtures, so speed cannot hide incorrect alleles.
+
+The full suite passed 420 tests with 10 skips. New regression coverage includes
+3,500 noisy 301-base reads with variable quality trimming: the previous code
+hit `assembly_node_limit`, while the corrected caller reconstructs the 432-base
+product and calibrated 8-repeat allele. Other checks cover unknown/conflicting
+votes, native batching, coverage above 8,000, partial primer-arm consensus,
+stale measurements after template changes, and node/path limit reporting.
+The reported server sample was unavailable locally; these are synthetic
+regression and performance checks, not validation of its final alleles.
+
 ## Reproduction commands
 
 ```bash
@@ -101,8 +133,8 @@ by recruitment, reconstruction or likelihood scoring.
 
 ## Remaining limits
 
-Exact-overlap assembly is deliberately conservative with errors, ambiguous
-repeat paths and large pools (256 distinct nodes/64 path expansions). Candidate
+Overlap assembly tolerates 2% substitutions and remains conservative with
+ambiguous repeat paths and large pools (2,048 compacted nodes/64 path expansions). Candidate
 backgrounds are bounded at 64. Long pure repeats may remain ambiguous without
 reliable empirical insert statistics. Short context flanks often provide too
 few ordinary pairs for estimating those statistics; an independently measured

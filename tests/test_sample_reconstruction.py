@@ -102,6 +102,45 @@ def test_high_depth_pileup_cannot_bridge_an_unobserved_repeat():
     assert reason in {'no_complete_path', 'ambiguous_overlap_offsets'}
 
 
+def test_trimmed_301bp_reads_reconstruct_before_node_limit(tmp_path):
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    from mlvamaps.targeted_reconstruction import microassemble
+    rng = random.Random(125654)
+    def dna(n):
+        return ''.join(rng.choices('ACGT', k=n))
+    left, right, motif = dna(180), dna(180), 'ATGACCGTA'
+    sequence = left+motif*8+right
+    locus = Locus('L_9bp_432bp_8U', forward_primer=left[:20], reverse_primer=revcomp(right[-20:]),
+                  repeat_unit_length_bp=9, expected_product_size_bp=432, nominal_repeat_units=8)
+    template = locus_templates([locus])[locus.locus_id]
+    world = dna(80)+sequence+dna(80)
+    items, reads, fragments = [], [], set()
+    for i in range(3500):
+        start = rng.randrange(len(world)-301+1)
+        read = list(world[start:start+301])
+        if i % 4:
+            for position in rng.sample(range(301), 2):
+                read[position] = rng.choice([base for base in 'ACGT' if base != read[position]])
+        read = ''.join(read)
+        trim_left, trim_right = rng.randrange(61), rng.randrange(61)
+        quality = '!'*trim_left+'I'*(301-trim_left-trim_right)+'!'*trim_right
+        fragments.add(read[trim_left:301-trim_right])
+        items.append(MoleculeEvidence(str(i), locus.locus_id, ('UNINFORMATIVE',),
+                     (read,), ('+',), qualities=(quality,)))
+        reads.append(ReadPair(str(i), ReadRecord(str(i), read, quality)))
+    assert len(fragments) > 2048
+    product, members, reason = microassemble(items, template)
+    assert product == sequence and len(members) == len(items) and not reason
+    calls, _, _, paths = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+        pairs=iter(reads), loci=[locus], database_path=None, outdir=tmp_path,
+        sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8)
+    assert calls[0]['repeat_count'] == 8
+    assert calls[0]['inference_method'] == 'RECONSTRUCTED'
+    with paths['reconstruction_pcr'].open() as handle:
+        audit = next(csv.DictReader(handle, delimiter='\t'))
+    assert audit['called_repeat_count'] == '8'
+
+
 def test_internal_reads_rescue_a_primer_only_locus_and_reach_sassy(tmp_path, capsys):
     locus, template, sequence, pairs = fixture()
     recruited = ShortReadRecruiter({'L': template}, 's').recruit(pairs).evidence
@@ -134,6 +173,64 @@ def test_repeat_graph_learns_both_arms_without_reference_sequences():
     assert learned.left.startswith(locus.forward_primer)
     assert learned.right.endswith(revcomp(locus.reverse_primer))
     assert learned.sequence((len(sequence)-len(learned.left)-len(learned.right))/9) == sequence
+
+
+def test_noisy_primer_arms_retain_partial_length_evidence(tmp_path):
+    locus, template, sequence, _ = fixture(30)
+    reads = []
+    for i in range(30):
+        arms = []
+        for arm in (sequence[:210], sequence[-210:]):
+            position = 30+i
+            arms.append(arm[:position]+next(b for b in 'ACGT' if b != arm[position])+arm[position+1:])
+        reads.append(pair(*arms, name=str(i)))
+    items = ShortReadRecruiter({locus.locus_id: template}, 's').recruit(reads).evidence
+    learned, info = learn_template(items, template)
+    assert info['graph_ready']
+    assert learned.sequence((len(sequence)-len(learned.left)-len(learned.right))/9) == sequence
+    calls, _, _, _ = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+        pairs=iter(reads), loci=[locus], database_path=None, outdir=tmp_path,
+        sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8,
+        insert_mean=len(sequence), insert_sd=3)
+    assert calls[0]['repeat_count'] == 30
+    assert calls[0]['inference_method'] == 'INFERRED'
+
+
+def test_sample_learning_reuses_unchanged_pileups(monkeypatch):
+    from mlvamaps import sample_reconstruction
+    from mlvamaps.progress import ProgressReporter
+    locus, template, _, pairs = fixture()
+    items = ShortReadRecruiter({locus.locus_id: template}, 's').recruit(pairs).evidence
+    prepared = []
+    original = sample_reconstruction.reliable_sequences
+    def prepare(items):
+        prepared.append(len(items))
+        return original(items)
+    monkeypatch.setattr(sample_reconstruction, 'reliable_sequences', prepare)
+    sample_reconstruction.recruit_sample_reads({locus.locus_id: items},
+        {locus.locus_id: template}, lambda: iter(()), ProgressReporter(enabled=False), 's')
+    assert prepared == [len(items)]
+
+
+def test_changed_sample_template_drops_stale_repeat_measurements():
+    from mlvamaps.sample_reconstruction import recruit_sample_reads
+    from mlvamaps.short_read_evidence import classify_pair
+    from mlvamaps.progress import ProgressReporter
+    locus, template, sequence, pairs = fixture(30)
+    initial = ShortReadRecruiter({locus.locus_id: template}, 's').recruit(pairs).evidence
+    rich, info = learn_template(initial, template)
+    assert info['graph_ready']
+    items = [classify_pair(pair(sequence[150:-150], name=str(i)), rich) for i in range(2)]
+    observed = (len(sequence)-len(rich.left)-len(rich.right))/rich.unit
+    assert all(item.observed_repeat == observed for item in items)
+    evidence = {locus.locus_id: items}
+    learned, _ = recruit_sample_reads(evidence, {locus.locus_id: template}, lambda: iter(()),
+                                      ProgressReporter(enabled=False), 's')
+    assert learned[locus.locus_id].primer_only
+    for item in evidence[locus.locus_id]:
+        assert item.classes == ('UNINFORMATIVE',)
+        assert item.observed_repeat is None and not item.alignment and not item.product_sequence
+        assert item.sequences == items[0].sequences
 
 
 @pytest.mark.parametrize('insert_known', [False, True])

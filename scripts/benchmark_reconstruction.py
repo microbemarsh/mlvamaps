@@ -87,6 +87,13 @@ def main():
               'peak_rss_bytes': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == 'darwin' else 1024),
               'peak_child_rss_bytes': resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * (1 if sys.platform == 'darwin' else 1024),
               'reconstruction': json.loads((args.output/'result'/'reconstruction_metadata.json').read_text())['performance']}
+    with (args.output/'result'/'calls.tsv').open() as handle:
+        result['repeat_counts'] = {row['locus_id']: row['repeat_count']
+                                   for row in csv.DictReader(handle, delimiter='\t')}
+    # Report correctness alongside speed. Tiny/low-depth benchmarks may lack
+    # enough reads to recover every locus, so do not assume those are callable.
+    if args.scenario != 'unresolved' and args.molecules >= 12000:
+        assert result['repeat_counts'] == {f'L{i}': str(5+i) for i in range(6)}, result['repeat_counts']
     (args.output/'benchmark.json').write_text(json.dumps(result, indent=2)+'\n')
     print(json.dumps(result))
 

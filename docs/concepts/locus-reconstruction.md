@@ -126,8 +126,13 @@ not rejected because of low-quality bases outside its primers.
 Unresolved pools enter a seeded overlap graph. High-depth reads first form
 HTSlib coordinate pileups through `pysam`: full-read placements with unique
 offsets consolidate substitution errors, with each molecule voting once per
-position. Indels and ambiguous repeat placements remain separate. Contained sequences are collapsed
-while retaining their molecule support; each edge must have a unique
+position. Different-length quality-trimmed reads can be placed inside longer
+reads with at most 2% substitutions and a unique offset in the chosen container.
+If several containers match equally, one holds the observation; the contained
+read does not join those containers. Original read coordinates and base votes
+are retained, so short reads cannot vote across unobserved extensions.
+Indels and ambiguous repeat offsets remain separate. Contained sequences are
+collapsed while retaining their molecule support; each edge must have a unique
 non-repeat-only overlap, allowing at most 2% substitutions. Exact 15-base seeds
 bound the candidate-offset search. Consistent overlap components form a shared
 coordinate pileup without enumerating redundant paths through every read start.
@@ -141,8 +146,9 @@ library statistics additionally constrain uniquely placed mate distances.
 Separate components and alternative paths that agree on product length and
 primer ends retain that length, masking disputed interior bases as `N`.
 Resource limits apply to 2048 compacted nodes and 64 alternative path expansions,
-not the original number of recruited read sequences. Hitting a limit defers
-to inference. No whole-genome assembly or external assembler is used.
+not the original number of recruited read sequences. Hitting a limit sets
+`limit_reached=true` and defers to inference when repeat boundaries are known.
+No whole-genome assembly or external assembler is used.
 
 Observed complete products and reconstructed contigs then pass through
 `run_in_silico_pcr_loci`, `pcr_rows_to_products` and

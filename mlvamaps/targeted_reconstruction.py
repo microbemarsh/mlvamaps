@@ -159,40 +159,94 @@ def _pileup_consensus(rows, length):
     if len(rows) == 1:
         sequence, offset, _ = rows[0]
         return 'N'*offset + sequence + 'N'*(length-offset-len(sequence))
-    molecules = {name: str(i) for i, name in enumerate(set().union(*(members for _, _, members in rows)))}
+    observations = defaultdict(list)
+    for i, (_, _, members) in enumerate(rows):
+        for name in members:
+            observations[name].append(i)
+    # Molecules with identical observed placements cast identical votes. Let
+    # HTSlib pile up each observation pattern once, retaining its exact weight.
+    patterns = Counter(tuple(indices) for indices in observations.values())
+    weights, names = {}, defaultdict(list)
+    for i, (indices, weight) in enumerate(patterns.items()):
+        name = str(i)
+        weights[name] = weight
+        for index in indices:
+            names[index].append(name)
     consensus = ['N']*length
     with TemporaryDirectory(prefix='mlvamaps-pileup-') as directory:
         path = str(Path(directory)/'observed.bam')
         header = {'HD': {'VN': '1.6', 'SO': 'coordinate'}, 'SQ': [{'SN': 'observed', 'LN': length}]}
         with pysam.AlignmentFile(path, 'wb0', header=header) as bam:
-            for sequence, offset, members in sorted(rows, key=lambda row: row[1]):
+            for i in sorted(range(len(rows)), key=lambda i: rows[i][1]):
+                sequence, offset, _ = rows[i]
                 read = pysam.AlignedSegment(bam.header)
                 read.query_sequence = sequence
                 read.reference_id, read.reference_start = 0, offset
                 read.mapping_quality = 60
                 read.cigartuples = [(0, len(sequence))]
-                for name in members:
-                    read.query_name = molecules[name]
+                for name in names[i]:
+                    read.query_name = name
                     bam.write(read)
         with pysam.AlignmentFile(path, 'rb') as bam:
             for column in bam.pileup(stepper='nofilter', min_base_quality=0,
                     ignore_overlaps=False, compute_baq=False,
-                    max_depth=sum(len(members) for _, _, members in rows)):
+                    max_depth=sum(map(len, names.values()))):
                 votes = {}
                 for name, base in zip(column.get_query_names(), column.get_query_sequences()):
                     votes[name] = base if votes.get(name, base) == base else 'N'
-                base, support = Counter(votes.values()).most_common(1)[0]
-                if support*10 >= len(votes)*7:
+                counts = Counter()
+                for name, base in votes.items():
+                    counts[base] += weights[name]
+                base, support = counts.most_common(1)[0]
+                if support*10 >= sum(counts.values())*7:
                     consensus[column.reference_pos] = base
     return ''.join(consensus)
 
 
-def _pileup_sequences(sequences):
+def _pileup_consensuses(pools):
+    """Batch independent read-coordinate pools in one native samtools call."""
+    results, native = {}, {}
+    for i, (rows, length) in enumerate(pools):
+        # Native simple consensus ignores N votes and does not deduplicate
+        # molecules. Those cases retain the molecule-aware HTSlib reduction.
+        if (len(rows) > 1 and all(not set(seq)-set('ACGT') for seq, _, _ in rows)
+                and sum(len(members) for _, _, members in rows)
+                    == len(set().union(*(members for _, _, members in rows)))):
+            native[i] = (rows, length)
+        else:
+            results[i] = _pileup_consensus(rows, length)
+    if native:
+        with TemporaryDirectory(prefix='mlvamaps-pileups-') as directory:
+            path, fasta = str(Path(directory)/'observed.bam'), str(Path(directory)/'consensus.fa')
+            header = {'HD': {'VN': '1.6', 'SO': 'coordinate'},
+                      'SQ': [{'SN': str(i), 'LN': length} for i, (_, length) in native.items()]}
+            with pysam.AlignmentFile(path, 'wb0', header=header) as bam:
+                for ref, (rows, _) in enumerate(native.values()):
+                    for sequence, offset, members in sorted(rows, key=lambda row: row[1]):
+                        read = pysam.AlignedSegment(bam.header)
+                        read.query_name = 'observation'
+                        read.query_sequence = sequence
+                        read.reference_id, read.reference_start = ref, offset
+                        read.mapping_quality = 60
+                        read.cigartuples = [(0, len(sequence))]
+                        for _ in members:
+                            bam.write(read)
+            pysam.samtools.consensus('-m', 'simple', '-c', '0.7', '-a', '-o', fasta, path,
+                                    catch_stdout=False)
+            with pysam.FastxFile(fasta) as records:
+                for record in records:
+                    results[int(record.name)] = record.sequence
+    return [results[i] for i in range(len(pools))]
+
+
+def _pileup_sequences(sequences, pileup_rows=None):
     """Consolidate substitution errors at uniquely anchored read coordinates.
 
-    Same-length, ungapped placements preserve observed lengths. An indel or an
+    Ungapped placements preserve observed lengths. An indel or an
     ambiguous repeat offset remains a separate graph node, never a forced join.
     Molecules vote once per position, including overlapping mates.
+    Returning original rows permits shorter contained fragments; without those
+    coordinates, restrict grouping to equal lengths to preserve support spans.
     """
     index = defaultdict(list)
     representatives, groups = [], []
@@ -200,11 +254,12 @@ def _pileup_sequences(sequences):
         bases = np.frombuffer(sequence.encode('ascii'), dtype=np.uint8)
         placements = set()
         for start in range(0, len(sequence)-14, 15):
-            # Only equal-length, zero-offset placements are admissible. Key
-            # those constraints instead of scanning every depth/trim variant
-            # sharing a seed elsewhere in the locus.
-            for node in index.get((len(sequence), start, sequence[start:start+15]), ()):
-                placements.add((node, 0))
+            seed = sequence[start:start+15]
+            key = seed if pileup_rows is not None else (len(sequence), start, seed)
+            for node, position in index.get(key, ()):
+                offset = position-start
+                if 0 <= offset <= len(representatives[node])-len(sequence):
+                    placements.add((node, offset))
         matches = []
         for node, offset in placements:
             target = representatives[node][offset:offset+len(sequence)]
@@ -212,7 +267,14 @@ def _pileup_sequences(sequences):
             if errors <= int(.02*len(sequence)):
                 matches.append((errors, node, offset))
         matches.sort()
-        if matches and (len(matches) == 1 or matches[0][0] < matches[1][0]):
+        # A trimmed read can be contained in several overlapping nodes. As in
+        # exact containment below, choose one container, without joining those
+        # nodes through the read. Multiple offsets in that container abstain.
+        contained = (pileup_rows is not None and matches and
+                     len(sequence) < len(representatives[matches[0][1]]) and
+                     sum(errors == matches[0][0] and node == matches[0][1]
+                         for errors, node, _ in matches) == 1)
+        if matches and (len(matches) == 1 or matches[0][0] < matches[1][0] or contained):
             _, node, offset = matches[0]
             groups[node].append((sequence, offset))
         else:
@@ -224,12 +286,15 @@ def _pileup_sequences(sequences):
                 positions[sequence[start:start+15]].append(start)
             for seed, starts in positions.items():
                 if len(starts) == 1 and 'N' not in seed:
-                    index[len(sequence), starts[0], seed].append(node)
+                    key = seed if pileup_rows is not None else (len(sequence), starts[0], seed)
+                    index[key].append((node, starts[0]))
+    pools = [([(sequence, offset, sequences[sequence]) for sequence, offset in group], len(representative))
+             for representative, group in zip(representatives, groups)]
     result = defaultdict(set)
-    for representative, group in zip(representatives, groups):
-        consensus = _pileup_consensus(((sequence, offset, sequences[sequence])
-                                      for sequence, offset in group), len(representative))
-        result[consensus].update(set().union(*(sequences[sequence] for sequence, _ in group)))
+    for consensus, (rows, _) in zip(_pileup_consensuses(pools), pools):
+        result[consensus].update(set().union(*(members for _, _, members in rows)))
+        if pileup_rows is not None:
+            pileup_rows.setdefault(consensus, []).extend(rows)
     return result
 
 
@@ -269,9 +334,11 @@ def microassemble(items, template, insert=None, max_nodes=2048, max_paths=64):
                     sequences[seq[segment.start():segment.end()]].add(item.molecule_id)
     if max_nodes <= 0:
         return '', [], 'assembly_node_limit'
+    pileup_rows = {}
     if len(sequences) > 256:
-        sequences = _pileup_sequences(sequences)
-    pileup_rows = {sequence: [(sequence, 0, set(members))] for sequence, members in sequences.items()}
+        sequences = _pileup_sequences(sequences, pileup_rows)
+    else:
+        pileup_rows = {sequence: [(sequence, 0, set(members))] for sequence, members in sequences.items()}
     nodes = sorted(sequences, key=lambda s: (-len(s), s))
     retained = []
     for sequence in nodes:
@@ -513,11 +580,15 @@ def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_
             sequence, support_count=len(members), effective_depth=len(members), reconstruction_confidence=.99,
             evidence={'call_method': 'RECONSTRUCTED', 'meaningful': 'yes', 'molecule_ids': members})
         return LocusRecovery(products=[product], method='RECONSTRUCTED', confidence=.99, identifiable=True, counts=counts)
+    assembly_limit = reason in {'assembly_node_limit', 'assembly_path_limit'}
     if template.primer_only:
-        return LocusRecovery(method='AMBIGUOUS', counts=counts,
+        return LocusRecovery(method='AMBIGUOUS', counts=counts, limit_reached=assembly_limit,
             reason='primer_only_no_complete_product:' + reason)
     result = candidate_likelihood(usable, template, insert, maximum, minimum_probability, context_templates)
     result.counts, result.reason = counts, result.reason or reason
+    if assembly_limit:
+        result.limit_reached = True
+        result.reason = reason + '; ' + result.reason
     if counts.get('FLANK_PAIR', 0) < minimum_spanning_pairs:
         result.identifiable = False
         if result.method == 'INFERRED':
