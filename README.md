@@ -14,7 +14,7 @@ mlvamaps uses input-specific evidence to produce compatible locus calls:
 flowchart LR
   A[Assembly] --> P[Sassy PCR products]
   L[Accurate long reads] --> M[Complete spanning molecules]
-  S[Paired or single short reads] --> E[Competitive recruitment and targeted reconstruction]
+  S[Paired or single short reads] --> E[Reference recruitment and targeted reconstruction]
   P --> C[Canonical locus products]
   M --> C
   C --> G[Shared repeat and SNP typing]
@@ -22,26 +22,20 @@ flowchart LR
   E --> C
 ```
 
-Assembly product selection remains MLVA_finder compatible. Long reads are
-measured directly. Short reads use one database-free competitive pathway:
-native flank alignments assign molecules across loci, then sample-derived
-repeat lengths compete using direct spans, censored boundary evidence and
-paired-fragment likelihoods. Local stitching and primer-arm rescue recover
-missing sequence automatically. Recovered products use the same repeat/SNP
-interpreter as assembly mode. Provisional read-depth estimates remain available
-when exact length is unresolved; optional database classification follows calling.
+Assembly and accurate long-read calling are database independent. SR FASTQ
+calling requires `--database`: minimap2 competitively recruits reads across
+reference loci, and the shared caller measures repeat lengths from observed
+spans, reconstructed products, or calibrated fragment geometry. A stored
+reference allele is never substituted for a measured sample length; novel
+alleles remain callable. Provisional read-depth estimates remain available
+when exact length is unresolved.
 
-Illumina allele calling needs no reference database, including with legacy
-three-column primer panels (`locus_id forward_primer reverse_primer`). Names
-such as `vrrA_12bp_314bp_10U` provide product-length calibration. Primer-only
-calls first use observed or locally reconstructed products. Unresolved loci
-trigger up to two combined recruitment rounds against sample-derived anchors.
-Supported motifs and primer-to-repeat arms form a small repeat graph for
-boundary measurement and candidate inference. A primer-connected k-mer graph
-can also estimate length from whole-input coverage relative to its flanks.
-Lengths without usable sequence or coverage evidence stay
-uncalled. Reference database sequences are never used for
-Illumina recruitment or reconstruction.
+Legacy three-column primer panels (`locus_id forward_primer reverse_primer`)
+remain supported. Names such as `vrrA_12bp_314bp_10U` provide product-length
+calibration, while the database supplies repeat flanks and mapping targets.
+`reference_calling/summary.tsv` records reference support and call outcomes.
+Taxonomic classification requires a database in every input mode and runs
+separately from allele measurement.
 
 The evidence hierarchy is **direct → reconstructed → inferred → depth estimated**, with explicit
 ambiguous, no-call and mixed outcomes. There is one short-read pathway. The
@@ -146,6 +140,7 @@ mlvamaps call \
 mlvamaps call \
   -p panel.tsv \
   -i sr \
+  --database references \
   --fq1 sample_R1.fastq.gz \
   --fq2 sample_R2.fastq.gz \
   --sample-id sample \
@@ -157,7 +152,7 @@ For a directory containing exact `SAMPLE_1.fastq.gz` / `SAMPLE_2.fastq.gz`
 pairs:
 
 ```bash
-mlvamaps call -p panel.tsv -i reads/ --short-reads -o results -t 8
+mlvamaps call -p panel.tsv -i reads/ --short-reads --database references -o results -t 8
 ```
 
 ### Accurate long or amplicon reads
@@ -244,8 +239,8 @@ mlvamaps call \
 Current databases store reusable `competitive_mapping/candidate_contexts.fasta`,
 `candidate_metadata.tsv`, short/long minimap2 indexes, and a broad real-genome
 Deacon recruitment index. These resources support optional reference
-classification. Illumina allele recovery uses the supplied primer/locus panel
-and reads independently of these database sequences.
+classification and SR FASTQ calling. Assembly and default long-read calling
+use the supplied panel and sample sequences independently of these resources.
 
 For a multi-taxid build, that command automatically loads the saved panel and
 taxon metadata, then identifies the closest reference IDs with taxon annotations. No separate panel,

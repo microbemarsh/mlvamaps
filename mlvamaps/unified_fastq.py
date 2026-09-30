@@ -94,7 +94,8 @@ def run_unified_fastq_inference(
             database_path=database_path, outdir=outdir, sample_id=sample_id, technology=technology,
             threads=threads, minimum_molecules=minimum_molecules, minimum_probability=minimum_probability,
             maximum_candidate_repeat_count=maximum_candidate_repeat_count, orphan_path=orphan_path,
-            round_tolerance=round_tolerance, min_fraction=min_mixture_fraction, repeat_threshold=repeat_threshold)
+            round_tolerance=round_tolerance, min_fraction=min_mixture_fraction, repeat_threshold=repeat_threshold,
+            minimap2_bin=minimap2_bin, keep_alignments=keep_alignments)
     outdir = Path(outdir)
     work = outdir / "candidate_mapping"
     work.mkdir(parents=True, exist_ok=True)

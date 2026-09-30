@@ -291,6 +291,8 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         parser.error("--short-reads requires -i DIRECTORY, not -i sr")
     if not args.short_read_mode and (args.reads1 or args.reads2):
         parser.error("--fq1/--fq2 require the short-read selector: -i sr")
+    if args.short_read_mode and not args.database:
+        parser.error("SR FASTQ calling requires --database; assembly and long-read calling do not")
     if args.taxon_identification is True and not args.database:
         parser.error("--taxon-identification requires --database")
     if not args.loci and not args.primers and args.database:
@@ -387,7 +389,7 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     call.add_argument("--profiles")
     call.add_argument(
         "--database",
-        help="Reference-build directory for alignment-based reference classification",
+        help="Reference-build directory (required for SR FASTQ calling; enables reference classification in all modes)",
     )
     taxon_toggle = call.add_mutually_exclusive_group()
     taxon_toggle.add_argument(

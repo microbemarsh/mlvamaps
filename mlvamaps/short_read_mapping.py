@@ -121,7 +121,7 @@ def run_mapping_short_read_call(
                 min_length=short_min_read_length, min_mean_quality=short_min_mean_quality,
                 trim_quality=short_trim_quality, min_pair_retention=short_min_pair_retention,
                 decompression_threads=tuple(io_plan['decoder_threads']))
-        method = "competitive_sample_likelihood" if technology == "illumina" else "spanning_molecules"
+        method = ("competitive_reference_likelihood" if database_path else "competitive_sample_likelihood") if technology == "illumina" else "spanning_molecules"
         if show_progress:
             print(f"[{sample_id}] Recovering loci using {method}", flush=True)
         started = time.perf_counter()
@@ -328,7 +328,7 @@ def run_mapping_short_read_call(
         metadata_path.write_text(json.dumps({
                            "schema_version": "2.0", "mlvamaps_version": __version__,
                            "method": method,
-                           "minimap2_version": minimap2_version(minimap2_bin) if database_path else "not_used",
+                           "minimap2_version": minimap2_version(minimap2_bin) if database_path or 'candidate_metadata' in unified_paths else "not_used",
                            "database": database_path or "panel-derived",
                            "performance": {"stage_seconds": stage_seconds, "qc": qc_statistics, "io": io_plan},
                            "insert_size": insert_stats, "parameters": {"repeat_fraction": short_repeat_fraction,

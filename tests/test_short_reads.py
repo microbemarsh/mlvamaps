@@ -131,7 +131,7 @@ def test_canonical_short_read_pipeline_calls_recoverable_product(tmp_path):
     assert not (tmp_path / "out" / "short_read_assembly_summary.tsv").exists()
 
 
-def test_legacy_primer_cli_calls_without_database(tmp_path, monkeypatch):
+def test_legacy_primer_cli_requires_database(tmp_path, monkeypatch, capsys):
     from mlvamaps.cli import main
     def forbidden(*args, **kwargs):
         pytest.fail('Database sequences requested by a primer-only call')
@@ -144,10 +144,9 @@ def test_legacy_primer_cli_calls_without_database(tmp_path, monkeypatch):
     _write_fastq(first, [(f'm{i}/1', product[:60]) for i in range(4)])
     _write_fastq(second, [(f'm{i}/2', revcomp(product[-60:])) for i in range(4)])
     out = tmp_path/'out'
-    assert main(['call', '-p', str(panel), '-i', 'sr', '--fq1', str(first), '--fq2', str(second),
-                 '-o', str(out), '--sample-id', 'legacy', '-t', '1']) == 0
-    with (out/'calls.tsv').open() as handle:
-        call = next(csv.DictReader(handle, delimiter='\t'))
-    assert call['repeat_count'] == '4'
-    assert call['call_method'] == 'DIRECT'
-    assert not list(out.glob('filtered*.fastq.gz'))
+    with pytest.raises(SystemExit) as exc:
+        main(['call', '-p', str(panel), '-i', 'sr', '--fq1', str(first), '--fq2', str(second),
+              '-o', str(out), '--sample-id', 'legacy', '-t', '1'])
+    assert exc.value.code == 2
+    assert 'requires --database' in capsys.readouterr().err
+    assert not out.exists()

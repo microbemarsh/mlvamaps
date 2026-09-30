@@ -504,13 +504,15 @@ def microassemble(items, template, insert=None, max_nodes=2048, max_paths=64):
 
 def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_probability=.8,
                   minimum_spanning_pairs=0, min_fraction=.01, min_secondary_reads=0,
-                  precomputed=None):
+                  precomputed=None, allow_assembly=True):
     counts = dict(Counter(c for e in items for c in e.classes))
     usable = [e for e in items if 'discordant' not in e.classes]
     if not usable or template is None:
         return LocusRecovery(counts=counts)
     products = precomputed[0] if precomputed is not None else direct_products(usable, template, sample_id, min_fraction, min_secondary_reads)
     assembled = precomputed[1] if precomputed is not None else None
+    if not allow_assembly:
+        assembled = ('', [], 'no_length_identifying_alignment')
     counts = dict(Counter(c for e in items for c in e.classes))
     if products and all('N' in product.sequence for product in products):
         sequence, members, _ = assembled if assembled is not None else microassemble(usable, template, insert)

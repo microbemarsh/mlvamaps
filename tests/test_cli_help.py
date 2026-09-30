@@ -23,3 +23,15 @@ def test_hidden_options_still_parse():
 def test_confirmed_missing_locus_default_is_strongly_penalized():
     args = build_parser().parse_args(["call"])
     assert args.missing_locus_penalty == 8.0
+
+
+@pytest.mark.parametrize('source', [['-i', 'sr', '--fq1', 'sample.fq'],
+                                  ['-i', 'reads', '--short-reads'],
+                                  ['-i', 'sr', '--manifest', 'samples.tsv']])
+def test_short_read_cli_requires_database(source, tmp_path, capsys):
+    panel = tmp_path/'panel.tsv'
+    panel.write_text('locus_id\tforward_primer\treverse_primer\nL\tACGT\tTGCA\n')
+    with pytest.raises(SystemExit) as exc:
+        main(['call', '-p', str(panel), *source])
+    assert exc.value.code == 2
+    assert 'SR FASTQ calling requires --database' in capsys.readouterr().err

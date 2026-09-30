@@ -22,7 +22,7 @@ inferred from filenames. Paired directory mode provides opt-in filename
 discovery:
 
 ```bash
-mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads -o results
+mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads --database references -o results
 ```
 
 This mode non-recursively matches exact `PREFIX_1.fastq.gz` and

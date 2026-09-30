@@ -446,7 +446,7 @@ def test_qc_mean_quality_matches_original_numpy_reduction():
 
 
 def test_streaming_pipeline_preserves_database_inputs_and_results(tmp_path, monkeypatch):
-    from mlvamaps.io import read_fastq_pairs, write_fastq, write_tsv
+    from mlvamaps.io import read_fastq_pairs, read_profiles, write_fastq, write_tsv
     from mlvamaps.short_reads import run_short_read_call
     pairs = list(reads(12))
     first, second = tmp_path/'r1.fq', tmp_path/'r2.fq'
@@ -461,12 +461,19 @@ def test_streaming_pipeline_preserves_database_inputs_and_results(tmp_path, monk
         return {}
     monkeypatch.setattr('mlvamaps.mapping_classification.run_mapping_classification', classify)
     monkeypatch.setattr('mlvamaps.minimap_mapping.minimap2_version', lambda _: 'test')
+    reference = tmp_path/'references'
+    reference.mkdir()
+    for name, target in templates().items():
+        (reference/f'{name}.fasta').write_text('>reference\n'+target.sequence(4)+'\n')
     for database in (None, 'database'):
         run_short_read_call(str(first), str(second), str(panel), str(tmp_path/str(database)), 's',
-                            database_path=database, threads=1, show_progress=False)
+                            database_path=str(reference) if database else None, threads=1, show_progress=False)
     assert classified == pairs
-    for name in ('calls.tsv', 'reconstructed_loci.fasta', 'reconstructed_locus_variants.tsv',
-                 'locus_snps.tsv', 'short_read_qc_summary.tsv', 'molecule_candidate_evidence.tsv'):
+    fields = ('locus_id', 'repeat_count', 'product_size_bp', 'status')
+    results = [[tuple(row[field] for field in fields) for row in read_profiles(tmp_path/mode/'calls.tsv')]
+               for mode in ('None', 'database')]
+    assert results[0] == results[1]
+    for name in ('reconstructed_loci.fasta', 'locus_snps.tsv', 'short_read_qc_summary.tsv'):
         assert (tmp_path/'None'/name).read_bytes() == (tmp_path/'database'/name).read_bytes()
     metadata = json.loads((tmp_path/'database'/'short_read_run_metadata.json').read_text())
     assert metadata['performance']['stage_seconds']['total'] > 0

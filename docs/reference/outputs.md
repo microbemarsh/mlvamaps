@@ -152,6 +152,7 @@ data are supplied.
 | `short_read_recruitment_summary.tsv` | Unique, ambiguous, discordant, and orphan pair counts per locus. |
 | `short_read_mapping_evidence.tsv` | Per-locus state, candidate scores, molecule support and boundary evidence; legacy mapper fields remain blank. |
 | `short_read_repeat_evidence.tsv` | Direct/reconstructed/inferred/depth-estimated method, confidence, evidence counts, repeat interval, and calibrated length features. |
+| `reference_calling/summary.tsv` | SR reference support, reference IDs, supporting molecules, final `call_status`, repeat counts, product lengths and per-locus insert statistics. Calls retain `reference_assisted` in their reason. Candidate sequences/metadata/provenance are alongside this table; BAMs require `--keep-intermediates`. |
 | `repeat_length_estimates.json` | Depth fallback diagnostics: k-mer graph size, flank depths, estimated product length and sensitivity interval, shared edges, or the reason estimation could not run. Written when a locus enters the fallback. |
 | `reconstructed_locus_variants.tsv` | Shared repeat counts, masked SNP markers, full sequence, observed repeat sequence and motif-relative edits. |
 | `short_read_run_metadata.json` | minimap2 and mlvamaps versions, resolved parameters, database source, and insert-size estimate. |

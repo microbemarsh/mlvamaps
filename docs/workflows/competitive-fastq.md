@@ -2,10 +2,9 @@
 
 The reference-candidate genotyping workflow below applies to
 `--lr-engine competitive`. Long reads default to spanning recovery.
-[Illumina reads](illumina.md) use one database-free competitive sample model:
-native locus assignment, observed products, and censored boundary/fragment
-likelihoods. There is no short-read engine selector. Their optional database
-classification still uses minimap2 after allele calling.
+[Illumina reads](illumina.md) require `--database` and use competitive reference
+recruitment followed by read-derived length measurement. Taxonomic classification
+requires a database for every mode. There is no short-read engine selector.
 
 The FASTQ path accepts `.fastq`, `.fq`, and gzip-compressed equivalents. It
 is intended for current high-accuracy long-read sequencing. Reads may span a

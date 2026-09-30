@@ -6,92 +6,25 @@ read-depth length estimation when a complete locus cannot be recovered.
 Assembly and long-read recovery feed the
 same `LocusProduct` and `genotype_product` interpreter.
 
-## Recruitment and mate rescue
+## Reference recruitment and mate retention
 
-One streaming pass reads paired FASTQ, applies QC, and looks up both strands in
-a combined hash index of panel anchors. Each locus contributes one panel
-template; reference database sequences never supply or expand these templates.
-Native SIMD flank alignments verify seed hits. A pair retains both mates even
-when only one has an anchor; the second mate need not map at all. Full and
-compact ambiguity audits are available with `--sr-recruitment-audit`.
+SR FASTQ commands require a reference database. Minimap2 maps the QC-filtered
+reads against candidate contexts for all panel loci. Per-mate scores are
+collapsed across duplicate reference/allele contexts. Locus assignment needs a
+margin of both 12 score points and 20%; cross-locus ties remain unassigned.
 
-Legacy primer-only panels use full primer matches with up to two edits (capped
-for short primers), including IUPAC primer symbols. Mates without a primer are
-oriented using their anchored partner. Short or degenerate primers bypass the
-four-base seed filter when a valid match need not contain a concrete seed.
-Complete observed products provide the fast path for these panels. When a
-recruited locus cannot be recovered, additional sample-derived recruitment and
-repeat-graph inference run as described below. Unknown internal flanks and
-motifs are never borrowed from reference sequences.
+Supported reference backgrounds supply flank coordinates. Native flank
+alignment classifies the original read pairs, including mates without mapping
+records. Repeat-only molecules without a usable flank do not identify a locus.
+Up to eight equally supported backgrounds are fitted; conflicting lengths remain
+unresolved. Observed spans, local reconstruction and fragment likelihoods use
+the measurement rules below. Database counts are never copied into missing
+sample calls, and unobserved sequence remains `N`.
 
-Assignment uses only non-repeat anchor scores. Multiple contexts of one locus
-count as one competitor. A winning locus must exceed the runner-up by both 12
-alignment-score points and 20% of its own score. Tied loci remain unassigned.
-Repeat copy number and the frequency of a reference in the database do not
-increase recruitment support. This is an in-process combined target index;
-allele recovery does not launch minimap2 or create intermediate SAM files.
-
-Only candidate molecules undergo motif testing. Cyclic templates and native
-gapped alignment handle rotations, reverse complements, substitutions and
-small indels. `--short-repeat-fraction` (default 0.7) sets the matched-base
-fraction required for repeat-rich tagging. Unanchored repeat-only molecules
-cannot identify a locus and are excluded rather than assigned to every locus
-with that motif.
-
-## Sample-derived recruitment and repeat graphs
-
-If direct measurement and bounded local assembly cannot recover a recruited
-locus, the caller builds a frozen 21-mer index from Q20 sample sequences across
-all recruited loci, including competitors that already have calls. It excludes
-candidate repeat tracts, motif-only seeds, low-complexity seeds and sequences
-too short to inspect two repeat units. A new pair needs at least 40 matched
-bases (or two repeat units, whichever is larger), consistent orientation, and
-a winner margin of both 12 bases and 20%. Both mates are retained. Unanchored
-repeat-only reads and cross-locus ties do not establish a locus assignment.
-
-Up to two combined FASTQ replay passes recruit internal reads using these
-sample anchors. The index is rebuilt between rounds, never during a round;
-read order cannot change which seeds are available. Previously recruited pairs
-are not counted again. Recruitment stops when no pairs are added or the index
-does not change. Replays apply the original QC settings without changing QC
-totals or rewriting filtered FASTQs. Iterator-only API inputs use a temporary
-disk spool, closed on success and failure. The existing bounded process workers
-also perform sample recruitment; no external mapper or reference is required.
-
-Motif discovery uses the panel unit length and lagged sequence identity, with
-at least two units, 12 bases and 90% consensus identity, without a minimum
-molecule count. Motifs must belong to a family observed on both primer-linked arms;
-abundant repeats in unlinked mates or outside the primers cannot choose the
-VNTR. Same-length cyclic motifs with at least 85% identity are treated as
-substitution variants, with both boundaries placed in the same cyclic phase.
-Distinct families supported on both arms remain ambiguous. Primer arms extend
-through unique nonperiodic overlaps only where extensions agree. The pysam
-pileup retains longer primer-linked observations when shorter fragments end,
-without letting those fragments vote at uncovered positions.
-High-depth sequences are consolidated by coordinate pileup before
-selecting up to 256 supported sequences per locus. At most eight
-arm extensions are inspected. A graph is enabled only after both observed
-primer-to-repeat arms and a single compatible motif family are recovered. The two arms are
-placed at compatible motif phases. This is a small graph with one variable
-repeat edge; bounded path expansion reuses the native candidate alignments.
-Substitutions and small indels are alignment differences, not a fully learned
-graph of complex multi-motif alleles.
-
-Recruited reads are reclassified against the learned flanks. An internal read
-spanning both repeat boundaries can establish length even without a complete
-primer-bounded contig. Full reconstructed products still undergo Sassy PCR.
-Graph estimates require informative length evidence; repeat-rich reads alone
-do not determine an exact traversal count. No depth-only estimator is applied
-to this selected read pool. Empirical or supplied fragment statistics remain
-necessary for fragment-based estimates.
-
-`sample_repeat_graphs.json` records global motif candidates and support, the
-selected primer-linked motif, learned arm sequences, graph structure,
-recruitment rounds, caps and stopping reasons. Sample-learned entries identify
-this selection policy with `motif_selection: primer_linked_arms`; the global
-candidate list can still contain abundant unrelated repeats.
-`sample_recruitment.tsv` records recruited pairs and witnesses for ambiguous
-assignments in each round. These files are created only when rescue runs.
+The lower-level sample-only recruitment and graph-learning helpers remain for
+synthetic validation. They are not the user-facing SR FASTQ calling pathway.
+Assembly and default accurate long-read recovery need no database. Taxonomic
+classification remains a separate database-dependent step in every mode.
 
 ## Evidence definitions
 
@@ -295,8 +228,8 @@ is an evidence score, not an externally calibrated error probability.
 
 ## Performance and limits
 
-FASTQs are never rescanned per locus. Unresolved pools can trigger up to two
-additional combined passes, with early stopping when anchors do not change.
+FASTQs are never rescanned per locus. Reference recruitment uses a combined
+mapping pass and replay; unresolved depth estimation can add a combined replay.
 Recruitment uses bounded process batches;
 local reconstruction runs after recruitment within the same thread allocation.
 Only recruited locus pools are retained, not the complete input FASTQ dataset.

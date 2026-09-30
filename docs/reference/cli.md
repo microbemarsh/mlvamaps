@@ -1,9 +1,10 @@
 # CLI options and thresholds
 
-Short reads always use the [database-free competitive sample model](../workflows/illumina.md).
-No `--sr-engine` selection is needed or accepted. Long reads default to
-`--lr-engine spanning`; reference-candidate mapping applies to the optional
-`--lr-engine competitive` and downstream reference classification.
+SR FASTQ calling (`-i sr` or `--short-reads`) requires `--database` and uses
+[competitive reference calling](../workflows/illumina.md). Assembly and default
+long-read calling are database independent. Taxonomic classification requires
+a database in every mode. No `--sr-engine` selection is needed or accepted.
+Long reads default to `--lr-engine spanning`; `competitive` remains optional.
 Short-read inference controls include `--short-repeat-fraction`,
 `--short-confidence-threshold`, `--short-max-candidate-repeat-count`,
 `--insert-mean` and `--insert-sd`.
@@ -60,7 +61,7 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `--quiet` | Off | Suppress live progress. |
 | `--max-primer-mismatches` | `2` | Maximum edit distance allowed independently for each primer during Sassy-backed paired-primer detection. Searches proceed through error rounds 0 to this value. |
 | `--profiles` | None | Known MLVA profile TSV. |
-| `--database` | None | Completed reference-build directory containing observed amplicons and mapping assets. |
+| `--database` | None | Completed reference-build directory containing observed amplicons and mapping assets; required for SR FASTQ calling; enables reference classification in all modes. |
 | `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
 | `--classification-repeat-scale` | `1.0` | Repeat-count discrepancy scale in mapping log likelihoods, in repeat units. |
 | `--missing-locus-min-depth` | `0` | Deprecated compatibility option; accepted but ignored. No depth or molecule-count cutoff. |

@@ -410,24 +410,27 @@ def test_uncertain_length_estimates_survive_into_calls(template, kind):
     assert not result.products
     common = _common_call(template.locus, result.products, 4, 's', 'illumina', 3, .8, result)
     call = common_calls_to_compatibility([common])[0]
-    if kind == 'presence':
+    if kind in {'presence', 'boundary'}:
         assert call['repeat_count'] == ''
         assert call['status'] == 'PRESENT_COUNT_UNKNOWN'
-        assert common['repeat_count_min'] == ''
-        assert 'no_repeat_length_information' in call['evidence']
+        if kind == 'presence':
+            assert common['repeat_count_min'] == ''
+            assert 'no_repeat_length_information' in call['evidence']
+        else:
+            assert common['repeat_count_min'] == 20
+            assert common['repeat_count_max'] == 100
+            assert 'repeat_length_lower_bound' in call['evidence']
     else:
         assert call['status'] == 'AMBIGUOUS'
-        assert call['repeat_count'] == (30 if kind == 'insert' else 20)
+        assert call['repeat_count'] == 30
         assert common['repeat_count_min'] <= call['repeat_count'] <= common['repeat_count_max']
         assert call['allele_distribution']
-        if kind == 'boundary':
-            assert 'repeat_length_lower_bound' in call['evidence']
         fingerprint, _ = build_fingerprint('s', [{'locus_id': 'L', 'called_repeat_count': call['repeat_count']}], [template.locus])
         assert fingerprint[0]['L'] == call['repeat_count']
 
 
 @pytest.mark.parametrize('primer_only', [False, True])
-def test_reconstruction_never_loads_database_sequences(tmp_path, template, monkeypatch, primer_only):
+def test_long_read_reconstruction_never_loads_database_sequences(tmp_path, template, monkeypatch, primer_only):
     from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
     import json
     locus = template.locus
@@ -435,18 +438,17 @@ def test_reconstruction_never_loads_database_sequences(tmp_path, template, monke
         locus = replace(locus, left_flank_sequence='', right_flank_sequence='', repeat_motif='NNNN',
                         expected_product_size_bp=len(template.sequence(8)), nominal_repeat_units=8)
     def forbidden(*args, **kwargs):
-        pytest.fail('Illumina recovery accessed database sequences')
+        pytest.fail('Long-read recovery accessed database sequences')
     monkeypatch.setattr('mlvamaps.candidate_contexts._base_contexts', forbidden)
     results = []
     for index, database in enumerate((None, tmp_path/'absent_database')):
         result = run_reconstructed_fastq_inference(reads1=None, reads2=None,
             pairs=iter([pair(template.sequence(12), name=str(i)) for i in range(3)]),
             loci=[locus], database_path=database, outdir=tmp_path/str(index), sample_id='s',
-            technology='illumina', minimum_molecules=2, minimum_probability=.8)
+            technology='hifi', minimum_molecules=2, minimum_probability=.8)
         results.append(result[0])
         metadata = json.loads(result[3]['reconstruction_metadata'].read_text())
-        assert metadata['performance']['recruitment']['template_source'] == 'locus_panel'
-        assert metadata['performance']['recruitment']['template_contexts'] == 1
+        assert metadata['caller'] == 'spanning_molecules'
     assert results[0] == results[1]
     assert results[0][0]['repeat_count'] == 12
 

@@ -300,7 +300,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         max_anchor_edits=3, threads=1, minimum_spanning_pairs=0, round_tolerance=.25,
         show_progress=False, audit_writer=None, audit_handle=None, pairs=None,
         recruitment_threads=None, sr_recruitment_audit="full", ambiguity_writer=None, repeat_threshold=.7,
-        replay_pairs=None, locus_stack=None, **_unused):
+        replay_pairs=None, locus_stack=None, minimap2_bin='minimap2', keep_alignments=False, **_unused):
     progress = ProgressReporter(enabled=show_progress, stream=sys.stdout)
     stage_seconds, recruitment_stats, locus_stats = {}, {}, {}
     output = Path(outdir)
@@ -329,23 +329,34 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         templates = locus_templates(loci)
         stage_seconds["template_loading"] = time.perf_counter() - started
         recruitment_stats["template_contexts"] = len(templates)
-        recruitment_stats["template_source"] = "locus_panel"
+        recruitment_stats["template_source"] = "reference_database" if database_path else "locus_panel"
         recruitment_stats["primer_only_loci"] = [name for name, t in templates.items() if t.primer_only]
         recruitment_stats["template_motif_lengths"] = {
             name: len(template.motif) for name, template in templates.items() if template is not None
         }
-        progress.step(f"[{sample_id}] Repeat templates loaded in {stage_seconds['template_loading']:.1f}s; {len(templates):,} panel templates (no reference database sequences)")
+        progress.step(f"[{sample_id}] Panel calibration loaded in {stage_seconds['template_loading']:.1f}s; {len(templates):,} loci")
         evidence = defaultdict(list)
         insert_lengths = []
         from .short_read_recruitment import recruit_short_reads
         recruitment_threads = threads if recruitment_threads is None else recruitment_threads
-        progress.step(f"[{sample_id}] Recruiting short-read molecules with up to {resolve_threads(recruitment_threads)} worker(s); {sr_recruitment_audit} ambiguity audit")
+        progress.step(f"[{sample_id}] {'Filtering reads for reference mapping' if database_path else 'Recruiting short-read molecules'}; {sr_recruitment_audit} ambiguity audit")
         started = time.perf_counter()
         recruitment_stats.update(pairs_examined=0, locus_tests=0, uniquely_recruited_pairs=0,
                                  ambiguous_pairs=0, unmatched_pairs=0, skipped_locus_tests=0)
-        for chunk in recruit_short_reads(pairs, templates, sample_id, recruitment_threads, statistics=recruitment_stats,
-                                        audit_fields=MOLECULE_AUDIT_FIELDS if audit_handle is not None else None,
-                                        audit_mode=sr_recruitment_audit, repeat_threshold=repeat_threshold):
+        if database_path:
+            # Consume streamed QC before reference mapping. Primer-only
+            # recruitment must not gate which loci the database can recover.
+            for pair in pairs:
+                recruitment_stats['pairs_examined'] += 1
+                progress.count(f'[{sample_id}] QC read pairs', recruitment_stats['pairs_examined'])
+            chunks = ()
+        else:
+            # Low-level sample-only inference remains available for synthetic
+            # validation; the SR CLI requires a database.
+            chunks = recruit_short_reads(pairs, templates, sample_id, recruitment_threads,
+                statistics=recruitment_stats, audit_fields=MOLECULE_AUDIT_FIELDS if audit_handle is not None else None,
+                audit_mode=sr_recruitment_audit, repeat_threshold=repeat_threshold)
+        for chunk in chunks:
             recruitment_stats["pairs_examined"] += chunk.examined
             recruitment_stats["uniquely_recruited_pairs"] += len(chunk.evidence)
             for key in ("locus_tests", "ambiguous_pairs", "unmatched_pairs", "skipped_locus_tests"):
@@ -367,7 +378,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                                   f"{recruitment_stats['ambiguous_pairs']:,} ambiguous; {rate:,.0f} pairs/s")
         stage_seconds["recruitment"] = time.perf_counter() - started
         recruitment_stats["pairs_per_second"] = recruitment_stats["pairs_examined"] / max(stage_seconds["recruitment"], 1e-9)
-        progress.step(f"[{sample_id}] Primer recruitment finished in {stage_seconds['recruitment']:.1f}s")
+        progress.step(f"[{sample_id}] {'Read QC' if database_path else 'Primer recruitment'} finished in {stage_seconds['recruitment']:.1f}s")
         reconstruction_workers = min(resolve_threads(threads), max(1, sum(bool(evidence[locus.locus_id]) for locus in loci)))
         locus_executor = None
         if reconstruction_workers > 1 and locus_stack is not None:
@@ -432,8 +443,16 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             for i in spanning:
                 item = evidence[locus.locus_id][i]
                 item.classes = tuple(sorted(set(item.classes) | {'FULL_SPAN'}))
-        # Fit the rescued evidence first: measured products and identifiable
-        # likelihoods take priority, and fallback intervals retain uncertainty.
+        if database_path and replay_pairs is not None:
+            from .competitive_short_reads import call_reference_loci
+            reference_started = time.perf_counter()
+            reconstruction_paths.update(call_reference_loci(fitted, loci, templates, evidence,
+                replay_pairs, output, progress, database_path=database_path, options=options,
+                round_tolerance=round_tolerance, threads=resolve_threads(threads),
+                minimap2_bin=minimap2_bin, keep_alignments=keep_alignments,
+                reads1=reads1, reads2=reads2, orphan_path=orphan_path))
+            stage_seconds['reference_calling'] = time.perf_counter()-reference_started
+            recruitment_stats['final_uniquely_recruited_pairs'] = sum(map(len, evidence.values()))
         if replay_pairs is not None:
             from .repeat_depth import estimate_graph_lengths
             depth_started = time.perf_counter()
@@ -452,6 +471,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         stage_seconds['reconstruction_sassy_pcr'] = time.perf_counter() - pcr_started
         for locus, result in zip(loci, fitted):
             locus_stats[locus.locus_id]['call_method'] = result.method
+            locus_stats[locus.locus_id]['evidence_molecules'] = len(evidence[locus.locus_id])
         stage_seconds["locus_recovery"] = time.perf_counter() - started
         progress.step(f"[{sample_id}] Locus recovery finished in {stage_seconds['locus_recovery']:.1f}s")
         for locus, result in zip(loci, fitted):
@@ -492,6 +512,15 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                     audit.append(row)
                 else:
                     audit_writer.writerow(row)
+    if 'reference_calling' in reconstruction_paths:
+        from .io import read_profiles
+        rows = read_profiles(reconstruction_paths['reference_calling'])
+        by_name = {call['locus']: call for call in calls}
+        for row in rows:
+            call = by_name[row['locus_id']]
+            row.update(call_status=call['status'], method=call['inference_method'],
+                       repeat_count=call['repeat_count'], product_size_bp=call['product_size_bp'])
+        write_tsv(rows, reconstruction_paths['reference_calling'], list(rows[0]))
     progress.step(f"[{sample_id}] Writing canonical genotypes and evidence")
     started = time.perf_counter()
     output_stats = {}
@@ -525,7 +554,8 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
     write_fasta(dominant.items(), paths["taxonomic_query_sequences"])
     paths["reconstruction_metadata"] = output / "reconstruction_metadata.json"
     stage_seconds["genotype_and_evidence_output"] = time.perf_counter() - started
-    paths["reconstruction_metadata"].write_text(json.dumps({"technology": technology, "caller": "competitive_sample_likelihood" if technology == "illumina" else "spanning_molecules",
+    paths["reconstruction_metadata"].write_text(json.dumps({"technology": technology,
+        "caller": ("competitive_reference_likelihood" if database_path else "competitive_sample_likelihood") if technology == "illumina" else "spanning_molecules",
         "candidate_model": "censored_boundaries_and_fragment_geometry", "insert_size": vars(insert) if insert else None,
         "performance": {"stage_seconds": stage_seconds, "recruitment": recruitment_stats,
                         "loci": locus_stats, "output": output_stats}}, indent=2) + "\n")

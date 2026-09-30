@@ -2,15 +2,17 @@
 
 ## Architecture and cleanup
 
-Short reads have one database-free competitive pathway. Native alignments
-assign molecules across loci; observed products, automatic local stitching and
-sample-derived arms feed shared assembly calibration. Censored boundaries and
-fragment geometry compete over repeat lengths without reference allele grids.
-Database classification follows measurement and cannot change the caller.
+SR FASTQ commands now require a database for competitive locus recruitment.
+Observed products, local stitching and fragment geometry feed the shared length
+interpreter. Reference counts never fill missing observations. Classification
+remains a separate database-dependent step; assembly and default long-read
+calling remain independent.
 
-The short-read engine selector and separate reference-candidate extractor have
-been removed. No minimum depth or molecule-support gates apply. A boundary
-observation cannot become a definitive allele solely by being repeated.
+The historical sample-only timing results below describe lower-level recovery
+helpers. New native-mapping regressions in `test_competitive_short_reads.py`
+cover database calling, novel alleles, missing primers, unmapped mates, unknown
+insert sizes and cross-locus ambiguity. The reported server sample is not
+available locally, so these tests do not establish recovery on that sample.
 
 ## Important implementation files
 
@@ -20,8 +22,8 @@ observation cannot become a definitive allele solely by being repeated.
   motif compatibility, explicit evidence classes, robust insert estimates.
 - `mlvamaps/targeted_reconstruction.py`: direct products, unique pair merging,
   bounded overlap graph and conservative inferred bases.
-- `mlvamaps/competitive_short_reads.py`: vectorized censored-boundary and
-  phase-corrected fragment likelihoods.
+- `mlvamaps/competitive_short_reads.py`: reference calling, vectorized
+  censored-boundary and phase-corrected fragment likelihoods.
 - `mlvamaps/locus_reconstruction.py`: sequence-first orchestration and QC.
 - `mlvamaps/locus_products.py`: existing shared assembly calibration and SNP
   markers, plus additive observed repeat-sequence/motif-edit fields.

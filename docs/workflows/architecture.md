@@ -58,7 +58,7 @@ memory-constrained nodes:
 
 ```bash
 export MLVAMAPS_MAX_CONCURRENT_SAMPLES=2
-mlvamaps call -p panel.tsv -i reads/ --short-reads -o results -t 32
+mlvamaps call -p panel.tsv -i reads/ --short-reads --database references -o results -t 32
 ```
 
 Input discovery and final combined tables retain deterministic input order even

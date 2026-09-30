@@ -163,7 +163,7 @@ def run_short_read_call(
     short_repeat_fraction: float = .7,
     taxon_screen_summary: dict | None = None,
 ) -> dict[str, Path]:
-    """Call Illumina data with the single database-free competitive sample model."""
+    """Call reference-backed Illumina data; retain the sample-only library helper."""
     from .short_read_mapping import run_mapping_short_read_call
 
     return run_mapping_short_read_call(

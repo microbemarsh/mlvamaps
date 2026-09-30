@@ -44,6 +44,10 @@ def test_competitive_single_read_matches_assembly_outside_candidate_grid(tmp_pat
         second = revcomp(sequence[-140:])
         write_fastq([ReadRecord('one/2', second, ('!' if mode == 'orphan' else 'I')*len(second))], mate)
     if mode == 'cached':
+        import shutil
+        minimap = shutil.which('minimap2')
+        if minimap is None:
+            pytest.skip('minimap2 is required for database calling')
         from mlvamaps.candidate_contexts import generate_candidate_contexts, write_candidate_contexts
         database = tmp_path/'database'
         paths = write_candidate_contexts(generate_candidate_contexts([locus]), database/'competitive_mapping')
@@ -108,3 +112,85 @@ def test_partial_half_repeat_preserves_snp_mask_boundaries(tmp_path):
     assert actual.repeat_sequence == expected.repeat_sequence
     assert actual.snp_sequence == expected.snp_sequence[:-30]+'N'*30
     assert snp_comparison(actual.snp_sequence, expected.snp_sequence) == (50, 50)
+
+
+@pytest.mark.parametrize('mode', ['novel', 'nested_database', 'paired', 'orphan', 'inferred', 'unknown_insert',
+                                  'boundary', 'competing_locus'])
+def test_reference_calling_measures_reads_missing_both_primers(tmp_path, mode):
+    import shutil
+    from mlvamaps.unified_fastq import run_unified_fastq_inference
+    minimap = shutil.which('minimap2')
+    if minimap is None:
+        pytest.skip('minimap2 is required for reference rescue integration')
+    rng = random.Random(1947)
+    dna = lambda n: ''.join(rng.choices('ACGT', k=n))
+    left, right, motif = dna(180), dna(180), dna(9)
+    locus = Locus('L', forward_primer=left[:20], reverse_primer=revcomp(right[-20:]),
+        repeat_motif='N'*9, repeat_unit_length_bp=9,
+        expected_product_size_bp=432, nominal_repeat_units=8)
+    loci = [locus]
+    if mode == 'competing_locus':
+        loci.append(replace(locus, locus_id='other'))
+    database = tmp_path/'references'
+    resource = database/'database' if mode == 'nested_database' else database
+    resource.mkdir(parents=True)
+    for target in loci:
+        (resource/f'{target.locus_id}.fasta').write_text('>reference\n'+left+motif*8+right+'\n')
+    # The observed allele is outside the reference's expanded 7..9 grid.
+    sequence = left+motif*11+right
+    read = left[-60:]+motif*7 if mode == 'boundary' else sequence[100:-100]
+    reads = tmp_path/'reads.fq'
+    mate = None
+    if mode in {'paired', 'inferred', 'unknown_insert'}:
+        mate = tmp_path/'mate.fq'
+        second = dna(150) if mode == 'paired' else revcomp(right[:80])
+        if mode != 'paired':
+            read = left[-80:]
+        write_fastq([ReadRecord('one/2', second, 'I'*len(second))], mate)
+    write_fastq([ReadRecord('one/1' if mate else 'one', read, 'I'*len(read))], reads)
+    kwargs = dict(reads1=reads, reads2=mate, loci=loci, sample_id='s', technology='illumina',
+        minimap2_bin=minimap, threads=1, minimum_molecules=0, minimum_probability=.8,
+        maximum_candidate_repeat_count=10)
+    if mode == 'orphan':
+        orphan = tmp_path/'orphans.fq'
+        reads.rename(orphan)
+        reads.write_text('')
+        kwargs['orphan_path'] = orphan
+    engine = run_unified_fastq_inference
+    if mode == 'inferred':
+        from mlvamaps.locus_reconstruction import run_reconstructed_fastq_inference
+        engine = run_reconstructed_fastq_inference
+        kwargs.update(insert_mean=160+11*9, insert_sd=.1, maximum_candidate_repeat_count=100)
+    without, _, _, _ = engine(**kwargs, database_path=None, outdir=tmp_path/'free')
+    assert all(row['repeat_count'] == '' for row in without)
+    calls, _, _, paths = engine(**kwargs, database_path=database,
+        outdir=tmp_path/'rescued', keep_alignments=True)
+    if mode in {'novel', 'nested_database', 'paired', 'orphan', 'inferred'}:
+        assert calls[0]['repeat_count'] == 11
+        assert calls[0]['product_size_bp'] == len(sequence)
+        assert calls[0]['status'] == 'called'
+        assert 'reference_assisted:reference' in calls[0]['reason']
+        variants = read_profiles(paths['reconstructed_locus_variants'])
+        expected = ('N'*100+left[-80:]+'N'*99+right[:80]+'N'*100
+                    if mode == 'inferred' else 'N'*100+read+'N'*100)
+        assert variants[0]['sequence'] == expected
+        summary = read_profiles(paths['reference_calling'])[0]
+        assert summary['status'] == summary['call_status'] == 'called'
+        if mode == 'inferred':
+            assert float(summary['insert_mean']) == 259
+            assert float(summary['insert_sd']) == .1
+    else:
+        assert all(row['repeat_count'] == '' for row in calls)
+        assert all(row['status'] != 'called' for row in calls)
+    assert paths['reference_calling_alignments_0'].is_file()
+
+
+def test_tied_fragment_lengths_remain_uncalled_at_low_probability_threshold():
+    from mlvamaps.competitive_short_reads import candidate_likelihood
+    from mlvamaps.short_read_evidence import InsertDistribution, MoleculeEvidence, RepeatTemplate
+    locus = Locus('L', repeat_unit_length_bp=4)
+    template = RepeatTemplate(locus, 'A'*40, 'C'*40, 'AGTC', 4)
+    item = MoleculeEvidence('one', 'L', ('FLANK_PAIR',), (), (), fragment_offset=80)
+    result = candidate_likelihood([item], template, InsertDistribution(121, .1, 1, 'override'), 100, .3)
+    assert not result.identifiable and result.best is None
+    assert result.reason == 'minimum_likelihood_tie'

@@ -1,141 +1,76 @@
 # Illumina paired-end FASTQ
 
-Short reads use a **single database-free competitive caller**. Supply the
-primer panel and FASTQs; there is no short-read engine selector. Native flank
-alignments compete across loci, and physical repeat lengths compete using
-sample evidence. Supplying `--database` adds downstream reference classification
-without changing the genotype algorithm.
-
-There are no minimum depth, supporting-molecule, spanning-pair or graph-edge
-count requirements. Single observations remain usable; confidence and intervals
-describe the evidence, while unobserved lengths remain unresolved.
+SR FASTQ calling requires **`--database`**. Assembly and default accurate
+long-read calling remain database independent. Taxonomic classification always
+requires a database and runs separately from repeat measurement.
 
 ```bash
 mlvamaps call -i sr --fq1 sample_R1.fastq.gz --fq2 sample_R2.fastq.gz \
-  -p primers.tsv -o results -t 8
-mlvamaps call -p panel.tsv -i reads/ --short-reads -o results -t 8
+  --database references -p primers.tsv -o results -t 8
+mlvamaps call -p panel.tsv -i reads/ --short-reads \
+  --database references -o results -t 8
 ```
 
-Mate 2 is optional; competitive recruitment retains both mates and QC-surviving
-orphans. Direct spans, unique pair overlaps and local stitching feed the same
-assembly-calibrated repeat/SNP interpreter, including novel and half-repeat
-alleles and primer-indel correction. Sample-derived arms permit candidate
-inference without reference alleles or cached minimap2 indexes. Minimap2 is
-used only for optional downstream database classification.
+A reference build can supply its saved panel when `-p` is omitted. Mate 2 is
+optional. QC retains usable orphan mates, and recruitment preserves both mates
+when only one maps. Minimap2 is required. There is no short-read engine selector.
 
-A boundary-only read gives a lower bound, with equal likelihood for all longer
-compatible alleles. Repeated copies cannot manufacture a unique length. Inward
-pairs contribute a robust fragment likelihood; learned flank-phase offsets are
-removed before comparing physical lengths. The caller scores length vectors
-without building or aligning every candidate sequence. Local product recovery,
-SNP evidence and the read-depth fallback are automatic parts of this pathway.
+The calling sequence is:
 
-Legacy three-column primer panels are supported, including names such as
-`vrrA_12bp_314bp_10U`. The name supplies repeat-unit length, nominal product
-length and nominal repeat count for the shared MLVA length calibration; those
-values may also be supplied as panel columns. Complete primer-bounded reads,
-uniquely overlapping pairs and uniquely reconstructed products can be called
-without knowing the motif or internal flank sequences.
-Without product-length calibration, recovered sequences are retained but their
-numeric repeat counts remain blank; repeat-unit size alone is insufficient.
+1. Filter and validate FASTQs.
+2. Competitively map reads against the database's candidate contexts for all
+   panel loci. Duplicate references and allele expansions do not multiply
+   molecule support. Cross-locus ties remain unassigned.
+3. Classify reads against supported reference flanks. Measure complete products
+   and reads spanning both repeat boundaries; reconstruct unique overlaps where
+   useful. Unobserved bases remain `N`.
+4. For unresolved lengths, use inward mate geometry with empirical or supplied
+   insert statistics. A single boundary supplies a lower bound, never an exact
+   count. Equally supported lengths remain unresolved.
+5. Estimate remaining lengths from whole-input k-mer coverage only when an
+   observed, primer-connected graph and usable flank depth exist.
+6. Apply shared assembly calibration and Sassy PCR to recovered complete
+   products, then write repeat/SNP results and database classification.
 
-Primer-only loci can learn repeat motifs and both boundary flanks from recruited
-sample reads. Primer-anchored consensus tolerates isolated sequencing errors;
-once both boundaries are learned, partial reads can support likelihood estimates.
-Without those boundaries or a complete product, a primer-connected k-mer graph
-may still support a provisional read-depth length estimate.
-The caller does not treat the entire sequence between primers as a repeat tract.
-When the motif is unknown, overlaps must
-span at least two configured repeat units and pass an observed periodicity
-check. A rich panel with concrete motifs and repeat-boundary flanks additionally
-supports partial boundary evidence and the likelihood fallback below.
+The database identifies locus context; its stored repeat count is not a sample
+call. Reads can establish alleles outside the reference candidate grid, including
+half-repeat alleles. Reference-relative lengths assume the unobserved flanks
+have the reference lengths; validate these assumptions on real libraries.
+Up to eight equally supported reference backgrounds are evaluated. Conflicting
+lengths and larger background ties remain unresolved.
 
-1. Stream QC and competitive recruitment against a combined flank index.
-2. Classify spans, boundaries, flank pairs and anchored repeat-rich reads.
-3. Recover observed products and uniquely overlapping pairs.
-4. Pile up recruited reads, consolidate substitution errors, and reconstruct
-   unresolved loci through unique overlaps.
-5. Measure recovered contigs with the same Sassy PCR and length calibration as assembly.
-6. Use haploid candidate likelihoods for unresolved loci with panel or sample-learned boundaries.
-7. Estimate remaining unresolved lengths from whole-input k-mer coverage when a
-   primer-connected graph is available. Interpret recovered products through
-   the shared repeat/SNP layer.
+Legacy three-column panels are supported. Calibrated locus names or panel
+columns supply repeat-unit and product-length calibration. Reference contexts
+provide the internal flanks missing from primer-only panels. A database lacking
+a locus cannot supply a call for that locus.
 
-The graph retains contiguous high-quality segments rather than discarding a
-whole read for one bad base. Overlaps tolerate up to 2% substitutions but must
-have a unique non-repeat offset; ambiguous consensus bases remain `N`.
-Read and path redundancy is consolidated before applying reconstruction limits,
-so thousands of recruited molecules can contribute to a primer-bounded consensus.
-Different-length quality-trimmed fragments can join a containing read through a
-unique ungapped placement, retaining their original coordinates and base votes.
-They contribute no support outside their observed bases. The 2,048-node cap
-applies after this consolidation; node/path failures set `limit_reached=true`.
-Consensus retains the length established by the overlap coordinates.
-Separate recovered components with the same product length and primer ends
-also retain their repeat count; disputed interior bases are masked as `N`.
-Sassy runs on the small recovered-contig collection after recruitment.
-`locus_reconstruction/reconstructed_contigs.fasta.gz` and
-`locus_reconstruction/reconstruction_pcr.tsv` retain the sequences and PCR
-measurements shown in the report's local assembly section.
+There are no minimum supporting-molecule or depth cutoffs. Confidence, support,
+intervals and failure reasons remain explicit. The hierarchy is `DIRECT` →
+`RECONSTRUCTED` → `INFERRED` → `KMER_DEPTH`, with `AMBIGUOUS`, `MIXED` and no-call
+outcomes. `KMER_DEPTH` is a provisional `ESTIMATED` result, with confidence zero
+and a coverage-sensitivity interval; it does not supply reconstructed sequence.
 
-The hierarchy is `DIRECT` → `RECONSTRUCTED` → `INFERRED` → `KMER_DEPTH`. Low-confidence
-observed products and informative likelihood candidates retain their best
-repeat estimate in `calls.tsv`, the fingerprint, and the report, with
-`AMBIGUOUS` status and alternatives/intervals. Equally supported lengths use
-the smallest candidate; boundary-only estimates may represent only a lower
-bound. A flat likelihood or an uncalibrated primer-only product still cannot
-supply a numeric count on its own. `KMER_DEPTH` uses `ESTIMATED` status and
-uncalibrated confidence (`0`); its interval describes coverage sensitivity and
-retains any wider likelihood uncertainty. It supplies no reconstructed sequence
-or SNP claims. Substantial incompatible alleles are `MIXED` and retain priority.
-See the [method definitions and limitations](../concepts/locus-reconstruction.md).
+`reference_calling/summary.tsv` records outcomes and reference IDs, alongside
+candidate contexts and provenance. BAMs are retained with `--keep-intermediates`.
+Calls include `reference_assisted` provenance. `short_read_repeat_evidence.tsv`
+records evidence counts, product/VNTR lengths and uncertainty;
+`reconstructed_locus_variants.tsv` retains sample-derived sequence.
+`short_read_run_metadata.json` identifies the caller as
+`competitive_reference_likelihood`.
 
-Useful advanced controls:
+## Performance and CPU allocation
 
-```text
---short-repeat-fraction 0.7
---short-confidence-threshold 0.8
---short-max-candidate-repeat-count 100
---sr-recruitment-audit compact
---insert-mean 400 --insert-sd 35
-```
+Reference mapping uses the sample's `--threads` budget and writes BAM through
+HTSlib. Normal runs reuse the QC FASTQs. A combined replay retains mapped pairs
+and orphan mates; input is not replayed separately for each locus. Iterator-only
+API inputs use temporary FASTQs. Reference fitting currently runs per locus in
+the main process. Memory scales with recruited evidence and the reference
+candidate count. Optional rapidgzip/ISA-L acceleration remains available.
 
-Supply insert statistics only when measured independently from the library.
-Without reliable insert statistics, boundary-only observations cannot resolve
-an exact allele. Depth estimates normalize whole-input graph k-mer abundance
-against flank coverage; recruited repeat-rich read counts alone do not determine
-copy number. `--threads` controls recruitment, I/O and subsequent locus work
-without overlapping full allocations.
-
-Pileups use HTSlib through the installed [`pysam` Python API](https://pysam.readthedocs.io/en/stable/api.html#pysam.AlignmentFile.pileup) at validated read
-coordinates, without realigning repeat lengths. Overlapping mates contribute
-one molecule vote; conflicts become `N`, and consensus bases require 70%
-agreement. The read-depth limit is set to the complete input pool, avoiding
-HTSlib's default depth truncation. Overlap mismatch counts use NumPy.
-Independent A/C/G/T-only pools without shared molecules are batched into one
-native `pysam.samtools.consensus` call per consolidation. Pools containing `N`
-or overlapping molecular observations use `AlignmentFile.pileup`, preserving
-conflict votes and exact molecule weights. Identical observation patterns share
-one pileup entry with their full multiplicity; reads are not subsampled.
-Independent loci use process workers for reconstruction preparation and final
-recovery, capped by the sample's thread allocation and number of loci. Completed
-preparations are reused when recruitment has not changed the reads or template.
-Sample-anchor learning and indexing share each prepared sequence pool, and
-unchanged loci reuse their learned templates between rescue rounds.
-When a template changes, reads are reclassified and obsolete boundary
-coordinates and length measurements are discarded.
-Pileups use temporary uncompressed BAMs in the system temporary directory;
-memory scales with the active pileup depth and retained read evidence. Stage
-timings, pileup backend and worker allocation are recorded in
-`reconstruction_metadata.json`. Sample-anchor learning and indexing currently
-run in the main process; progress logs show each learning phase and its locus
-molecule count, including after each rescue scan.
-
-`calls.tsv` preserves the primary schema and adds call method and confidence.
-`short_read_repeat_evidence.tsv` contains evidence counts and failure-mode
-features; `reconstructed_locus_variants.tsv` retains recovered sequence.
-Candidate likelihood files are empty for loci resolved without inference.
-Run metadata includes stage timings and insert statistics.
+Use `--force` when comparing previously completed server runs. Historical
+sample-only benchmarks exercise lower-level recovery helpers, which remain
+available for synthetic validation; they do not measure the database-backed
+SR command's total runtime.
 
 ## Validation commands
 
@@ -184,7 +119,7 @@ SRR000002\t/path/SRR000002.fastq.gz\t.\tSAMN000002
 ```
 
 ```bash
-mlvamaps call -p panel.tsv -i sr --manifest samples.tsv \
+mlvamaps call -p panel.tsv -i sr --manifest samples.tsv --database references \
   --sample-metadata metadata.tsv \
   --profiles profiles.tsv \
   -o results -t 32
@@ -205,13 +140,13 @@ large samples or memory-constrained nodes:
 
 ```bash
 export MLVAMAPS_MAX_CONCURRENT_SAMPLES=2
-mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads \
+mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads --database references \
   -o results -t 32
 ```
 
 Completion order does not change combined output order. Within each sample,
 FASTQ/QC streams in bounded chunks and process workers recruit molecules
-against panel anchors. Progress reports sample/worker allocation and stage
+against reference targets. Progress reports sample/worker allocation and stage
 transitions unless `--quiet` is selected.
 
 For Slurm arrays, split the manifest by row while preserving its header and run
@@ -229,7 +164,7 @@ python examples/make_illumina_example.py examples/illumina_demo
 Then run:
 
 ```bash
-mlvamaps call -p examples/illumina_demo/panel.tsv -i sr \
+mlvamaps call -p examples/illumina_demo/panel.tsv -i sr --database references \
   --fq1 examples/illumina_demo/SRR_DEMO_1.fastq.gz \
   --fq2 examples/illumina_demo/SRR_DEMO_2.fastq.gz \
   --sample-id SRR_DEMO \
@@ -257,7 +192,7 @@ mlvamaps call -p examples/illumina_demo/panel.tsv \
   usable fragment-length information cannot estimate repeat number. An
   incomplete primer-only product also needs reconstruction or additional
   repeat-boundary information. Expected-range midpoints are not measurements.
-- **Database predates the context schema:** omit `--database` for allele calling;
-  rebuild it only if reference classification is wanted.
+- **Database predates the context schema:** rebuild it with the current
+  `mlvamaps build-reference`; SR FASTQ calling requires current reference assets.
 - **MYOGA row does not attach to a tip:** make `genome_id` exactly equal to the
   Newick label, including suffixes and case.

@@ -15,6 +15,16 @@ def _write_panel(path: Path) -> Path:
     return panel
 
 
+def _write_database(path: Path) -> Path:
+    database = path/'references'
+    mapping = database/'competitive_mapping'
+    mapping.mkdir(parents=True, exist_ok=True)
+    (database/'manifest.json').write_text('{}')
+    for name in ('candidate_contexts.fasta', 'candidate_metadata.tsv', 'short.mmi', 'long.mmi'):
+        (mapping/name).write_text('')
+    return database
+
+
 def _fake_short_result(outdir: Path, sample_id: str) -> dict[str, Path]:
     outdir.mkdir(parents=True, exist_ok=True)
     files = {
@@ -91,7 +101,7 @@ def test_short_read_directory_cli_routes_pairs_to_batch(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_run_short_batch", fake_batch)
 
     assert cli.main(
-        ["call", "-p", str(panel), "-i", str(inputs), "--short-reads"]
+        ["call", "-p", str(panel), "-i", str(inputs), "--short-reads", "--database", str(_write_database(tmp_path))]
     ) == 0
     assert observed["short_read_mode"] is True
     assert [row["sample_id"] for row in observed["rows"]] == ["sample"]
@@ -293,7 +303,7 @@ def test_paired_fastq_directory_writes_clean_batch_layout(tmp_path, monkeypatch)
     results = tmp_path / "results"
 
     assert cli.main(
-        ["call", "-p", str(panel), "-i", str(inputs), "--short-reads", "-o", str(results)]
+        ["call", "-p", str(panel), "-i", str(inputs), "--short-reads", "--database", str(_write_database(tmp_path)), "-o", str(results)]
     ) == 0
     assert {path.name for path in results.iterdir()} == {
         "sample1", "sample2", "batch_summary"
@@ -324,12 +334,16 @@ def test_manifest_batch_layout_resumes_from_sample_directory(tmp_path, monkeypat
 
     def fake_run(args, reads1, reads2, outdir, sample_id, metadata):
         calls.append(sample_id)
+        classification = outdir/'classification'
+        classification.mkdir(parents=True, exist_ok=True)
+        (classification/'mapping_reference_matches.tsv').write_text('')
+        (classification/'classification.json').write_text('{}')
         return _fake_short_result(outdir, sample_id)
 
     monkeypatch.setattr(cli, "_run_short_input", fake_run)
     results = tmp_path / "results"
     command = [
-        "call", "-p", str(panel), "-i", "sr", "--manifest", str(manifest),
+        "call", "-p", str(panel), "-i", "sr", "--database", str(_write_database(tmp_path)), "--manifest", str(manifest),
         "-o", str(results),
     ]
 
@@ -354,7 +368,7 @@ def test_manifest_rejects_reserved_batch_summary_sample_id(tmp_path, capsys):
 
     with pytest.raises(SystemExit, match="2"):
         cli.main(
-            ["call", "-p", str(panel), "-i", "sr", "--manifest", str(manifest)]
+            ["call", "-p", str(panel), "-i", "sr", "--database", str(_write_database(tmp_path)), "--manifest", str(manifest)]
         )
 
     assert "reserved for batch aggregate outputs" in capsys.readouterr().err
