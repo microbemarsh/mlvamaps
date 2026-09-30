@@ -43,3 +43,29 @@ or establish agreement for a real library.
 `fastq_unrounded_output.csv` was generated from the identical inputs and pinned
 script with `--round 0`. Tests check both settings, including integer values
 and fractional alleles retained exactly when rounding is disabled.
+
+## Expanded sizing fixtures
+
+`sizing_spanning_output.csv`, `sizing_shotgun_output.csv`, their `_unrounded`
+counterparts, and `sizing_unresolved_output.csv` are unmodified detailed outputs
+from the same upstream commit and SHA-256 above. Generate their artificial DNA
+inputs with:
+
+```bash
+python scripts/make_repeat_sizing_inputs.py --output /tmp/synthetic_sizing
+python MLVA_finder.py --input /tmp/synthetic_sizing/spanning/assemblies \
+  --output /tmp/synthetic_sizing/spanning/mlva \
+  --primer /tmp/synthetic_sizing/spanning/primers.tsv --contig
+```
+
+Repeat for `shotgun` and `unresolved`. Add `--round 0` and choose a separate
+output directory to regenerate the unrounded outputs for `spanning` and
+`shotgun`. The seed is `9302026`; generate all three sets together to preserve
+the random-number sequence. No organism-derived sequences are used.
+
+The 26 spanning and 11 shotgun loci are checked through the public FASTQ
+outputs against assembly calls, the independent MLVA_finder output, and the
+generator's base-pair truth. Both rounded and raw counts are checked, including
+thirds/sixths that cannot be represented by a finite decimal. The unresolvable
+long-repeat control retains a zero-confidence prior estimate constrained by
+observed lower bounds. It remains provisional and fails strict matching.

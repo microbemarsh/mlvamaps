@@ -65,15 +65,57 @@ python scripts/benchmark_cross_mode.py runs.tsv --output comparison.json --requi
 ```
 
 The reports are written before the command exits. `--require-exact` returns 1
-if primary called profiles differ, any paired sample run is missing, or no
-callable profile can be compared. Wrong, missing and provisional SR calls all
-prevent complete agreement with a called MLVA_finder locus. Missing values
-remain distinct from zero. `strict_repeat_match` records this result in JSON;
+unless every reported locus has matching called repeats **and calibrated PCR
+size in base pairs**, with no missing sample runs. A locus unresolved in both
+outputs also fails. Matching rounded alleles cannot hide a one-base size error.
+Wrong, missing and provisional SR calls all prevent complete agreement.
+Missing values remain distinct from zero. `strict_repeat_match` and
+`strict_size_match` record the separate checks; `strict_match` combines them.
+The locus table includes `product_size_bp_a/b`, `size_comparison`, and
+`size_absolute_difference_bp`. Size checks use `calls.tsv.product_size_bp`,
+not the physical sequence length or a depth diagnostic. Older outputs without
+product size must be regenerated before strict validation can pass.
+The metric
 `exact_repeat_recovery_by_mode.mlva_finder` includes all MLVA_finder calls in its
 denominator, so dropping difficult loci cannot improve it to 100%.
 Use the detailed CSV rather than the shortened `MLVA_analysis_*.csv` table to
 avoid ambiguous locus-name matching. Numeric primary-count agreement alone
 does not establish agreement on mixture composition or SNPs.
+
+## Synthetic repeat-sizing datasets
+
+```bash
+python scripts/make_repeat_sizing_inputs.py --output /tmp/synthetic_sizing
+python -m pytest -q tests/test_mlva_finder_concordance.py
+```
+
+The generator writes deterministic artificial assemblies, three-column primer
+panels, read FASTQs, reference loci, and `truth.tsv` under three sample folders:
+
+- `spanning`: 26 loci, repeat-unit lengths 2–96 bp, zero/whole/partial repeats,
+  strict rounding boundaries, forward/reverse primer indels, flank indels,
+  reverse orientation, and an 80-copy allele. Reads cover complete products.
+- `shotgun`: 11 loci with 440–536 bp products, paired 150-bp reads from 250-bp
+  fragments at staggered positions. No fragment contains a complete product.
+- `unresolved`: an 80-copy repeat with boundary pairs but no spanning sequence
+  or independently calibrated insert distribution. This negative control must
+  retain a zero-confidence prior estimate constrained by the observed lower
+  bound, and fail strict concordance.
+
+Every reference contains five repeats; all sample alleles differ. `truth.tsv`
+distinguishes physical repeat-tract length, actual sequence length, calibrated
+PCR size, and unrounded MLVA allele. A flank indel can change the MLVA allele
+without changing the physical tandem-repeat count.
+
+The regression runs the public FASTQ caller and assembly caller, comparing all
+37 measurable loci against frozen output from the pinned upstream MLVA_finder
+script, with default rounding and with rounding disabled. It needs minimap2,
+Sassy and the package dependencies, but no network access. See the
+[oracle provenance](../tests/data/mlva_finder_oracle/README.md) for regeneration.
+These controlled error-free reads test sizing and reconstruction, not accuracy
+on noisy, unevenly covered real libraries.
+
+## Server comparisons
 
 For a server-only dataset, keep the reads and assemblies there and compare
 existing outputs with a manifest such as:
@@ -86,11 +128,11 @@ isolate1	sr_after	/path/to/isolate1/sr_after
 ```
 
 Use identical reads, panels and settings for the two SR runs, and distinct output
-directories. Short reads use one database-free competitive caller; no engine
+directories. Short reads use one reference-backed competitive caller; no engine
 selection is required:
 
 ```bash
-mlvamaps call -i sr --fq1 R1.fastq.gz --fq2 R2.fastq.gz -p primers.tsv \
+mlvamaps call -i sr --fq1 R1.fastq.gz --fq2 R2.fastq.gz -p primers.tsv --database references \
   -t 8 -o sr_competitive
 ```
 

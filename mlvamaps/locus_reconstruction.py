@@ -24,7 +24,8 @@ from .short_read_evidence import (
     _read_profile, RepeatTemplate, estimate_insert_distribution, panel_template,
 )
 from .sequence import revcomp
-from .repeat_calibration import expected_nonrepeat_bp
+from .repeat_calibration import assembly_equivalent_product_allele, expected_nonrepeat_bp
+from .allele_inference import retain_detected_estimate
 
 
 def locus_templates(loci):
@@ -140,7 +141,7 @@ def _project_flanks(item, sequence, template, count, alignment_cache=None):
     return {p: next(iter(values)) for p, values in votes.items() if len(values) == 1}
 
 
-def _common_call(locus, products, recruited, sample_id, technology, minimum_molecules, minimum_probability, inference=None):
+def _common_call(locus, products, recruited, sample_id, technology, minimum_molecules, minimum_probability, inference=None, depth_estimate=None):
     ranked = sorted(products, key=lambda p: (-p.estimated_fraction, -p.support_count, p.variant_id))
     best = ranked[0] if ranked else None
     confidence = best.reconstruction_confidence if best else inference.confidence if inference else 0
@@ -150,7 +151,7 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
         status = "mixed" if len(meaningful) > 1 else "called"
     if inference and inference.method == "MIXED":
         status = "mixed"
-    repeat = product_repeat_allele(best, locus)[1] if best else ""
+    raw_repeat, repeat = product_repeat_allele(best, locus) if best else (None, "")
     if repeat is None:
         repeat = ""
         status = "detected_unresolved"
@@ -175,8 +176,11 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
     counts = inference.counts if inference else {"FULL_SPAN": sum(p.support_count for p in ranked)}
     product_size = ((best.calibrated_product_size_bp or len(best.sequence)) if best
                     else inference.product_size_bp if inference else None)
-    return {"sample": sample_id, "locus": locus.locus_id, "technology": technology,
+    if best is None and product_size is not None and repeat != "":
+        raw_repeat = assembly_equivalent_product_allele(locus, product_size)[0]
+    return retain_detected_estimate({"sample": sample_id, "locus": locus.locus_id, "technology": technology,
             "product_size_bp": product_size if product_size is not None else "",
+            "repeat_count_raw": raw_repeat if raw_repeat is not None else "",
             "repeat_count": repeat, "status": status, "best_probability": confidence,
             "second_best_probability": alternatives[0][1] if alternatives else 0,
             "molecule_support": recruited, "direct_product_support": counts.get("FULL_SPAN", 0),
@@ -188,6 +192,8 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
             "secondary_fraction": ranked[1].estimated_fraction if len(ranked)>1 else "",
             "candidate_distribution": ";".join(f"{r}:{p:.6f}" for r,p in sorted(count_distribution.items(), key=lambda v:-v[1])),
             "confidence": confidence, "margin": confidence,
+            "confidence_kind": "conditional_posterior" if inference and len(inference.states) else "sequence_support",
+            "repeat_count_interval_kind": "conditional_credible_interval" if inference and interval else "observed_range",
             "best_candidate_repeat": inference.best if inference else repeat,
             "dominant_repeat": repeat,
             "num_variants": len(ranked), "num_secondary": max(0, len(meaningful)-1),
@@ -195,7 +201,7 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
             "reason": (inference.reason or ("low_confidence_observed_product" if status == "ambiguous" else "")) if inference else "",
             "n_spanning": counts.get("FLANK_PAIR", 0), "repeat_count_min": interval[0] if interval else repeat,
             "repeat_count_max": interval[1] if interval else repeat,
-            "second_best_repeat_count": alternatives[0][0] if alternatives else ""}
+            "second_best_repeat_count": alternatives[0][0] if alternatives else ""}, locus, depth_estimate)
 
 
 MOLECULE_AUDIT_FIELDS = [
@@ -248,6 +254,12 @@ def _fit_locus(task):
                 result.interval = min(bounds), max(bounds)
             result.products = [replace(product, repeat_likelihoods={calibrated[n]: value
                 for n, value in product.repeat_likelihoods.items()}) for product in result.products]
+    elif result.interval:
+        bounds = [assembly_equivalent_product_allele(locus,
+            len(template.left)+len(template.right)+round(n*template.unit), round_tolerance)[1]
+            for n in result.interval]
+        if all(value is not None for value in bounds):
+            result.interval = min(bounds), max(bounds)
     stats = {'recovery_seconds': time.perf_counter()-started, 'evidence_molecules': len(items),
              'candidate_states': len(result.states), 'call_method': result.method, 'worker_pid': os.getpid()}
     return result, stats, [i for i, item in enumerate(items) if 'FULL_SPAN' in item.classes]
@@ -454,6 +466,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 reads1=reads1, reads2=reads2, orphan_path=orphan_path, executor=locus_executor))
             stage_seconds['reference_calling'] = time.perf_counter()-reference_started
             recruitment_stats['final_uniquely_recruited_pairs'] = sum(map(len, evidence.values()))
+        estimates = {}
         if replay_pairs is not None:
             from .repeat_depth import estimate_graph_lengths
             depth_started = time.perf_counter()
@@ -481,26 +494,28 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             products = [replace(p, round_tolerance=round_tolerance) for p in result.products]
             all_products.extend(products)
             calls.append(_common_call(locus, products, len(items), sample_id, technology,
-                                      minimum_molecules, minimum_probability, result))
+                                      minimum_molecules, minimum_probability, result, estimates.get(locus.locus_id)))
             read_lengths = [len(seq) for e in items for seq in e.sequences]
-            product_length = ((products[0].calibrated_product_size_bp or len(products[0].sequence))
-                              if products else result.product_size_bp)
+            product_length = calls[-1]['product_size_bp']
+            product_length = product_length if product_length != '' else None
             template = templates[locus.locus_id]
             nonrepeat = expected_nonrepeat_bp(locus)
             if nonrepeat is None and not template.primer_only:
                 nonrepeat = len(template.left)+len(template.right)
             summaries.append({"sample_id": sample_id, "locus_id": locus.locus_id,
-                "call_method": result.method, "confidence": result.confidence,
+                "call_method": calls[-1]['inference_method'], "confidence": calls[-1]['confidence'],
+                "confidence_kind": calls[-1]['confidence_kind'],
+                "repeat_count_interval_kind": calls[-1]['repeat_count_interval_kind'],
                 **{("n_flank_pairs" if name == "FLANK_PAIR" else "n_"+name.lower()): result.counts.get(name, 0) for name in EVIDENCE_CLASSES},
                 "best_repeat": calls[-1]['repeat_count'], "second_repeat": result.second,
-                "interval_min": result.interval[0] if result.interval else calls[-1]['repeat_count'],
-                "interval_max": result.interval[1] if result.interval else calls[-1]['repeat_count'],
+                "interval_min": calls[-1]['repeat_count_min'],
+                "interval_max": calls[-1]['repeat_count_max'],
                 "effective_depth": len(usable), "limit_reached": result.limit_reached,
                 "read_length": float(np.median(read_lengths)) if read_lengths else '',
                 "motif_length": template.unit if template else '', "amplicon_length": product_length or '',
                 "vntr_length": max(0, product_length-nonrepeat) if product_length is not None and nonrepeat is not None else '',
                 "amplicon_insert_ratio": product_length/insert.mean if product_length and insert else '',
-                "reason": result.reason})
+                "reason": calls[-1]['reason']})
             likelihood_rows.extend({"sample_id": sample_id, "locus_id": locus.locus_id,
                 "repeat_count": r, "log_likelihood": ll, "posterior": probability}
                 for r,ll,probability in zip(result.states, result.log_likelihoods, result.posterior))

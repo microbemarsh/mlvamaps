@@ -411,14 +411,15 @@ def test_uncertain_length_estimates_survive_into_calls(template, kind):
     common = _common_call(template.locus, result.products, 4, 's', 'illumina', 3, .8, result)
     call = common_calls_to_compatibility([common])[0]
     if kind in {'presence', 'boundary'}:
-        assert call['repeat_count'] == ''
-        assert call['status'] == 'PRESENT_COUNT_UNKNOWN'
+        assert call['status'] == 'ESTIMATED'
+        assert call['allele_confidence'] == 0 and call['confidence_kind'] == 'prior_only'
         if kind == 'presence':
-            assert common['repeat_count_min'] == ''
+            assert call['repeat_count'] == 6  # Midpoint of the supplied 0..12 panel range.
             assert 'no_repeat_length_information' in call['evidence']
         else:
+            assert call['repeat_count'] == 20
             assert common['repeat_count_min'] == 20
-            assert common['repeat_count_max'] == 100
+            assert common['repeat_count_max'] == ''
             assert 'repeat_length_lower_bound' in call['evidence']
     else:
         assert call['status'] == 'AMBIGUOUS'
@@ -577,8 +578,9 @@ def test_primer_only_without_length_calibration_preserves_sequence_but_not_count
         pairs=iter([pair(template.sequence(8), name=str(i)) for i in range(3)]),
         loci=[locus], database_path=None, outdir=tmp_path, sample_id='s',
         technology='illumina', minimum_molecules=2, minimum_probability=.8)
-    assert calls[0]['status'] == 'detected_unresolved'
-    assert calls[0]['repeat_count'] == calls[0]['candidate_distribution'] == ''
+    assert calls[0]['status'] == ('estimated' if unit else 'detected_unresolved')
+    assert calls[0]['repeat_count'] == (6 if unit else '')
+    assert calls[0]['confidence'] == 0 and calls[0]['candidate_distribution'] == ''
     with paths['reconstructed_locus_variants'].open() as handle:
         product = next(csv.DictReader(handle, delimiter='\t'))
     assert product['sequence'] == template.sequence(8)
@@ -792,6 +794,11 @@ def test_candidate_limit_below_observed_boundary_is_never_a_call(template):
     item = MoleculeEvidence('one', 'L', ('LEFT_BOUNDARY',), (), (), lower_bound=120)
     result = candidate_likelihood([item], template, None, 100, .8)
     assert result.best is None and result.limit_reached and not result.identifiable
+    from mlvamaps.locus_reconstruction import _common_call
+    call = _common_call(template.locus, [], 1, 's', 'illumina', 0, .8, result)
+    assert call['repeat_count'] == call['repeat_count_min'] == 120
+    assert call['repeat_count_max'] == '' and call['confidence'] == 0
+    assert call['status'] == 'estimated'
 
 
 def test_single_calibration_fragment_does_not_imply_known_library_variance(template):

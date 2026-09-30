@@ -157,6 +157,7 @@ ALLELE_FIELDS = [
     "locus_id",
     "called_repeat_count",
     "posterior_probability",
+    "confidence_kind",
     "second_best_repeat_count",
     "second_best_posterior",
     "read_depth",
@@ -233,6 +234,7 @@ SIMPLE_CALL_FIELDS = [
     "primary_read_depth",
     "mean_coverage",
     "allele_confidence",
+    "confidence_kind",
     "second_best_repeat_count",
     "second_best_probability",
     "inference_method",
@@ -253,6 +255,7 @@ REPEAT_COUNT_FIELDS = [
     "read_depth",
     "primary_read_depth",
     "allele_confidence",
+    "confidence_kind",
     "dominant_variant_fraction",
     "secondary_alleles",
     "status",
@@ -326,6 +329,7 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
                 "primary_read_depth": int(row.get("primary_read_depth") or 0),
                 "mean_coverage": "",
                 "allele_confidence": row.get("posterior_probability", 0.0),
+                "confidence_kind": row.get("confidence_kind", "conditional_posterior"),
                 "second_best_repeat_count": row.get("second_best_repeat_count", ""),
                 "second_best_probability": row.get("second_best_posterior", 0.0),
                 "inference_method": (
@@ -803,6 +807,7 @@ def run_call(
         row.update({
             "called_repeat_count": shared["repeat_count"],
             "posterior_probability": shared["best_probability"],
+            "confidence_kind": shared.get("confidence_kind", "conditional_posterior"),
             "second_best_repeat_count": (
                 str(shared["candidate_distribution"]).split(";")[1].split(":", 1)[0]
                 if len(str(shared["candidate_distribution"]).split(";")) > 1 else ""
@@ -813,7 +818,7 @@ def run_call(
             "dominant_variant_fraction": shared["dominant_fraction"] or 0,
             "allele_distribution": shared["candidate_distribution"],
             "call_status": status_map[str(shared["status"])],
-            "primary_measurement_source": "shared_competitive_minimap2_inference",
+            "primary_measurement_source": shared.get("inference_method", "shared_competitive_minimap2_inference"),
             "evidence_status": str(shared["status"]).upper(),
             "full_product_reads": shared["direct_product_support"],
             "repeat_informative_reads": shared["full_span_support"],

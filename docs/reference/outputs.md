@@ -136,12 +136,28 @@ evidence
 
 Fields that do not apply to an input mode remain blank. A FASTQ call based on a
 complete dominant local product includes its `product_size_bp` and unrounded
-`repeat_count_raw`. Likelihood calls retain product size when it can be
-calculated. `KMER_DEPTH` estimates remain diagnostic-only in
-`repeat_length_estimates.json`: their locus ownership and coverage assumptions
-are unverified, so they do not populate numeric call fields. Without separate
-length evidence, a detected locus is `PRESENT_COUNT_UNKNOWN`. An assembly-only
+`repeat_count_raw`. The raw count retains numeric precision in both assembly
+and FASTQ outputs; `repeat_count` applies the configured MLVA rounding.
+`product_size_bp` is the MLVA_finder-compatible PCR size, including configured
+primer lengths and correcting primer-match indels. It can therefore differ
+from the recovered sequence's literal length. Likelihood calls retain product size when it can be
+calculated. Detected loci without a measured or likelihood-based point estimate
+retain `KMER_DEPTH` estimates when available, followed by an explicit `PANEL_PRIOR`
+fallback. Both have `status=ESTIMATED` and `allele_confidence=0`: their exact-count
+confidence is unvalidated, not a calibrated zero probability of correctness.
+Priors respect observed lower bounds and do not fabricate a product length or
+raw measurement. `PRESENT_COUNT_UNKNOWN` is reserved for missing repeat metadata.
+An assembly-only
 call has product size but no read depth unless support data are supplied.
+
+`confidence_kind` identifies `sequence_support`, `sequence_measurement`,
+`conditional_posterior`, `unvalidated_depth`, `prior_only`, or
+`missing_repeat_definition`. Existing sequence support scores and likelihood
+posteriors are conditional on their models, not empirically calibrated real-library
+error rates. `repeat_count_interval_kind` distinguishes observed ranges,
+conditional credible intervals, coverage sensitivity, prior ranges, and lower
+bounds. A lower bound has a blank upper endpoint. Increasing boundary-only
+coverage cannot turn a prior estimate into a confident measurement.
 
 ## FASTQ outputs
 
@@ -155,7 +171,7 @@ call has product size but no read depth unless support data are supplied.
 | `short_read_repeat_evidence.tsv` | Direct/reconstructed/inferred method or unresolved outcome, confidence, evidence counts, repeat interval, and calibrated length features. |
 | `reference_calling/summary.tsv` | SR reference support, reference IDs, supporting molecules, final `call_status`, repeat counts, product lengths and per-locus insert statistics. Calls retain `reference_assisted` in their reason. Candidate sequences/metadata/provenance are alongside this table; BAMs require `--keep-intermediates`. |
 | `reference_calling/performance.json` | SR mapping, competition, QC replay and locus-fitting times; candidate/background counts, cached-index reuse, alignment records, mapped molecules and per-locus worker usage. |
-| `repeat_length_estimates.json` | Depth diagnostics: graph size, flank depths, raw product-length/repeat-count estimates, sensitivity intervals and shared edges, marked `diagnostic_only`, or the reason estimation could not run. These estimates are excluded from call fields. |
+| `repeat_length_estimates.json` | Depth diagnostics: graph size, flank depths, raw product-length/repeat-count estimates, sensitivity intervals and shared edges, marked `diagnostic_only`, or the reason estimation could not run. Eligible ratios are also exposed as provisional zero-confidence `ESTIMATED` counts when no length-based point estimate exists. |
 | `reconstructed_locus_variants.tsv` | Shared repeat counts, masked SNP markers, full sequence, observed repeat sequence and motif-relative edits. |
 | `short_read_run_metadata.json` | minimap2 and mlvamaps versions, resolved parameters, database source, and insert-size estimate. |
 | `filtered_reads_1.fastq.gz`, `filtered_reads_2.fastq.gz` | Quality-filtered mates, materialized when downstream classification or retained intermediates need them. |
@@ -250,8 +266,8 @@ filename order and assigns the historical zero-padded `key` values.
 | `PASS` | A decisive in-range call, without a minimum-depth requirement. |
 | `LOW_DEPTH` | Legacy status retained when reading older outputs; no longer assigned by a depth cutoff. |
 | `AMBIGUOUS` | Weak top posterior or insufficient separation from the second call. |
-| `ESTIMATED` | Legacy read-depth estimate with uncalibrated confidence. Current runs retain depth-only numbers in diagnostics instead of calling them. |
-| `PRESENT_COUNT_UNKNOWN` | The locus was detected but no repeat count is supported; depth-only ratios cannot resolve it. |
+| `ESTIMATED` | Provisional depth-based or panel-prior count with confidence 0 (unvalidated). Its method and confidence kind remain explicit. |
+| `PRESENT_COUNT_UNKNOWN` | Detected locus with no repeat unit or nominal count defined; repeat units cannot be estimated. |
 | `OUT_OF_RANGE` | Best repeat count exceeds the configured review range by more than `--repeat-range-tolerance`. The observed allele is retained rather than clipped. |
 | `MULTIPLE_VARIANTS` | At least one confirmed secondary remains in metagenome mode; isolate mode additionally requires dominant fraction below 0.8. Candidate and trace variants do not force this status. |
 | `LOCUS_DROPOUT` | No retained read evidence produced a prediction. |

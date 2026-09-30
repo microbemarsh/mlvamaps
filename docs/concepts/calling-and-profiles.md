@@ -70,6 +70,13 @@ EM-meaningful variants, plus the dominant estimated fraction. See
 `mlva_fingerprint_probabilistic.tsv` contains long-form repeat counts and
 posterior values.
 
+Detected loci retain provisional counts even when exact sizing is unsupported.
+`ESTIMATED` rows use read-depth estimates or an explicit panel prior, with zero
+confidence (unvalidated); they remain visible in fingerprints and reports.
+`confidence_kind` distinguishes those estimates from sequence support and
+conditional likelihood probabilities. Undetected loci remain blank. A panel
+without a repeat definition cannot express a repeat count.
+
 Assembly calls use the same fingerprint shape and historical integer/half-unit
 rounding convention. Product selection follows the MLVA_finder-compatible rule
 described in the assembly workflow. Optional FASTQ/BAM mapping reports depth
@@ -133,3 +140,7 @@ per profile and locus.
 
 Profiles from different panels or repeat-number conventions should not be
 compared without a documented conversion.
+
+`ESTIMATED` values are excluded from profile-match distances and confidence,
+while remaining visible in `profile_match_loci.tsv` as `ESTIMATED_NOT_COMPARED`.
+A prior matching a reference is not independent evidence of agreement.

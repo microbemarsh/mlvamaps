@@ -182,7 +182,8 @@ def test_reference_calling_measures_reads_missing_both_primers(tmp_path, mode):
             assert float(summary['insert_mean']) == 259
             assert float(summary['insert_sd']) == .1
     else:
-        assert all(row['repeat_count'] == '' for row in calls)
+        assert all(row['repeat_count'] == ('' if mode == 'competing_locus' else 8) for row in calls)
+        assert all(row['confidence'] == 0 for row in calls)
         assert all(row['status'] != 'called' for row in calls)
     assert paths['reference_calling_alignments_0'].is_file()
 
@@ -194,5 +195,6 @@ def test_tied_fragment_lengths_remain_uncalled_at_low_probability_threshold():
     template = RepeatTemplate(locus, 'A'*40, 'C'*40, 'AGTC', 4)
     item = MoleculeEvidence('one', 'L', ('FLANK_PAIR',), (), (), fragment_offset=80)
     result = candidate_likelihood([item], template, InsertDistribution(121, .1, 1, 'override'), 100, .3)
-    assert not result.identifiable and result.best is None
+    assert not result.identifiable and result.best == 10
+    assert result.second == 10.5 and .49 < result.confidence < .5
     assert result.reason == 'minimum_likelihood_tie'

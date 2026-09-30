@@ -74,9 +74,13 @@ def load_mlva_finder(path, sample):
             repeat = number(raw)
             if raw and (repeat is None or repeat < 0):
                 raise ValueError(f'{path}: invalid allele for {sample}/{locus}: {raw!r}')
+            size = number(row['size'])
+            if (row['size'].strip() or repeat is not None) and (size is None or size <= 0 or not size.is_integer()):
+                raise ValueError(f'{path}: invalid product size for {sample}/{locus}: {row["size"]!r}')
             details[locus] = {'locus_id': locus, 'repeat_count': repeat,
                 'status': 'PASS' if repeat is not None else 'NOT_FOUND',
                 'call_method': 'MLVA_finder', 'amplicon_length': row['size'],
+                'product_size_bp': size,
                 'source_sample': sample}
     if not details:
         raise ValueError(f'{path}: no MLVA_finder strain exactly matching {sample!r}; set source_sample in the manifest')
@@ -113,6 +117,7 @@ def compare_runs(manifest):
     result, locus_rows = {}, []
     for a,b in itertools.combinations(modes, 2):
         differences, estimate_differences, exact_profiles, components = [], [], [], []
+        size_differences, complete_profiles, exact_size_profiles = [], [], []
         snp_matches = snp_sites = 0
         repeat_matches = repeat_sites = 0
         callable_by_mode = {a: 0, b: 0}
@@ -138,13 +143,29 @@ def compare_runs(manifest):
             shared = ca.keys() & cb.keys()
             shared_by_sample[sample] = len(shared)
             exact_profiles.append(bool(ca) and ca == cb)
-            for locus in sorted(details[sample,a].keys() | details[sample,b].keys()):
+            all_loci = details[sample,a].keys() | details[sample,b].keys()
+            complete_profiles.append(bool(all_loci) and shared == all_loci)
+            sample_sizes_match = bool(all_loci)
+            for locus in sorted(all_loci):
                 row = {'sample_id': sample, 'mode_a': a, 'mode_b': b, 'locus_id': locus,
                        'repeat_a': ca.get(locus, ''), 'repeat_b': cb.get(locus, '')}
                 for mode, suffix in ((a, 'a'), (b, 'b')):
                     info = details[sample, mode].get(locus, {})
                     row['best_estimate_' + suffix] = number(info.get('repeat_count'))
                     row['status_' + suffix] = info.get('status', '')
+                    size = number(info.get('product_size_bp'))
+                    row['product_size_bp_' + suffix] = size if size is not None and size > 0 and size.is_integer() else None
+                sa, sb = row['product_size_bp_a'], row['product_size_bp_b']
+                has_a, has_b = locus in ca and sa is not None, locus in cb and sb is not None
+                if has_a and has_b:
+                    size_delta = abs(sa - sb)
+                    size_differences.append(size_delta)
+                    row['size_absolute_difference_bp'] = size_delta
+                    row['size_comparison'] = 'exact' if size_delta == 0 else 'discordant'
+                else:
+                    row['size_comparison'] = ('missing_in_both' if not has_a and not has_b
+                                              else 'missing_in_a' if not has_a else 'missing_in_b')
+                sample_sizes_match &= row['size_comparison'] == 'exact'
                 if row['best_estimate_a'] is not None and row['best_estimate_b'] is not None:
                     delta = abs(row['best_estimate_a'] - row['best_estimate_b'])
                     row['best_estimate_absolute_difference'] = delta
@@ -185,9 +206,23 @@ def compare_runs(manifest):
                         repeat_sites += rs
                         row['repeat_sequence_matches'], row['repeat_sequence_sites'] = rm, rs
                 locus_rows.append(row)
+            exact_size_profiles.append(sample_sizes_match)
         exact_matches = sum(delta == 0 for delta in differences)
+        exact_size_matches = sum(delta == 0 for delta in size_differences)
+        strict_repeats = (bool(exact_profiles) and all(exact_profiles) and all(complete_profiles)
+                          and not any(missing_runs.values()))
+        strict_sizes = bool(exact_size_profiles) and all(exact_size_profiles) and not any(missing_runs.values())
         result[f'{a}:{b}'] = {
-            'strict_repeat_match': bool(exact_profiles) and all(exact_profiles) and not any(missing_runs.values()),
+            'strict_repeat_match': strict_repeats,
+            'strict_size_match': strict_sizes,
+            'strict_match': strict_repeats and strict_sizes,
+            'shared_sized_loci': len(size_differences),
+            'exact_size_matches': exact_size_matches,
+            'discordant_size_loci': len(size_differences) - exact_size_matches,
+            'exact_size_concordance': exact_size_matches / len(size_differences) if size_differences else None,
+            'mean_absolute_size_difference_bp': float(np.mean(size_differences)) if size_differences else None,
+            'exact_size_recovery_by_mode': {
+                mode: exact_size_matches / count if count else None for mode, count in callable_by_mode.items()},
             'missing_runs_by_mode': missing_runs,
             'best_estimates_including_ambiguous': {
                 'comparable_loci': len(estimate_differences),
@@ -262,7 +297,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--distance-matrix', action='append', default=[], metavar='MODE=TSV')
     parser.add_argument('--require-exact', action='store_true',
-        help='Exit 1 after writing reports if any compared profile differs or a paired sample run is missing')
+        help='Exit 1 after writing reports unless every locus matches in repeat count and product size, with no missing calls or runs')
     args = parser.parse_args()
     manifest = read_table(args.manifest)
     if not manifest or not {'sample_id','mode','outdir'} <= manifest[0].keys():
@@ -279,8 +314,8 @@ def main():
             [field for row in rows for field in row])))
         writer.writeheader()
         writer.writerows(rows)
-    if args.require_exact and (not summary or not all(row['strict_repeat_match'] for row in summary.values())):
-        print('Repeat concordance failed; inspect the comparison JSON and .loci.tsv.', file=sys.stderr)
+    if args.require_exact and (not summary or not all(row['strict_match'] for row in summary.values())):
+        print('Repeat/size concordance failed; inspect the comparison JSON and .loci.tsv.', file=sys.stderr)
         raise SystemExit(1)
 
 

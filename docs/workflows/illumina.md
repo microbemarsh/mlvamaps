@@ -26,7 +26,8 @@ The calling sequence is:
    useful. Unobserved bases remain `N`.
 4. For unresolved lengths, use inward mate geometry with empirical or supplied
    insert statistics. A single boundary supplies a lower bound, never an exact
-   count. Equally supported lengths remain unresolved.
+   count. Equally supported lengths retain a provisional best count, its
+   conditional probability, and alternatives.
 5. Estimate remaining lengths from whole-input k-mer coverage only when an
    observed, primer-connected graph and usable flank depth exist.
 6. Apply shared assembly calibration and Sassy PCR to recovered complete
@@ -49,9 +50,13 @@ intervals and failure reasons remain explicit. The hierarchy is `DIRECT` →
 `RECONSTRUCTED` → `INFERRED`, with `AMBIGUOUS`, `MIXED` and no-call outcomes.
 `KMER_DEPTH` ratios remain in `repeat_length_estimates.json` as `diagnostic_only`.
 Matching sequence elsewhere and coverage bias can inflate these ratios even
-with balanced flank coverage. They do not populate repeat-count or product-size
-fields. Without separate length evidence, a detected locus remains
-`PRESENT_COUNT_UNKNOWN`; existing likelihood evidence and intervals are preserved.
+with balanced flank coverage. If no length-based point estimate exists, the
+ratio is also reported as `ESTIMATED`, with confidence 0 and coverage-sensitivity
+bounds. If no ratio is available, a `PANEL_PRIOR` uses the panel nominal count
+or midpoint of the panel range, constrained by observed lower bounds, with
+confidence 0. These values are visible in calls, fingerprints, and reports;
+they do not count as exact concordance or reference/profile support. Original
+likelihood distributions remain available. Missing repeat metadata is explicit.
 
 `reference_calling/summary.tsv` records outcomes and reference IDs, alongside
 candidate contexts and provenance. BAMs are retained with `--keep-intermediates`.

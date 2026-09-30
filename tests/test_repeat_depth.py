@@ -1,4 +1,4 @@
-"""Unverified coverage ratios remain diagnostics, never locus repeat calls."""
+"""Coverage estimates are reportable, but never acquire unsupported confidence."""
 from dataclasses import replace
 import csv
 import json
@@ -93,11 +93,12 @@ def test_matching_background_inflates_depth_without_establishing_a_locus_count()
     assert inflated['shared_edges'] == 0  # A panel-only sharing check misses it.
     assert inflated['status'] == 'diagnostic_only'
     assert recovery.best is None and recovery.interval is None and recovery.product_size_bp is None
-    call = _common_call(locus, [], len(items), 's', 'illumina', 0, .8, recovery)
-    assert call['status'] == 'detected_unresolved'
-    assert call['repeat_count'] == call['product_size_bp'] == ''
+    call = _common_call(locus, [], len(items), 's', 'illumina', 0, .8, recovery, inflated)
+    assert call['status'] == 'estimated'
+    assert call['repeat_count'] == inflated['repeat_count']
+    assert call['confidence'] == 0 and call['confidence_kind'] == 'unvalidated_depth'
     exported = common_calls_to_compatibility([call])[0]
-    assert exported['status'] == 'PRESENT_COUNT_UNKNOWN' and exported['repeat_count'] == ''
+    assert exported['status'] == 'ESTIMATED' and exported['allele_confidence'] == 0
 
 
 def test_disconnected_signal_does_not_fabricate_a_graph_length():
@@ -149,7 +150,7 @@ def test_repeat_phase_in_learned_flank_does_not_create_false_one_copy_span():
     assert item.alignment['0']['right'] is None
 
 
-def test_depth_only_counts_stay_out_of_exports_and_report(tmp_path, monkeypatch):
+def test_depth_only_counts_reach_exports_and_report_with_zero_confidence(tmp_path, monkeypatch):
     from mlvamaps import targeted_reconstruction
     from mlvamaps.unified_fastq import common_calls_to_compatibility
     from mlvamaps.report import _repeat_count_svg
@@ -160,23 +161,27 @@ def test_depth_only_counts_stay_out_of_exports_and_report(tmp_path, monkeypatch)
         pairs=iter(pairs), loci=[locus], database_path=None, outdir=tmp_path,
         sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8)
     call = calls[0]
-    assert call['repeat_count'] == call['product_size_bp'] == ''
-    assert call['status'] == 'detected_unresolved'
+    assert call['repeat_count'] == 70 and call['product_size_bp'] == len(sequence)
+    assert call['status'] == 'estimated'
+    assert call['confidence'] == call['best_probability'] == 0
+    assert call['confidence_kind'] == 'unvalidated_depth'
+    assert call['repeat_count_interval_kind'] == 'coverage_sensitivity'
     assert 'depth_only_not_length_identifying' in call['reason']
     with paths['short_read_repeat_evidence'].open() as handle:
         row = next(csv.DictReader(handle, delimiter='\t'))
-    assert row['best_repeat'] == row['amplicon_length'] == row['vntr_length'] == ''
+    assert row['best_repeat'] == '70' and float(row['amplicon_length']) == len(sequence)
+    assert float(row['confidence']) == 0
     assert row['limit_reached'] == 'True'
     with paths['common_locus_calls'].open() as handle:
         row = next(csv.DictReader(handle, delimiter='\t'))
-    assert row['repeat_count'] == row['product_size_bp'] == ''
+    assert row['repeat_count'] == '70' and float(row['product_size_bp']) == len(sequence)
     diagnostic = json.loads(paths['repeat_length_estimates'].read_text())['L']
     assert diagnostic['amplicon_length'] == len(sequence) and diagnostic['repeat_count'] == 70
     assert diagnostic['status'] == 'diagnostic_only'
     exported = common_calls_to_compatibility(calls)
-    assert exported[0]['product_size_bp'] == exported[0]['repeat_count'] == ''
+    assert exported[0]['repeat_count'] == 70 and exported[0]['allele_confidence'] == 0
     chart = _repeat_count_svg(exported, assembly=True)
-    assert '70 repeats' not in chart and 'PRESENT_COUNT_UNKNOWN' in chart
+    assert '70 repeats' in chart and 'ESTIMATED' in chart and 'confidence 0' in chart
 
 
 def test_rescued_reconstruction_precedes_depth_estimation(tmp_path, monkeypatch):
@@ -211,9 +216,13 @@ def test_depth_fallback_retains_calibrated_likelihood_uncertainty(tmp_path, monk
     calls, _, _, paths = run_reconstructed_fastq_inference(reads1=None, reads2=None,
         pairs=iter(pairs), loci=[locus], database_path=None, outdir=tmp_path,
         sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8)
-    assert calls[0]['inference_method'] == 'AMBIGUOUS'
-    assert calls[0]['repeat_count'] == ''
-    assert calls[0]['repeat_count_min'] == 0 and calls[0]['repeat_count_max'] == 100
+    assert calls[0]['inference_method'] == 'KMER_DEPTH'
+    assert calls[0]['repeat_count'] == 70 and calls[0]['confidence'] == 0
+    assert calls[0]['repeat_count_interval_kind'] == 'coverage_sensitivity'
+    with paths['repeat_likelihoods'].open() as handle:
+        likelihoods = list(csv.DictReader(handle, delimiter='\t'))
+    assert [float(row['repeat_count']) for row in likelihoods] == [0, 100]
+    assert [float(row['posterior']) for row in likelihoods] == [.5, .5]
     assert 'minimum_likelihood_tie' in calls[0]['reason']
     assert json.loads(paths['repeat_length_estimates'].read_text())['L']['status'] == 'diagnostic_only'
 

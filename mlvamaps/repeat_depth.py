@@ -4,7 +4,8 @@ A weighted de Bruijn graph collapses repeated sequence into shared k-mers.
 Coverage of those k-mers relative to the two single-copy primer arms estimates
 their multiplicity under uniform, locus-specific coverage. Those assumptions
 are unverified: matching reads elsewhere in the input can inflate the ratio.
-Keep these estimates diagnostic; they cannot establish a locus's repeat count.
+The reporting layer may expose them as provisional counts with zero confidence;
+they cannot establish a locus's repeat count or replace a length likelihood.
 """
 from collections import Counter, defaultdict, deque
 from functools import lru_cache
@@ -256,7 +257,7 @@ def estimate_graph_lengths(recoveries, loci, templates, evidence, replay_pairs,
         calibrated = expected_nonrepeat_bp(locus) is not None or bool(
             locus.left_flank_sequence and locus.right_flank_sequence)
         if calibrated:
-            best = assembly_equivalent_product_allele(locus, length, round_tolerance)[1]
+            raw, best = assembly_equivalent_product_allele(locus, length, round_tolerance)
             # The historical absolute-value calibration is nonmonotone below
             # the nonrepeat length; include zero when the interval crosses it.
             values = [assembly_equivalent_product_allele(locus, b, round_tolerance)[1] for b in bounds]
@@ -266,14 +267,15 @@ def estimate_graph_lengths(recoveries, loci, templates, evidence, replay_pairs,
             interval = min(values), max(values)
         elif not template.primer_only:
             best = max(0, (length-len(template.left)-len(template.right))/template.unit)
+            raw = best
             interval = tuple(max(0, (b-len(template.left)-len(template.right))/template.unit) for b in bounds)
         else:
-            best, interval = None, None
+            raw, best, interval = None, None, None
         shared = sum(owners[min(e, revcomp(e))] > 1 for e in graph['edges'])
         diagnostics[name] = {'method': 'KMER_DEPTH', 'k': graph['k'], 'graph_edges': len(graph['edges']),
             'arm_depths': arm_depths, 'read_start_positions': graph['read_start_positions'],
             'amplicon_length': length, 'length_interval': bounds,
-            'repeat_count': best, 'repeat_interval': interval,
+            'repeat_count': best, 'repeat_count_raw': raw, 'repeat_interval': interval,
             'shared_edges': shared, 'interval_kind': 'coverage_sensitivity',
             'status': 'diagnostic_only', 'reason': 'depth_only_not_length_identifying'}
         # A connected graph does not assign repeat-only reads to this locus.

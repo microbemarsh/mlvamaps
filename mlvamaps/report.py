@@ -420,14 +420,15 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
         count = _called_count(row.get(value_key))
         raw = row.get(raw_key, "")
         status = str(row.get("status" if assembly else "call_status", ""))
-        normalized.append((str(row.get("locus_id", "")), count, raw, status))
-    max_count = max((count for _locus, count, _raw, _status in normalized if count is not None), default=1)
-    row_height = 29
+        confidence = row.get('allele_confidence' if assembly else 'posterior_probability', '')
+        normalized.append((str(row.get("locus_id", "")), count, raw, status, confidence))
+    max_count = max((count for _locus, count, _raw, _status, _confidence in normalized if count is not None), default=1)
+    row_height = 42
     plot_left = 190
     plot_width = 600
     height = 65 + len(normalized) * row_height
     marks = []
-    for index, (locus_id, count, raw, status) in enumerate(normalized):
+    for index, (locus_id, count, raw, status, confidence) in enumerate(normalized):
         y = 42 + index * row_height
         color = _STATUS_COLORS.get(status, "#bdcbd6")
         width = 0 if count is None else (count / max(max_count, 1)) * plot_width
@@ -438,8 +439,9 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
             f'<text class="chart-label" x="8" y="{y + 14:.1f}">{_safe(locus_id)}</text>'
             f'<rect class="mapping-track" x="{plot_left}" y="{y:.1f}" width="{plot_width}" height="18" rx="3"/>'
             f'<rect x="{plot_left}" y="{y:.1f}" width="{width:.2f}" height="18" rx="3" fill="{color}" opacity="0.82">'
-            f'<title>{_safe(locus_id)}: {_safe(exact)}; {_safe(status)}</title></rect>'
+            f'<title>{_safe(locus_id)}: {_safe(exact)}; {_safe(status)}; confidence {_safe(confidence)}</title></rect>'
             f'<text class="chart-value" x="{plot_left + plot_width + 18}" y="{y + 13:.1f}">{_safe(exact)} · {_safe(status)}</text>'
+            f'<text class="chart-value" x="{plot_left + plot_width + 18}" y="{y + 29:.1f}">confidence {_safe(confidence)}</text>'
         )
     return f"""
 <figure class="chart-panel" aria-label="Individual locus repeat counts">
@@ -448,7 +450,7 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
     <desc>Repeat-count calls and estimates at every panel locus, with call status.</desc>
     {"".join(marks)}
   </svg>
-  <figcaption>Bar length represents repeat units. AMBIGUOUS and ESTIMATED values are provisional; inspect their intervals and evidence before comparison. ESTIMATED counts use read depth and their intervals describe sensitivity to coverage variation, not genotype confidence. Call status is printed beside each bar as well as indicated by color.</figcaption>
+  <figcaption>Bar length represents repeat units. AMBIGUOUS and ESTIMATED values are provisional. Confidence 0 for depth-based or prior-based estimates means the exact count has no validated confidence, not that it is certainly wrong. Depth intervals describe coverage sensitivity; prior ranges and lower bounds are not confidence intervals. Call status and confidence are printed beside each bar.</figcaption>
 </figure>
 """
 
@@ -485,19 +487,19 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
             f'<text class="chart-label" x="8" y="{y + 4:.1f}">{_safe(row.get("locus_id", ""))}</text>'
             f'<line class="confidence-track" x1="{plot_left}" y1="{y:.1f}" x2="{x:.1f}" y2="{y:.1f}"/>'
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}">'
-            f'<title>{_safe(row.get("locus_id", ""))}: posterior {posterior:.3f}; depth {depth}; {status}</title></circle>'
+            f'<title>{_safe(row.get("locus_id", ""))}: confidence {posterior:.3f}; depth {depth}; {status}</title></circle>'
             f'<text class="chart-value" x="{plot_left + plot_width + 22}" y="{y + 4:.1f}">'
             f'{_safe(row.get("called_repeat_count", ""))}U · {_safe(status)}</text>'
         )
     return f"""
-<figure class="chart-panel" aria-label="Locus call posterior plot">
+<figure class="chart-panel" aria-label="Locus call confidence plot">
   <svg viewBox="0 0 {width} {height}" role="img">
     <title>Locus call confidence</title>
-    <desc>Posterior probability by locus. Point size reflects primary-cluster read depth and color reflects call status.</desc>
+    <desc>Confidence by locus. Point size reflects primary-cluster read depth and color reflects call status.</desc>
     {"".join(ticks)}
     {"".join(marks)}
   </svg>
-  <figcaption>Farther right is more confident. Point size scales with dominant-cluster read depth; status is also printed beside each point.</figcaption>
+  <figcaption>Farther right is more confident under the reported evidence model. Zero confidence for depth or prior estimates means unvalidated. Point size scales with dominant-cluster read depth; status is also printed beside each point.</figcaption>
 </figure>
 """
 
@@ -793,7 +795,7 @@ def write_report(
         ("LOW_DEPTH", "Low-depth loci"),
         ("MULTIPLE_VARIANTS", "Mixed loci"),
         ("AMBIGUOUS", "Ambiguous loci"),
-        ("ESTIMATED", "Loci estimated from read depth"),
+        ("ESTIMATED", "Loci with provisional repeat estimates"),
         ("OUT_OF_RANGE", "Out-of-range loci"),
     ):
         affected = [str(row.get("locus_id", "")) for row in allele_rows if row.get("call_status") == status]
@@ -899,7 +901,7 @@ def write_report(
     short_read_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
-        f"<td><span class=\"status-pill {'status-good' if row.get('repeat_count') not in ('', None) else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
+        f"<td><span class=\"status-pill {'status-good' if row.get('status') == 'PASS' else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
         f"<td>{_safe(row.get('recruited_read_pairs', ''))}</td>"
         f"<td>{_safe(row.get('call_method', ''))}</td>"
         f"<td>{_safe(row.get('proper_spanning_pairs', ''))}</td>"
@@ -916,7 +918,7 @@ def write_report(
         short_read_section = f"""
       <section class="report-section">
         <h2>Illumina Evidence</h2>
-        <p class="section-intro">Counts come from observed products, reconstructed products, or fragment-length evidence. Depth-only estimates remain in the diagnostics because matching sequence elsewhere can inflate them; they do not establish a repeat count. AMBIGUOUS candidates retain their uncertainty interval. Tied candidates remain unresolved; boundary-only evidence may supply only a lower bound. Presence without length information remains unresolved.</p>
+        <p class="section-intro">Detected loci retain a best repeat estimate with its method and confidence. Observed products, reconstruction and fragment likelihoods take priority. If those cannot supply a point estimate, read-depth estimates or a panel prior are shown as ESTIMATED with confidence 0 (unvalidated). A prior is constrained by observed lower bounds. Tied likelihood candidates retain alternatives and conditional probabilities. Depth sensitivity intervals and prior ranges are not genotype confidence intervals. A locus without a defined repeat unit or nominal count cannot be expressed in repeat units.</p>
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>Status</th><th>Recruited molecules</th><th>Call method</th><th>Spanning pairs</th><th>Left / right / full span</th><th>Best repeat count</th><th>Interval min / max</th><th>Confidence</th><th>Evidence / uncertainty</th></tr></thead>
           <tbody>{short_read_table_rows}</tbody>

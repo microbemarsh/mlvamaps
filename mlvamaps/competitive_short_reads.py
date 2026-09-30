@@ -279,8 +279,8 @@ def candidate_likelihood(items, template, insert, maximum, minimum_probability):
             joint[states < lower-.25] = -np.inf
         finite = np.isfinite(joint)
         if not finite.any():
-            return LocusRecovery(method='AMBIGUOUS', limit_reached=True,
-                reason='candidate_limit_below_observed_lower_bound')
+            return LocusRecovery(method='AMBIGUOUS', limit_reached=True, interval=(lower, lower),
+                reason='candidate_limit_below_observed_lower_bound; repeat_length_lower_bound')
         posterior = np.exp(np.maximum(joint-joint[finite].max(), -700))
         posterior[~finite] = 0
         posterior /= posterior.sum()
@@ -303,8 +303,8 @@ def candidate_likelihood(items, template, insert, maximum, minimum_probability):
     identifiable = bool(offsets) and confidence >= minimum_probability and not tied and not limit and not mixed
     return LocusRecovery(method='MIXED' if mixed else 'INFERRED' if identifiable else 'AMBIGUOUS',
         confidence=confidence if informative else 0, states=states, log_likelihoods=joint, posterior=posterior,
-        best=float(states[best]) if offsets and not tied else None,
-        second=float(states[second]) if offsets and not tied else None,
+        best=float(states[best]) if offsets else None,
+        second=float(states[second]) if offsets else None,
         interval=((float(states[finite].min()), float(maximum)) if lower and not offsets else
                   (float(states[selected].min()), float(states[selected].max()))) if informative else None,
         identifiable=identifiable, limit_reached=limit,

@@ -81,29 +81,112 @@ def test_fastq_and_assembly_match_independent_mlva_finder_calls(tmp_path, paired
         assert call['status'] == 'called', call
         assert call['repeat_count'] == float(assembled['repeat_count']) == oracle['repeat_count']
         assert call['product_size_bp'] == float(assembled['product_size_bp']) == float(oracle['amplicon_length'])
+        assert call['repeat_count_raw'] == float(assembled['repeat_count_raw'])
+    from mlvamaps.unified_fastq import common_calls_to_compatibility
+    for call, exported in zip(calls, common_calls_to_compatibility(calls)):
+        assert exported['repeat_count_raw'] == call['repeat_count_raw']
 
 
-@pytest.mark.parametrize('change', ['exact', 'wrong', 'missing', 'estimated'])
+@pytest.mark.parametrize('sample', ['spanning', 'shotgun'])
+@pytest.mark.parametrize('tolerance', [.25, 0])
+def test_synthetic_sizing_matches_independent_oracle_through_public_fastq_outputs(tmp_path, sample, tolerance):
+    from scripts.make_repeat_sizing_inputs import make_inputs
+    from mlvamaps.assembly_call import run_assembly_call
+    from mlvamaps.io import read_profiles
+    from mlvamaps.short_reads import run_short_read_call
+
+    if shutil.which('minimap2') is None:
+        pytest.skip('minimap2 is required for reference-backed FASTQ calling')
+    make_inputs(tmp_path)
+    root = tmp_path/sample
+    primers = root/'primers.tsv'
+    oracle_path = ORACLE.with_name(f'sizing_{sample}{"_unrounded" if tolerance == 0 else ""}_output.csv')
+    expected = load_mlva_finder(oracle_path, f'{sample}.fasta')
+    raw_expected = load_mlva_finder(ORACLE.with_name(f'sizing_{sample}_unrounded_output.csv'), f'{sample}.fasta')
+    assembly = run_assembly_call(str(root/'assemblies'/f'{sample}.fasta'), None, str(root/'assembly_calls'),
+        sample, primers_path=str(primers), threads=1, show_progress=False, assembly_round_tolerance=tolerance)
+    fastq = run_short_read_call(str(root/('single.fq' if sample == 'spanning' else 'r1.fq')),
+        str(root/'r2.fq') if sample == 'shotgun' else None, None, str(root/'sr'), sample,
+        primers_path=str(primers), database_path=str(root/'database'), threads=1,
+        show_progress=False, taxon_identification=False, round_tolerance=tolerance)
+    assembled = {row['locus_id']: row for row in read_profiles(assembly['calls'])}
+    calls = {row['locus_id']: row for row in read_profiles(fastq['calls'])}
+    common = {row['locus']: row for row in read_profiles(fastq['common_locus_calls'])}
+    evidence = {row['locus_id']: row for row in read_profiles(fastq['short_read_repeat_evidence'])}
+    truth = {row['locus_id']: row for row in read_profiles(root/'truth.tsv')}
+    assert calls.keys() == assembled.keys() == expected.keys() == truth.keys()
+    for locus, oracle in expected.items():
+        call = calls[locus]
+        assert call['status'] == 'PASS', call
+        assert float(call['repeat_count']) == float(assembled[locus]['repeat_count']) == oracle['repeat_count']
+        assert float(call['product_size_bp']) == float(assembled[locus]['product_size_bp']) == float(oracle['amplicon_length']) == float(truth[locus]['product_size_bp'])
+        assert float(call['repeat_count_raw']) == pytest.approx(raw_expected[locus]['repeat_count'], abs=1e-6)
+        assert float(call['repeat_count_raw']) == float(assembled[locus]['repeat_count_raw'])
+        assert float(common[locus]['repeat_count_raw']) == float(call['repeat_count_raw'])
+        assert float(evidence[locus]['amplicon_length']) == float(call['product_size_bp'])
+    metrics, _ = compare_runs([
+        {'sample_id': sample, 'mode': 'mlva_finder', 'outdir': oracle_path, 'source_sample': f'{sample}.fasta'},
+        {'sample_id': sample, 'mode': 'assembly', 'outdir': root/'assembly_calls'},
+        {'sample_id': sample, 'mode': 'sr', 'outdir': root/'sr'}])
+    assert all(row['strict_match'] for row in metrics.values()), metrics
+
+
+def test_synthetic_unspanned_repeat_retains_estimate_without_claiming_exact_size(tmp_path):
+    from scripts.make_repeat_sizing_inputs import make_inputs
+    from mlvamaps.io import read_profiles
+    from mlvamaps.short_reads import run_short_read_call
+
+    if shutil.which('minimap2') is None:
+        pytest.skip('minimap2 is required for reference-backed FASTQ calling')
+    make_inputs(tmp_path)
+    root = tmp_path/'unresolved'
+    paths = run_short_read_call(str(root/'r1.fq'), str(root/'r2.fq'), None, str(root/'sr'),
+        'unresolved', primers_path=str(root/'primers.tsv'), database_path=str(root/'database'),
+        threads=1, show_progress=False, taxon_identification=False)
+    call, = read_profiles(paths['calls'])
+    assert call['status'] == 'ESTIMATED', call
+    assert float(call['repeat_count']) >= 22.5  # The read-derived lower bound.
+    assert float(call['allele_confidence']) == 0
+    assert call['confidence_kind'] == 'prior_only'
+    assert call['repeat_count_max'] == ''  # No observed upper bound.
+    metrics, _ = compare_runs([
+        {'sample_id': 'unresolved', 'mode': 'mlva_finder',
+         'outdir': ORACLE.with_name('sizing_unresolved_output.csv'), 'source_sample': 'unresolved.fasta'},
+        {'sample_id': 'unresolved', 'mode': 'sr', 'outdir': root/'sr'}])
+    assert not metrics['mlva_finder:sr']['strict_match']
+    assert metrics['mlva_finder:sr']['exact_repeat_recovery_by_mode']['mlva_finder'] == 0
+
+
+@pytest.mark.parametrize('change', ['exact', 'wrong', 'missing', 'estimated', 'wrong_size', 'missing_size'])
 def test_external_comparison_requires_recovery_of_all_oracle_calls(tmp_path, change):
     expected = load_mlva_finder(ORACLE, 'oracle.fasta')
     sr = tmp_path/'sr'
     sr.mkdir()
     with (sr/'calls.tsv').open('w') as handle:
         writer = csv.writer(handle, delimiter='\t')
-        writer.writerow(['locus_id', 'repeat_count', 'status'])
+        writer.writerow(['locus_id', 'repeat_count', 'status', 'product_size_bp'])
         for i, (locus, row) in enumerate(expected.items()):
             count, status = row['repeat_count'], 'PASS'
+            size = row['amplicon_length']
             if i == 0:
                 if change == 'wrong': count += 1
                 if change == 'missing': count, status = '', 'PRESENT_COUNT_UNKNOWN'
                 if change == 'estimated': status = 'ESTIMATED'
-            writer.writerow([locus, count, status])
+                if change == 'wrong_size': size = float(size) + 1
+                if change == 'missing_size': size = ''
+            writer.writerow([locus, count, status, size])
     manifest = [{'sample_id': 's', 'mode': 'mlva_finder', 'outdir': ORACLE, 'source_sample': 'oracle.fasta'},
                 {'sample_id': 's', 'mode': 'sr', 'outdir': sr}]
     summary, rows = compare_runs(manifest)
     comparison = summary['mlva_finder:sr']
-    assert comparison['strict_repeat_match'] == (change == 'exact')
-    assert comparison['exact_repeat_recovery_by_mode']['mlva_finder'] == (1 if change == 'exact' else 5/6)
+    repeats_match = change in {'exact', 'wrong_size', 'missing_size'}
+    assert comparison['strict_repeat_match'] == repeats_match
+    assert comparison['strict_match'] == (change == 'exact')
+    assert comparison['strict_size_match'] == (change in {'exact', 'wrong'})
+    assert comparison['exact_repeat_recovery_by_mode']['mlva_finder'] == (1 if repeats_match else 5/6)
+    if change in {'wrong_size', 'missing_size'}:
+        assert comparison['exact_size_recovery_by_mode']['mlva_finder'] == 5/6
+        assert rows[0]['size_comparison'] == ('discordant' if change == 'wrong_size' else 'missing_in_b')
     assert len(rows) == 6
     if change in {'missing', 'estimated'}:
         assert comparison['exact_repeat_concordance'] == 1  # Cannot hide the missing sixth call.
@@ -138,6 +221,8 @@ def test_external_comparison_retains_zero_and_missing_and_rejects_invalid_rows(t
     assert details['missing']['repeat_count'] is None and details['missing']['status'] == 'NOT_FOUND'
     for rows, message in [('s,L,7,148\ns,L,8,152\n', 'duplicate'),
                           ('s,L,NaN,148\n', 'invalid allele'), ('s,L,-1,148\n', 'invalid allele'),
+                          ('s,L,7,NaN\n', 'invalid product size'), ('s,L,7,\n', 'invalid product size'),
+                          ('s,L,7,-1\n', 'invalid product size'), ('s,L,7,148.5\n', 'invalid product size'),
                           ('s,L\n', 'incomplete')]:
         output.write_text('strain,primer,allele,size\n'+rows)
         with pytest.raises(ValueError, match=message):
@@ -158,3 +243,16 @@ def test_strict_comparison_detects_an_entire_missing_sample_run(tmp_path):
     assert result['full_profile_concordance'] == 1
     assert result['missing_runs_by_mode']['sr'] == ['missing']
     assert not result['strict_repeat_match']
+
+
+def test_strict_comparison_cannot_hide_loci_uncalled_in_both_modes(tmp_path):
+    manifest = []
+    for mode in ('assembly', 'sr'):
+        folder = tmp_path/mode
+        folder.mkdir()
+        (folder/'calls.tsv').write_text('locus_id\trepeat_count\tproduct_size_bp\tstatus\n'
+            'L1\t7\t148\tPASS\nL2\t\t\tNOT_FOUND\n')
+        manifest.append({'sample_id': 's', 'mode': mode, 'outdir': folder})
+    result, _ = compare_runs(manifest)
+    assert result['assembly:sr']['exact_repeat_concordance'] == 1
+    assert not result['assembly:sr']['strict_match']

@@ -27,8 +27,10 @@ calling requires `--database`: minimap2 competitively recruits reads across
 reference loci, and the shared caller measures repeat lengths from observed
 spans, reconstructed products, or calibrated fragment geometry. A stored
 reference allele is never substituted for a measured sample length; novel
-alleles remain callable. Provisional read-depth estimates remain available
-when exact length is unresolved.
+alleles remain callable. Every detected locus with a repeat definition retains
+a point estimate and confidence. When length evidence is insufficient, a
+read-depth estimate or explicitly labeled panel prior is reported with zero
+confidence (unvalidated).
 
 Legacy three-column primer panels (`locus_id forward_primer reverse_primer`)
 remain supported. Names such as `vrrA_12bp_314bp_10U` provide product-length
@@ -38,11 +40,12 @@ Taxonomic classification requires a database in every input mode and runs
 separately from allele measurement.
 
 The evidence hierarchy is **direct → reconstructed → inferred**, with explicit
-ambiguous, no-call and mixed outcomes. Depth-only estimates remain diagnostics
-because matching sequence elsewhere can inflate them. There is one short-read pathway. The
+ambiguous, estimated, missing and mixed outcomes. Depth estimates and panel
+priors remain provisional and do not count as exact matches. There is one short-read pathway. The
 long-read default remains `--lr-engine spanning`. See the [Illumina workflow](docs/workflows/illumina.md)
 and [method, diagnostics and limitations](docs/concepts/locus-reconstruction.md).
-Missing and unresolved calls remain explicit and are never converted to zero.
+Undetected loci remain missing. Panels without a repeat unit or nominal count
+cannot express an estimate in repeat units and retain an explicit metadata failure.
 
 Calling has no minimum read-depth or molecule-support cutoff. A single usable
 observation can contribute a repeat, variant, or SNP call. Support counts,

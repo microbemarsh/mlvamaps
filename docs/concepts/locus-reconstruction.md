@@ -128,9 +128,10 @@ or spanning evidence.
 can inflate the ratio even when both arms have equal coverage and no other
 eligible locus shares a graph edge. Primer connectivity establishes a path,
 but cannot assign internal repeat-only reads to that locus. A numeric depth
-estimate therefore cannot supply a repeat call or replace existing likelihood
-evidence. A detected locus without separate length evidence remains
-`PRESENT_COUNT_UNKNOWN`, with reason `depth_only_not_length_identifying`.
+estimate therefore cannot establish an exact repeat call or replace existing
+likelihood evidence. When no length-based point estimate exists, the reporting
+layer retains it as `ESTIMATED`, with `confidence_kind=unvalidated_depth` and
+confidence 0. Zero means unvalidated, not a probability of being wrong.
 
 Diagnostic lengths are converted to repeat units using shared panel calibration
 or sample-learned boundaries. Their intervals describe coverage sensitivity,
@@ -141,10 +142,19 @@ eligible loci are flagged; a zero shared-edge count does not prove uniqueness.
 `repeat_length_estimates.json` records the k-mer size, graph size, flank depths,
 estimated amplicon length, repeat count, sensitivity intervals and shared-edge
 count, with `status=diagnostic_only`, or the reason estimation could not run.
-Depth-only numbers do not populate `short_read_repeat_evidence.tsv`,
-`common_locus_calls.tsv`, `calls.tsv`, mapping evidence or the report's repeat
-bars. Earlier versions exported these numbers as `ESTIMATED` calls; rerun the
-sample to regenerate those outputs.
+Depth estimates also populate call tables and report bars as provisional
+estimates. Their intervals are labeled `coverage_sensitivity`; original
+likelihoods remain unchanged in `repeat_likelihoods.tsv`. A depth estimate below
+an observed repeat lower bound is rejected.
+
+If no read-derived point estimate exists, `PANEL_PRIOR` uses the panel nominal
+count, or the midpoint of its expected range when no nominal count is supplied.
+Observed lower bounds constrain it; a computational search ceiling does not
+become an observed upper bound. These estimates have `confidence_kind=prior_only`
+and confidence 0. They do not create synthetic sequence, raw measurements,
+exact-concordance successes, or profile/reference matches. Every detected locus
+with a repeat definition thus has an estimate and confidence; missing repeat
+metadata remains `PRESENT_COUNT_UNKNOWN`.
 
 Observed complete products and reconstructed contigs then pass through
 `run_in_silico_pcr_loci`, `pcr_rows_to_products` and
