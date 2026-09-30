@@ -10,7 +10,7 @@ from .allele_inference import (
     InferenceThresholds,
     infer_alleles,
 )
-from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
+from .candidate_contexts import CandidateContext, generate_candidate_contexts, write_candidate_contexts
 from .io import write_fasta, write_tsv
 from .long_read_evidence import extract_long_read_evidence
 from .minimap_mapping import map_reads_to_candidates_bam
@@ -83,13 +83,18 @@ def run_unified_fastq_inference(
     minimum_probability: float,
     maximum_candidate_repeat_count: int = 100,
     keep_alignments: bool = False,
+    orphan_path: str | Path | None = None,
+    round_tolerance: float = .25,
+    min_mixture_fraction: float = .2,
+    repeat_threshold: float = .7,
 ) -> tuple[list[dict[str, object]], list[CandidateEvidence], dict[tuple[str, str], int | float], dict[str, Path]]:
     if technology == "illumina":
         from .locus_reconstruction import run_reconstructed_fastq_inference
         return run_reconstructed_fastq_inference(reads1=reads1, reads2=reads2, loci=loci,
             database_path=database_path, outdir=outdir, sample_id=sample_id, technology=technology,
             threads=threads, minimum_molecules=minimum_molecules, minimum_probability=minimum_probability,
-            maximum_candidate_repeat_count=maximum_candidate_repeat_count)
+            maximum_candidate_repeat_count=maximum_candidate_repeat_count, orphan_path=orphan_path,
+            round_tolerance=round_tolerance, min_fraction=min_mixture_fraction, repeat_threshold=repeat_threshold)
     outdir = Path(outdir)
     work = outdir / "candidate_mapping"
     work.mkdir(parents=True, exist_ok=True)
@@ -114,7 +119,7 @@ def run_unified_fastq_inference(
     else:
         paths = write_candidate_contexts(contexts, work)
     bam = work / "candidate_alignments.bam"
-    index_name = "short.mmi" if technology == "illumina" else "long.mmi"
+    index_name = "long.mmi"
     cached_index = resource / index_name if resource is not None else None
     mapping_reference = cached_index if cached_index is not None and cached_index.is_file() else paths["fasta"]
     alignments = map_reads_to_candidates_bam(
@@ -127,6 +132,7 @@ def run_unified_fastq_inference(
         InferenceThresholds(
             minimum_molecules=minimum_molecules,
             minimum_probability=minimum_probability,
+            mixture_min_fraction=min_mixture_fraction,
         ),
     )
     common_calls = outdir / "common_locus_calls.tsv"
@@ -163,6 +169,7 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
         "low_coverage": "LOW_DEPTH",
         "detected_unresolved": "PRESENT_COUNT_UNKNOWN",
         "ambiguous": "AMBIGUOUS",
+        "estimated": "ESTIMATED",
         "not_found": "NOT_FOUND",
         "mixed": "MULTIPLE_VARIANTS",
     }
@@ -175,7 +182,7 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
             "present": "no" if row["status"] == "not_found" else "yes",
             "repeat_count": repeat,
             "repeat_count_raw": repeat,
-            "product_size_bp": "",
+            "product_size_bp": row.get("product_size_bp", ""),
             "read_depth": row["molecule_support"],
             "primary_read_depth": row["molecule_support"],
             "mean_coverage": "",

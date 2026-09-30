@@ -96,7 +96,7 @@ def _arms(sequences, template, motif):
 
 
 def learn_template(items, template, sequences=None):
-    """Require independently supported motif and both observed primer arms."""
+    """Learn the observed motif and primer arms without a support-count cutoff."""
     if not template.primer_only or not template.unit:
         return template, {'source': 'panel', 'motifs': []}
     sequences = reliable_sequences(items) if sequences is None else sequences
@@ -109,7 +109,7 @@ def learn_template(items, template, sequences=None):
     info = {'source': 'sample', 'motif_selection': 'primer_linked_arms',
             'motifs': [{'sequence': m, 'molecules': len(votes[m])} for m in ranked[:3]],
             'graph_ready': False}
-    if not ranked or len(votes[ranked[0]]) < 2:
+    if not ranked:
         return template, info
     # Deterministic depth-first ordering bounds noisy pools without selecting
     # a nominal allele. A capped pool may learn less sequence, never more.
@@ -146,11 +146,8 @@ def learn_template(items, template, sequences=None):
         if len(right) > 1 and cyclic_match(right_arm[min(right)-template.unit:max(right)], motif):
             right = {max(right)}
         if len(left) == len(right) == 1:
-            support = set().union(*(members for found, members in votes.items()
-                                   if pattern.search(found+found[:-1])))
-            if len(support) >= 2:
-                candidates.append(RepeatTemplate(template.locus, left_arm[:left.pop()],
-                                                 right_arm[right.pop():], motif, template.unit))
+            candidates.append(RepeatTemplate(template.locus, left_arm[:left.pop()],
+                                             right_arm[right.pop():], motif, template.unit))
     if len(candidates) != 1:
         info['reason'] = 'ambiguous_sample_motif' if candidates else 'incomplete_sample_repeat_boundaries'
         return template, info

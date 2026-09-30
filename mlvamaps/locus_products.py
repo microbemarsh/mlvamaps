@@ -5,7 +5,7 @@ synthetic product cannot turn an uncertain length estimate into a certain call.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import time
@@ -14,6 +14,7 @@ from pathlib import Path
 from .combined_marker_phylogeny import decompose_marker_sequence
 from .io import write_fasta, write_tsv
 from .models import Locus
+from .alignment import MASKED_DNA_MATRIX
 from .repeat_calibration import assembly_equivalent_product_allele
 
 
@@ -67,15 +68,26 @@ def genotype_product(product: LocusProduct, locus: Locus, tolerance: float | Non
     """Use the assembly calibration and existing repeat masker for every input."""
     raw, repeat = product_repeat_allele(product, locus, tolerance)
     components = decompose_marker_sequence(locus, product.sequence)
-    haplotype = hashlib.sha256(components.snp_sequence.encode()).hexdigest()[:20]
-    repeated = components.repeat_sequence
-    if components.masking_method != 'flank_bounded' and locus.left_flank_sequence and locus.right_flank_sequence:
+    interval = (product.evidence.get('repeat_interval')
+                if locus.left_flank_sequence and locus.right_flank_sequence
+                and components.oriented_sequence == product.sequence else None)
+    if not interval and components.masking_method != 'flank_bounded' and locus.left_flank_sequence and locus.right_flank_sequence:
         from .locus_measurement import find_anchor
         left = find_anchor(locus.left_flank_sequence, components.oriented_sequence, 2)
         right = find_anchor(locus.right_flank_sequence, components.oriented_sequence, 2,
                             left.end if left else 0)
         if left and right:
-            repeated = components.oriented_sequence[left.end:right.start]
+            interval = left.end, right.start
+    if interval and 0 <= interval[0] < interval[1] <= len(components.oriented_sequence):
+        # Partial flanks and half units must use the measured boundaries, not
+        # an integer motif run that leaves repeat bases in the SNP marker.
+        start, end = interval
+        sequence = components.oriented_sequence
+        components = replace(components, snp_sequence=sequence[:start]+sequence[end:],
+            repeat_sequence=sequence[start:end], repeat_region_start=start,
+            repeat_region_end=end, masking_method='flank_bounded')
+    haplotype = hashlib.sha256(components.snp_sequence.encode()).hexdigest()[:20]
+    repeated = components.repeat_sequence
     cigar, edits = repeat_motif_variants(repeated, locus.repeat_motif)
     return ProductGenotype(product, raw, repeat, components.snp_sequence, haplotype,
                            f"{repeat}:{haplotype}", components.masking_method, repeated, cigar, edits)
@@ -189,14 +201,14 @@ def write_product_alignments(genotypes: list[ProductGenotype], output: Path, *, 
         references.append((dominant.product.variant_id, reference))
         counts = defaultdict(Counter)
         ref_bases = {}
-        matrix = parasail.matrix_create("ACGTN", 2, -4)
+        matrix = MASKED_DNA_MATRIX
         for genotype in variants:
             if not reference or not genotype.snp_sequence:
                 continue
             if genotype.snp_sequence == reference and not set(reference) - set('ACGTN'):
                 # Identical strings attain the maximum score without any DP.
                 query = target = reference
-                cigar, score = f"{len(reference)}=", 2 * len(reference)
+                cigar, score = f"{len(reference)}=", 2 * (len(reference)-reference.count('N'))
             else:
                 result = parasail.nw_trace_striped_32(genotype.snp_sequence, reference, 5, 1, matrix)
                 query, target = result.traceback.query, result.traceback.ref

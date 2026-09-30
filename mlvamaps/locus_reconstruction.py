@@ -24,6 +24,7 @@ from .short_read_evidence import (
     _read_profile, RepeatTemplate, estimate_insert_distribution, panel_template,
 )
 from .sequence import revcomp
+from .repeat_calibration import expected_nonrepeat_bp
 
 
 def locus_templates(loci):
@@ -43,7 +44,7 @@ def locus_templates(loci):
     return templates
 
 
-def recover_long_reads(pairs, loci, sample_id, min_fraction=0.01, min_secondary_reads=2,
+def recover_long_reads(pairs, loci, sample_id, min_fraction=0.01, min_secondary_reads=0,
                        max_anchor_edits=3):
     """Retain independently observed complete molecules, including novel states."""
     clusters = defaultdict(list)
@@ -146,7 +147,7 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
     meaningful = [p for p in ranked if p.evidence.get("meaningful") == "yes"]
     status = "not_found" if not recruited else "detected_unresolved"
     if best and confidence >= minimum_probability:
-        status = "low_coverage" if best.effective_depth < minimum_molecules else "mixed" if len(meaningful) > 1 else "called"
+        status = "mixed" if len(meaningful) > 1 else "called"
     if inference and inference.method == "MIXED":
         status = "mixed"
     repeat = product_repeat_allele(best, locus)[1] if best else ""
@@ -156,7 +157,7 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
     if repeat == "" and inference and inference.best is not None:
         repeat = inference.best
     if repeat != "" and status == "detected_unresolved":
-        status = "ambiguous"
+        status = "estimated" if inference and inference.method == "KMER_DEPTH" else "ambiguous"
     count_distribution = defaultdict(float)
     for product in ranked:
         count = product_repeat_allele(product, locus)[1]
@@ -172,7 +173,10 @@ def _common_call(locus, products, recruited, sample_id, technology, minimum_mole
     alternatives = sorted(((count, probability) for count, probability in count_distribution.items()
                            if count != repeat), key=lambda item: (-item[1], item[0]))
     counts = inference.counts if inference else {"FULL_SPAN": sum(p.support_count for p in ranked)}
+    product_size = ((best.calibrated_product_size_bp or len(best.sequence)) if best
+                    else inference.product_size_bp if inference else None)
     return {"sample": sample_id, "locus": locus.locus_id, "technology": technology,
+            "product_size_bp": product_size if product_size is not None else "",
             "repeat_count": repeat, "status": status, "best_probability": confidence,
             "second_best_probability": alternatives[0][1] if alternatives else 0,
             "molecule_support": recruited, "direct_product_support": counts.get("FULL_SPAN", 0),
@@ -209,10 +213,13 @@ def _probe_locus(task):
     observed = direct_products(usable, template, options['sample_id'],
                                options['min_fraction'], options['min_secondary_reads'])
     assembled = None
-    if usable and (not observed or observed[0].reconstruction_confidence < options['minimum_probability']):
+    unresolved = bool(usable and (not observed or observed[0].reconstruction_confidence < options['minimum_probability']))
+    # Learn primer-only arms before building an overlap graph. Otherwise the
+    # same unresolved pool is assembled twice, before and after anchor rescue.
+    if unresolved and not template.primer_only:
         assembled = microassemble(usable, template, options['insert'])
     return {'observed': observed, 'assembled': assembled,
-            'needs_rescue': assembled is not None and not assembled[0],
+            'needs_rescue': unresolved and (template.primer_only or assembled is not None and not assembled[0]),
             'spanning': [i for i, item in enumerate(items) if 'FULL_SPAN' in item.classes],
             'seconds': time.perf_counter()-started}
 
@@ -226,6 +233,8 @@ def _fit_locus(task):
     started = time.perf_counter()
     result = recover_locus(items, template, **options, precomputed=precomputed)
     if len(result.states):
+        if result.best is not None:
+            result.product_size_bp = len(template.left)+len(template.right)+round(result.best*template.unit)
         # Export calibrated MLVA alleles, not graph motif-phase coordinates.
         calibrated = {float(n): assembly_equivalent_product_allele(locus,
             len(template.left)+len(template.right)+round(n*template.unit), round_tolerance)[1]
@@ -287,8 +296,8 @@ def run_reconstructed_fastq_inference(*, outdir, stream_molecule_evidence=False,
 
 def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, outdir, sample_id,
         technology, minimum_molecules, minimum_probability, maximum_candidate_repeat_count=100,
-        insert_mean=None, insert_sd=None, orphan_path=None, min_fraction=.01, min_secondary_reads=2,
-        max_anchor_edits=3, threads=1, minimum_spanning_pairs=2, round_tolerance=.25,
+        insert_mean=None, insert_sd=None, orphan_path=None, min_fraction=.01, min_secondary_reads=0,
+        max_anchor_edits=3, threads=1, minimum_spanning_pairs=0, round_tolerance=.25,
         show_progress=False, audit_writer=None, audit_handle=None, pairs=None,
         recruitment_threads=None, sr_recruitment_audit="full", ambiguity_writer=None, repeat_threshold=.7,
         replay_pairs=None, locus_stack=None, **_unused):
@@ -423,6 +432,17 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             for i in spanning:
                 item = evidence[locus.locus_id][i]
                 item.classes = tuple(sorted(set(item.classes) | {'FULL_SPAN'}))
+        # Fit the rescued evidence first: measured products and identifiable
+        # likelihoods take priority, and fallback intervals retain uncertainty.
+        if replay_pairs is not None:
+            from .repeat_depth import estimate_graph_lengths
+            depth_started = time.perf_counter()
+            estimates = estimate_graph_lengths(fitted, loci, templates, evidence,
+                replay_pairs, round_tolerance, progress, sample_id)
+            stage_seconds['repeat_length_estimation'] = time.perf_counter()-depth_started
+            if estimates:
+                reconstruction_paths['repeat_length_estimates'] = output/'repeat_length_estimates.json'
+                reconstruction_paths['repeat_length_estimates'].write_text(json.dumps(estimates, indent=2)+'\n')
         progress.step(f"[{sample_id}] Measuring reconstructed loci with assembly Sassy PCR")
         pcr_started = time.perf_counter()
         from .local_assembly import measure_reconstructed_loci
@@ -441,8 +461,12 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
             calls.append(_common_call(locus, products, len(items), sample_id, technology,
                                       minimum_molecules, minimum_probability, result))
             read_lengths = [len(seq) for e in items for seq in e.sequences]
-            product_length = len(products[0].sequence) if products else None
+            product_length = ((products[0].calibrated_product_size_bp or len(products[0].sequence))
+                              if products else result.product_size_bp)
             template = templates[locus.locus_id]
+            nonrepeat = expected_nonrepeat_bp(locus)
+            if nonrepeat is None and not template.primer_only:
+                nonrepeat = len(template.left)+len(template.right)
             summaries.append({"sample_id": sample_id, "locus_id": locus.locus_id,
                 "call_method": result.method, "confidence": result.confidence,
                 **{("n_flank_pairs" if name == "FLANK_PAIR" else "n_"+name.lower()): result.counts.get(name, 0) for name in EVIDENCE_CLASSES},
@@ -452,7 +476,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 "effective_depth": len(usable), "limit_reached": result.limit_reached,
                 "read_length": float(np.median(read_lengths)) if read_lengths else '',
                 "motif_length": template.unit if template else '', "amplicon_length": product_length or '',
-                "vntr_length": product_length-len(template.left)-len(template.right) if product_length and template and not template.primer_only else '',
+                "vntr_length": max(0, product_length-nonrepeat) if product_length is not None and nonrepeat is not None else '',
                 "amplicon_insert_ratio": product_length/insert.mean if product_length and insert else '',
                 "reason": result.reason})
             likelihood_rows.extend({"sample_id": sample_id, "locus_id": locus.locus_id,
@@ -500,7 +524,8 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
     write_fasta(dominant.items(), paths["taxonomic_query_sequences"])
     paths["reconstruction_metadata"] = output / "reconstruction_metadata.json"
     stage_seconds["genotype_and_evidence_output"] = time.perf_counter() - started
-    paths["reconstruction_metadata"].write_text(json.dumps({"technology": technology, "insert_size": vars(insert) if insert else None,
+    paths["reconstruction_metadata"].write_text(json.dumps({"technology": technology, "caller": "competitive_sample_likelihood" if technology == "illumina" else "spanning_molecules",
+        "candidate_model": "censored_boundaries_and_fragment_geometry", "insert_size": vars(insert) if insert else None,
         "performance": {"stage_seconds": stage_seconds, "recruitment": recruitment_stats,
                         "loci": locus_stats, "output": output_stats}}, indent=2) + "\n")
     progress.step(f"[{sample_id}] Canonical genotype and evidence output finished in {stage_seconds['genotype_and_evidence_output']:.1f}s")

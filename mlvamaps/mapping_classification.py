@@ -43,9 +43,9 @@ def _coverage_gated_missing_loci(
     min_fraction: float,
     penalty: float,
 ) -> tuple[set[str], dict]:
-    """Use molecule support as a coverage proxy, never as confirmed absence."""
-    if not math.isfinite(min_depth) or min_depth <= 0:
-        raise ValueError("Missing-locus minimum depth must be finite and positive")
+    """Use observed locus presence without a minimum read-depth requirement."""
+    if not math.isfinite(min_depth) or min_depth < 0:
+        raise ValueError("Legacy missing-locus minimum depth must be finite and non-negative")
     if not math.isfinite(min_fraction) or not 0 < min_fraction <= 1:
         raise ValueError("Missing-locus minimum fraction must be in (0, 1]")
     if not math.isfinite(penalty) or penalty < 0:
@@ -65,10 +65,10 @@ def _coverage_gated_missing_loci(
             if status == "not_found":
                 if depth == 0 and not query_sequences.get(locus_id):
                     missing.add(locus_id)
-            elif depth >= min_depth and status in {
+            elif depth > 0 and status in {
                 "called", "pass", "low_coverage", "low_depth", "ambiguous",
                 "mixed", "multiple_variants", "detected_unresolved",
-                "present_count_unknown", "present",
+                "present_count_unknown", "present", "estimated",
             }:
                 covered.add(locus_id)
     fraction = len(covered) / len(requested_loci) if requested_loci else 0.0
@@ -76,7 +76,7 @@ def _coverage_gated_missing_loci(
     return (missing if passed and penalty > 0 else set()), {
         "missing_locus_gate_passed": "yes" if passed else "no",
         "well_covered_locus_fraction": f"{fraction:.6f}",
-        "missing_locus_min_depth": min_depth,
+        "missing_locus_min_depth": 0,
         "missing_locus_min_fraction": min_fraction,
         "missing_locus_penalty_per_locus": penalty,
     }
@@ -350,7 +350,8 @@ def classify_molecules(likelihoods, reference_ids, *, sample_mode="isolate", pen
 
 def _assembly_alignments(queries, contexts):
     import parasail
-    matrix = parasail.matrix_create("ACGTN", 2, -4)
+    from .alignment import MASKED_DNA_MATRIX
+    matrix = MASKED_DNA_MATRIX
     rows = []
     for context in contexts:
         query = queries.get(context.locus_id)
@@ -372,7 +373,7 @@ def run_mapping_classification(
     query_sequences=None, technology="hifi", threads=1, minimap2_bin="minimap2",
     sample_mode="isolate", locus_quality=None, reference_metadata_path=None,
     taxon_identification=None, minimum_loci=2, repeat_scale=1.0,
-    missing_locus_min_depth=3.0, missing_locus_min_fraction=0.8,
+    missing_locus_min_depth=0.0, missing_locus_min_fraction=0.8,
     missing_locus_penalty=8.0, keep_alignments=False,
     query_repeat_counts=None,
 ):

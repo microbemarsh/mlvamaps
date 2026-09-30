@@ -27,16 +27,23 @@ def make_inputs(output, molecules, scenario):
     output.mkdir(parents=True, exist_ok=True)
     loci, sequences = [], []
     for i in range(6):
+        unit = (9, 15, 39, 42, 21, 45)[i] if scenario == 'depth' else 4
         locus = Locus(f'L{i}', forward_primer=dna(20), reverse_primer=dna(20),
             left_flank_sequence=dna(160 if scenario in ('rescue', 'pileup') else 35),
-            right_flank_sequence=dna(160 if scenario in ('rescue', 'pileup') else 35), repeat_motif='AATG',
-            repeat_unit_length_bp=4, expected_max_repeats=15)
+            right_flank_sequence=dna(160 if scenario in ('rescue', 'pileup') else 35),
+            repeat_motif=dna(unit) if scenario == 'depth' else 'AATG',
+            repeat_unit_length_bp=unit, expected_max_repeats=15)
         repeat = (5+i) if scenario in ('direct', 'rescue', 'pileup') else (70+i)
-        sequences.append(locus.forward_primer+locus.left_flank_sequence+'AATG'*repeat+
+        if scenario == 'depth':
+            repeat = (70, 26, 5, 11, 14, 9)[i]
+        sequences.append(locus.forward_primer+locus.left_flank_sequence+locus.repeat_motif*repeat+
                          locus.right_flank_sequence+revcomp(locus.reverse_primer))
         if scenario in ('rescue', 'pileup'):
             locus = replace(locus, left_flank_sequence='', right_flank_sequence='', repeat_motif='NNNN',
                             expected_product_size_bp=len(sequences[-1]), nominal_repeat_units=repeat)
+        if scenario == 'depth':
+            locus = replace(locus, left_flank_sequence='', right_flank_sequence='', repeat_motif='N'*unit,
+                            expected_product_size_bp=110+8*unit, nominal_repeat_units=8)
         loci.append(locus)
     panel = output/'panel.tsv'
     with panel.open('w') as handle:
@@ -44,6 +51,8 @@ def make_inputs(output, molecules, scenario):
         writer.writeheader()
         writer.writerows(asdict(l) for l in loci)
     contexts = [dna(80)+sequence+dna(80) for sequence in sequences] if scenario == 'pileup' else []
+    if scenario == 'depth':
+        contexts = [dna(500)+sequence+dna(500) for sequence in sequences]
     first, second = output/'reads1.fq', output/'reads2.fq'
     with first.open('w') as a, second.open('w') as b:
         for i in range(molecules):
@@ -64,6 +73,11 @@ def make_inputs(output, molecules, scenario):
                     read[position] = rng.choice([base for base in 'ACGT' if base != read[position]])
                 r1 = ''.join(read)
                 r2 = revcomp(r1)
+            if scenario == 'depth' and i % 4 != 3:
+                context = contexts[i % len(contexts)]
+                start = rng.randrange(len(context)-350+1)
+                fragment = context[start:start+350]
+                r1, r2 = fragment[:150], revcomp(fragment[-150:])
             a.write(f'@r{i}/1\n{r1}\n+\n'+ 'I'*len(r1)+'\n')
             b.write(f'@r{i}/2\n{r2}\n+\n'+ 'I'*len(r2)+'\n')
     return first, second, panel
@@ -74,25 +88,32 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--molecules', type=int, default=10000)
     parser.add_argument('--threads', type=int, default=1)
-    parser.add_argument('--scenario', choices=['direct', 'unresolved', 'rescue', 'pileup'], default='direct')
+    parser.add_argument('--scenario', choices=['direct', 'unresolved', 'rescue', 'pileup', 'depth'], default='direct')
+    parser.add_argument('--minimap2', default='minimap2')
     args = parser.parse_args()
     if args.molecules < 1 or args.threads < 1:
         parser.error('molecules and threads must be positive')
     first, second, panel = make_inputs(args.output, args.molecules, args.scenario)
     started = time.perf_counter()
     run_short_read_call(str(first), str(second), str(panel), str(args.output/'result'), 'bench',
-                        threads=args.threads, show_progress=False)
+                        threads=args.threads, show_progress=False, minimap2_bin=args.minimap2)
     result = {'synthetic': True, 'scenario': args.scenario, 'molecules': args.molecules,
-              'threads': args.threads, 'seconds': time.perf_counter()-started,
+              'threads': args.threads, 'sr_engine': 'competitive', 'seconds': time.perf_counter()-started,
               'peak_rss_bytes': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == 'darwin' else 1024),
               'peak_child_rss_bytes': resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * (1 if sys.platform == 'darwin' else 1024),
-              'reconstruction': json.loads((args.output/'result'/'reconstruction_metadata.json').read_text())['performance']}
+              'performance': json.loads((args.output/'result'/'short_read_run_metadata.json').read_text())['performance']}
     with (args.output/'result'/'calls.tsv').open() as handle:
         result['repeat_counts'] = {row['locus_id']: row['repeat_count']
                                    for row in csv.DictReader(handle, delimiter='\t')}
     # Report correctness alongside speed. Tiny/low-depth benchmarks may lack
     # enough reads to recover every locus, so do not assume those are callable.
-    if args.scenario != 'unresolved' and args.molecules >= 12000:
+    if args.scenario == 'depth':
+        result['expected_repeat_counts'] = {f'L{i}': n for i, n in enumerate((70, 26, 5, 11, 14, 9))}
+        if args.molecules >= 12000:
+            assert all(result['repeat_counts'][locus] and
+                       abs(float(result['repeat_counts'][locus])-truth) <= max(2, truth*.1)
+                       for locus, truth in result['expected_repeat_counts'].items()), result['repeat_counts']
+    elif args.scenario != 'unresolved' and args.molecules >= 12000:
         assert result['repeat_counts'] == {f'L{i}': str(5+i) for i in range(6)}, result['repeat_counts']
     (args.output/'benchmark.json').write_text(json.dumps(result, indent=2)+'\n')
     print(json.dumps(result))

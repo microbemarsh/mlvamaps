@@ -55,7 +55,7 @@ reserved and cannot be used as a sample ID in a batch.
 | `report.html` | Self-contained interpretation report with sample findings, locus-quality flags, FASTQ SPOARS/assembly-PCR concordance, gel evidence, profile matches, closest reference genomes, and technical tables. |
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
-| `common_locus_calls.tsv` | Technology-neutral FASTQ calls with probability, margin, molecule support, and explicit called/low-coverage/unresolved/ambiguous/mixed/not-found status. |
+| `common_locus_calls.tsv` | Technology-neutral FASTQ calls with product length, repeat interval, inference method, probability, molecule support, and explicit called/low-coverage/unresolved/ambiguous/estimated/mixed/not-found status. |
 | `molecule_candidate_evidence.tsv` | Optional detailed competitive-alignment and VNTR evidence for each molecule/candidate state; intended for validation rather than the default report. |
 | `candidate_mapping/candidate_alignments.bam` | Optional (`--keep-intermediates`) compressed competitive candidate alignments streamed from minimap2 through htslib. It is removed during normal operation; no text candidate SAM is produced. |
 
@@ -136,8 +136,10 @@ evidence
 
 Fields that do not apply to an input mode remain blank. A FASTQ call based on a
 complete dominant local product includes its `product_size_bp` and unrounded
-`repeat_count_raw`; a provisional partial-read call may leave product size
-blank. An assembly-only call has product size but no read depth unless support
+`repeat_count_raw`. Likelihood and `KMER_DEPTH` estimates also retain product
+size when it can be calculated. `ESTIMATED` calls are provisional depth-based
+lengths with uncalibrated confidence (`0`); their intervals describe coverage
+sensitivity rather than genotype probability. An assembly-only call has product size but no read depth unless support
 data are supplied.
 
 ## FASTQ outputs
@@ -149,7 +151,8 @@ data are supplied.
 | `short_read_qc_summary.tsv` | Input/retained reads and pairs, orphans, and empirical insert-size values when estimable. |
 | `short_read_recruitment_summary.tsv` | Unique, ambiguous, discordant, and orphan pair counts per locus. |
 | `short_read_mapping_evidence.tsv` | Per-locus state, candidate scores, molecule support and boundary evidence; legacy mapper fields remain blank. |
-| `short_read_repeat_evidence.tsv` | Direct/reconstructed/inferred method, confidence, evidence counts, depth and length features. |
+| `short_read_repeat_evidence.tsv` | Direct/reconstructed/inferred/depth-estimated method, confidence, evidence counts, repeat interval, and calibrated length features. |
+| `repeat_length_estimates.json` | Depth fallback diagnostics: k-mer graph size, flank depths, estimated product length and sensitivity interval, shared edges, or the reason estimation could not run. Written when a locus enters the fallback. |
 | `reconstructed_locus_variants.tsv` | Shared repeat counts, masked SNP markers, full sequence, observed repeat sequence and motif-relative edits. |
 | `short_read_run_metadata.json` | minimap2 and mlvamaps versions, resolved parameters, database source, and insert-size estimate. |
 | `filtered_reads_1.fastq.gz`, `filtered_reads_2.fastq.gz` | Quality-filtered mates, materialized when downstream classification or retained intermediates need them. |
@@ -208,8 +211,8 @@ Recruitment presence statuses:
 
 | Status | Meaning |
 | --- | --- |
-| `PRESENT_GENOTYPED` | At least two complete recruited products support genotyping. |
-| `PRESENT_PROVISIONAL` | One complete product or repeat-boundary-spanning partial evidence is available. |
+| `PRESENT_GENOTYPED` | A complete recruited product supports genotyping, including a singleton. |
+| `PRESENT_PROVISIONAL` | Repeat-boundary-spanning partial evidence is available. |
 | `PRESENT_UNTYPED` | Locus-specific mapping establishes presence but does not resolve both repeat boundaries. |
 | `NO_EVIDENCE` | No mapping passed recruitment thresholds. |
 
@@ -241,17 +244,17 @@ filename order and assigns the historical zero-padded `key` values.
 
 | Status | Meaning |
 | --- | --- |
-| `PASS` | Sufficient depth and a decisive in-range posterior. |
-| `LOW_DEPTH` | Fewer dominant-cluster reads than `--min-depth`. |
+| `PASS` | A decisive in-range call, without a minimum-depth requirement. |
+| `LOW_DEPTH` | Legacy status retained when reading older outputs; no longer assigned by a depth cutoff. |
 | `AMBIGUOUS` | Weak top posterior or insufficient separation from the second call. |
+| `ESTIMATED` | Provisional read-depth estimate with uncalibrated confidence and a coverage-sensitivity interval. |
 | `OUT_OF_RANGE` | Best repeat count exceeds the configured review range by more than `--repeat-range-tolerance`. The observed allele is retained rather than clipped. |
 | `MULTIPLE_VARIANTS` | At least one confirmed secondary remains in metagenome mode; isolate mode additionally requires dominant fraction below 0.8. Candidate and trace variants do not force this status. |
 | `LOCUS_DROPOUT` | No retained read evidence produced a prediction. |
 
 `allele_calls.tsv` also contains a more explicit `evidence_status`: `CONFIDENT`,
-`PROVISIONAL_LOW_DEPTH`, `SINGLE_MOLECULE_PROVISIONAL`, `AMBIGUOUS`, or
-`NO_INFORMATIVE_READS`. The legacy `call_status` values remain unchanged for
-backwards compatibility.
+`SINGLE_MOLECULE_PROVISIONAL`, `AMBIGUOUS`, or `NO_INFORMATIVE_READS`.
+Historical depth-related status values remain readable for compatibility.
 
 ## Assembly call statuses
 
@@ -293,3 +296,9 @@ keys and phylogenetic typing outputs are removed.
 
 See [mapping classification and profile trees](../concepts/mapping-classification.md)
 for the likelihood model, defaults, interpretation, and multi-sample MYOGA export.
+
+The single competitive short-read caller writes observed products, SNP evidence,
+repeat-length likelihoods and `reconstruction_metadata.json`. Metadata identifies
+`competitive_sample_likelihood` and the censored-boundary/fragment model.
+`short_read_run_metadata.json` records whole-run timings. Optional database
+classification does not change the calling engine or supply sample SNP bases.

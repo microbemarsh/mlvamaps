@@ -36,6 +36,15 @@ def fixture(count=8):
     return locus, template, sequence, pairs
 
 
+def test_single_molecule_can_supply_sample_motif_and_arms():
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    locus, template, sequence, _ = fixture()
+    item = MoleculeEvidence('one', locus.locus_id, ('UNINFORMATIVE',), (sequence,), ('+',))
+    learned, info = learn_template([item], template)
+    assert info['graph_ready'] and not learned.primer_only
+    assert info['motifs'][0]['molecules'] == 1
+
+
 @pytest.mark.parametrize('unit,nominal,product_bp,count,depth', [(12, 10, 314, 11, 2482), (9, 16, 229, 17, 14642)])
 def test_high_depth_primer_only_pileup_reaches_assembly_caller(tmp_path, unit, nominal, product_bp, count, depth):
     from mlvamaps.assembly_call import run_assembly_call
@@ -328,7 +337,7 @@ def test_partial_graph_evidence_estimates_count_only_with_length_information(tmp
         assert calls[0]['repeat_count_min'] <= 30 <= calls[0]['repeat_count_max']
     else:
         assert 0 < calls[0]['repeat_count'] < 30
-        assert calls[0]['status'] == 'ambiguous'
+        assert calls[0]['status'] == 'estimated'
         assert 'repeat_length_lower_bound' in calls[0]['reason']
         assert calls[0]['repeat_count_min'] <= 30 <= calls[0]['repeat_count_max']
     assert 'reconstruction_pcr' not in paths  # No fabricated contig enters PCR.

@@ -2,19 +2,15 @@
 
 ## Architecture and cleanup
 
-Previously, the default short-read engine competitively mapped reads to candidate
-alleles; an optional E/S/F/FRR engine fitted lengths before synthesizing products.
-The new single pathway streams a combined context/flank index, retains mates,
-classifies evidence, observes or reconstructs loci, then falls back to haploid
-candidate likelihoods. Reference classification follows physical measurement.
+Short reads have one database-free competitive pathway. Native alignments
+assign molecules across loci; observed products, automatic local stitching and
+sample-derived arms feed shared assembly calibration. Censored boundaries and
+fragment geometry compete over repeat lengths without reference allele grids.
+Database classification follows measurement and cannot change the caller.
 
-Removed: `mlvamaps/repeat_likelihood.py`, its mixture-EM genotype fitting and
-reference-filled repeat reconstruction, the old short-read candidate evidence
-extractor, `--sr-engine`, unused short-read MAPQ/secondary-alignment controls,
-E/S/F/FRR output columns, the per-molecule candidate-grid output, the obsolete
-repeat-fitting benchmark and model-equivalence tests. Reusable native anchor,
-quality and insert-statistics utilities were retained. No dependencies were
-added; no dependency was exclusively required by the removed algorithm.
+The short-read engine selector and separate reference-candidate extractor have
+been removed. No minimum depth or molecule-support gates apply. A boundary
+observation cannot become a definitive allele solely by being repeated.
 
 ## Important implementation files
 
@@ -23,7 +19,9 @@ added; no dependency was exclusively required by the removed algorithm.
 - `mlvamaps/short_read_evidence.py`: native flank/primer localization,
   motif compatibility, explicit evidence classes, robust insert estimates.
 - `mlvamaps/targeted_reconstruction.py`: direct products, unique pair merging,
-  bounded overlap graph, haploid candidate scoring, conservative inferred bases.
+  bounded overlap graph and conservative inferred bases.
+- `mlvamaps/competitive_short_reads.py`: vectorized censored-boundary and
+  phase-corrected fragment likelihoods.
 - `mlvamaps/locus_reconstruction.py`: sequence-first orchestration and QC.
 - `mlvamaps/locus_products.py`: existing shared assembly calibration and SNP
   markers, plus additive observed repeat-sequence/motif-edit fields.
@@ -41,11 +39,9 @@ are preserved; motif edits add a separate observed-repeat view.
 
 ## Tests and scientific validation
 
-The final full suite passed **360 tests**, with **10 skips**: two require
-minimap2 and eight require optional rapidgzip/isal backends unavailable here.
-The pre-refactor baseline passed 336 tests with 11 skips. Obsolete likelihood
-implementation tests were removed, useful biological cases were migrated, and
-`tests/test_targeted_reconstruction.py` adds explicit acceptance checks.
+Run `python -m pytest -q` for the complete regression suite. Native Sassy and
+minimap2 checks run when their executables are available; optional accelerated
+FASTQ backend checks are skipped when those backends are absent.
 
 Coverage includes short/full spans, paired/overlapping reads, targeted
 multi-read reconstruction, repeats longer than reads or fragment lengths,
@@ -190,3 +186,49 @@ panels. Retained evidence memory grows with on-target depth. Inferred repeat
 bases remain unknown, and partial flank SNPs do not provide fully phased
 haplotypes. Motif-relative indels may have multiple equivalent placements;
 nonidentical repeats above 10 kb retain sequence without global motif alignment.
+
+Sub-1× controls are reproducible with `scripts/benchmark_low_coverage.py`.
+See [the benchmark instructions](../../scripts/README.md) for paired 150-bp
+sampling, truth comparisons and a server-side Shovill comparison protocol.
+No real-data superiority claim follows from these synthetic controls.
+
+## Competitive sample model validation (September 2026)
+
+The full regression suite passes 466 tests, with 8 optional-backend skips.
+Packaging and the single-path CLI were checked. Cross-mode regressions compare repeat counts,
+product lengths, SNP sequences and combined markers for singleton reads,
+overlapping pairs, surviving orphan mates and primer indels. Primer-only panels
+and an unused, incompatible database candidate index are included: database
+contents must not change allele measurement.
+
+On the same six-locus, 12,000-pair direct-evidence fixture with two threads, the
+previous reference-candidate mapper took 9.45 seconds; the competitive sample
+model took 2.63 seconds, with the same 5–10 repeat calls. The harder primer-only
+depth fixture dropped from 27.87 to 19.74 seconds with unchanged provisional
+estimates. These are local synthetic timings, not whole-genome or server claims.
+
+The sub-1× sweep used paired 150-bp reads, 100 seeds per coverage and identical
+reads for both panels. Each cell below is exact definitive calls / all 600
+locus evaluations, including missing and uncertain results:
+
+| Coverage | Rich panel | Calibrated primer-only panel |
+| --- | --- | --- |
+| 0.125× | 34 / 600 | 13 / 600 |
+| 0.25× | 57 / 600 | 24 / 600 |
+| 0.5× | 95 / 600 | 44 / 600 |
+| 0.75× | 123 / 600 | 72 / 600 |
+
+All 462 definitive repeat calls matched assembly mode; 4,338 evaluations were
+missing or uncertain. Provisional numeric estimates are reported separately
+and are not counted as definitive matches. The two panels share reads, so
+these evaluations are not independent biological samples. This supports sparse
+observation handling, not high recall below 1× or superiority over Shovill.
+Run the documented server comparison on real matched inputs before making
+that claim.
+
+SNP validation uses a neutral alignment score for `N` in both canonical output
+and the comparator, so missing bases cannot become deletion calls. Partial
+spans retain their measured repeat boundaries, including half units, instead
+of allowing a motif-only mask to leak repeat bases into the SNP marker. The
+benchmark compares each FASTQ run to assembly using the same panel, preserving
+its SNP masking convention.

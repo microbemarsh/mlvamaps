@@ -41,21 +41,19 @@ of retained variants per locus.
 
 ## Floors and meaningful variants
 
-After initial convergence, mlvamaps applies Emu's depth-adaptive component
-floor: `1 / (reads + 1)` through 1,000 retained reads and `10 / reads` above
-1,000 reads. Components below that floor are removed and the model is refit.
+No depth-adaptive component floor or minimum read-support cutoff is applied.
+All observed components participate in the abundance fit.
 
 The final `--min-mixture-fraction` threshold, 0.01 by default, determines which
-remaining variants have enough abundance for interpretation. A secondary
-variant must also have at least `--min-secondary-reads` observations, two by
-default, before it can alter mixture status. The most abundant component is
+variants have enough relative abundance for interpretation. A secondary
+variant can alter mixture status with one observation; the legacy
+`--min-secondary-reads` option is ignored. The most abundant component is
 always retained. Evidence tiers are:
 
 - `DOMINANT`: highest estimated fraction.
-- `CONFIRMED_SECONDARY`: passes both abundance and read-support thresholds.
-- `CANDIDATE`: passes the abundance threshold but lacks independent read
-  support; retained for rapid low-coverage detection without changing the
-  primary signature.
+- `CONFIRMED_SECONDARY`: an observed secondary passing the abundance threshold;
+  this legacy label does not imply replicated read support.
+- `CANDIDATE`: retained for compatibility with older output files.
 - `TRACE`: below the meaningful threshold.
 
 In default metagenome mode, `MULTIPLE_VARIANTS` is assigned only when a

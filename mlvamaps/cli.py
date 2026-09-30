@@ -245,8 +245,8 @@ def _resolve_panel_option(
 
 
 def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    if not math.isfinite(args.missing_locus_min_depth) or args.missing_locus_min_depth <= 0:
-        parser.error("--missing-locus-min-depth must be finite and positive")
+    if not math.isfinite(args.missing_locus_min_depth) or args.missing_locus_min_depth < 0:
+        parser.error("--missing-locus-min-depth must be finite and non-negative")
     if not math.isfinite(args.missing_locus_min_fraction) or not 0 < args.missing_locus_min_fraction <= 1:
         parser.error("--missing-locus-min-fraction must be in (0, 1]")
     if not math.isfinite(args.missing_locus_penalty) or args.missing_locus_penalty < 0:
@@ -421,16 +421,17 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     call.add_argument("--short-min-mean-quality", type=_nonnegative_float, default=15.0)
     call.add_argument("--short-trim-quality", type=_nonnegative_int, default=0)
     call.add_argument("--short-min-pair-retention", type=_fraction, default=0.5)
-    call.add_argument("--short-min-spanning-pairs", type=_nonnegative_int, default=2)
+    call.add_argument("--short-min-spanning-pairs", type=_nonnegative_int, default=0,
+                      help="Deprecated compatibility option; no spanning-pair count cutoff")
     call.add_argument("--short-confidence-threshold", type=_fraction, default=0.8)
     call.add_argument("--short-max-candidate-repeat-count", type=_positive_int, default=100)
     call.add_argument("--short-repeat-fraction", type=_fraction, default=.7,
                       help="Minimum motif-compatible read fraction for repeat-rich evidence (default: %(default)s)")
     call.add_argument(
         "--short-min-informative-molecules",
-        type=_positive_int,
-        default=3,
-        help="Informative molecules required to avoid Illumina LOW_DEPTH (default: %(default)s)",
+        type=_nonnegative_int,
+        default=0,
+        help="Deprecated compatibility option; no molecule-count cutoff",
     )
     call.add_argument("--sr-recruitment-audit", choices=("compact", "full"), default="compact",
                       help="Ambiguous-pair diagnostics: compact records the two strongest loci; full records all matching loci")
@@ -523,12 +524,9 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--min-depth",
-        type=_positive_int,
-        default=1,
-        help=(
-            "Minimum informative reads required to avoid LOW_DEPTH "
-            "(default: %(default)s)"
-        ),
+        type=_nonnegative_int,
+        default=0,
+        help="Deprecated compatibility option; no read-depth cutoff",
     )
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
@@ -558,12 +556,9 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--min-secondary-reads",
-        type=_positive_int,
-        default=2,
-        help=(
-            "Minimum reads required to promote a secondary variant from "
-            "candidate to confirmed (default: %(default)s)"
-        ),
+        type=_nonnegative_int,
+        default=0,
+        help="Deprecated compatibility option; no secondary-read count cutoff",
     )
     call.add_argument(
         "--minimap2-bin",
@@ -576,12 +571,12 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         help="Repeat-count difference scale in mapping likelihoods, in repeat units (default: %(default)s)",
     )
     call.add_argument(
-        "--missing-locus-min-depth", type=_positive_float, default=3.0,
-        help="Minimum supporting molecules per locus for the missing-locus gate (default: %(default)s)",
+        "--missing-locus-min-depth", type=_nonnegative_float, default=0.0,
+        help="Deprecated compatibility option; no per-locus depth cutoff",
     )
     call.add_argument(
         "--missing-locus-min-fraction", type=_positive_float, default=0.8,
-        help="Fraction of panel loci meeting missing-locus depth, in (0, 1] (default: %(default)s)",
+        help="Fraction of panel loci observed before applying missing-locus penalties, in (0, 1] (default: %(default)s)",
     )
     call.add_argument(
         "--missing-locus-penalty", type=_nonnegative_float, default=8.0,
@@ -612,15 +607,15 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--min-snp-depth",
-        type=_positive_int,
-        default=3,
-        help="Minimum quality-filtered depth for a SNP call (default: %(default)s)",
+        type=_nonnegative_int,
+        default=0,
+        help="Deprecated compatibility option; no SNP depth cutoff",
     )
     call.add_argument(
         "--min-snp-alternate-reads",
-        type=_positive_int,
-        default=2,
-        help="Minimum reads supporting a non-reference SNP allele (default: %(default)s)",
+        type=_nonnegative_int,
+        default=0,
+        help="Deprecated compatibility option; no alternate-read count cutoff",
     )
     call.add_argument(
         "--min-snp-frequency",

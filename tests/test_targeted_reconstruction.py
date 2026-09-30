@@ -315,7 +315,7 @@ def test_no_evidence_is_no_call(template):
     assert result.method == 'NO_CALL' and not result.products and result.confidence == 0
 
 
-def test_removed_engine_flag_is_rejected():
+def test_short_reads_have_no_engine_selector():
     from mlvamaps.cli import build_parser
     with pytest.raises(SystemExit):
         build_parser().parse_args(['call', '--sr-engine', 'competitive'])
@@ -337,15 +337,26 @@ def test_full_product_error_consensus_preserves_supported_snp(template):
 def test_conflicting_singleton_lengths_retain_estimate_and_alternative(template):
     result = recover_locus(evidence(template, [(template.sequence(8), None),
                                                (template.sequence(12), None)]), template, 's')
-    assert result.method == 'AMBIGUOUS'
+    assert result.method == 'MIXED'
     assert len(result.products) == 2
-    assert result.confidence < .8
+    assert result.products[0].support_count == result.products[1].support_count == 1
     from mlvamaps.locus_reconstruction import _common_call
     call = _common_call(template.locus, result.products, 2, 's', 'illumina', 3, .8, result)
-    assert call['status'] == 'ambiguous'
+    assert call['status'] == 'mixed'
     assert call['repeat_count'] == 8
     assert call['second_best_repeat_count'] == 12
     assert (call['repeat_count_min'], call['repeat_count_max']) == (8, 12)
+
+
+def test_single_flank_pair_can_infer_length_and_retain_observed_bases(template):
+    items = evidence(template, [(template.left[-40:], revcomp(template.right[:40]))])
+    assert items[0].fragment_offset is not None
+    insert = InsertDistribution(items[0].fragment_offset + 8*template.unit, .1, 0, 'override')
+    result = recover_locus(items, template, 's', insert=insert, minimum_spanning_pairs=100)
+    assert result.method == 'INFERRED' and result.best == 8
+    assert result.counts['FLANK_PAIR'] == 1
+    assert template.left[-40:] in result.products[0].sequence
+    assert template.right[:40] in result.products[0].sequence
 
 
 @pytest.mark.parametrize('kind', ['insert', 'boundary', 'presence'])
@@ -699,3 +710,67 @@ def test_uninformative_flank_molecule_cannot_bias_candidate_likelihood(template)
     with_flank = candidate_likelihood([flank]*100, template, None, 20, .8)
     np.testing.assert_array_equal(without.posterior, with_flank.posterior)
     assert not with_flank.identifiable
+
+
+
+def test_censored_boundaries_do_not_favor_short_candidates_at_high_depth(template, monkeypatch):
+    import numpy as np
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    from mlvamaps.targeted_reconstruction import candidate_likelihood
+    def forbidden(*args):
+        pytest.fail('a censored boundary does not require per-candidate alignment')
+    monkeypatch.setattr('parasail.sw_striped_profile_16', forbidden)
+    boundary = MoleculeEvidence('one', 'L', ('LEFT_BOUNDARY',), ('AATG'*25,), (), lower_bound=25)
+    one = candidate_likelihood([boundary], template, None, 100, .8)
+    many = candidate_likelihood([replace(boundary, molecule_id=str(i)) for i in range(1000)], template, None, 100, .8)
+    np.testing.assert_array_equal(one.posterior, many.posterior)
+    assert not one.identifiable and one.reason == 'repeat_length_lower_bound'
+    assert np.ptp(one.posterior[one.states >= 25]) == 0
+    assert all(one.posterior[one.states < 25] == 0)
+
+
+def test_competitive_fragment_likelihood_is_invariant_to_learned_flank_phase(template):
+    import numpy as np
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    from mlvamaps.targeted_reconstruction import candidate_likelihood
+    insert = InsertDistribution(320, 5, 1, 'override')
+    original = MoleculeEvidence('one', 'L', ('FLANK_PAIR',), (), (),
+                                lower_bound=10, fragment_offset=200, template=template)
+    shifted = replace(original, template=replace(template, left=template.left+'AA'),
+                      lower_bound=9.5, fragment_offset=202)
+    first = candidate_likelihood([original], template, insert, 100, .8)
+    second = candidate_likelihood([shifted], template, insert, 100, .8)
+    np.testing.assert_array_equal(first.states, second.states)
+    np.testing.assert_allclose(first.posterior, second.posterior)
+    assert first.best == 30
+
+
+def test_candidate_limit_below_observed_boundary_is_never_a_call(template):
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    from mlvamaps.targeted_reconstruction import candidate_likelihood
+    item = MoleculeEvidence('one', 'L', ('LEFT_BOUNDARY',), (), (), lower_bound=120)
+    result = candidate_likelihood([item], template, None, 100, .8)
+    assert result.best is None and result.limit_reached and not result.identifiable
+
+
+def test_single_calibration_fragment_does_not_imply_known_library_variance(template):
+    from mlvamaps.short_read_evidence import estimate_insert_distribution, MoleculeEvidence
+    from mlvamaps.targeted_reconstruction import candidate_likelihood
+    learned = estimate_insert_distribution([320])
+    assert learned is not None and learned.pairs_used == 1 and learned.sd >= 32
+    pair = MoleculeEvidence('one', 'L', ('FLANK_PAIR',), (), (), fragment_offset=200)
+    result = candidate_likelihood([pair], template, learned, 100, .8)
+    assert result.best == 30 and not result.identifiable
+    assert result.interval[1]-result.interval[0] > 10
+    measured = estimate_insert_distribution([], 320, 1)
+    assert measured.sd == 1
+
+
+def test_boundary_uncertainty_remains_open_to_the_candidate_ceiling(template):
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    from mlvamaps.targeted_reconstruction import candidate_likelihood
+    item = MoleculeEvidence('one', 'L', ('LEFT_BOUNDARY',), (), (), lower_bound=25)
+    result = candidate_likelihood([item], template, None, 500, .8)
+    assert result.interval == (25, 500)
+    assert result.states[-1] == 500 and result.limit_reached
+    assert not result.identifiable

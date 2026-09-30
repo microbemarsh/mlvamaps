@@ -1,11 +1,12 @@
 # CLI options and thresholds
 
-Short reads use [targeted locus reconstruction](../concepts/locus-reconstruction.md).
-Long reads default to `--lr-engine spanning`; competitive mapping below applies
-to the optional `--lr-engine competitive` and downstream reference classification.
+Short reads always use the [database-free competitive sample model](../workflows/illumina.md).
+No `--sr-engine` selection is needed or accepted. Long reads default to
+`--lr-engine spanning`; reference-candidate mapping applies to the optional
+`--lr-engine competitive` and downstream reference classification.
 Short-read inference controls include `--short-repeat-fraction`,
 `--short-confidence-threshold`, `--short-max-candidate-repeat-count`,
-`--short-min-spanning-pairs`, `--insert-mean` and `--insert-sd`.
+`--insert-mean` and `--insert-sd`.
 
 Run `mlvamaps call --help` for essential options, or `mlvamaps call --advanced`
 for the complete parser-generated reference. Advanced options remain usable
@@ -62,8 +63,8 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `--database` | None | Completed reference-build directory containing observed amplicons and mapping assets. |
 | `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
 | `--classification-repeat-scale` | `1.0` | Repeat-count discrepancy scale in mapping log likelihoods, in repeat units. |
-| `--missing-locus-min-depth` | `3.0` | Minimum informative molecule support at a locus to count toward the coverage gate (read inputs only). |
-| `--missing-locus-min-fraction` | `0.8` | Required fraction of all panel loci meeting that depth, in `(0, 1]`. |
+| `--missing-locus-min-depth` | `0` | Deprecated compatibility option; accepted but ignored. No depth or molecule-count cutoff. |
+| `--missing-locus-min-fraction` | `0.8` | Required fraction of all panel loci with observed evidence, in `(0, 1]`; no per-locus depth cutoff. |
 | `--missing-locus-penalty` | `8.0` | Log-likelihood penalty per undetected query locus recorded in a reference once the gate passes; `0` disables. |
 
 ## Alignment-based reference assignment
@@ -93,13 +94,13 @@ model and [migration](../workflows/emu-migration.md) for removed options.
 | `--short-min-mean-quality` | `15` | Minimum mean Phred quality. |
 | `--short-trim-quality` | `0` | Conservative 3-prime trim threshold; zero disables trimming. |
 | `--short-min-pair-retention` | `0.5` | Fraction of a molecule's mates that must pass; a good mate may remain as an explicit orphan. |
-| `--short-min-informative-molecules` | `3` | Boundary-informative molecules required to avoid `LOW_DEPTH`. |
+| `--short-min-informative-molecules` | `0` | Deprecated compatibility option; accepted but ignored. No depth or molecule-count cutoff. |
 | `--manifest` | None | Failure-isolated batch TSV. |
 | `--sample-metadata` | None | CSV/TSV joined by sample ID. |
 | `--force` | Off | Rerun already-successful manifest samples. |
 | `--keep-intermediates` | Off | Retain QC FASTQs and any competitive alignment intermediates; short-read recruitment does not write SAM. |
 | `--short-repeat-fraction` | `0.7` | Motif-compatible fraction required for repeat-rich tagging. |
-| `--short-min-spanning-pairs` | `2` | Opposite-flank pairs required as decisive geometry evidence. |
+| `--short-min-spanning-pairs` | `0` | Deprecated compatibility option; accepted but ignored. No depth or molecule-count cutoff. |
 | `--short-confidence-threshold` | `0.8` | Minimum normalized candidate score for a call. |
 
 Separate mates are supported. Interleaved data are not guessed or accepted.
@@ -143,7 +144,7 @@ classification.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `--min-mixture-fraction` | `0.01` | Minimum EM-estimated fraction for a variant to affect mixed-locus status and appear separately in the main abundance plot. |
-| `--min-secondary-reads` | `2` | Reads required to promote an abundance-supported secondary from candidate to confirmed. |
+| `--min-secondary-reads` | `0` | Deprecated compatibility option; accepted but ignored. No depth or molecule-count cutoff. |
 
 Lower estimates remain in `vntr_mixture_abundance.tsv` as `TRACE` evidence and
 are combined into one trace segment in the report.
@@ -156,8 +157,8 @@ are combined into one trace segment in the report.
 | `--no-locus-mapping` | Off | Skip downstream dominant-representative mapping and SNP evidence; competitive locus recruitment still runs. |
 | `--min-mapping-quality` | `0` | Minimum accepted primary-alignment MAPQ. |
 | `--min-base-quality` | `20` | Minimum base quality used in depth and SNP evidence. |
-| `--min-snp-depth` | `3` | Minimum quality-filtered depth at a position. |
-| `--min-snp-alternate-reads` | `2` | Minimum reads supporting an alternate base. |
+| `--min-snp-depth` | `0` | Deprecated compatibility option; accepted but ignored. No depth or molecule-count cutoff. |
+| `--min-snp-alternate-reads` | `0` | Deprecated compatibility option; accepted but ignored. No depth or molecule-count cutoff. |
 | `--min-snp-frequency` | `0.2` | Minimum alternate allele fraction. |
 
 ## Allele calling
@@ -169,7 +170,7 @@ midpoint as an exact call.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--min-depth` | `1` | Informative reads required to avoid `LOW_DEPTH`. One repeat-informative read is sufficient for a provisional call. |
+| `--min-depth` | `0` | Deprecated compatibility option; accepted but ignored. No depth or molecule-count cutoff. |
 | `--min-posterior` | `0.75` | Required top repeat-count probability for FASTQ and assembly calls. |
 | `--repeat-range-tolerance` | `1.0` | Number of repeats allowed beyond either expected locus bound before assigning `OUT_OF_RANGE`. |
 | `--max-confidence-depth` | `25` | Maximum effective dominant-cluster evidence used to sharpen FASTQ allele confidence. |
@@ -180,8 +181,8 @@ assembly products. Read-level probabilities quantify support around that fixed
 assembly-equivalent convention.
 
 The default `--sample-mode metagenome` flags any meaningful secondary allele
-as `MULTIPLE_VARIANTS`; candidates below `--min-secondary-reads` remain visible
-without changing the signature. Use `--sample-mode isolate` for cultured material to
+as `MULTIPLE_VARIANTS`, including singleton secondary observations that pass
+the abundance fraction threshold. Use `--sample-mode isolate` for cultured material to
 retain the historical 80% dominance rule. In both modes the dominant allele
 uses the assembly-equivalent convention, so it can be compared directly with
 a later cultured assembly while posterior probability and dominant fraction

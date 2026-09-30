@@ -824,7 +824,7 @@ def run_assembly_call(
     taxon_min_loci: int | None = None,
     taxon_identification: bool | None = None,
     show_progress: bool = False,
-    missing_locus_min_depth: float = 3.0,
+    missing_locus_min_depth: float = 0.0,
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,

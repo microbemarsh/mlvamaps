@@ -100,7 +100,7 @@ def test_competitive_mapping_separates_presence_from_full_product(tmp_path):
     assert by_read["repeat_partial"]["evidence_class"] == "REPEAT_INFORMATIVE"
     assert len(assignments) == 1
     assert assignments[0].product_size_bp == len(sequence)
-    assert summaries[0]["presence_status"] == "PRESENT_PROVISIONAL"
+    assert summaries[0]["presence_status"] == "PRESENT_GENOTYPED"
     assert summaries[0]["mapped_reads"] == 3
     assert summaries[0]["full_product_reads"] == 1
     assert summaries[0]["genotype_informative_reads"] == 2

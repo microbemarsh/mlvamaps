@@ -148,7 +148,7 @@ def test_fastq_prediction_uses_assembly_rounding_but_retains_raw_value():
     assert prediction.predicted_repeat_count == 5.5
 
 
-def test_single_spanning_read_remains_in_signature_with_low_depth_status():
+def test_single_spanning_read_ignores_legacy_depth_cutoff():
     locus = Locus(
         locus_id="VNTR",
         repeat_unit_length_bp=4,
@@ -161,7 +161,8 @@ def test_single_spanning_read_remains_in_signature_with_low_depth_status():
     fingerprint, _probabilistic = build_fingerprint("sample", [row], [locus])
 
     assert row["called_repeat_count"] == 5
-    assert row["call_status"] == "LOW_DEPTH"
+    assert row["call_status"] == "PASS"
+    assert row["evidence_status"] == "SINGLE_MOLECULE_PROVISIONAL"
     assert fingerprint[0]["VNTR"] == 5
 
 
@@ -181,9 +182,9 @@ def test_single_spanning_read_is_retained_by_default():
     assert row["call_status"] != "LOW_DEPTH"
 
 
-def test_minimum_depth_cannot_be_below_one():
-    with pytest.raises(ValueError, match="at least 1"):
-        call_loci([], [], [], min_depth=0)
+def test_zero_minimum_depth_is_accepted_without_inventing_evidence():
+    assert call_loci([], [], [], min_depth=0) == []
+    assert call_loci([], [Locus('missing')], [], min_depth=0)[0]['called_repeat_count'] == ''
 
 
 def test_expected_range_warns_without_censoring_observed_allele():
@@ -426,7 +427,7 @@ def test_secondary_variant_does_not_muddy_primary_allele_posterior():
     assert "VNTR_ASV2|6|0.200000|CONFIRMED_SECONDARY" in mixed["secondary_alleles"]
 
 
-def test_singleton_secondary_is_candidate_not_signature_changing():
+def test_singleton_secondary_ignores_legacy_support_cutoff():
     asvs = [
         {
             "sample_id": "sample",
@@ -461,8 +462,8 @@ def test_singleton_secondary_is_candidate_not_signature_changing():
     )
     by_variant = {row["variant_id"]: row for row in rows}
 
-    assert by_variant["VNTR_ASV2"]["evidence_class"] == "CANDIDATE"
-    assert by_variant["VNTR_ASV2"]["meaningful"] == "no"
+    assert by_variant["VNTR_ASV2"]["evidence_class"] == "CONFIRMED_SECONDARY"
+    assert by_variant["VNTR_ASV2"]["meaningful"] == "yes"
     assert by_variant["VNTR_ASV2"]["abundance_class"] == "SECONDARY"
 
 

@@ -43,10 +43,9 @@ variant counts, and a compact secondary-allele representation.
 
 ## Status logic
 
-A locus is `LOW_DEPTH` when its dominant cluster has fewer reads than
-`--min-depth`, which defaults to one. A single informative molecule is
-retained as `SINGLE_MOLECULE_PROVISIONAL`. With enough primary reads, a locus
-is `AMBIGUOUS` when the top posterior is below `--min-posterior` or leads the
+A single informative molecule is retained as `SINGLE_MOLECULE_PROVISIONAL`.
+There is no minimum-depth cutoff; the legacy `--min-depth` option is ignored.
+A locus is `AMBIGUOUS` when the top posterior is below `--min-posterior` or leads the
 second-best count by less than 0.2.
 
 An otherwise decisive call is `OUT_OF_RANGE` when it lies outside the panel's

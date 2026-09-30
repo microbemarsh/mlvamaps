@@ -65,7 +65,7 @@ def test_internal_flank_hits_do_not_invent_repeat_boundaries():
 
 
 @pytest.mark.parametrize('reverse', [False, True])
-def test_single_boundary_spanning_read_retains_low_coverage_call(template, reverse):
+def test_single_boundary_spanning_read_has_no_depth_cutoff(template, reverse):
     # The read covers the repeat and only ten bases of each adjacent flank;
     # there is no full primer-bounded product and no insert calibration.
     sequence = template.left[-10:] + template.motif * 8 + template.right[:10]
@@ -77,7 +77,7 @@ def test_single_boundary_spanning_read_retains_low_coverage_call(template, rever
     from mlvamaps.locus_reconstruction import _common_call
     call = _common_call(template.locus, products, 1, 's', 'illumina', 3, .8, result)
     assert call['repeat_count'] == 8
-    assert call['status'] == 'low_coverage'
+    assert call['status'] == 'called'
 
 
 @pytest.mark.parametrize('repeat', [2, 8, 12, 12.5, 40])
@@ -113,7 +113,9 @@ def test_insert_robustness_and_override():
     assert result.mean == 300
     assert result.pairs_used == 60
     assert estimate_insert_distribution([], 500, 20).mean == 500
-    assert estimate_insert_distribution([300]*2) is None
+    assert estimate_insert_distribution([300]).pairs_used == 1
+    assert estimate_insert_distribution([300]*2).mean == 300
+    assert estimate_insert_distribution([]) is None
     with pytest.raises(ValueError):
         estimate_insert_distribution([], 300, None)
 
@@ -366,13 +368,13 @@ def test_mask_excludes_repeat_length_differences(template):
     assert len({p.haplotype_id for p in products}) == 1
 
 
-def test_singleton_secondary_sequence_remains_trace(template):
+def test_singleton_secondary_sequence_is_not_filtered_by_read_count(template):
     seq = template.sequence(8)
     alt = seq[:20] + 'A' + seq[21:]
     items = [classify_pair(pair(s, name=str(i)), template) for i,s in enumerate([seq]*20+[alt])]
     products = recover_locus(items, template, 's').products
     assert {p.sequence for p in products} == {seq, alt}
-    assert next(p for p in products if p.sequence == alt).evidence['meaningful'] == 'no'
+    assert next(p for p in products if p.sequence == alt).evidence['meaningful'] == 'yes'
 
 
 def test_flank_insert_geometry(template):
@@ -425,7 +427,10 @@ def test_custom_rounding_is_retained_in_canonical_output(tmp_path, template):
     assert float(read_profiles(paths['reconstructed_locus_variants'])[0]['repeat_count']) == 8
 
 
-def test_candidate_memory_safety_guard(template):
+def test_candidate_length_vectors_do_not_materialize_long_sequences(template):
     t = replace(template, locus=replace(template.locus, expected_max_repeats=20000))
-    with pytest.raises(ValueError, match='memory safety limit'):
-        candidate_likelihood([], t, None, 20000, .8)
+    result = candidate_likelihood([], t, None, 20000, .8)
+    assert len(result.states) == 40001
+    assert result.states.nbytes+result.log_likelihoods.nbytes+result.posterior.nbytes < 1_000_000
+    with pytest.raises(ValueError, match='sequence safety limit'):
+        candidate_likelihood([], t, None, 300000, .8)

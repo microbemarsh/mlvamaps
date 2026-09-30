@@ -173,9 +173,22 @@ def test_shared_inference_low_coverage_direct_measurement_is_retained():
         InferenceThresholds(minimum_molecules=3),
     )
     assert calls[0]["repeat_count"] == 4
-    assert calls[0]["status"] == "low_coverage"
+    assert calls[0]["status"] == "called"
+
     assert calls[0]["direct_product_support"] == 1
     assert molecule_calls[("L1", "m1")] == 4
+
+
+def test_direct_half_allele_outside_candidate_grid_is_not_snapped():
+    locus = _locus()
+    contexts = generate_candidate_contexts([locus], maximum=4)
+    rows = [CandidateEvidence('L1', context.repeat_count, 'one',
+            direct_product_measurement=True, measured_repeat_count=8.5,
+            candidate_id=context.candidate_id) for context in contexts]
+    calls, molecules = infer_alleles(rows, [locus], contexts, 's', 'illumina')
+    assert calls[0]['repeat_count'] == 8.5
+    assert molecules[('L1', 'one')] == 8.5
+    assert calls[0]["direct_product_support"] == 1
 
 
 def test_generic_flank_mapping_detects_but_does_not_call():
@@ -229,3 +242,16 @@ def test_independent_molecule_mixture_requires_support():
     assert calls[0]["dominant_repeat"] == 3
     assert calls[0]["secondary_repeat"] == 5
     assert calls[0]["dominant_fraction"] == 0.6
+
+
+def test_short_read_boundary_pileup_cannot_call_truncated_reference():
+    locus = _locus()
+    contexts = generate_candidate_contexts([locus])
+    rows = [CandidateEvidence('L1', context.repeat_count, str(molecule),
+            alignment_score=100+float(context.repeat_count), left_boundary_span=True,
+            technology='illumina', candidate_id=context.candidate_id)
+            for molecule in range(100) for context in contexts]
+    calls, molecules = infer_alleles(rows, [locus], contexts, 's', 'illumina')
+    assert calls[0]['status'] == 'detected_unresolved'
+    assert calls[0]['repeat_count'] == ''
+    assert not molecules

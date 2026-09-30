@@ -239,7 +239,7 @@ def test_raw_read_mapping_preserves_alternatives_and_low_coverage(tmp_path, monk
     assert seen["include_unknown_repeats"]
     matches = read_tsv(result["mapping_reference_matches"])
     assert matches[0]["reference_id"] == "A"
-    assert matches[0]["missing_locus_gate_passed"] == "no"
+    assert matches[0]["missing_locus_gate_passed"] == "yes"
     assert float(matches[0]["missing_locus_penalty"]) == 0
     assert read_tsv(result["taxonomic_identification"])[0]["best_taxon"] == "1"
     assert json.loads(result["classification_details"].read_text())["molecules"] == 3
@@ -363,11 +363,14 @@ def test_coverage_penalty_is_reference_specific_and_applied_once(tmp_path, monke
         technology="illumina", locus_quality=quality, missing_locus_min_fraction=2 / 3)
     low = run_mapping_classification(**kwargs, outdir=tmp_path / "low")
     low_groups = json.loads(low["classification_details"].read_text())["groups"]
-    assert next(g for g in low_groups if "A" in g["references"])["references"] == ["A", "B"]
+    assert next(g for g in low_groups if "A" in g["references"])["references"] == ["A"]
     for locus in ("L1", "L2"):
         quality[locus]["depth"] = 3
     high = run_mapping_classification(**kwargs, outdir=tmp_path / "high")
     matches = {r["reference_id"]: r for r in read_tsv(high["mapping_reference_matches"])}
+    low_matches = {r["reference_id"]: r for r in read_tsv(low["mapping_reference_matches"])}
+    assert {ref: r['log_likelihood'] for ref, r in low_matches.items()} == {
+        ref: r['log_likelihood'] for ref, r in matches.items()}
     assert float(matches["A"]["log_likelihood"]) == -8
     assert float(matches["B"]["log_likelihood"]) == 0
     assert float(matches["A"]["missing_locus_penalty"]) == 8
@@ -453,7 +456,8 @@ def test_missing_locus_gate_requires_explicit_undetected_status(status):
 
 @pytest.mark.parametrize("depth, mode, penalty, expected", [
     (3, "illumina", 1, {"missing"}),
-    (2, "fastq", 1, set()),
+    (1, "fastq", 1, {"missing"}),
+    (0, "fastq", 1, set()),
     ("", "fastq", 1, set()),
     (float("nan"), "fastq", 1, set()),
     (float("inf"), "fastq", 1, set()),
@@ -475,7 +479,7 @@ def test_missing_locus_gate_preserves_low_or_unknown_coverage(depth, mode, penal
 
 
 @pytest.mark.parametrize("min_depth, fraction, penalty", [
-    (0, 0.8, 1), (3, 0, 1), (3, 1.1, 1), (3, 0.8, -1),
+    (-1, 0.8, 1), (3, 0, 1), (3, 1.1, 1), (3, 0.8, -1),
     (float("nan"), 0.8, 1), (3, float("inf"), 1), (3, 0.8, float("nan")),
 ])
 def test_missing_locus_gate_rejects_invalid_settings(min_depth, fraction, penalty):

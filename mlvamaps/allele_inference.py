@@ -13,10 +13,10 @@ from .models import Locus
 
 @dataclass(frozen=True)
 class InferenceThresholds:
-    minimum_molecules: int = 3
+    minimum_molecules: int = 0  # Compatibility only; no molecule-count cutoff.
     minimum_probability: float = 0.8
     minimum_margin: float = 0.2
-    mixture_min_molecules: int = 2
+    mixture_min_molecules: int = 0  # Compatibility only.
     mixture_min_fraction: float = 0.2
     temperature: float = 8.0
 
@@ -35,6 +35,10 @@ def _tier_weight(evidence: CandidateEvidence) -> float:
         return 12.0
     if evidence.full_repeat_span:
         return 8.0
+    if evidence.technology == "illumina" and not evidence.pair_geometry_support:
+        # One repeat boundary establishes presence, not the unseen tract length.
+        # Repeating that observation must not select a truncated candidate.
+        return 0.0
     if evidence.left_boundary_span and evidence.right_boundary_span:
         return 5.0
     if evidence.left_boundary_span or evidence.right_boundary_span:
@@ -90,6 +94,10 @@ def infer_alleles(
     for context in contexts:
         if context.repeat_count is not None and context.repeat_count not in states_by_locus[context.locus_id]:
             states_by_locus[context.locus_id].append(context.repeat_count)
+    # Direct observations need not lie on the reference candidate grid.
+    for row in evidence:
+        if row.measured_repeat_count is not None and row.measured_repeat_count not in states_by_locus[row.locus_id]:
+            states_by_locus[row.locus_id].append(row.measured_repeat_count)
     for states in states_by_locus.values():
         states.sort(key=float)
     by_locus_molecule: dict[tuple[str, str], list[CandidateEvidence]] = defaultdict(list)
@@ -132,15 +140,11 @@ def infer_alleles(
             secondary_fraction = mixture[1][1] / total if len(mixture) > 1 else 0.0
             if (
                 len(mixture) > 1
-                and mixture[1][1] >= thresholds.mixture_min_molecules
                 and secondary_fraction >= thresholds.mixture_min_fraction
-                and (technology != "illumina" or mixture[1][1] >= max(3, thresholds.mixture_min_molecules))
             ):
                 status = "mixed"
             elif best_probability < thresholds.minimum_probability or best_probability - second_probability < thresholds.minimum_margin:
                 status = "ambiguous"
-            elif len(informative) < thresholds.minimum_molecules:
-                status = "low_coverage"
             else:
                 status = "called"
 
@@ -197,4 +201,5 @@ COMMON_LOCUS_CALL_FIELDS = [
     "direct_product_support", "full_span_support", "junction_support",
     "best_candidate_repeat", "candidate_distribution", "technology",
     "dominant_repeat", "secondary_repeat", "dominant_fraction", "secondary_fraction",
+    "product_size_bp", "inference_method", "reason", "repeat_count_min", "repeat_count_max",
 ]

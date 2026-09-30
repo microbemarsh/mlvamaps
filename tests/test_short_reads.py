@@ -127,7 +127,7 @@ def test_canonical_short_read_pipeline_calls_recoverable_product(tmp_path):
     with result["calls"].open() as handle:
         call = next(csv.DictReader(handle, delimiter="\t"))
     assert call["repeat_count"] == "4"
-    assert call["mlva_method"] == "targeted_locus_reconstruction"
+    assert call["mlva_method"] == "competitive_sample_likelihood"
     assert not (tmp_path / "out" / "short_read_assembly_summary.tsv").exists()
 
 

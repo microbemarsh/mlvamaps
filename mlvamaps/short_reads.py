@@ -139,16 +139,16 @@ def run_short_read_call(
     profiles_path: str | None = None, database_path: str | None = None,
     sample_metadata: dict[str, str] | None = None, short_min_read_length: int = 40,
     short_min_mean_quality: float = 15.0, short_trim_quality: int = 0,
-    short_min_pair_retention: float = 0.5, min_depth: int = 3,
+    short_min_pair_retention: float = 0.5, min_depth: int = 0,
     threads: int = DEFAULT_THREADS, keep_intermediates: bool = False,
     sample_mode: str = "isolate", minimap2_bin: str = "minimap2",
-    short_min_spanning_pairs: int = 2, short_confidence_threshold: float = 0.8,
+    short_min_spanning_pairs: int = 0, short_confidence_threshold: float = 0.8,
     short_max_candidate_repeat_count: int = 100,
     reference_metadata_path: str | None = None,
     taxon_min_loci: int | None = None,
     taxon_identification: bool | None = None,
     show_progress: bool = True,
-    missing_locus_min_depth: float = 3.0,
+    missing_locus_min_depth: float = 0.0,
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
@@ -158,11 +158,12 @@ def run_short_read_call(
     round_tolerance: float = .25,
     max_anchor_edits: int = 3,
     min_mixture_fraction: float = .01,
-    min_secondary_reads: int = 2,
+    min_secondary_reads: int = 0,
     sr_recruitment_audit: str = "compact",
     short_repeat_fraction: float = .7,
+    taxon_screen_summary: dict | None = None,
 ) -> dict[str, Path]:
-    """Call Illumina data using competitive alignment or locus reconstruction."""
+    """Call Illumina data with the single database-free competitive sample model."""
     from .short_read_mapping import run_mapping_short_read_call
 
     return run_mapping_short_read_call(
@@ -183,6 +184,7 @@ def run_short_read_call(
         classification_repeat_scale=classification_repeat_scale,
         insert_mean=insert_mean, insert_sd=insert_sd,
         sr_recruitment_audit=sr_recruitment_audit, short_repeat_fraction=short_repeat_fraction,
+        taxon_screen_summary=taxon_screen_summary,
         technology=technology, max_anchor_edits=max_anchor_edits, round_tolerance=round_tolerance,
         min_mixture_fraction=min_mixture_fraction, min_secondary_reads=min_secondary_reads,
         reference_metadata_path=reference_metadata_path,

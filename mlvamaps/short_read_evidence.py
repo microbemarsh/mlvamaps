@@ -241,7 +241,6 @@ def cyclic_match(sequence: str, motif: str) -> bool:
 
 
 @lru_cache(maxsize=4096)
-@lru_cache(maxsize=4096)
 def repeat_fraction(sequence: str, motif: str) -> float:
     """Matched bases in the best cyclic, gapped repeat alignment / read length.
 
@@ -345,6 +344,15 @@ def _oriented_anchors(sequence: str, motif: str, left_flank: str, right_flank: s
         is_repeat = repetitive(seq, motif)
         left = None if is_repeat else flank_hit(seq, left_flank)
         right = None if is_repeat else flank_hit(seq, right_flank)
+        # Learned flank phase can include part of a repeat unit. A local hit
+        # entirely in that periodic tail is not a unique boundary anchor.
+        # Otherwise long motifs can create false spans of one repeat copy.
+        if left and (repetitive(left_flank[left.flank_start:left.flank_end], motif)
+                     or repetitive(seq[left.query_start:left.query_end], motif)):
+            left = None
+        if right and (repetitive(right_flank[right.flank_start:right.flank_end], motif)
+                      or repetitive(seq[right.query_start:right.query_end], motif)):
+            right = None
         # Short local matches occur by chance in whole-genome background.
         # Rescue 10..19-base anchors only when adjacent motif sequence supplies
         # an independently recognizable repeat boundary.
@@ -495,14 +503,21 @@ def estimate_insert_distribution(lengths, mean=None, sd=None) -> InsertDistribut
             raise ValueError("insert mean and SD must be finite and positive")
         return InsertDistribution(mean, sd, 0, "override")
     values = np.asarray([v for v in lengths if math.isfinite(v) and v > 0], dtype=float)
-    if len(values) < 10:
+    if not len(values):
         return None
     median = np.median(values)
     mad = float(np.median(abs(values - median)))
     values = values[abs(values - median) <= max(5.0, 4.5 * 1.4826 * mad)]
-    if len(values) < 10:
+    if not len(values):
         return None
-    return InsertDistribution(float(np.mean(values)), max(1.0, float(np.std(values))), len(values), "robust_flank_pairs", float(median), mad,
+    # A single fragment measures its own length, not the library's variance.
+    # Regularize toward a broad 10% CV (at least 10 bp), with two prior
+    # observations, and retain uncertainty in the estimated mean. This is an
+    # uncertainty model, not a count gate; explicit library overrides bypass it.
+    prior_sd = max(10., .1*float(median))
+    variance = (float(np.var(values))*len(values)+2*prior_sd**2)/(len(values)+2)
+    predictive_sd = math.sqrt(variance*(1+1/len(values)))
+    return InsertDistribution(float(np.mean(values)), max(1.0, predictive_sd), len(values), "robust_flank_pairs", float(median), mad,
                               float(np.quantile(values, .05)), float(np.quantile(values, .95)))
 
 

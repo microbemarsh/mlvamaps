@@ -1,4 +1,4 @@
-"""FASTQ orchestration using reconstructed products or legacy competition.
+"""FASTQ orchestration using competitive sample evidence and shared products.
 
 The module deliberately separates locus detection from genotype resolution.  A
 few flank-anchored molecules can establish presence without supplying enough
@@ -45,18 +45,19 @@ def run_mapping_short_read_call(
     reference_metadata_path: str | None,
     taxon_min_loci: int | None,
     taxon_identification: bool | None,
-    missing_locus_min_depth: float = 3.0,
+    missing_locus_min_depth: float = 0.0,
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     show_progress: bool = True,
     classification_repeat_scale: float = 1.0,
     insert_mean=None, insert_sd=None,
     technology: str = "illumina", max_anchor_edits: int = 3, round_tolerance: float = .25,
-    min_mixture_fraction: float = .01, min_secondary_reads: int = 2,
+    min_mixture_fraction: float = .01, min_secondary_reads: int = 0,
     sr_recruitment_audit: str = "compact",
     short_repeat_fraction: float = .7,
+    taxon_screen_summary: dict | None = None,
 ) -> dict[str, Path]:
-    """Select recovery strategy and emit established output views."""
+    """Run competitive short-read or spanning long-read recovery and emit output views."""
     # Lazy imports avoid a module cycle with the shared Illumina helpers.
     from .concurrency import resolve_threads
     from .short_read_qc import filtered_pairs
@@ -120,7 +121,7 @@ def run_mapping_short_read_call(
                 min_length=short_min_read_length, min_mean_quality=short_min_mean_quality,
                 trim_quality=short_trim_quality, min_pair_retention=short_min_pair_retention,
                 decompression_threads=tuple(io_plan['decoder_threads']))
-        method = "targeted_locus_reconstruction" if technology == "illumina" else "spanning_molecules"
+        method = "competitive_sample_likelihood" if technology == "illumina" else "spanning_molecules"
         if show_progress:
             print(f"[{sample_id}] Recovering loci using {method}", flush=True)
         started = time.perf_counter()
@@ -154,7 +155,7 @@ def run_mapping_short_read_call(
             evidence_rows.append({
                 "sample_id": sample_id, "locus_id": locus.locus_id,
                 "state": "no_evidence" if state == "not_found" else state,
-                "repeat_count": row["repeat_count"], "locus_length_bp": "",
+                "repeat_count": row["repeat_count"], "locus_length_bp": row.get("product_size_bp", ""),
                 "confidence": row["best_probability"],
                 "supporting_fragments": row["molecule_support"],
                 "proper_spanning_pairs": row.get("n_spanning", 0), "junction_reads": row["junction_support"],
@@ -306,7 +307,7 @@ def run_mapping_short_read_call(
             "total_reads": counters.get("input_reads", 0), "total_read_pairs": counters.get("input_pairs", 0),
             "retained_reads": counters.get("retained_reads", 0), "retained_pairs": counters.get("retained_pairs", 0),
             "callable_loci": states["called"], "complete_loci": states["called"],
-            "partial_loci": states["detected_unresolved"] + states["low_coverage"] + states["ambiguous"],
+            "partial_loci": states["detected_unresolved"] + states["low_coverage"] + states["ambiguous"] + states["estimated"],
             "presence_only_loci": states["detected_unresolved"], "mixed_loci": states["mixed"],
             "missing_loci": states["no_evidence"], "best_profile_id": best.get("best_profile_id", ""),
             "best_profile_distance": best.get("distance", ""), "profile_confidence": best.get("confidence", ""),
@@ -332,8 +333,8 @@ def run_mapping_short_read_call(
                            "performance": {"stage_seconds": stage_seconds, "qc": qc_statistics, "io": io_plan},
                            "insert_size": insert_stats, "parameters": {"repeat_fraction": short_repeat_fraction,
                            "recruitment_audit": sr_recruitment_audit,
-                           "minimum_supporting_fragments": min_depth,
-                           "minimum_spanning_pairs": short_min_spanning_pairs,
+                           "minimum_supporting_fragments": 0,
+                           "minimum_spanning_pairs": 0,
                            "confidence_threshold": short_confidence_threshold,
                            "maximum_candidate_repeat_count": short_max_candidate_repeat_count}}, indent=2, sort_keys=True) + "\n")
         started = time.perf_counter()
@@ -345,7 +346,7 @@ def run_mapping_short_read_call(
             closest_reference_bands=closest_reference_bands,
             presence_rows=recruitment,
             local_assembly_rows=read_profiles(unified_paths['reconstruction_pcr']) if 'reconstruction_pcr' in unified_paths else [],
-            short_read_rows=calls,
+            short_read_rows=calls, taxon_screen_summary=taxon_screen_summary,
             asv_rows=read_profiles(unified_paths["mapped_variant_table"]) if "mapped_variant_table" in unified_paths else [],
             mixture_rows=read_profiles(unified_paths["mixture_abundance"]) if "mixture_abundance" in unified_paths else [],
             mapping_rows=read_profiles(unified_paths["mapping_summary"]) if "mapping_summary" in unified_paths else [],

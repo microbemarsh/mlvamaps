@@ -97,7 +97,7 @@ def call_loci(
     predictions: list[ReadPrediction],
     loci: list[Locus],
     asv_rows: list[dict],
-    min_depth: int = 1,
+    min_depth: int = 0,
     min_posterior: float = 0.75,
     mixture_rows: list[dict] | None = None,
     sample_mode: str = "metagenome",
@@ -113,8 +113,7 @@ def call_loci(
         raise ValueError("calling_convention must be 'assembly' or 'probabilistic'")
     if max_confidence_depth <= 0:
         raise ValueError("max_confidence_depth must be positive")
-    if min_depth < 1:
-        raise ValueError("min_depth must be at least 1")
+    # min_depth remains accepted for API compatibility; evidence is not gated by depth.
     if repeat_range_tolerance < 0:
         raise ValueError("repeat_range_tolerance cannot be negative")
     primary_product_measurements = primary_product_measurements or {}
@@ -287,15 +286,11 @@ def call_loci(
                 break
         if len(primary_preds) == 1:
             evidence_status = "SINGLE_MOLECULE_PROVISIONAL"
-        elif len(primary_preds) < min_depth:
-            evidence_status = "PROVISIONAL_LOW_DEPTH"
         elif best[1] < min_posterior or (best[1] - second[1]) < 0.2:
             evidence_status = "AMBIGUOUS"
         else:
             evidence_status = "CONFIDENT"
-        if len(primary_preds) < min_depth:
-            status = "LOW_DEPTH"
-        elif best[1] < min_posterior or (best[1] - second[1]) < 0.2:
+        if best[1] < min_posterior or (best[1] - second[1]) < 0.2:
             status = "AMBIGUOUS"
         elif (
             best[0] < locus.expected_min_repeats - repeat_range_tolerance

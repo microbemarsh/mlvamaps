@@ -403,6 +403,7 @@ _STATUS_COLORS = {
     "PASS": "#56b4e9",
     "LOW_DEPTH": "#e69f00",
     "AMBIGUOUS": "#f0e442",
+    "ESTIMATED": "#f0e442",
     "MULTIPLE_VARIANTS": "#cc79a7",
     "OUT_OF_RANGE": "#ff9f80",
     "LOCUS_DROPOUT": "#a6b2bd",
@@ -447,7 +448,7 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
     <desc>Repeat-count calls and estimates at every panel locus, with call status.</desc>
     {"".join(marks)}
   </svg>
-  <figcaption>Bar length represents repeat units. AMBIGUOUS values are provisional best estimates; inspect their intervals and evidence before comparison. Call status is printed beside each bar as well as indicated by color.</figcaption>
+  <figcaption>Bar length represents repeat units. AMBIGUOUS and ESTIMATED values are provisional; inspect their intervals and evidence before comparison. ESTIMATED counts use read depth and their intervals describe sensitivity to coverage variation, not genotype confidence. Call status is printed beside each bar as well as indicated by color.</figcaption>
 </figure>
 """
 
@@ -693,7 +694,7 @@ def write_report(
     reference_best = reference_rows[0] if reference_rows else {}
     total_loci = len(allele_rows)
     flagged = low_depth + dropout + multiple + sum(
-        row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE", "PRESENT_COUNT_UNKNOWN", "NOT_FOUND"}
+        row.get("call_status") in {"AMBIGUOUS", "ESTIMATED", "OUT_OF_RANGE", "PRESENT_COUNT_UNKNOWN", "NOT_FOUND"}
         for row in allele_rows
     )
     summary_cards = [
@@ -792,6 +793,7 @@ def write_report(
         ("LOW_DEPTH", "Low-depth loci"),
         ("MULTIPLE_VARIANTS", "Mixed loci"),
         ("AMBIGUOUS", "Ambiguous loci"),
+        ("ESTIMATED", "Loci estimated from read depth"),
         ("OUT_OF_RANGE", "Out-of-range loci"),
     ):
         affected = [str(row.get("locus_id", "")) for row in allele_rows if row.get("call_status") == status]
@@ -914,7 +916,7 @@ def write_report(
         short_read_section = f"""
       <section class="report-section">
         <h2>Illumina Evidence</h2>
-        <p class="section-intro">Counts come from observed products, reconstructed products, or the best supported repeat-length candidate. AMBIGUOUS estimates retain their uncertainty interval. Tied candidates use the smallest equally supported count; boundary-only evidence may supply only a lower bound. Presence without length information remains unresolved.</p>
+        <p class="section-intro">Counts come from observed products, reconstructed products, repeat-length candidates, or read-depth estimates. KMER_DEPTH estimates use the coverage of a primer-connected sequence graph relative to its single-copy flanks. ESTIMATED intervals describe sensitivity to coverage variation; confidence is uncalibrated. AMBIGUOUS candidates retain their uncertainty interval. Tied candidates use the smallest equally supported count; boundary-only evidence may supply only a lower bound. Presence without length information remains unresolved.</p>
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>Status</th><th>Recruited molecules</th><th>Call method</th><th>Spanning pairs</th><th>Left / right / full span</th><th>Best repeat count</th><th>Interval min / max</th><th>Confidence</th><th>Evidence / uncertainty</th></tr></thead>
           <tbody>{short_read_table_rows}</tbody>

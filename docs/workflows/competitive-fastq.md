@@ -1,9 +1,11 @@
 # Competitive FASTQ workflows
 
-The candidate genotyping workflow below applies to `--lr-engine competitive`.
-Long reads default to spanning recovery. [Illumina reads](illumina.md) use
-competitive flank recruitment and targeted reconstruction; their downstream
-reference classification still uses competitive minimap2 mapping.
+The reference-candidate genotyping workflow below applies to
+`--lr-engine competitive`. Long reads default to spanning recovery.
+[Illumina reads](illumina.md) use one database-free competitive sample model:
+native locus assignment, observed products, and censored boundary/fragment
+likelihoods. There is no short-read engine selector. Their optional database
+classification still uses minimap2 after allele calling.
 
 The FASTQ path accepts `.fastq`, `.fq`, and gzip-compressed equivalents. It
 is intended for current high-accuracy long-read sequencing. Reads may span a
@@ -165,9 +167,8 @@ assignment likelihoods, while the abundance estimate from each iteration
 becomes the prior for the next iteration. This separates meaningful secondary
 variants from trace clusters and estimates the fraction of each component.
 
-Secondary variants require both the configured abundance fraction and
-`--min-secondary-reads` (default 2) to become confirmed. Singleton secondaries
-remain visible as `CANDIDATE` evidence but do not alter the primary signature.
+Secondary variants use the configured abundance fraction without a minimum
+read count. Singleton secondaries remain visible and can alter mixture status.
 
 This stage returns `vntr_mixture_abundance.tsv`. Control the meaningful/trace
 boundary with `--min-mixture-fraction`.
@@ -207,8 +208,8 @@ successively weaker evidence tiers. SPOARS supplies corrected representative
 sequences, confirmatory measurements, and sequence-variant characterization,
 but is not a prerequisite for a repeat-count call.
 
-Singleton clusters are retained by default (`--min-cluster-size 1` and
-`--min-depth 1`). A single spanning read can therefore contribute a
+Singleton clusters are retained without a minimum-depth cutoff.
+A single spanning read can therefore contribute a
 provisional allele and remain in the fingerprint. The
 `SINGLE_MOLECULE_PROVISIONAL` evidence label preserves the distinction between
 detection and replicated support.
@@ -229,7 +230,7 @@ This stage returns:
 - `allele_calls.tsv`
 - `calls.tsv`
 
-Statuses include `PASS`, `LOW_DEPTH`, `AMBIGUOUS`, `OUT_OF_RANGE`,
+Statuses include `PASS`, `AMBIGUOUS`, `OUT_OF_RANGE`,
 `MULTIPLE_VARIANTS`, and `LOCUS_DROPOUT`.
 
 The default is `--sample-mode metagenome`, where any meaningful secondary allele causes

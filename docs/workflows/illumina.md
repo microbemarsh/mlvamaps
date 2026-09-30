@@ -1,7 +1,14 @@
 # Illumina paired-end FASTQ
 
-Short reads use **competitive locus recruitment and local VNTR reconstruction**.
-There is one standard short-read pathway.
+Short reads use a **single database-free competitive caller**. Supply the
+primer panel and FASTQs; there is no short-read engine selector. Native flank
+alignments compete across loci, and physical repeat lengths compete using
+sample evidence. Supplying `--database` adds downstream reference classification
+without changing the genotype algorithm.
+
+There are no minimum depth, supporting-molecule, spanning-pair or graph-edge
+count requirements. Single observations remain usable; confidence and intervals
+describe the evidence, while unobserved lengths remain unresolved.
 
 ```bash
 mlvamaps call -i sr --fq1 sample_R1.fastq.gz --fq2 sample_R2.fastq.gz \
@@ -9,9 +16,19 @@ mlvamaps call -i sr --fq1 sample_R1.fastq.gz --fq2 sample_R2.fastq.gz \
 mlvamaps call -p panel.tsv -i reads/ --short-reads -o results -t 8
 ```
 
-No reference database is needed. Recruitment and reconstruction use only the
-supplied panel and observed reads, even when `--database` is supplied for later
-reference classification. Mate 2 is optional; recruited pairs retain both mates.
+Mate 2 is optional; competitive recruitment retains both mates and QC-surviving
+orphans. Direct spans, unique pair overlaps and local stitching feed the same
+assembly-calibrated repeat/SNP interpreter, including novel and half-repeat
+alleles and primer-indel correction. Sample-derived arms permit candidate
+inference without reference alleles or cached minimap2 indexes. Minimap2 is
+used only for optional downstream database classification.
+
+A boundary-only read gives a lower bound, with equal likelihood for all longer
+compatible alleles. Repeated copies cannot manufacture a unique length. Inward
+pairs contribute a robust fragment likelihood; learned flank-phase offsets are
+removed before comparing physical lengths. The caller scores length vectors
+without building or aligning every candidate sequence. Local product recovery,
+SNP evidence and the read-depth fallback are automatic parts of this pathway.
 
 Legacy three-column primer panels are supported, including names such as
 `vrrA_12bp_314bp_10U`. The name supplies repeat-unit length, nominal product
@@ -25,7 +42,8 @@ numeric repeat counts remain blank; repeat-unit size alone is insufficient.
 Primer-only loci can learn repeat motifs and both boundary flanks from recruited
 sample reads. Primer-anchored consensus tolerates isolated sequencing errors;
 once both boundaries are learned, partial reads can support likelihood estimates.
-Without those boundaries or a complete product, the locus remains unresolved.
+Without those boundaries or a complete product, a primer-connected k-mer graph
+may still support a provisional read-depth length estimate.
 The caller does not treat the entire sequence between primers as a repeat tract.
 When the motif is unknown, overlaps must
 span at least two configured repeat units and pass an observed periodicity
@@ -38,8 +56,10 @@ supports partial boundary evidence and the likelihood fallback below.
 4. Pile up recruited reads, consolidate substitution errors, and reconstruct
    unresolved loci through unique overlaps.
 5. Measure recovered contigs with the same Sassy PCR and length calibration as assembly.
-6. Use haploid candidate likelihoods for unresolved loci with panel or sample-learned boundaries, then
-   interpret products through the shared repeat/SNP layer.
+6. Use haploid candidate likelihoods for unresolved loci with panel or sample-learned boundaries.
+7. Estimate remaining unresolved lengths from whole-input k-mer coverage when a
+   primer-connected graph is available. Interpret recovered products through
+   the shared repeat/SNP layer.
 
 The graph retains contiguous high-quality segments rather than discarding a
 whole read for one bad base. Overlaps tolerate up to 2% substitutions but must
@@ -58,13 +78,16 @@ Sassy runs on the small recovered-contig collection after recruitment.
 `locus_reconstruction/reconstruction_pcr.tsv` retain the sequences and PCR
 measurements shown in the report's local assembly section.
 
-The hierarchy is `DIRECT` → `RECONSTRUCTED` → `INFERRED`. Low-confidence
+The hierarchy is `DIRECT` → `RECONSTRUCTED` → `INFERRED` → `KMER_DEPTH`. Low-confidence
 observed products and informative likelihood candidates retain their best
 repeat estimate in `calls.tsv`, the fingerprint, and the report, with
 `AMBIGUOUS` status and alternatives/intervals. Equally supported lengths use
 the smallest candidate; boundary-only estimates may represent only a lower
 bound. A flat likelihood or an uncalibrated primer-only product still cannot
-supply a numeric count. Substantial incompatible alleles are `MIXED`.
+supply a numeric count on its own. `KMER_DEPTH` uses `ESTIMATED` status and
+uncalibrated confidence (`0`); its interval describes coverage sensitivity and
+retains any wider likelihood uncertainty. It supplies no reconstructed sequence
+or SNP claims. Substantial incompatible alleles are `MIXED` and retain priority.
 See the [method definitions and limitations](../concepts/locus-reconstruction.md).
 
 Useful advanced controls:
@@ -72,7 +95,6 @@ Useful advanced controls:
 ```text
 --short-repeat-fraction 0.7
 --short-confidence-threshold 0.8
---short-min-spanning-pairs 2
 --short-max-candidate-repeat-count 100
 --sr-recruitment-audit compact
 --insert-mean 400 --insert-sd 35
@@ -80,8 +102,9 @@ Useful advanced controls:
 
 Supply insert statistics only when measured independently from the library.
 Without reliable insert statistics, boundary-only observations cannot resolve
-an exact allele. Repeat-rich read abundance is not treated as a copy-number
-measurement. `--threads` controls recruitment, I/O and subsequent locus work
+an exact allele. Depth estimates normalize whole-input graph k-mer abundance
+against flank coverage; recruited repeat-rich read counts alone do not determine
+copy number. `--threads` controls recruitment, I/O and subsequent locus work
 without overlapping full allocations.
 
 Pileups use HTSlib through the installed [`pysam` Python API](https://pysam.readthedocs.io/en/stable/api.html#pysam.AlignmentFile.pileup) at validated read
@@ -121,6 +144,7 @@ python -m pytest -q
 python scripts/benchmark_reconstruction.py --output bench/direct --molecules 10000 --threads 1
 python scripts/benchmark_reconstruction.py --output bench/unresolved --molecules 10000 --scenario unresolved --threads 1
 python scripts/benchmark_reconstruction.py --output bench/pileup --molecules 12000 --scenario pileup --threads 4
+python scripts/benchmark_reconstruction.py --output bench/depth --molecules 12000 --scenario depth --threads 2
 python scripts/benchmark_short_read_recruitment.py --help
 python scripts/benchmark_cross_mode.py manifest.tsv --output comparison.json
 ```

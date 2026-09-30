@@ -95,7 +95,8 @@ def test_canonical_identity_alignment_matches_parasail(tmp_path, monkeypatch):
     with paths['canonical_alignments'].open() as handle:
         rows = list(csv.DictReader(handle, delimiter='\t'))
     assert called == sequences[2:]
-    matrix = parasail.matrix_create('ACGTN', 2, -4)
+    from mlvamaps.alignment import MASKED_DNA_MATRIX
+    matrix = MASKED_DNA_MATRIX
     for row, sequence in zip(rows, sequences):
         expected = native(sequence, sequences[0], 5, 1, matrix)
         assert row['aligned_query'] == expected.traceback.query
@@ -131,3 +132,23 @@ def test_streamed_membership_and_prediction_files_match_dict_writer(tmp_path, mo
                              'raw_repeat_count_estimate': expected_genotype.repeat_count_raw,
                              'probability': product.reconstruction_confidence, 'evidence_weight': 1})
         assert paths[key].read_bytes() == expected.getvalue().encode()
+
+
+
+def test_uncovered_flank_bases_do_not_become_deletions(tmp_path):
+    from scripts.benchmark_cross_mode import snp_comparison
+    sequence = 'CTAGCCTAAATGCTCTATCGTGAATCTTTGCAAATAGGAACTGTTTTCCAGGCAAGGGTGTTTGGCTAAGGACTCGATGC'
+    partial = 'N'*14+sequence[14:]
+    assert snp_comparison(sequence, partial) == (len(sequence)-14, len(sequence)-14)
+    assert snp_comparison(partial, sequence) == (len(sequence)-14, len(sequence)-14)
+    locus = Locus('L')
+    genotypes = [genotype_product(LocusProduct('s', 'L', 'short_read', name, seq,
+                  estimated_fraction=fraction), locus)
+                 for name, seq, fraction in [('full', sequence, .75), ('partial', partial, .25)]]
+    paths = write_product_alignments(genotypes, tmp_path)
+    with paths['mapping_snps'].open() as handle:
+        assert list(csv.DictReader(handle, delimiter='\t')) == []
+    # True mismatches and deletions still count as disagreement.
+    changed = sequence[:30]+('A' if sequence[30] != 'A' else 'C')+sequence[31:]
+    assert snp_comparison(sequence, changed) == (len(sequence)-1, len(sequence))
+    assert snp_comparison(sequence, sequence[:30]+sequence[31:]) == (len(sequence)-1, len(sequence))

@@ -8,17 +8,16 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from functools import lru_cache
-import math
 from tempfile import TemporaryDirectory
 from pathlib import Path
 
 import numpy as np
-import parasail
 import pysam
 import regex
 
+from .competitive_short_reads import candidate_likelihood
 from .locus_products import LocusProduct, product_repeat_allele
-from .short_read_evidence import MoleculeEvidence, RepeatTemplate, InsertDistribution, _read_profile, repetitive, primer_product, primer_bounds
+from .short_read_evidence import MoleculeEvidence, RepeatTemplate, InsertDistribution, repetitive, primer_product, primer_bounds
 
 EVIDENCE_CLASSES = ('FULL_SPAN', 'LEFT_BOUNDARY', 'RIGHT_BOUNDARY', 'FLANK_PAIR',
                     'REPEAT_RICH', 'ANCHORED_REPEAT', 'SOFTCLIP_LEFT', 'SOFTCLIP_RIGHT', 'UNINFORMATIVE')
@@ -39,6 +38,7 @@ class LocusRecovery:
     limit_reached: bool = False
     counts: dict[str, int] = field(default_factory=dict)
     reason: str = ''
+    product_size_bp: int | None = None
 
 
 @lru_cache(maxsize=4096)
@@ -88,6 +88,7 @@ def _reliable(item):
 
 def direct_products(items, template, sample_id, min_fraction, min_secondary_reads):
     groups = defaultdict(list)
+    repeat_intervals = defaultdict(set)
     for item in items:
         if not item.product_sequence and not _reliable(item):
             continue
@@ -105,21 +106,23 @@ def direct_products(items, template, sample_id, min_fraction, min_secondary_read
                     start = left['query_start'] - left['flank_start']
                     end = right['query_end'] + len(context.right) - right['flank_end']
                     sequence = 'N'*max(0, -start) + seq[max(0, start):min(len(seq), end)] + 'N'*max(0, end-len(seq))
+                    repeat_intervals[sequence].add((
+                        left['query_end']+len(context.left)-left['flank_end']-start,
+                        right['query_start']-right['flank_start']-start))
                     break
         if sequence:
             groups[sequence].append(item)
-    # Unlinked singleton sequencing errors should not choose an arbitrary SNP
-    # haplotype. A same-length consensus is allowed only without a supported
-    # exact haplotype; minority bases remain unknown below 70% agreement.
+    # Consolidate unique same-length observations without choosing an arbitrary
+    # SNP haplotype. This retains every molecule; it is not a support cutoff.
     by_length = defaultdict(list)
     for seq, members in groups.items():
         by_length[len(seq)].append((seq, members))
     for length, rows in by_length.items():
-        depth = sum(len(members) for _, members in rows)
-        if depth >= 3 and max(len(members) for _, members in rows) < min_secondary_reads:
+        if len(rows) > 1 and all(len(members) == 1 for _, members in rows):
             consensus = _pileup_consensus(((seq, 0, {item.molecule_id for item in members})
                                            for seq, members in rows), length)
             members = [item for _, group in rows for item in group]
+            repeat_intervals[consensus] = set().union(*(repeat_intervals[seq] for seq, _ in rows))
             for seq, _ in rows:
                 del groups[seq]
             groups[consensus] = members
@@ -132,13 +135,14 @@ def direct_products(items, template, sample_id, min_fraction, min_secondary_read
             effective_depth=len(members), estimated_fraction=fraction,
             reconstruction_confidence=1 - .01**len(members),
             evidence={'call_method': 'DIRECT', 'molecule_ids': [m.molecule_id for m in members],
-                      'meaningful': 'yes' if len(members) >= min_secondary_reads and fraction >= min_fraction else 'no',
+                      'meaningful': 'yes' if fraction >= min_fraction else 'no',
+                      **({'repeat_interval': next(iter(repeat_intervals[seq]))} if len(repeat_intervals[seq]) == 1 else {}),
                       'uncovered_bases': seq.count('N')}))
-    # Conflicting singleton lengths are not a confidently observed haploid call.
+    # Conflicting lengths retain their relative support, including singletons.
     support_by_repeat = Counter()
     for product in products:
         support_by_repeat[product_repeat_allele(product, template.locus)[1]] += product.support_count
-    substantial = [n for n in support_by_repeat.values() if n >= min_secondary_reads and n/total >= min_fraction]
+    substantial = [n for n in support_by_repeat.values() if n/total >= min_fraction]
     if products and len(substantial) < 2:
         from dataclasses import replace
         products = [replace(p, reconstruction_confidence=p.reconstruction_confidence *
@@ -464,94 +468,13 @@ def microassemble(items, template, insert=None, max_nodes=2048, max_paths=64):
         sequence = ''.join(column[0] if len(set(column)) == 1 else 'N'
                            for column in zip(*products))
         members = sorted(set().union(*products.values()))
-        if len(members) >= 2:
-            return sequence, members, ''
+        return sequence, members, ''
     return '', [], 'multiple_reconstructions' if products else 'ambiguous_overlap_offsets' if ambiguous else 'no_complete_path'
 
 
-def candidate_likelihood(items, template, insert, maximum, minimum_probability, context_templates=None):
-    """Haploid, sequence/fragment log likelihood; no genotype or component EM.
-
-    Marginalize over distinct recruited natural contexts for each repeat length.
-    Bound-only observations remain uncertain even at very high read depth.
-    """
-    if maximum < 1 or maximum * template.unit > 1_000_000:
-        raise ValueError('invalid candidate ceiling or candidate locus exceeds sequence safety limit')
-    upper = min(maximum, max(10, template.locus.expected_max_repeats + 2,
-                             math.ceil(max([e.lower_bound for e in items] + [0])) + 3))
-    if insert:
-        upper = min(maximum, max(upper, math.ceil((insert.mean + 4*insert.sd)/template.unit)))
-    step = .5 if template.unit > 1 else 1.
-    context_templates = context_templates or [e.template for e in items if e.template]
-    contexts = list(dict.fromkeys((t.left, t.right, t.motif) for t in context_templates))
-    contexts = contexts or [(template.left, template.right, template.motif)]
-    if len(contexts) > 64:
-        return LocusRecovery(method='AMBIGUOUS', reason='candidate_context_limit')
-    cache = {}
-    while True:
-        states = np.arange(0, upper + step/2, step)
-        joint = np.zeros(len(states))
-        if len(states) * (len(template.left)+len(template.right)+upper*template.unit) > 50_000_000:
-            raise ValueError('candidate sequences exceed memory safety limit')
-        for item in items:
-            # Flank-only/unsupported clips establish presence, not length.
-            # Including their local scores can bias length through chance hits.
-            if not item.lower_bound and 'FLANK_PAIR' not in item.classes:
-                continue
-            scores_for_molecule = np.zeros(len(states))
-            if item.lower_bound:
-                scores_for_molecule[states < item.lower_bound-.25] = -50
-            if insert and 'FLANK_PAIR' in item.classes and item.fragment_offset is not None:
-                fragment = item.fragment_offset + states * template.unit
-                # Student-t tails reduce the influence of discordant fragments.
-                scores_for_molecule -= 2.5 * np.log1p(((fragment-insert.mean)/insert.sd)**2/4)
-            for read in item.sequences:
-                if read not in cache or len(cache[read]) != len(states):
-                    scores = list(cache.get(read, []))
-                    for state in states[len(scores):]:
-                        backgrounds = []
-                        for left, right, motif in contexts:
-                            length = round(state*template.unit)
-                            target = left + (motif*math.ceil(length/len(motif)))[:length] + right
-                            score = 2*len(read) if read in target else parasail.sw_striped_profile_32(_read_profile(read), target, 5, 1).score
-                            backgrounds.append((score-2*len(read))/8)
-                        top = max(backgrounds)
-                        scores.append(top + math.log(sum(math.exp(v-top) for v in backgrounds)/len(backgrounds)))
-                    cache[read] = np.asarray(scores)
-                scores_for_molecule += cache[read]
-            joint += scores_for_molecule
-        posterior = np.exp(np.maximum(joint-joint.max(), -700))
-        posterior /= posterior.sum()
-        if upper >= maximum or posterior[-2:].sum() < .01:
-            break
-        upper = min(maximum, upper*2)
-    ranking = np.argsort(-posterior, kind='stable')
-    best, second = map(int, ranking[:2])
-    selected = ranking[:np.searchsorted(np.cumsum(posterior[ranking]), .95)+1]
-    limit = upper == maximum and posterior[-2:].sum() >= .01
-    identifiable = bool(insert and any('FLANK_PAIR' in e.classes for e in items))
-    # Detect separated insert-implied clusters without fitting a mixture model.
-    implied = [round((insert.mean-e.fragment_offset)/template.unit) for e in items
-               if insert and 'FLANK_PAIR' in e.classes and e.fragment_offset is not None]
-    modes = Counter(implied).most_common()
-    mixed = len(modes)>1 and modes[1][1] >= max(3, .2*len(implied)) and abs(modes[0][0]-modes[1][0])*template.unit > 4*insert.sd
-    confidence = float(posterior[best])
-    informative = np.ptp(joint) > 1e-8
-    tied = np.count_nonzero(np.isclose(joint, joint[best], rtol=0, atol=1e-8)) > 1
-    return LocusRecovery(method='MIXED' if mixed else 'INFERRED' if identifiable and confidence >= minimum_probability and not limit else 'AMBIGUOUS',
-        confidence=confidence if informative else 0, states=states, log_likelihoods=joint, posterior=posterior,
-        best=float(states[best]) if informative else None, second=float(states[second]) if informative else None,
-        interval=(float(states[selected].min()), float(states[selected].max())) if informative else None,
-        identifiable=informative and identifiable and confidence >= minimum_probability and not limit and not mixed,
-        limit_reached=limit,
-        reason='no_repeat_length_information' if not informative else
-               'minimum_likelihood_tie; repeat_length_lower_bound' if tied and not insert else
-               'minimum_likelihood_tie' if tied else
-               'candidate_limit_reached' if limit else 'best_likelihood_estimate')
-
 
 def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_probability=.8,
-                  minimum_spanning_pairs=2, min_fraction=.01, min_secondary_reads=2, context_templates=None,
+                  minimum_spanning_pairs=0, min_fraction=.01, min_secondary_reads=0,
                   precomputed=None):
     counts = dict(Counter(c for e in items for c in e.classes))
     usable = [e for e in items if 'discordant' not in e.classes]
@@ -584,15 +507,11 @@ def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_
     if template.primer_only:
         return LocusRecovery(method='AMBIGUOUS', counts=counts, limit_reached=assembly_limit,
             reason='primer_only_no_complete_product:' + reason)
-    result = candidate_likelihood(usable, template, insert, maximum, minimum_probability, context_templates)
+    result = candidate_likelihood(usable, template, insert, maximum, minimum_probability)
     result.counts, result.reason = counts, result.reason or reason
     if assembly_limit:
         result.limit_reached = True
         result.reason = reason + '; ' + result.reason
-    if counts.get('FLANK_PAIR', 0) < minimum_spanning_pairs:
-        result.identifiable = False
-        if result.method == 'INFERRED':
-            result.method = 'AMBIGUOUS'
     if result.identifiable:
         # Partial SNPs use quality-filtered unique flank placements; uncovered
         # positions (including the unobserved repeat) stay explicitly unknown.
@@ -606,7 +525,7 @@ def recover_locus(items, template, sample_id, insert=None, maximum=100, minimum_
         for pos in range(len(synthetic)):
             if votes[pos]:
                 (insertion, base), support = votes[pos].most_common(1)[0]
-                seq.append(insertion + ('' if base == '-' else base) if support >= 3 and support/sum(votes[pos].values()) >= .9 else 'N')
+                seq.append(insertion + ('' if base == '-' else base) if support/sum(votes[pos].values()) >= .9 else 'N')
             else:
                 seq.append('N')
         result.products = [LocusProduct(sample_id, template.locus.locus_id, 'short_read', template.locus.locus_id+'|v1',

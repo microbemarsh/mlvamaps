@@ -362,7 +362,7 @@ def test_manifest_rejects_reserved_batch_summary_sample_id(tmp_path, capsys):
 
 @pytest.mark.parametrize("flag, value", [
     ("--missing-locus-min-depth", "nan"),
-    ("--missing-locus-min-depth", "0"),
+    ("--missing-locus-min-depth", "-1"),
     ("--missing-locus-min-fraction", "1.1"),
     ("--missing-locus-min-fraction", "0"),
     ("--missing-locus-penalty", "inf"),

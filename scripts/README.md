@@ -58,7 +58,15 @@ isolate1	sr_after	/path/to/isolate1/sr_after
 ```
 
 Use identical reads, panels and settings for the two SR runs, and distinct output
-directories. Repeat at the coverage levels relevant to the experiment (for
+directories. Short reads use one database-free competitive caller; no engine
+selection is required:
+
+```bash
+mlvamaps call -i sr --fq1 R1.fastq.gz --fq2 R2.fastq.gz -p primers.tsv \
+  -t 8 -o sr_competitive
+```
+
+Repeat at the coverage levels relevant to the experiment (for
 example 1x, 2x, 5x, 10x and full depth), using the same subsampled molecules for
 before/after runs and several subsampling seeds. Use a separate manifest per
 depth and seed. Inspect discordant loci and missing calls as well as aggregate
@@ -71,7 +79,9 @@ do not report peak RAM; measure that with the server's job accounting if needed.
 
 `benchmark_reconstruction.py` generates six synthetic loci with off-target
 background reads, runs the complete short-read path and records wall time and
-peak resident memory. Direct and unresolved scenarios exercise separate paths:
+peak resident memory. Direct and unresolved scenarios exercise separate evidence paths within the
+same competitive caller. Each JSON result records its runtime, call correctness,
+peak process memory and stage timings:
 
 ```bash
 python scripts/benchmark_reconstruction.py --molecules 10000 --threads 1 --output bench/direct
@@ -106,3 +116,28 @@ python scripts/benchmark_short_read_recruitment.py \
 This isolates recruitment, including process startup and audit hashing. It does
 not measure reference classification or end-to-end sample runtime. Production
 calls also record stage timings in `reconstruction_metadata.json`.
+
+## Sub-1× validation
+
+```bash
+python scripts/benchmark_low_coverage.py --output bench/sub1x --seeds 10
+python scripts/benchmark_cross_mode.py bench/sub1x/runs.tsv --output bench/sub1x/comparison.json
+```
+
+The first script samples paired 150-bp reads at 0.125×, 0.25×, 0.5× and 0.75×,
+with 320±30-bp fragments and a 0.1% substitution rate. Identical reads are run
+with rich and calibrated primer-only panels, without a database or supplied
+insert-size parameters. Truth is measured by assembly mode on the source
+contigs with the same panel used for the corresponding FASTQ run. Every locus is counted, including missing and uncertain calls; the
+output separates definitive call errors/recovery from provisional estimates.
+These small synthetic controls do not establish superiority over Shovill.
+
+For that comparison, run Shovill plus assembly mode and this caller on identical
+subsampled server FASTQs, with independent seeds and equal CPU allocations.
+Record Shovill's full command and version: its documented defaults include
+contig-coverage filtering, so evaluate both defaults and any explicitly chosen
+low-coverage settings ([Shovill documentation](https://github.com/tseemann/shovill)).
+Compare both outputs against an independent high-quality truth where available,
+using the manifest workflow above; disagreement alone does not establish which
+method is correct. Include missing loci and total elapsed time for assembly
+plus typing, rather than timing typing alone.

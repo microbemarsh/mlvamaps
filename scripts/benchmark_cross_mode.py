@@ -12,10 +12,16 @@ import csv
 import itertools
 import json
 import math
+import sys
 from pathlib import Path
 
 import numpy as np
 import parasail
+
+if __package__ in (None, ''):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from mlvamaps.alignment import MASKED_DNA_MATRIX
 
 
 def read_table(path):
@@ -51,7 +57,7 @@ def load_run(directory):
 def snp_comparison(first, second):
     if not first or not second:
         return 0, 0
-    alignment = parasail.nw_trace_striped_32(first, second, 5, 1, parasail.matrix_create('ACGTN', 2, -4))
+    alignment = parasail.nw_trace_striped_32(first, second, 5, 1, MASKED_DNA_MATRIX)
     pairs = [(a,b) for a,b in zip(alignment.traceback.query, alignment.traceback.ref)
              if a in 'ACGT-' and b in 'ACGT-' and (a,b) != ('-', '-')]
     return sum(a == b for a,b in pairs), len(pairs)

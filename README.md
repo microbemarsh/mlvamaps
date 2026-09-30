@@ -23,11 +23,13 @@ flowchart LR
 ```
 
 Assembly product selection remains MLVA_finder compatible. Long reads are
-measured directly. Short reads competitively recruit locus-associated pairs,
-rescue informative mates, and attempt direct or targeted local reconstruction.
-Recovered sequence uses the shared repeat/SNP interpreter. A bounded haploid
-candidate likelihood fallback handles unresolved loci; reference classification
-is performed separately after measurement.
+measured directly. Short reads use one database-free competitive pathway:
+native flank alignments assign molecules across loci, then sample-derived
+repeat lengths compete using direct spans, censored boundary evidence and
+paired-fragment likelihoods. Local stitching and primer-arm rescue recover
+missing sequence automatically. Recovered products use the same repeat/SNP
+interpreter as assembly mode. Provisional read-depth estimates remain available
+when exact length is unresolved; optional database classification follows calling.
 
 Illumina allele calling needs no reference database, including with legacy
 three-column primer panels (`locus_id forward_primer reverse_primer`). Names
@@ -35,15 +37,22 @@ such as `vrrA_12bp_314bp_10U` provide product-length calibration. Primer-only
 calls first use observed or locally reconstructed products. Unresolved loci
 trigger up to two combined recruitment rounds against sample-derived anchors.
 Supported motifs and primer-to-repeat arms form a small repeat graph for
-boundary measurement and candidate inference. Unidentifiable lengths stay
+boundary measurement and candidate inference. A primer-connected k-mer graph
+can also estimate length from whole-input coverage relative to its flanks.
+Lengths without usable sequence or coverage evidence stay
 uncalled. Reference database sequences are never used for
 Illumina recruitment or reconstruction.
 
-The evidence hierarchy is **direct → reconstructed → inferred**, with explicit
+The evidence hierarchy is **direct → reconstructed → inferred → depth estimated**, with explicit
 ambiguous, no-call and mixed outcomes. There is one short-read pathway. The
 long-read default remains `--lr-engine spanning`. See the [Illumina workflow](docs/workflows/illumina.md)
 and [method, diagnostics and limitations](docs/concepts/locus-reconstruction.md).
 Missing and unresolved calls remain explicit and are never converted to zero.
+
+Calling has no minimum read-depth or molecule-support cutoff. A single usable
+observation can contribute a repeat, variant, or SNP call. Support counts,
+confidence, ambiguity and depth-estimate sensitivity remain visible, including
+at very low coverage. Missing sequence or length information stays unresolved.
 
 Reference typing uses one Emu-inspired alignment-likelihood framework:
 Sassy-recovered assembly amplicons are aligned to observed reference loci with

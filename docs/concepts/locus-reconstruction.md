@@ -1,8 +1,9 @@
 # Targeted paired-end locus reconstruction
 
-Illumina FASTQ has one standard pathway: competitive locus recruitment, direct
-measurement, targeted reconstruction, and haploid likelihood inference when a
-complete locus cannot be recovered. Assembly and long-read recovery feed the
+The single short-read pathway uses competitive locus recruitment, direct
+measurement, targeted reconstruction, haploid likelihood inference, and
+read-depth length estimation when a complete locus cannot be recovered.
+Assembly and long-read recovery feed the
 same `LocusProduct` and `genotype_product` interpreter.
 
 ## Recruitment and mate rescue
@@ -58,8 +59,8 @@ disk spool, closed on success and failure. The existing bounded process workers
 also perform sample recruitment; no external mapper or reference is required.
 
 Motif discovery uses the panel unit length and lagged sequence identity, with
-at least two units, 12 bases, 90% consensus identity, and two supporting
-molecules. Motifs must belong to a family observed on both primer-linked arms;
+at least two units, 12 bases and 90% consensus identity, without a minimum
+molecule count. Motifs must belong to a family observed on both primer-linked arms;
 abundant repeats in unlinked mates or outside the primers cannot choose the
 VNTR. Same-length cyclic motifs with at least 85% identity are treated as
 substitution variants, with both boundaries placed in the same cyclic phase.
@@ -156,8 +157,56 @@ Separate components and alternative paths that agree on product length and
 primer ends retain that length, masking disputed interior bases as `N`.
 Resource limits apply to 2048 compacted nodes and 64 alternative path expansions,
 not the original number of recruited read sequences. Hitting a limit sets
-`limit_reached=true` and defers to inference when repeat boundaries are known.
+`limit_reached=true` and defers to likelihood inference and read-depth estimation.
 No whole-genome assembly or external assembler is used.
+
+## Read-depth length estimates
+
+Unresolved short-read loci also enter a compact weighted de Bruijn graph. Its
+edges are observed Q20 21-mers; if no primer-connected graph exists, 15-mers are
+tried. Sequence multiplicity increases edge weights instead of creating more
+read-fragment nodes. The overlap assembler's 2,048-node and 64-path limits do
+not limit this graph, and no paths through repeat cycles are enumerated.
+Coordinate-based pileup consolidates substitution errors while retaining
+singleton observations. Edges that cannot connect the observed primer endpoints
+are removed. There is no minimum edge depth. Motif discovery and a complete
+contig are not prerequisites.
+
+One combined replay of the complete, QC-filtered input counts graph k-mers for
+all eligible loci, including repeat-only reads omitted during recruitment.
+Both strands contribute to the same sequence count. The two unbranched primer
+arms define single-copy k-mer depth. Product length is estimated as
+`k - 1 + sum(distinct canonical k-mer counts) / single-copy depth`, bounded
+below by the shortest primer-connected graph path. This uses read-derived
+sequence multiplicity, following the coverage-normalization principle described
+by [Kuśmirek and Nowak (2018)](https://pmc.ncbi.nlm.nih.gov/articles/PMC6052550/).
+It is a local length estimator, not an implementation of their assembler.
+
+Measured products, identifiable likelihood calls and mixtures retain priority.
+Successful calls incur no additional input replay. Depth estimation imposes no
+minimum depth, molecule count or read-start diversity. Observed primer-start
+position counts are recorded in the diagnostics. Identical primer-start amplicon
+reads violate the uniform-coverage assumption and can bias these estimates.
+No connected graph or no usable single-copy depth still leaves length
+unresolved; abundance alone cannot identify a length without a coverage model
+or spanning evidence.
+
+Calls use method `KMER_DEPTH` and status `ESTIMATED`. Physical product length
+is converted to repeat units using the shared panel length calibration, or
+sample-learned repeat boundaries when calibration is unavailable. Panel nominal
+counts never fill missing observations. These estimates carry no reconstructed
+sequence, SNP claims, or calibrated genotype probability (`confidence=0`).
+Their intervals describe sensitivity to coverage variation, with a minimum
+10% length variation and a broader range for unequal flank depth or low depth;
+existing likelihood uncertainty is retained. They are not credible intervals.
+Shared k-mers across eligible loci are flagged. Unrepresented genomic copies,
+coverage bias and incomplete graph sequence can bias the point estimate.
+
+`repeat_length_estimates.json` records the k-mer size, graph size, flank depths,
+estimated amplicon length, length sensitivity interval and shared-edge count,
+or the reason estimation could not run. `short_read_repeat_evidence.tsv`,
+`common_locus_calls.tsv`, `calls.tsv` and mapping evidence retain numeric
+lengths as well as counts. The report labels provisional depth estimates.
 
 Observed complete products and reconstructed contigs then pass through
 `run_in_silico_pcr_loci`, `pcr_rows_to_products` and
@@ -180,10 +229,15 @@ bounds, expands when probability reaches its edge, and stops at
 included where the unit is at least two bases. Direct observations are not
 restricted by this inference ceiling.
 
-Each molecule contributes native alignment scores from its reads, a penalty
-for violating its observed repeat lower bound, and, for inward flank pairs,
-a Student-t fragment-length likelihood. Scores are summed in log space and
-normalized across candidates. No diploid model or component EM is involved.
+Native alignments establish locus and boundary coordinates once. A boundary
+observation excludes shorter lengths and assigns equal likelihood to every
+compatible longer length. Repeated observations of the same bound cannot
+sharpen its unobserved end. Inward flank pairs contribute Student-t fragment
+likelihoods, summed in log space and normalized over half-repeat length states.
+Different learned flank phases are converted to the same physical product
+coordinates before comparing evidence. Repeated fragment geometries share
+vector computation while retaining their molecule multiplicities. No candidate
+sequences, per-candidate alignments, diploid model or component EM are required.
 Graph loop counts and uncertainty intervals are converted to the same
 product-length calibration used for the reported MLVA allele; motif phase
 choices do not change the reported allele coordinates.
@@ -193,13 +247,19 @@ separated, substantially supported fragment clusters are marked `MIXED`
 without inventing a single sequence.
 
 Fragment statistics come from uniquely positioned, ordinary inward pairs on
-the same non-repeat flank, independently of unknown VNTR length. At least ten
-observations are needed. Median/MAD outlier filtering yields mean, SD and 5th/
-95th percentiles. A library without enough such pairs contributes no fragment
+the same non-repeat flank, independently of unknown VNTR length. Any observed
+pair can contribute. Median/MAD outlier filtering yields mean, SD and 5th/
+95th percentiles. The automatic predictive SD includes uncertainty in the mean
+and shrinks variance toward a broad prior (10% coefficient of variation, at
+least 10 bp, with weight equivalent to two observations). This is a modeling
+assumption, not empirically calibrated confidence or a depth cutoff. A singleton
+still contributes but cannot imply a 1-bp library SD. Explicit library overrides
+retain their supplied mean and SD.
+A library without such pairs contributes no fragment
 term. Independently measured `--insert-mean BP --insert-sd BP` may be supplied.
 
 Inferred sequence retains only flank bases with Q20, accepted flank placement,
-at least three molecules and 90% base agreement. Uncovered positions and the
+90% base agreement, without a minimum molecule count. Uncovered positions and the
 unobserved repeat remain `N`. An inferred repeat count is not a measured repeat
 haplotype, and should not be used as evidence for intra-repeat SNP absence.
 
@@ -226,7 +286,8 @@ read length, motif length, amplicon/VNTR lengths, depth, the amplicon-to-insert
 ratio, likelihood intervals and failure reasons.
 
 Methods are `DIRECT`, `RECONSTRUCTED`, `INFERRED`, `AMBIGUOUS`, `NO_CALL`, or
-`MIXED`. Existing PASS/LOW_DEPTH/UNRESOLVED-style status columns remain.
+`MIXED`. A single observation can be called; no depth cutoff emits `LOW_DEPTH`.
+Legacy status values remain readable in existing outputs.
 Aggregate likelihood TSVs contain rows only for loci that needed inference.
 Per-molecule diagnostics retain evidence and placements rather than a large
 molecule-by-candidate likelihood grid. Confidence

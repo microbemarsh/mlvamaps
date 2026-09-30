@@ -363,11 +363,11 @@ def run_call(
     max_read_length: int = 100000,
     min_qscore: float = 15.0,
     max_primer_mismatches: int = 3,
-    min_depth: int = 1,
+    min_depth: int = 0,
     min_posterior: float = 0.75,
     repeat_range_tolerance: float = 1.0,
     min_mixture_fraction: float = 0.01,
-    min_secondary_reads: int = 2,
+    min_secondary_reads: int = 0,
     minimap2_bin: str = "minimap2",
     reference_metadata_path: str | None = None,
     taxon_min_loci: int | None = None,
@@ -375,8 +375,8 @@ def run_call(
     locus_mapping: bool = True,
     min_mapping_quality: int = 0,
     min_base_quality: int = 20,
-    min_snp_depth: int = 3,
-    min_snp_alternate_reads: int = 2,
+    min_snp_depth: int = 0,
+    min_snp_alternate_reads: int = 0,
     min_snp_frequency: float = 0.2,
     threads: int = DEFAULT_THREADS,
     show_progress: bool = False,
@@ -392,7 +392,7 @@ def run_call(
     taxon_screen_abs_threshold: int = 2,
     taxon_screen_rel_threshold: float = 0.01,
     deacon_bin: str = "deacon",
-    missing_locus_min_depth: float = 3.0,
+    missing_locus_min_depth: float = 0.0,
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
@@ -490,7 +490,7 @@ def run_call(
             taxon_min_loci=taxon_min_loci, taxon_identification=taxon_identification,
             show_progress=show_progress, missing_locus_min_depth=missing_locus_min_depth,
             missing_locus_min_fraction=missing_locus_min_fraction, missing_locus_penalty=missing_locus_penalty,
-            classification_repeat_scale=classification_repeat_scale,
+            classification_repeat_scale=classification_repeat_scale, taxon_screen_summary=screen_summary,
         )
         result.update(screen_paths)
         return result
@@ -797,6 +797,7 @@ def run_call(
         status_map = {
             "called": "PASS", "low_coverage": "LOW_DEPTH",
             "detected_unresolved": "LOCUS_DROPOUT", "ambiguous": "AMBIGUOUS",
+            "estimated": "ESTIMATED",
             "not_found": "LOCUS_DROPOUT", "mixed": "MULTIPLE_VARIANTS",
         }
         row.update({
