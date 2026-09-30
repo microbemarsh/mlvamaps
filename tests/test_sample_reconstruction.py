@@ -357,9 +357,10 @@ def test_partial_graph_evidence_estimates_count_only_with_length_information(tmp
         assert calls[0]['inference_method'] == 'INFERRED'
         assert calls[0]['repeat_count_min'] <= 30 <= calls[0]['repeat_count_max']
     else:
-        assert 0 < calls[0]['repeat_count'] < 30
-        assert calls[0]['status'] == 'estimated'
+        assert calls[0]['repeat_count'] == ''
+        assert calls[0]['status'] == 'detected_unresolved'
         assert 'repeat_length_lower_bound' in calls[0]['reason']
+        assert 'depth_only_not_length_identifying' in calls[0]['reason']
         assert calls[0]['repeat_count_min'] <= 30 <= calls[0]['repeat_count_max']
     assert 'reconstruction_pcr' not in paths  # No fabricated contig enters PCR.
 

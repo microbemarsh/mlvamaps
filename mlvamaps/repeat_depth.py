@@ -1,9 +1,10 @@
-"""Read-derived lengths for loci whose overlap assembly cannot count cycles.
+"""Coverage diagnostics for loci whose overlap assembly cannot count cycles.
 
 A weighted de Bruijn graph collapses repeated sequence into shared k-mers.
 Coverage of those k-mers relative to the two single-copy primer arms estimates
-their multiplicity. Count coverage in the *whole input*, not the anchor-selected
-recruitment pool, which systematically excludes internal repeat reads.
+their multiplicity under uniform, locus-specific coverage. Those assumptions
+are unverified: matching reads elsewhere in the input can inflate the ratio.
+Keep these estimates diagnostic; they cannot establish a locus's repeat count.
 """
 from collections import Counter, defaultdict, deque
 from functools import lru_cache
@@ -179,7 +180,7 @@ def _count_depth_chunk(task):
 def estimate_graph_lengths(recoveries, loci, templates, evidence, replay_pairs,
                            round_tolerance=.25, progress=None, sample_id='',
                            *, locus_executor=None, threads=1):
-    """Populate provisional counts/lengths; never manufacture a contig or SNPs."""
+    """Record depth estimates without replacing length evidence or its uncertainty."""
     graphs = {}
     diagnostics = {}
     tasks = ((locus.locus_id, evidence[locus.locus_id], templates[locus.locus_id])
@@ -245,10 +246,9 @@ def estimate_graph_lengths(recoveries, loci, templates, evidence, replay_pairs,
         total = sum(coverage.get(e, coverage.get(revcomp(e), 0))
                     for e in {min(e, revcomp(e)) for e in graph['edges']})
         length = max(graph['minimum_bp'], round(graph['k']-1+total/depth))
-        # ponytail: this is a uniform-local-coverage point estimate, not a
-        # calibrated genotype posterior. Shared sequence and library bias can
-        # inflate it. Keep a conservative sensitivity interval and expose the
-        # assumptions; upgrade to a fitted coverage model with validated data.
+        # ponytail: unverified locus ownership and uniform coverage limit this
+        # ratio to diagnostics. A calibrated, validated coverage model would
+        # be required before it could supply a repeat call.
         variation = max(.1, abs(arm_depths[0]-arm_depths[1])/depth, 2/math.sqrt(depth))
         bounds = (max(graph['minimum_bp'], round(length/(1+variation))),
                   round(length*(1+variation)))
@@ -269,21 +269,14 @@ def estimate_graph_lengths(recoveries, loci, templates, evidence, replay_pairs,
             interval = tuple(max(0, (b-len(template.left)-len(template.right))/template.unit) for b in bounds)
         else:
             best, interval = None, None
-        if interval is not None and recovery.interval is not None:
-            interval = min(interval[0], recovery.interval[0]), max(interval[1], recovery.interval[1])
         shared = sum(owners[min(e, revcomp(e))] > 1 for e in graph['edges'])
         diagnostics[name] = {'method': 'KMER_DEPTH', 'k': graph['k'], 'graph_edges': len(graph['edges']),
             'arm_depths': arm_depths, 'read_start_positions': graph['read_start_positions'],
             'amplicon_length': length, 'length_interval': bounds,
-            'shared_edges': shared, 'interval_kind': 'coverage_sensitivity'}
-        recovery.product_size_bp = length
-        recovery.best, recovery.interval = best, interval
-        recovery.states = np.array([])
-        recovery.log_likelihoods = np.array([])
-        recovery.posterior = np.array([])
-        recovery.second = None
-        recovery.method, recovery.confidence, recovery.identifiable = 'KMER_DEPTH', 0.0, False
-        recovery.reason = '; '.join(filter(None, (recovery.reason, 'read_depth_length_estimate',
-            'shared_repeat_sequence' if shared else '',
-            'repeat_count_uncalibrated' if best is None else '', 'interval_is_coverage_sensitivity')))
+            'repeat_count': best, 'repeat_interval': interval,
+            'shared_edges': shared, 'interval_kind': 'coverage_sensitivity',
+            'status': 'diagnostic_only', 'reason': 'depth_only_not_length_identifying'}
+        # A connected graph does not assign repeat-only reads to this locus.
+        # Even balanced arms and shared_edges=0 cannot prove unique ownership.
+        recovery.reason = '; '.join(filter(None, (recovery.reason, 'depth_only_not_length_identifying')))
     return diagnostics

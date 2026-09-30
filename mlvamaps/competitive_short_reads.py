@@ -8,29 +8,61 @@ allele database or a minimum molecule count.
 """
 from collections import Counter
 import math
+import time
 
 import numpy as np
+
+
+def _fit_reference_locus(task):
+    """Fit one locus's tied backgrounds inside the existing bounded worker pool."""
+    import os
+    from .locus_reconstruction import _fit_locus, _common_call
+    from .short_read_evidence import classify_pair, flank_insert_length, estimate_insert_distribution
+    name, targets, pairs, options, round_tolerance = task
+    started = time.perf_counter()
+    recoveries, distributions = [], {}
+    for key, template in targets:
+        items, lengths = [], []
+        for pair in pairs:
+            item = classify_pair(pair, template)
+            if item is not None:
+                items.append(item)
+                length = flank_insert_length(pair, template)
+                if length is not None:
+                    lengths.append(length)
+        fitting = dict(options)
+        if fitting['insert'] is None:
+            fitting['insert'] = estimate_insert_distribution(lengths)
+        distributions[key] = fitting['insert']
+        result, _, _ = _fit_locus((template, items, fitting, round_tolerance, None))
+        call = _common_call(template.locus, result.products, len(items), options['sample_id'],
+                            'illumina', 0, options['minimum_probability'], result)
+        recoveries.append((key, template, items, result, call))
+    return name, recoveries, distributions, {'seconds': time.perf_counter()-started,
+        'worker_pid': os.getpid(), 'molecules': len(pairs), 'backgrounds': len(targets)}
 
 
 def call_reference_loci(fitted, loci, templates, evidence, replay, output, progress,
                         *, database_path, options, round_tolerance, threads=1,
                         minimap2_bin='minimap2', keep_alignments=False,
-                        reads1=None, reads2=None, orphan_path=None):
+                        reads1=None, reads2=None, orphan_path=None, executor=None):
     """Call loci from reads competitively recruited against reference targets.
 
     All loci compete for recruitment. Lengths require observed spans,
     reconstruction or fragment data, rather than a stored reference allele.
     """
+    import filecmp
+    import json
+    from functools import partial
     from collections import defaultdict
     from contextlib import closing, nullcontext
     from pathlib import Path
     from tempfile import TemporaryDirectory
-    from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts, _repeat_template
+    from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts, _repeat_template, _database_root
     from .io import normalize_read_id, write_tsv
-    from .locus_reconstruction import _fit_locus, _common_call
+    from .concurrency import bounded_ordered_map, resolve_threads
     from .minimap_mapping import map_reads_to_candidates_bam
-    from .short_read_evidence import (RepeatTemplate, classify_pair, _primitive_motif,
-                                     flank_insert_length, estimate_insert_distribution)
+    from .short_read_evidence import RepeatTemplate, _primitive_motif
 
     pending = {locus.locus_id: i for i, locus in enumerate(loci)}
     if not pending:
@@ -54,6 +86,14 @@ def call_reference_loci(fitted, loci, templates, evidence, replay, output, progr
     work = Path(output)/'reference_calling'
     written = write_candidate_contexts(contexts, work)
     paths = {f'reference_calling_{key}': value for key, value in written.items()}
+    root = _database_root(database_path)
+    resource = root/'competitive_mapping' if (root/'competitive_mapping').is_dir() else root
+    cached_index, cached_fasta = resource/'short.mmi', resource/'candidate_contexts.fasta'
+    reuse_index = (cached_index.is_file() and cached_fasta.is_file()
+                   and filecmp.cmp(written['fasta'], cached_fasta, shallow=False))
+    mapping_reference = cached_index if reuse_index else written['fasta']
+    performance = {'candidate_contexts': len(contexts), 'reference_backgrounds': len(backgrounds),
+                   'cached_index': reuse_index, 'mapping_runs': [], 'stage_seconds': {}, 'loci': {}}
     progress.step(f"[{options['sample_id']}] Calling {len(pending)} loci against reference targets")
     # One combined replay preserves QC, orphan mates and iterator-only callers.
     with TemporaryDirectory(prefix='mlvamaps-reference-') as temporary:
@@ -77,22 +117,34 @@ def call_reference_loci(fitted, loci, templates, evidence, replay, output, progr
                     for read, handle in records:
                         handle.write(f'@{read.read_id}\n{read.sequence}\n+\n{read.quality or "I"*len(read.sequence)}\n')
             inputs = ([(first, second)] if paired else []) + ([(single, None)] if unpaired else [])
-        grouped = defaultdict(lambda: defaultdict(dict))
+        grouped = {}
         for index, (first, second) in enumerate(inputs):
             bam = work/f'alignments_{index}.bam'
-            rows = map_reads_to_candidates_bam(written['fasta'], first, second, contexts,
-                bam, threads, 'illumina', executable=minimap2_bin,
-                retain_all_competitors=True, max_secondary=max(100, len(contexts)))
-            for row in rows:
-                key = context_keys.get(row.candidate_id)
-                if key is not None:
-                    mates = grouped[row.molecule_id][key]
-                    mates[row.mate] = max(mates.get(row.mate, -math.inf), row.alignment_score)
+            stats = {}
+            started = time.perf_counter()
+            with progress.phase(f"[{options['sample_id']}] Reference mapping input {index+1}/{len(inputs)}",
+                                f"{len(contexts):,} contexts; {threads} threads; cached index={reuse_index}"):
+                reduced = map_reads_to_candidates_bam(mapping_reference, first, second, contexts,
+                    bam, threads, 'illumina', executable=minimap2_bin,
+                    retain_all_competitors=True, max_secondary=max(100, len(contexts)),
+                    score_groups=context_keys, keep_alignments=keep_alignments, statistics=stats,
+                    on_progress=partial(progress.count, f"[{options['sample_id']}] Reference alignment records"))
+            stats['seconds'] = time.perf_counter()-started
+            performance['mapping_runs'].append(stats)
+            for molecule, matches in reduced.items():
+                if molecule not in grouped:
+                    grouped[molecule] = matches
+                    continue
+                for key, mates in matches.items():
+                    target = grouped[molecule].setdefault(key, {})
+                    for mate, score in mates.items():
+                        target[mate] = max(target.get(mate, -math.inf), score)
+            del reduced
             if keep_alignments:
                 paths[f'reference_calling_alignments_{index}'] = bam
-            else:
-                bam.unlink(missing_ok=True)
+        performance['stage_seconds']['mapping'] = sum(run['seconds'] for run in performance['mapping_runs'])
 
+    started = time.perf_counter()
     assignments, support = {}, defaultdict(lambda: defaultdict(float))
     for molecule, matches in grouped.items():
         scores = defaultdict(float)
@@ -108,15 +160,22 @@ def call_reference_loci(fitted, loci, templates, evidence, replay, output, progr
                 if key[0] == winner:
                     support[winner][key] += sum(mates.values())
     del grouped
+    performance['stage_seconds']['competition'] = time.perf_counter()-started
+    started = time.perf_counter()
+    progress.step(f"[{options['sample_id']}] Recovering {len(assignments):,} assigned molecules from QC replay")
     pools = {name: {} for name in pending}
     iterator = replay()
     with closing(iterator) if hasattr(iterator, 'close') else nullcontext(iterator):
-        for pair in iterator:
+        for scanned, pair in enumerate(iterator, 1):
+            if scanned % 100000 == 0:
+                progress.count(f"[{options['sample_id']}] QC replay molecules scanned", scanned)
             name = assignments.get(normalize_read_id(pair.molecule_id)[0])
             if name is not None:
                 pools[name][normalize_read_id(pair.molecule_id)[0]] = pair
-    diagnostics = []
-    for name, index in pending.items():
+    performance['stage_seconds']['read_replay'] = time.perf_counter()-started
+    progress.step(f"[{options['sample_id']}] QC replay finished in {performance['stage_seconds']['read_replay']:.1f}s")
+    diagnostics, targets = {}, {}
+    for name in pending:
         row = {'sample_id': options['sample_id'], 'locus_id': name,
                'status': 'no_reference_support', 'reference_ids': '',
                'molecules': 0, 'method': '', 'repeat_count': '', 'product_size_bp': '',
@@ -129,25 +188,21 @@ def call_reference_loci(fitted, loci, templates, evidence, replay, output, progr
         if len(keys) > 8:
             row['status'] = 'reference_background_limit'
             keys = []
-        recoveries, distributions = [], {}
-        for key in keys:
-            template = backgrounds[key]
-            items, lengths = [], []
-            for pair in pools[name].values():
-                item = classify_pair(pair, template)
-                if item is not None:
-                    items.append(item)
-                    length = flank_insert_length(pair, template)
-                    if length is not None:
-                        lengths.append(length)
-            fitting = dict(options)
-            if fitting['insert'] is None:
-                fitting['insert'] = estimate_insert_distribution(lengths)
-            distributions[key] = fitting['insert']
-            result, _, _ = _fit_locus((template, items, fitting, round_tolerance, None))
-            call = _common_call(by_locus[name], result.products, len(items), options['sample_id'],
-                                'illumina', 0, options['minimum_probability'], result)
-            recoveries.append((key, template, items, result, call))
+        diagnostics[name] = row
+        if keys:
+            targets[name] = [(key, backgrounds[key]) for key in keys]
+    tasks = ((name, target, list(pools[name].values()), options, round_tolerance)
+             for name, target in targets.items())
+    workers = min(resolve_threads(threads), len(targets)) if executor is not None else 1
+    results = (bounded_ordered_map(executor, _fit_reference_locus, tasks, max(1, workers))
+               if executor is not None else map(_fit_reference_locus, tasks))
+    started = time.perf_counter()
+    progress.step(f"[{options['sample_id']}] Fitting {len(targets)} reference loci with up to {workers} workers")
+    for name, recoveries, distributions, stats in results:
+        performance['loci'][name] = stats
+        progress.step(f"[{options['sample_id']}] Reference locus {name} finished in {stats['seconds']:.1f}s; "
+                      f"{stats['molecules']:,} molecules, {stats['backgrounds']} backgrounds")
+        row, index = diagnostics[name], pending[name]
         if recoveries:
             calls = [entry[-1] for entry in recoveries]
             refs = ';'.join(sorted(set().union(*(references[entry[0]] for entry in recoveries))))
@@ -170,7 +225,11 @@ def call_reference_loci(fitted, loci, templates, evidence, replay, output, progr
                 row['status'] = 'reference_background_ambiguous'
                 evidence[name] = recoveries[0][2]
                 fitted[index].reason = 'reference_background_ambiguous'
-        diagnostics.append(row)
+    performance['stage_seconds']['locus_fitting'] = time.perf_counter()-started
+    performance['workers_used'] = len({row['worker_pid'] for row in performance['loci'].values()})
+    diagnostics = list(diagnostics.values())
+    paths['reference_calling_performance'] = work/'performance.json'
+    paths['reference_calling_performance'].write_text(json.dumps(performance, indent=2)+'\n')
     paths['reference_calling'] = work/'summary.tsv'
     write_tsv(diagnostics, paths['reference_calling'], list(diagnostics[0]))
     return paths

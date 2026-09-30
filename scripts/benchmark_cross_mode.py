@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Compare existing mlvamaps runs; no dataset or organism assumptions.
+"""Compare mlvamaps runs and MLVA_finder outputs; no organism assumptions.
 
 Manifest TSV: sample_id, mode (assembly/sr/lr), outdir.
+For mode mlva_finder, outdir is its detailed *_output.csv; source_sample is
+the exact strain field when it differs from sample_id.
 Run: python scripts/benchmark_cross_mode.py manifest.tsv --output comparison.json
 Optional: --distance-matrix assembly=assembly_distances.tsv --distance-matrix sr=sr_distances.tsv
 """
@@ -54,6 +56,33 @@ def load_run(directory):
     return calls, variants
 
 
+def load_mlva_finder(path, sample):
+    """Read the upstream detailed CSV, which preserves full calibrated locus IDs."""
+    with Path(path).open(newline='', encoding='utf-8-sig') as handle:
+        reader = csv.DictReader(handle)
+        if not {'strain', 'primer', 'allele', 'size'} <= set(reader.fieldnames or []):
+            raise ValueError(f'{path}: expected MLVA_finder detailed *_output.csv with strain, primer, allele, size')
+        details = {}
+        for row in reader:
+            if row['strain'] != sample:
+                continue
+            if any(row.get(field) is None for field in ('primer', 'allele', 'size')):
+                raise ValueError(f'{path}: incomplete MLVA_finder row for {sample}')
+            locus, raw = row['primer'], row['allele'].strip()
+            if not locus or locus in details:
+                raise ValueError(f'{path}: missing or duplicate locus for {sample}: {locus!r}')
+            repeat = number(raw)
+            if raw and (repeat is None or repeat < 0):
+                raise ValueError(f'{path}: invalid allele for {sample}/{locus}: {raw!r}')
+            details[locus] = {'locus_id': locus, 'repeat_count': repeat,
+                'status': 'PASS' if repeat is not None else 'NOT_FOUND',
+                'call_method': 'MLVA_finder', 'amplicon_length': row['size'],
+                'source_sample': sample}
+    if not details:
+        raise ValueError(f'{path}: no MLVA_finder strain exactly matching {sample!r}; set source_sample in the manifest')
+    return details
+
+
 def snp_comparison(first, second):
     if not first or not second:
         return 0, 0
@@ -69,11 +98,16 @@ def compare_runs(manifest):
         key = (row['sample_id'], row['mode'])
         if key in runs:
             raise ValueError(f'duplicate manifest entry: {key}')
-        runs[key] = load_run(row['outdir'])
         directory = Path(row['outdir'])
-        details[key] = {r['locus_id']: dict(r) for r in read_table(directory/'calls.tsv')}
-        for qc in read_table(directory/'short_read_repeat_evidence.tsv'):
-            details[key].setdefault(qc['locus_id'], {}).update(qc)
+        if row['mode'] == 'mlva_finder':
+            details[key] = load_mlva_finder(directory, row.get('source_sample') or row['sample_id'])
+            runs[key] = ({locus: info['repeat_count'] for locus, info in details[key].items()
+                          if info['repeat_count'] is not None}, {})
+        else:
+            runs[key] = load_run(directory)
+            details[key] = {r['locus_id']: dict(r) for r in read_table(directory/'calls.tsv')}
+            for qc in read_table(directory/'short_read_repeat_evidence.tsv'):
+                details[key].setdefault(qc['locus_id'], {}).update(qc)
     modes = sorted({mode for _,mode in runs})
     samples = sorted({sample for sample,_ in runs})
     result, locus_rows = {}, []
@@ -86,6 +120,8 @@ def compare_runs(manifest):
         fraction_distances = []
         total_by_mode = {a: 0, b: 0}
         ambiguous_by_mode = {a: 0, b: 0}
+        missing_runs = {a: [s for s in samples if (s,b) in runs and (s,a) not in runs],
+                        b: [s for s in samples if (s,a) in runs and (s,b) not in runs]}
         per_locus = {}
         for sample in samples:
             if (sample,a) not in runs or (sample,b) not in runs:
@@ -118,7 +154,7 @@ def compare_runs(manifest):
                     rate[mode][0] += int(locus in calls)
                     rate[mode][1] += int(locus in details[sample,mode])
                     info = details[sample,mode].get(locus, {})
-                    for field in ('call_method', 'confidence', 'effective_depth', 'read_length', 'motif_length',
+                    for field in ('call_method', 'source_sample', 'confidence', 'effective_depth', 'read_length', 'motif_length',
                                   'vntr_length', 'amplicon_length', 'amplicon_insert_ratio',
                                   'n_full_span', 'n_left_boundary', 'n_right_boundary', 'n_flank_pairs',
                                   'n_repeat_rich', 'n_anchored_repeat', 'n_softclip_left', 'n_softclip_right'):
@@ -151,6 +187,8 @@ def compare_runs(manifest):
                 locus_rows.append(row)
         exact_matches = sum(delta == 0 for delta in differences)
         result[f'{a}:{b}'] = {
+            'strict_repeat_match': bool(exact_profiles) and all(exact_profiles) and not any(missing_runs.values()),
+            'missing_runs_by_mode': missing_runs,
             'best_estimates_including_ambiguous': {
                 'comparable_loci': len(estimate_differences),
                 'exact_repeat_concordance': float(np.mean(np.asarray(estimate_differences)==0)) if estimate_differences else None,
@@ -223,6 +261,8 @@ def main():
     parser.add_argument('manifest', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--distance-matrix', action='append', default=[], metavar='MODE=TSV')
+    parser.add_argument('--require-exact', action='store_true',
+        help='Exit 1 after writing reports if any compared profile differs or a paired sample run is missing')
     args = parser.parse_args()
     manifest = read_table(args.manifest)
     if not manifest or not {'sample_id','mode','outdir'} <= manifest[0].keys():
@@ -239,6 +279,9 @@ def main():
             [field for row in rows for field in row])))
         writer.writeheader()
         writer.writerows(rows)
+    if args.require_exact and (not summary or not all(row['strict_repeat_match'] for row in summary.values())):
+        print('Repeat concordance failed; inspect the comparison JSON and .loci.tsv.', file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

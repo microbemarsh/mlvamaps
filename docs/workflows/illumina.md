@@ -46,9 +46,12 @@ a locus cannot supply a call for that locus.
 
 There are no minimum supporting-molecule or depth cutoffs. Confidence, support,
 intervals and failure reasons remain explicit. The hierarchy is `DIRECT` →
-`RECONSTRUCTED` → `INFERRED` → `KMER_DEPTH`, with `AMBIGUOUS`, `MIXED` and no-call
-outcomes. `KMER_DEPTH` is a provisional `ESTIMATED` result, with confidence zero
-and a coverage-sensitivity interval; it does not supply reconstructed sequence.
+`RECONSTRUCTED` → `INFERRED`, with `AMBIGUOUS`, `MIXED` and no-call outcomes.
+`KMER_DEPTH` ratios remain in `repeat_length_estimates.json` as `diagnostic_only`.
+Matching sequence elsewhere and coverage bias can inflate these ratios even
+with balanced flank coverage. They do not populate repeat-count or product-size
+fields. Without separate length evidence, a detected locus remains
+`PRESENT_COUNT_UNKNOWN`; existing likelihood evidence and intervals are preserved.
 
 `reference_calling/summary.tsv` records outcomes and reference IDs, alongside
 candidate contexts and provenance. BAMs are retained with `--keep-intermediates`.
@@ -60,12 +63,21 @@ records evidence counts, product/VNTR lengths and uncertainty;
 
 ## Performance and CPU allocation
 
-Reference mapping uses the sample's `--threads` budget and writes BAM through
-HTSlib. Normal runs reuse the QC FASTQs. A combined replay retains mapped pairs
-and orphan mates; input is not replayed separately for each locus. Iterator-only
-API inputs use temporary FASTQs. Reference fitting currently runs per locus in
-the main process. Memory scales with recruited evidence and the reference
-candidate count. Optional rapidgzip/ISA-L acceleration remains available.
+Reference mapping uses the sample's `--threads` budget. HTSlib streams alignment
+scores directly into molecule/background support; BAM writing and full alignment
+decoding are skipped unless needed. `--keep-intermediates` retains the BAMs.
+The database's `short.mmi` is reused when its candidate FASTA exactly matches the
+requested targets; a subset panel uses its own targets. Normal runs reuse the QC
+FASTQs. One combined replay retains mapped pairs and orphan mates; input is not
+replayed separately for each locus. Iterator-only API inputs use temporary FASTQs.
+Reference fitting runs across process workers within the sample's thread budget,
+capped by the locus count. Memory scales with recruited evidence, supported
+backgrounds and active workers. Optional rapidgzip/ISA-L acceleration remains available.
+
+Progress separates mapping, QC replay and individual locus fits.
+`reference_calling/performance.json` records their timings, alignment counts,
+candidate/background counts, index reuse and worker usage. The bracketed time
+in progress messages is elapsed run time, not the duration of the named step.
 
 Use `--force` when comparing previously completed server runs. Historical
 sample-only benchmarks exercise lower-level recovery helpers, which remain
@@ -84,7 +96,7 @@ python scripts/benchmark_short_read_recruitment.py --help
 python scripts/benchmark_cross_mode.py manifest.tsv --output comparison.json
 ```
 
-The cross-mode manifest has `sample_id`, `mode` (`assembly`, `sr`, `lr`) and
+The cross-mode manifest has `sample_id`, `mode` (`assembly`, `sr`, `lr`, `mlva_finder`) and
 `outdir`. Run assembly and FASTQ independently with the same panel. Assembly is
 a validation target and is never supplied as training labels or expected calls.
 The comparison reports exact/±1 concordance, dropout, incorrect-call rate,
@@ -92,6 +104,13 @@ per-locus call rates, SNP concordance and available short-read QC features.
 It also reports `best_estimates_including_ambiguous` concordance separately
 from confident-call metrics. The companion `.loci.tsv` includes both best
 estimates, statuses, and their absolute differences.
+For direct comparison with assembly + MLVA_finder, use its detailed
+`*_output.csv` as the `mlva_finder` row's `outdir` and its exact `strain` value
+as `source_sample`. Add `--require-exact` to fail on mismatched counts, missing
+calls or missing paired runs after writing the reports. See the
+[manifest example](../../scripts/README.md#cross-mode-validation).
+Unresolved SR loci count as missing recoveries when MLVA_finder calls them;
+preventing false counts alone does not establish equivalent call recovery.
 Synthetic performance fixtures are not a substitute for paired real assemblies
 and Illumina libraries. Resource measurements are described in the
 [refactor validation report](../reference/short-read-validation.md).

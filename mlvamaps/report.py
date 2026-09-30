@@ -916,7 +916,7 @@ def write_report(
         short_read_section = f"""
       <section class="report-section">
         <h2>Illumina Evidence</h2>
-        <p class="section-intro">Counts come from observed products, reconstructed products, repeat-length candidates, or read-depth estimates. KMER_DEPTH estimates use the coverage of a primer-connected sequence graph relative to its single-copy flanks. ESTIMATED intervals describe sensitivity to coverage variation; confidence is uncalibrated. AMBIGUOUS candidates retain their uncertainty interval. Tied candidates use the smallest equally supported count; boundary-only evidence may supply only a lower bound. Presence without length information remains unresolved.</p>
+        <p class="section-intro">Counts come from observed products, reconstructed products, or fragment-length evidence. Depth-only estimates remain in the diagnostics because matching sequence elsewhere can inflate them; they do not establish a repeat count. AMBIGUOUS candidates retain their uncertainty interval. Tied candidates remain unresolved; boundary-only evidence may supply only a lower bound. Presence without length information remains unresolved.</p>
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>Status</th><th>Recruited molecules</th><th>Call method</th><th>Spanning pairs</th><th>Left / right / full span</th><th>Best repeat count</th><th>Interval min / max</th><th>Confidence</th><th>Evidence / uncertainty</th></tr></thead>
           <tbody>{short_read_table_rows}</tbody>

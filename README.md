@@ -37,8 +37,9 @@ calibration, while the database supplies repeat flanks and mapping targets.
 Taxonomic classification requires a database in every input mode and runs
 separately from allele measurement.
 
-The evidence hierarchy is **direct → reconstructed → inferred → depth estimated**, with explicit
-ambiguous, no-call and mixed outcomes. There is one short-read pathway. The
+The evidence hierarchy is **direct → reconstructed → inferred**, with explicit
+ambiguous, no-call and mixed outcomes. Depth-only estimates remain diagnostics
+because matching sequence elsewhere can inflate them. There is one short-read pathway. The
 long-read default remains `--lr-engine spanning`. See the [Illumina workflow](docs/workflows/illumina.md)
 and [method, diagnostics and limitations](docs/concepts/locus-reconstruction.md).
 Missing and unresolved calls remain explicit and are never converted to zero.

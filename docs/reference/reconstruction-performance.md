@@ -1,5 +1,33 @@
 # Short-read reconstruction performance
 
+## Database-backed SR reference calling
+
+At baseline `505ac29`, reference calling decoded full alignment objects after a
+BAM round trip and fit every locus serially. Worker allocation happened before
+reference recruitment, when evidence was empty, so this stage always selected
+one worker. It now reduces alignment scores while streaming through HTSlib and
+fits loci in the existing bounded process pool. Candidate competition, reference
+background limits and repeat-length acceptance rules are unchanged.
+
+A local synthetic comparison used 1,600 pairs, eight loci, three reference
+backgrounds per locus, 816 candidate contexts and a four-CPU budget. Each version
+ran once on the same host. Reference calling decreased from **6.44 s to 3.06 s**;
+the reconstruction API including output writing decreased from 6.58 s to 3.24 s.
+Input generation, parent imports and downstream taxonomic classification were
+excluded. Both returned the same four 11-repeat calls and four unresolved loci.
+All sequence/evidence outputs matched, accounting for gzip headers; timing and
+worker metadata changed. These measurements do not predict server runtime.
+
+`reference_calling/performance.json` separates mapping, competition, replay and
+locus-fitting costs. Regression checks exercise streaming score equivalence,
+serial/process calls and evidence, retained BAMs and subset-panel index handling:
+
+```bash
+python -m pytest -q tests/test_reference_calling_performance.py tests/test_competitive_short_reads.py
+```
+
+## Earlier sample-only reconstruction optimization
+
 The high-depth pileup implementation at baseline `5bdcbc6` spent most of its
 reconstruction time in Python overlap comparisons. Preparation also assembled
 some loci a second time during final calling, and CPU-bound locus recovery used

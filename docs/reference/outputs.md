@@ -136,11 +136,12 @@ evidence
 
 Fields that do not apply to an input mode remain blank. A FASTQ call based on a
 complete dominant local product includes its `product_size_bp` and unrounded
-`repeat_count_raw`. Likelihood and `KMER_DEPTH` estimates also retain product
-size when it can be calculated. `ESTIMATED` calls are provisional depth-based
-lengths with uncalibrated confidence (`0`); their intervals describe coverage
-sensitivity rather than genotype probability. An assembly-only call has product size but no read depth unless support
-data are supplied.
+`repeat_count_raw`. Likelihood calls retain product size when it can be
+calculated. `KMER_DEPTH` estimates remain diagnostic-only in
+`repeat_length_estimates.json`: their locus ownership and coverage assumptions
+are unverified, so they do not populate numeric call fields. Without separate
+length evidence, a detected locus is `PRESENT_COUNT_UNKNOWN`. An assembly-only
+call has product size but no read depth unless support data are supplied.
 
 ## FASTQ outputs
 
@@ -151,9 +152,10 @@ data are supplied.
 | `short_read_qc_summary.tsv` | Input/retained reads and pairs, orphans, and empirical insert-size values when estimable. |
 | `short_read_recruitment_summary.tsv` | Unique, ambiguous, discordant, and orphan pair counts per locus. |
 | `short_read_mapping_evidence.tsv` | Per-locus state, candidate scores, molecule support and boundary evidence; legacy mapper fields remain blank. |
-| `short_read_repeat_evidence.tsv` | Direct/reconstructed/inferred/depth-estimated method, confidence, evidence counts, repeat interval, and calibrated length features. |
+| `short_read_repeat_evidence.tsv` | Direct/reconstructed/inferred method or unresolved outcome, confidence, evidence counts, repeat interval, and calibrated length features. |
 | `reference_calling/summary.tsv` | SR reference support, reference IDs, supporting molecules, final `call_status`, repeat counts, product lengths and per-locus insert statistics. Calls retain `reference_assisted` in their reason. Candidate sequences/metadata/provenance are alongside this table; BAMs require `--keep-intermediates`. |
-| `repeat_length_estimates.json` | Depth fallback diagnostics: k-mer graph size, flank depths, estimated product length and sensitivity interval, shared edges, or the reason estimation could not run. Written when a locus enters the fallback. |
+| `reference_calling/performance.json` | SR mapping, competition, QC replay and locus-fitting times; candidate/background counts, cached-index reuse, alignment records, mapped molecules and per-locus worker usage. |
+| `repeat_length_estimates.json` | Depth diagnostics: graph size, flank depths, raw product-length/repeat-count estimates, sensitivity intervals and shared edges, marked `diagnostic_only`, or the reason estimation could not run. These estimates are excluded from call fields. |
 | `reconstructed_locus_variants.tsv` | Shared repeat counts, masked SNP markers, full sequence, observed repeat sequence and motif-relative edits. |
 | `short_read_run_metadata.json` | minimap2 and mlvamaps versions, resolved parameters, database source, and insert-size estimate. |
 | `filtered_reads_1.fastq.gz`, `filtered_reads_2.fastq.gz` | Quality-filtered mates, materialized when downstream classification or retained intermediates need them. |
@@ -248,7 +250,8 @@ filename order and assigns the historical zero-padded `key` values.
 | `PASS` | A decisive in-range call, without a minimum-depth requirement. |
 | `LOW_DEPTH` | Legacy status retained when reading older outputs; no longer assigned by a depth cutoff. |
 | `AMBIGUOUS` | Weak top posterior or insufficient separation from the second call. |
-| `ESTIMATED` | Provisional read-depth estimate with uncalibrated confidence and a coverage-sensitivity interval. |
+| `ESTIMATED` | Legacy read-depth estimate with uncalibrated confidence. Current runs retain depth-only numbers in diagnostics instead of calling them. |
+| `PRESENT_COUNT_UNKNOWN` | The locus was detected but no repeat count is supported; depth-only ratios cannot resolve it. |
 | `OUT_OF_RANGE` | Best repeat count exceeds the configured review range by more than `--repeat-range-tolerance`. The observed allele is retained rather than clipped. |
 | `MULTIPLE_VARIANTS` | At least one confirmed secondary remains in metagenome mode; isolate mode additionally requires dominant fraction below 0.8. Candidate and trace variants do not force this status. |
 | `LOCUS_DROPOUT` | No retained read evidence produced a prediction. |

@@ -379,7 +379,8 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         stage_seconds["recruitment"] = time.perf_counter() - started
         recruitment_stats["pairs_per_second"] = recruitment_stats["pairs_examined"] / max(stage_seconds["recruitment"], 1e-9)
         progress.step(f"[{sample_id}] {'Read QC' if database_path else 'Primer recruitment'} finished in {stage_seconds['recruitment']:.1f}s")
-        reconstruction_workers = min(resolve_threads(threads), max(1, sum(bool(evidence[locus.locus_id]) for locus in loci)))
+        reconstruction_workers = min(resolve_threads(threads), max(1,
+            len(loci) if database_path else sum(bool(evidence[locus.locus_id]) for locus in loci)))
         locus_executor = None
         if reconstruction_workers > 1 and locus_stack is not None:
             from concurrent.futures import ProcessPoolExecutor
@@ -400,7 +401,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
         progress.step(f"[{sample_id}] Preparing locus reconstructions with {reconstruction_workers} process worker(s)")
         tasks = ((templates[locus.locus_id], evidence[locus.locus_id], options) for locus in loci)
         results = (bounded_ordered_map(locus_executor, _probe_locus, tasks, reconstruction_workers)
-                   if locus_executor else map(_probe_locus, tasks))
+                   if locus_executor and not database_path else map(_probe_locus, tasks))
         probes = {}
         for locus, probe in zip(loci, results):
             probes[locus.locus_id] = probe
@@ -435,7 +436,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 precomputed = (probes[name]['observed'], probes[name]['assembled']) if reusable else None
                 yield templates[name], evidence[name], options, round_tolerance, precomputed
         results = (bounded_ordered_map(locus_executor, _fit_locus, fit_tasks(), reconstruction_workers)
-                   if locus_executor else map(_fit_locus, fit_tasks()))
+                   if locus_executor and not database_path else map(_fit_locus, fit_tasks()))
         fitted = []
         for locus, (result, stats, spanning) in zip(loci, results):
             fitted.append(result)
@@ -450,7 +451,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 replay_pairs, output, progress, database_path=database_path, options=options,
                 round_tolerance=round_tolerance, threads=resolve_threads(threads),
                 minimap2_bin=minimap2_bin, keep_alignments=keep_alignments,
-                reads1=reads1, reads2=reads2, orphan_path=orphan_path))
+                reads1=reads1, reads2=reads2, orphan_path=orphan_path, executor=locus_executor))
             stage_seconds['reference_calling'] = time.perf_counter()-reference_started
             recruitment_stats['final_uniquely_recruited_pairs'] = sum(map(len, evidence.values()))
         if replay_pairs is not None:

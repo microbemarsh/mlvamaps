@@ -49,9 +49,11 @@ def test_competitive_single_read_matches_assembly_outside_candidate_grid(tmp_pat
         if minimap is None:
             pytest.skip('minimap2 is required for database calling')
         from mlvamaps.candidate_contexts import generate_candidate_contexts, write_candidate_contexts
+        from mlvamaps.minimap_mapping import build_minimap2_index
         database = tmp_path/'database'
         paths = write_candidate_contexts(generate_candidate_contexts([locus]), database/'competitive_mapping')
-        (database/'competitive_mapping'/'short.mmi').write_bytes(b'unused reference index')
+        build_minimap2_index(paths['fasta'], database/'competitive_mapping'/'short.mmi',
+                            executable=minimap, kmer_size=21, window_size=11)
         monkeypatch.setattr('mlvamaps.minimap_mapping.minimap2_version', lambda _: 'not_used_in_this_check')
         monkeypatch.setattr('mlvamaps.mapping_classification.run_mapping_classification', lambda **kwargs: {})
     reference = run_assembly_call(str(assembly), str(panel), str(tmp_path/'assembly'), 's')

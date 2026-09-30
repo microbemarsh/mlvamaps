@@ -47,6 +47,34 @@ Loci uncalled in both modes are retained in call-rate denominators and labeled
 features. Assembly calls
 are comparators, not an independently verified ground truth.
 
+To compare directly with assembly + MLVA_finder, add a `mlva_finder` mode row.
+For that mode, `outdir` points to MLVA_finder's detailed `*_output.csv`, which
+preserves full locus names. `source_sample` selects the exact `strain` field
+(usually the assembly filename); `sample_id` pairs it with the SR run. Use the
+same primer panel and record matching rounding, primer-error and binning settings.
+Example TSV:
+
+```tsv
+sample_id	mode	outdir	source_sample
+sample_A	mlva_finder	mlva/assemblies_output.csv	sample_A.fasta
+sample_A	sr	sr/sample_A
+```
+
+```bash
+python scripts/benchmark_cross_mode.py runs.tsv --output comparison.json --require-exact
+```
+
+The reports are written before the command exits. `--require-exact` returns 1
+if primary called profiles differ, any paired sample run is missing, or no
+callable profile can be compared. Wrong, missing and provisional SR calls all
+prevent complete agreement with a called MLVA_finder locus. Missing values
+remain distinct from zero. `strict_repeat_match` records this result in JSON;
+`exact_repeat_recovery_by_mode.mlva_finder` includes all MLVA_finder calls in its
+denominator, so dropping difficult loci cannot improve it to 100%.
+Use the detailed CSV rather than the shortened `MLVA_analysis_*.csv` table to
+avoid ambiguous locus-name matching. Numeric primary-count agreement alone
+does not establish agreement on mixture composition or SNPs.
+
 For a server-only dataset, keep the reads and assemblies there and compare
 existing outputs with a manifest such as:
 

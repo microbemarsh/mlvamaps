@@ -124,22 +124,27 @@ No connected graph or no usable single-copy depth still leaves length
 unresolved; abundance alone cannot identify a length without a coverage model
 or spanning evidence.
 
-Calls use method `KMER_DEPTH` and status `ESTIMATED`. Physical product length
-is converted to repeat units using the shared panel length calibration, or
-sample-learned repeat boundaries when calibration is unavailable. Panel nominal
-counts never fill missing observations. These estimates carry no reconstructed
-sequence, SNP claims, or calibrated genotype probability (`confidence=0`).
-Their intervals describe sensitivity to coverage variation, with a minimum
-10% length variation and a broader range for unequal flank depth or low depth;
-existing likelihood uncertainty is retained. They are not credible intervals.
-Shared k-mers across eligible loci are flagged. Unrepresented genomic copies,
-coverage bias and incomplete graph sequence can bias the point estimate.
+`KMER_DEPTH` values are diagnostic only. Matching sequence outside the locus
+can inflate the ratio even when both arms have equal coverage and no other
+eligible locus shares a graph edge. Primer connectivity establishes a path,
+but cannot assign internal repeat-only reads to that locus. A numeric depth
+estimate therefore cannot supply a repeat call or replace existing likelihood
+evidence. A detected locus without separate length evidence remains
+`PRESENT_COUNT_UNKNOWN`, with reason `depth_only_not_length_identifying`.
+
+Diagnostic lengths are converted to repeat units using shared panel calibration
+or sample-learned boundaries. Their intervals describe coverage sensitivity,
+with at least 10% length variation, and are not genotype confidence intervals.
+They do not modify the caller's likelihood interval. Shared k-mers across
+eligible loci are flagged; a zero shared-edge count does not prove uniqueness.
 
 `repeat_length_estimates.json` records the k-mer size, graph size, flank depths,
-estimated amplicon length, length sensitivity interval and shared-edge count,
-or the reason estimation could not run. `short_read_repeat_evidence.tsv`,
-`common_locus_calls.tsv`, `calls.tsv` and mapping evidence retain numeric
-lengths as well as counts. The report labels provisional depth estimates.
+estimated amplicon length, repeat count, sensitivity intervals and shared-edge
+count, with `status=diagnostic_only`, or the reason estimation could not run.
+Depth-only numbers do not populate `short_read_repeat_evidence.tsv`,
+`common_locus_calls.tsv`, `calls.tsv`, mapping evidence or the report's repeat
+bars. Earlier versions exported these numbers as `ESTIMATED` calls; rerun the
+sample to regenerate those outputs.
 
 Observed complete products and reconstructed contigs then pass through
 `run_in_silico_pcr_loci`, `pcr_rows_to_products` and

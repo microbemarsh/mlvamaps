@@ -127,10 +127,12 @@ def legacy_round_repeat_count(value: float, tolerance: float = 0.25) -> int | fl
 
     Values within ``tolerance`` of an integer become that integer; all other
     values become the intervening half allele.  The old default tolerance was
-    0.25.
+    0.25. A tolerance of zero disables rounding, as in MLVA_finder.
     """
     if not 0 <= tolerance <= 0.5:
         raise ValueError("repeat-count rounding tolerance must be between 0 and 0.5")
+    if tolerance == 0:
+        return value
     lower = math.floor(value)
     upper = math.ceil(value)
     if value < lower + tolerance:
