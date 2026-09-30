@@ -44,6 +44,8 @@ have a unique non-repeat offset; ambiguous consensus bases remain `N`.
 Read and path redundancy is consolidated before applying reconstruction limits,
 so thousands of recruited molecules can contribute to a primer-bounded consensus.
 Consensus retains the length established by the overlap coordinates.
+Separate recovered components with the same product length and primer ends
+also retain their repeat count; disputed interior bases are masked as `N`.
 Sassy runs on the small recovered-contig collection after recruitment.
 `locus_reconstruction/reconstructed_contigs.fasta.gz` and
 `locus_reconstruction/reconstruction_pcr.tsv` retain the sequences and PCR
@@ -75,13 +77,20 @@ an exact allele. Repeat-rich read abundance is not treated as a copy-number
 measurement. `--threads` controls recruitment, I/O and subsequent locus work
 without overlapping full allocations.
 
-Pileup voting and overlap mismatch counts use native NumPy operations.
+Pileups use HTSlib through the installed [`pysam` Python API](https://pysam.readthedocs.io/en/stable/api.html#pysam.AlignmentFile.pileup) at validated read
+coordinates, without realigning repeat lengths. Overlapping mates contribute
+one molecule vote; conflicts become `N`, and consensus bases require 70%
+agreement. The read-depth limit is set to the complete input pool, avoiding
+HTSlib's default depth truncation. Overlap mismatch counts use NumPy.
 Independent loci use process workers for reconstruction preparation and final
 recovery, capped by the sample's thread allocation and number of loci. Completed
 preparations are reused when recruitment has not changed the reads or template.
-The native vote buffer is capped at 8 MiB per worker; retained read evidence is
-additional memory. Stage timings and worker allocation are recorded in
-`reconstruction_metadata.json`.
+Pileups use temporary uncompressed BAMs in the system temporary directory;
+memory scales with the active pileup depth and retained read evidence. Stage
+timings, pileup backend and worker allocation are recorded in
+`reconstruction_metadata.json`. Sample-anchor learning and indexing currently
+run in the main process; progress logs show each learning phase and its locus
+molecule count, including after each rescue scan.
 
 `calls.tsv` preserves the primary schema and adds call method and confidence.
 `short_read_repeat_evidence.tsv` contains evidence counts and failure-mode

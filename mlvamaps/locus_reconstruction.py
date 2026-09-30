@@ -389,6 +389,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 item.classes = tuple(sorted(set(item.classes) | {'FULL_SPAN'}))
         stage_seconds['reconstruction_probe'] = time.perf_counter()-started
         recruitment_stats['reconstruction_workers'] = reconstruction_workers
+        recruitment_stats['pileup_backend'] = 'pysam_htslib'
         needs_rescue = any(probe['needs_rescue'] for probe in probes.values())
         if needs_rescue and replay_pairs is not None:
             from .sample_reconstruction import recruit_sample_reads

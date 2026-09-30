@@ -9,9 +9,12 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from functools import lru_cache
 import math
+from tempfile import TemporaryDirectory
+from pathlib import Path
 
 import numpy as np
 import parasail
+import pysam
 import regex
 
 from .locus_products import LocusProduct, product_repeat_allele
@@ -114,17 +117,12 @@ def direct_products(items, template, sample_id, min_fraction, min_secondary_read
     for length, rows in by_length.items():
         depth = sum(len(members) for _, members in rows)
         if depth >= 3 and max(len(members) for _, members in rows) < min_secondary_reads:
-            consensus = []
-            for position in range(length):
-                votes = Counter()
-                for seq, members in rows:
-                    votes[seq[position]] += len(members)
-                base, support = votes.most_common(1)[0]
-                consensus.append(base if support/depth >= .7 else 'N')
+            consensus = _pileup_consensus(((seq, 0, {item.molecule_id for item in members})
+                                           for seq, members in rows), length)
             members = [item for _, group in rows for item in group]
             for seq, _ in rows:
                 del groups[seq]
-            groups[''.join(consensus)] = members
+            groups[consensus] = members
     total = sum(map(len, groups.values()))
     products = []
     for seq, members in sorted(groups.items(), key=lambda v: (-len(v[1]), len(v[0]), v[0])):
@@ -149,39 +147,44 @@ def direct_products(items, template, sample_id, min_fraction, min_secondary_read
 
 
 def _pileup_consensus(rows, length):
+    """Use HTSlib's pileup engine at the observed, fixed read coordinates.
+
+    The reduction retains our molecule-level policy: agreeing mates vote once,
+    conflicting mates vote N, and a base needs 70% support. No realignment or
+    depth subsampling is allowed to change the observed repeat length.
+    """
     rows = [(sequence, offset, members) for sequence, offset, members in rows if members]
     if not rows or not length:
         return 'N'*length
     if len(rows) == 1:
         sequence, offset, _ = rows[0]
         return 'N'*offset + sequence + 'N'*(length-offset-len(sequence))
-    molecules = {name: i for i, name in enumerate(set().union(*(members for _, _, members in rows)))}
-    encoded = [(np.frombuffer(sequence.encode('ascii'), dtype=np.uint8), offset,
-                np.fromiter((molecules[name] for name in members), dtype=np.intp))
-               for sequence, offset, members in rows]
-    alphabet = np.unique(np.frombuffer(('N'+''.join(sequence for sequence, _, _ in rows)).encode('ascii'), dtype=np.uint8))
-    counts = np.zeros((len(alphabet), length), dtype=np.int64)
-    coverage = np.zeros(length, dtype=np.int64)
-    # Bound the native vote matrix to 8 MiB per worker. Zero means uncovered;
-    # conflicting mates become N and each molecule contributes only one vote.
-    chunk_size = max(1, 8*1024*1024//length)
-    for start in range(0, len(molecules), chunk_size):
-        stop = min(len(molecules), start+chunk_size)
-        votes = np.zeros((stop-start, length), dtype=np.uint8)
-        for bases, offset, members in encoded:
-            selected = members[(members >= start) & (members < stop)]-start
-            if not len(selected):
-                continue
-            region = votes[:, offset:offset+len(bases)]
-            previous = region[selected]
-            region[selected] = np.where((previous == 0) | (previous == bases), bases, ord('N'))
-        coverage += np.count_nonzero(votes, axis=0)
-        for i, base in enumerate(alphabet):
-            counts[i] += np.count_nonzero(votes == base, axis=0)
-    best = counts.argmax(axis=0)
-    consensus = alphabet[best]
-    consensus[(coverage == 0) | (counts[best, np.arange(length)]*10 < coverage*7)] = ord('N')
-    return consensus.tobytes().decode('ascii')
+    molecules = {name: str(i) for i, name in enumerate(set().union(*(members for _, _, members in rows)))}
+    consensus = ['N']*length
+    with TemporaryDirectory(prefix='mlvamaps-pileup-') as directory:
+        path = str(Path(directory)/'observed.bam')
+        header = {'HD': {'VN': '1.6', 'SO': 'coordinate'}, 'SQ': [{'SN': 'observed', 'LN': length}]}
+        with pysam.AlignmentFile(path, 'wb0', header=header) as bam:
+            for sequence, offset, members in sorted(rows, key=lambda row: row[1]):
+                read = pysam.AlignedSegment(bam.header)
+                read.query_sequence = sequence
+                read.reference_id, read.reference_start = 0, offset
+                read.mapping_quality = 60
+                read.cigartuples = [(0, len(sequence))]
+                for name in members:
+                    read.query_name = molecules[name]
+                    bam.write(read)
+        with pysam.AlignmentFile(path, 'rb') as bam:
+            for column in bam.pileup(stepper='nofilter', min_base_quality=0,
+                    ignore_overlaps=False, compute_baq=False,
+                    max_depth=sum(len(members) for _, _, members in rows)):
+                votes = {}
+                for name, base in zip(column.get_query_names(), column.get_query_sequences()):
+                    votes[name] = base if votes.get(name, base) == base else 'N'
+                base, support = Counter(votes.values()).most_common(1)[0]
+                if support*10 >= len(votes)*7:
+                    consensus[column.reference_pos] = base
+    return ''.join(consensus)
 
 
 def _pileup_sequences(sequences):
@@ -197,10 +200,11 @@ def _pileup_sequences(sequences):
         bases = np.frombuffer(sequence.encode('ascii'), dtype=np.uint8)
         placements = set()
         for start in range(0, len(sequence)-14, 15):
-            for node, position in index.get(sequence[start:start+15], ()):
-                offset = position-start
-                if offset == 0 and len(sequence) == len(representatives[node]):
-                    placements.add((node, offset))
+            # Only equal-length, zero-offset placements are admissible. Key
+            # those constraints instead of scanning every depth/trim variant
+            # sharing a seed elsewhere in the locus.
+            for node in index.get((len(sequence), start, sequence[start:start+15]), ()):
+                placements.add((node, 0))
         matches = []
         for node, offset in placements:
             target = representatives[node][offset:offset+len(sequence)]
@@ -220,7 +224,7 @@ def _pileup_sequences(sequences):
                 positions[sequence[start:start+15]].append(start)
             for seed, starts in positions.items():
                 if len(starts) == 1 and 'N' not in seed:
-                    index[seed].append((node, starts[0]))
+                    index[len(sequence), starts[0], seed].append(node)
     result = defaultdict(set)
     for representative, group in zip(representatives, groups):
         consensus = _pileup_consensus(((sequence, offset, sequences[sequence])
@@ -282,9 +286,11 @@ def microassemble(items, template, insert=None, max_nodes=2048, max_paths=64):
                 sequences[container].update(sequences[sequence])
         else:
             retained.append(sequence)
+            # Length-descending traversal means later nodes cannot contain
+            # any retained node, so this count can never fall back below the cap.
+            if len(retained) > max_nodes:
+                return '', [], 'assembly_node_limit'
     nodes = retained
-    if len(nodes) > max_nodes:
-        return '', [], 'assembly_node_limit'
     seed_index = defaultdict(set)
     for j, right in enumerate(nodes):
         for start in range(0, len(right)-14, 15):
@@ -336,8 +342,8 @@ def microassemble(items, template, insert=None, max_nodes=2048, max_paths=64):
                     unseen.discard(j)
                     pending.append(j)
         layouts.append(positions)
+    products = {}
     if consistent:
-        products = {}
         for positions in layouts:
             start = min(positions.values())
             length = max(position+len(nodes[i]) for i, position in positions.items())-start
@@ -347,16 +353,8 @@ def microassemble(items, template, insert=None, max_nodes=2048, max_paths=64):
             product = primer_product(sequence, template)
             if product and _compatible_pairs(items, sequence, insert):
                 products.setdefault(product, set()).update(set().union(*(sequences[nodes[i]] for i in positions)))
-        if len(products) == 1:
-            product, members = next(iter(products.items()))
-            if len(members) >= 2:
-                return product, sorted(members), ''
-        if products:
-            return '', [], 'multiple_reconstructions'
-        return '', [], 'ambiguous_overlap_offsets' if ambiguous else 'no_complete_path'
-    starts = [i for i, seq in enumerate(nodes) if primer_bounds(seq, template.locus.forward_primer)]
+    starts = [] if consistent else [i for i, seq in enumerate(nodes) if primer_bounds(seq, template.locus.forward_primer)]
     paths = [(i, nodes[i], ((i, 0),)) for i in starts]
-    products = {}
     visited = set()
     while paths:
         i, sequence, used = paths.pop()
@@ -387,7 +385,8 @@ def microassemble(items, template, insert=None, max_nodes=2048, max_paths=64):
                 return '', [], 'cyclic_overlap_graph'
             paths.append((j, sequence + nodes[j][overlap:], used + ((j, len(sequence)-overlap),)))
     if products and len({len(product) for product in products}) == 1:
-        # Base uncertainty need not discard an agreed primer-bounded length.
+        # Components and alternative paths share the same length policy:
+        # base uncertainty need not discard an agreed primer-bounded length.
         # Keep primer ends identical so this cannot hide differences in PCR
         # size calibration. Mask disputed interior bases rather than selecting
         # an arbitrary path/SNP or counting shared molecules more than once.

@@ -77,6 +77,48 @@ def test_reconstruction_does_not_merge_different_repeat_lengths(template):
     assert reason == 'multiple_reconstructions'
 
 
+@pytest.mark.parametrize('count', [8, 12])
+def test_disconnected_reconstructions_preserve_agreed_length(template, count, tmp_path):
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    sequence = template.sequence(8)
+    alternative = list(template.sequence(count))
+    # Two independently assembled paths with divergent interiors cannot form
+    # overlap edges between them, but can still agree on primer-product length.
+    for position in range(25, len(alternative)-25, 7):
+        alternative[position] = next(b for b in 'ACGT' if b != alternative[position])
+    alternative = ''.join(alternative)
+    items = []
+    for haplotype in (sequence, alternative):
+        for read in (haplotype[:120], haplotype[60:190], haplotype[140:]):
+            items.append(MoleculeEvidence(str(len(items)), 'L', ('UNINFORMATIVE',), (read,), ('+',)))
+    product, members, reason = microassemble(items, template)
+    if count == 8:
+        assert product == ''.join(a if a == b else 'N' for a, b in zip(sequence, alternative))
+        assert len(members) == 6 and not reason
+        assert genotype_product(LocusProduct('s', 'L', 'short_read', 'v', product), template.locus).repeat_count == 8
+        from dataclasses import asdict
+        from mlvamaps.io import write_fastq, write_tsv, read_profiles
+        from mlvamaps.short_reads import run_short_read_call
+        locus = replace(template.locus, left_flank_sequence='', right_flank_sequence='',
+                        repeat_motif='NNNN', expected_product_size_bp=len(sequence), nominal_repeat_units=8)
+        panel = tmp_path/'panel.tsv'
+        write_tsv([asdict(locus)], panel, list(asdict(locus)))
+        pairs = [pair(read, revcomp(mate), str(i)) for i, (read, mate) in enumerate(
+            (reads for haplotype in (sequence, alternative) for reads in
+             ((haplotype[:120], haplotype[60:190]), (haplotype[140:], haplotype[140:]))))]
+        first, second = tmp_path/'r1.fq', tmp_path/'r2.fq'
+        write_fastq([p.read1 for p in pairs], first)
+        write_fastq([p.read2 for p in pairs], second)
+        output = run_short_read_call(str(first), str(second), str(panel), str(tmp_path/'out'),
+                                     's', show_progress=False)
+        call = read_profiles(output['calls'])[0]
+        assert float(call['repeat_count']) == 8
+        assert call['call_method'] == 'RECONSTRUCTED'
+        assert '8 repeats' in output['report'].read_text()
+    else:
+        assert not product and reason == 'multiple_reconstructions'
+
+
 @pytest.mark.parametrize('count', [30, 80, 160])
 def test_repeat_only_overlap_never_selects_arbitrary_copy_number(template, count):
     sequence = template.sequence(count)
@@ -162,14 +204,54 @@ def test_contained_flank_reads_do_not_vote_for_uncovered_bases(template):
     assert not reason
 
 
-def test_native_pileup_counts_conflicting_mates_once_across_chunks():
+def test_htslib_pileup_counts_conflicting_mates_once_without_depth_truncation():
     from mlvamaps.targeted_reconstruction import _pileup_consensus
-    # 10 MB of observations crosses the 8 MiB worker buffer. Conflicting
-    # observations consume one N vote, not a second vote for either base.
-    rows = [('A'*5000, 0, set(range(2000))), ('C'*5000, 0, set(range(650)))]
-    assert _pileup_consensus(rows, 5000) == 'N'*5000
-    rows[1] = ('C'*5000, 0, set(range(600)))
-    assert _pileup_consensus(rows, 5000) == 'A'*5000
+    # Exceed HTSlib's default 8,000-read cap. Conflicting observations consume
+    # one N vote, not a second vote for either base, including at exactly 70%.
+    rows = [('A'*100, 0, set(range(12000))), ('C'*100, 0, set(range(4000)))]
+    assert _pileup_consensus(rows, 100) == 'N'*100
+    rows[1] = ('C'*100, 0, set(range(3600)))
+    assert _pileup_consensus(rows, 100) == 'A'*100
+
+
+def test_htslib_pileup_preserves_uncovered_bases_and_overlapping_molecule_votes():
+    from mlvamaps.targeted_reconstruction import _pileup_consensus
+    rows = [('ACGT', 2, {'a', 'b'}), ('CGTC', 3, {'a'}), ('TTTT', 2, {'c'})]
+    assert _pileup_consensus(rows, 9) == 'NNNNNTCNN'
+    assert _pileup_consensus(reversed(rows), 9) == 'NNNNNTCNN'
+
+
+def test_pileup_preserves_trim_coordinates_support_and_ambiguous_seeds():
+    from mlvamaps.targeted_reconstruction import _pileup_sequences
+    rng = random.Random(918)
+    world = ''.join(rng.choices('ACGT', k=400))
+    sequences, expected = {}, {}
+    for start in range(0, 100, 10):
+        for length in (80, 100, 150, 200):
+            truth = world[start:start+length]
+            name = f'{start}:{length}'
+            members = {name+':a', name+':b', name+':c'}
+            sequences[truth] = members
+            position = length//2
+            error = truth[:position]+next(b for b in 'ACGT' if b != truth[position])+truth[position+1:]
+            sequences[error] = {name+':error'}
+            expected[truth] = members | sequences[error]
+    # Repeated seeds cannot establish a unique placement, even at the same
+    # length and coordinate. Preserve these distinct observations.
+    for sequence in ('A'*100, 'A'*99+'C'):
+        sequences[sequence] = {sequence}
+        expected[sequence] = {sequence}
+    assert _pileup_sequences(sequences) == expected
+
+
+def test_assembly_node_limit_applies_after_containment(template):
+    from mlvamaps.short_read_evidence import MoleculeEvidence
+    sequence = template.sequence(8)
+    items = [MoleculeEvidence(str(i), 'L', ('UNINFORMATIVE',), (sequence[:end],), ('+',))
+             for i, end in enumerate(range(30, len(sequence)+1))]
+    assert microassemble(items, template, max_nodes=1)[0] == sequence
+    items.append(MoleculeEvidence('separate', 'L', ('UNINFORMATIVE',), ('G'*100,), ('+',)))
+    assert microassemble(items, template, max_nodes=1)[2] == 'assembly_node_limit'
 
 
 def test_insert_likelihood_distinguishes_or_withholds_adjacent_lengths(template):

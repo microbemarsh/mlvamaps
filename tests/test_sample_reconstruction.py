@@ -70,6 +70,8 @@ def test_high_depth_primer_only_pileup_reaches_assembly_caller(tmp_path, unit, n
     assert calls[0]['repeat_count'] == count
     assert calls[0]['inference_method'] == 'RECONSTRUCTED'
     assert calls[0]['status'] == 'called'
+    metadata = json.loads(paths['reconstruction_metadata'].read_text())
+    assert metadata['performance']['recruitment']['pileup_backend'] == 'pysam_htslib'
     audit = read_profiles(paths['reconstruction_pcr'])[0]
     assert audit['measurement_source'] == 'sassy_assembly_pcr'
     assert int(audit['pcr_product_size_bp']) == len(sequence)
@@ -100,7 +102,7 @@ def test_high_depth_pileup_cannot_bridge_an_unobserved_repeat():
     assert reason in {'no_complete_path', 'ambiguous_overlap_offsets'}
 
 
-def test_internal_reads_rescue_a_primer_only_locus_and_reach_sassy(tmp_path):
+def test_internal_reads_rescue_a_primer_only_locus_and_reach_sassy(tmp_path, capsys):
     locus, template, sequence, pairs = fixture()
     recruited = ShortReadRecruiter({'L': template}, 's').recruit(pairs).evidence
     assert not recover_locus(recruited, template, 's').products
@@ -108,7 +110,8 @@ def test_internal_reads_rescue_a_primer_only_locus_and_reach_sassy(tmp_path):
     assert not ShortReadRecruiter({'L': template}, 's').recruit(bridges).evidence
     calls, _, _, paths = run_reconstructed_fastq_inference(reads1=None, reads2=None,
         pairs=iter(pairs+bridges), loci=[locus], database_path=None, outdir=tmp_path,
-        sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8)
+        sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8,
+        show_progress=True)
     assert calls[0]['repeat_count'] == 8
     with paths['reconstruction_pcr'].open() as handle:
         row = next(csv.DictReader(handle, delimiter='\t'))
@@ -116,6 +119,10 @@ def test_internal_reads_rescue_a_primer_only_locus_and_reach_sassy(tmp_path):
     metadata = json.loads(paths['sample_repeat_graphs'].read_text())
     assert metadata['rounds'][0]['recruited'] == 3
     assert metadata['loci'][locus.locus_id]['graph_ready']
+    progress = capsys.readouterr().out
+    assert 'Sample recruitment round 1 finished' in progress
+    assert f'Sample anchor learning {locus.locus_id} started: round 2; 12 molecules' in progress
+    assert f'Final sample template {locus.locus_id} finished' in progress
 
 
 def test_repeat_graph_learns_both_arms_without_reference_sequences():

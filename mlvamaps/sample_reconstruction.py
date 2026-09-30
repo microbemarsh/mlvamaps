@@ -265,8 +265,11 @@ def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_r
     previous_index = None
     for round_index in range(max_rounds):
         for locus_id, template in templates.items():
-            learned[locus_id], metadata['loci'][locus_id] = learn_template(evidence[locus_id], template)
-        recruiter = SampleRecruiter(evidence, learned)
+            with progress.phase(f'[{sample_id}] Sample anchor learning {locus_id}',
+                                f"round {round_index+1}; {len(evidence[locus_id]):,} molecules"):
+                learned[locus_id], metadata['loci'][locus_id] = learn_template(evidence[locus_id], template)
+        with progress.phase(f'[{sample_id}] Sample anchor index', f'round {round_index+1}'):
+            recruiter = SampleRecruiter(evidence, learned)
         if not recruiter.index:
             metadata['stop_reason'] = 'no_unique_sample_anchors'
             break
@@ -306,17 +309,21 @@ def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_r
             if hasattr(iterator, 'close'):
                 iterator.close()
         metadata['rounds'].append(stats)
+        progress.step(f"[{sample_id}] Sample recruitment round {round_index+1} finished; "
+                      f"{stats['examined']:,} pairs scanned; {stats['recruited']:,} additional pairs")
         if not stats['recruited']:
             metadata['stop_reason'] = 'no_additional_pairs'
             break
     else:
         metadata['stop_reason'] = 'round_limit'
     for locus_id, template in templates.items():
-        learned[locus_id], metadata['loci'][locus_id] = learn_template(evidence[locus_id], template)
-        if learned[locus_id] != template:
-            updated = []
-            for item in evidence[locus_id]:
-                classified = classify_pair(evidence_pair(item), learned[locus_id])
-                updated.append(classified or replace(item, template=learned[locus_id]))
-            evidence[locus_id] = updated
+        with progress.phase(f'[{sample_id}] Final sample template {locus_id}',
+                            f'{len(evidence[locus_id]):,} molecules'):
+            learned[locus_id], metadata['loci'][locus_id] = learn_template(evidence[locus_id], template)
+            if learned[locus_id] != template:
+                updated = []
+                for item in evidence[locus_id]:
+                    classified = classify_pair(evidence_pair(item), learned[locus_id])
+                    updated.append(classified or replace(item, template=learned[locus_id]))
+                evidence[locus_id] = updated
     return learned, metadata

@@ -124,9 +124,9 @@ of their read fails this threshold. A quality-validated complete product is
 not rejected because of low-quality bases outside its primers.
 
 Unresolved pools enter a seeded overlap graph. High-depth reads first form
-coordinate pileups: full-read placements with unique offsets consolidate
-substitution errors, with each molecule voting once per position. Indels and
-ambiguous repeat placements remain separate. Contained sequences are collapsed
+HTSlib coordinate pileups through `pysam`: full-read placements with unique
+offsets consolidate substitution errors, with each molecule voting once per
+position. Indels and ambiguous repeat placements remain separate. Contained sequences are collapsed
 while retaining their molecule support; each edge must have a unique
 non-repeat-only overlap, allowing at most 2% substitutions. Exact 15-base seeds
 bound the candidate-offset search. Consistent overlap components form a shared
@@ -138,6 +138,8 @@ primer and must reach the reverse primer. Nonunique overlaps are excluded
 without vetoing independently anchored complete paths. Conflicting product
 lengths, cycles and inconsistent paired placements remain unresolved. Reliable
 library statistics additionally constrain uniquely placed mate distances.
+Separate components and alternative paths that agree on product length and
+primer ends retain that length, masking disputed interior bases as `N`.
 Resource limits apply to 2048 compacted nodes and 64 alternative path expansions,
 not the original number of recruited read sequences. Hitting a limit defers
 to inference. No whole-genome assembly or external assembler is used.
