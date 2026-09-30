@@ -399,7 +399,7 @@ def _run_reconstructed_fastq_inference(*, reads1, reads2, loci, database_path, o
                 writer = csv.writer(handle, delimiter='\t')
                 writer.writerow(['sample_id', 'round', 'molecule_id', 'state', 'locus_id', 'competing_locus'])
                 templates, sample_metadata = recruit_sample_reads(evidence, templates, replay_pairs, progress,
-                    sample_id, threads=recruitment_threads, audit_writer=writer)
+                    sample_id, threads=recruitment_threads, audit_writer=writer, locus_executor=locus_executor)
             stage_seconds['sample_recruitment'] = time.perf_counter()-started
             recruitment_stats['sample_recruitment'] = sample_metadata
             recruitment_stats['sample_recruited_pairs'] = sum(row['recruited'] for row in sample_metadata['rounds'])

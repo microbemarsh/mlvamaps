@@ -117,6 +117,50 @@ stale measurements after template changes, and node/path limit reporting.
 The reported server sample was unavailable locally; these are synthetic
 regression and performance checks, not validation of its final alleles.
 
+## Primer-linked motif selection
+
+The DRR125654 diagnostic graph had no ready repeat graphs. Its global motif
+votes frequently favored homopolymers; Bams05 and Bams15 also had competing
+substitution variants. The learner now selects families supported on both
+primer-linked arms, preserves longer boundary observations through the existing
+pysam consensus, and recognizes cyclic substitution variants. Split repeat runs
+are joined only if the observed intervening sequence remains periodic.
+
+Eight regression cases cover unlinked homopolymers, short primer fragments,
+the supplied 39-base and 9-base motif variants in separate and interspersed
+blocks, unrelated boundary repeats, and repeats outside the primers. An
+end-to-end FASTQ regression checks the expected 30-repeat result in the call
+tables, evidence TSV and HTML report. Inferred-count fixtures supply an
+independently specified insert distribution; these do not establish that depth
+alone determines length. The full suite passed 428 tests with 10 optional-tool
+skips. DRR125654's FASTQs were unavailable locally, so its final alleles still
+require a server rerun.
+
+Learned-boundary classification reuses the existing locus process workers,
+skips reads already classified against identical arms, and caches repeated
+motif alignments. Sample graph entries include
+`motif_selection: primer_linked_arms` to identify the corrected learner in a
+fresh run. Reinstall the updated checkout in the server's active environment
+before rerunning; use `--force` for directory/manifest batches to replace
+existing successful results.
+
+Two sequential runs per configuration compared this change against `1d22002`,
+using 12,000 pairs, six loci and four threads with no concurrent test workload
+or profiling. Median wall times include output generation:
+
+| Synthetic workload | `1d22002` | Primer-linked learner |
+| --- | ---: | ---: |
+| Direct | 1.98 s | 1.77 s |
+| Pileup | 10.98 s | 11.09 s |
+| Rescue | 2.46 s | 2.34 s |
+
+All runs retain the expected counts 5–10. The pileup workload now learns six
+usable repeat graphs instead of two; its median runtime differs by about 1%.
+These small synthetic comparisons do not establish server throughput. Raw
+timings, stage times, memory, graph readiness and call checks are retained under
+`primer_linked_motif_validation` in
+[the reconstruction measurements](reconstruction-performance.json).
+
 ## Reproduction commands
 
 ```bash

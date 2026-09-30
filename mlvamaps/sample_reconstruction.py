@@ -5,7 +5,6 @@ The graph is represented by two observed arms and a variable repeat edge;
 targeted_reconstruction scores its bounded paths with native alignments.
 """
 from collections import Counter, defaultdict
-from dataclasses import replace
 from functools import lru_cache
 from os.path import commonprefix
 
@@ -13,8 +12,8 @@ import regex
 
 from .models import ReadPair, ReadRecord
 from .sequence import revcomp
-from .short_read_evidence import MoleculeEvidence, RepeatTemplate, classify_pair, primer_bounds
-from .targeted_reconstruction import _overlaps, _pileup_consensus, _pileup_sequences
+from .short_read_evidence import MoleculeEvidence, RepeatTemplate, classify_pair, cyclic_match, primer_bounds
+from .targeted_reconstruction import _overlaps, _pileup_consensuses, _pileup_sequences
 
 
 def reliable_sequences(items):
@@ -67,9 +66,10 @@ def _arms(sequences, template, motif):
                 starts.append((seq[bounds[0]:], 0, members))
         if not starts:
             return ''
-        length = min(len(seq) for seq, _, _ in starts)
-        arm = _pileup_consensus(((seq[:length], offset, members)
-                                 for seq, offset, members in starts), length).split('N', 1)[0]
+        # Short primer fragments must not truncate independently observed
+        # boundaries. HTSlib counts each read only at the bases it covers.
+        length = max(len(seq) for seq, _, _ in starts)
+        arm = _pileup_consensuses([(starts, length)])[0].split('N', 1)[0]
         # ponytail: at most eight extensions and 256 pool sequences. This is
         # a conservative arm builder, not a whole-genome assembler.
         for _ in range(8):
@@ -88,7 +88,11 @@ def _arms(sequences, template, motif):
     left = extend(sequences, template.locus.forward_primer, motif)
     right = extend({revcomp(s): members for s, members in sequences.items()},
                    template.locus.reverse_primer, revcomp(motif))
-    return left, revcomp(right)
+    right = revcomp(right)
+    # Reads may extend beyond the opposite primer into unrelated repeats.
+    end = primer_bounds(left, revcomp(template.locus.reverse_primer))
+    start = primer_bounds(right, template.locus.forward_primer)
+    return left[:end[1]] if end else left, right[start[0]:] if start else right
 
 
 def learn_template(items, template, sequences=None):
@@ -102,36 +106,58 @@ def learn_template(items, template, sequences=None):
             if end-start >= max(12, 2*template.unit):
                 votes[motif].update(members)
     ranked = sorted(votes, key=lambda motif: (-len(votes[motif]), motif))
-    info = {'source': 'sample', 'motifs': [{'sequence': m, 'molecules': len(votes[m])} for m in ranked[:3]],
+    info = {'source': 'sample', 'motif_selection': 'primer_linked_arms',
+            'motifs': [{'sequence': m, 'molecules': len(votes[m])} for m in ranked[:3]],
             'graph_ready': False}
     if not ranked or len(votes[ranked[0]]) < 2:
-        return template, info
-    motif = ranked[0]
-    if len(ranked) > 1 and len(votes[ranked[1]]) >= .5*len(votes[motif]):
-        info['reason'] = 'ambiguous_sample_motif'
         return template, info
     # Deterministic depth-first ordering bounds noisy pools without selecting
     # a nominal allele. A capped pool may learn less sequence, never more.
     pool = {s: sequences[s] for s in sorted(sequences, key=lambda s: (-len(sequences[s]), -len(s), s))[:256]}
-    left_arm, right_arm = _arms(pool, template, motif)
-    left, right = set(), set()
-    for start, end, found in repeat_runs(left_arm, template.unit):
-        if found == motif:
-            position = left_arm.find(motif, start, end)
-            if position >= len(template.locus.forward_primer):
-                left.add(left_arm[:position])
-    for start, end, found in repeat_runs(right_arm, template.unit):
-        if found == motif:
-            position = right_arm.rfind(motif, start, end)
-            if position >= 0 and len(right_arm)-position-template.unit >= len(template.locus.reverse_primer):
-                right.add(right_arm[position+template.unit:])
-    if len(left) != 1 or len(right) != 1:
-        info['reason'] = 'incomplete_sample_repeat_boundaries'
-        return replace(template, motif=motif), info
-    learned = RepeatTemplate(template.locus, left.pop(), right.pop(), motif, template.unit)
-    info.update(graph_ready=True, left_bp=len(learned.left), right_bp=len(learned.right), motif=motif,
+    left_arm, right_arm = _arms(pool, template, '')
+    left_runs = repeat_runs(left_arm, template.unit)
+    right_runs = repeat_runs(right_arm, template.unit)
+    # Global motif abundance includes retained mates and outward-facing reads.
+    # Only families observed on both primer-linked arms can identify the VNTR.
+    # Permit substitutions (85% identity, as for flank anchors), never indels
+    # or a change in unit length; use a common cyclic phase on both boundaries.
+    candidates = []
+    motifs = sorted({m for _, _, m in left_runs + right_runs},
+                    key=lambda m: (-len(votes.get(m, ())), m))
+    for motif in motifs:
+        pattern = regex.compile(f'(?:{motif}){{s<={3*template.unit//20}}}', regex.BESTMATCH)
+        if any(pattern.search(t.motif+t.motif[:-1]) for t in candidates):
+            continue
+        left, right = set(), set()
+        for start, end, found in left_runs:
+            if pattern.search(found+found[:-1]):
+                hit = pattern.search(left_arm, start, min(end, start+2*template.unit-1))
+                if hit and hit.start() >= len(template.locus.forward_primer):
+                    left.add(hit.start())
+        for start, end, found in right_runs:
+            if pattern.search(found+found[:-1]):
+                hit = pattern.search(right_arm, max(start, end-2*template.unit+1), end)
+                if hit and len(right_arm)-hit.end() >= len(template.locus.reverse_primer):
+                    right.add(hit.end())
+        # Substituted repeat units can split lag-identity runs. Join their
+        # boundaries only when the intervening observed tract is still periodic.
+        if len(left) > 1 and cyclic_match(left_arm[min(left):max(left)+template.unit], motif):
+            left = {min(left)}
+        if len(right) > 1 and cyclic_match(right_arm[min(right)-template.unit:max(right)], motif):
+            right = {max(right)}
+        if len(left) == len(right) == 1:
+            support = set().union(*(members for found, members in votes.items()
+                                   if pattern.search(found+found[:-1])))
+            if len(support) >= 2:
+                candidates.append(RepeatTemplate(template.locus, left_arm[:left.pop()],
+                                                 right_arm[right.pop():], motif, template.unit))
+    if len(candidates) != 1:
+        info['reason'] = 'ambiguous_sample_motif' if candidates else 'incomplete_sample_repeat_boundaries'
+        return template, info
+    learned = candidates[0]
+    info.update(graph_ready=True, left_bp=len(learned.left), right_bp=len(learned.right), motif=learned.motif,
                 left_sequence=learned.left, right_sequence=learned.right,
-                structure=f'{learned.left}({motif})*{learned.right}')
+                structure=f'{learned.left}({learned.motif})*{learned.right}')
     return learned, info
 
 
@@ -259,8 +285,24 @@ class SampleRecruiter:
         return result
 
 
+def _reclassify_locus(task):
+    locus_id, items, template = task
+    updated = []
+    for item in items:
+        if item.template == template:
+            updated.append(item)
+            continue  # Rescue already classified these reads against these exact arms.
+        classified = classify_pair(evidence_pair(item), template)
+        # Measurements and flank coordinates belong to the template that
+        # produced them. Retain unanchored reads without stale measurements.
+        updated.append(classified or MoleculeEvidence(item.molecule_id, item.locus_id,
+            ('UNINFORMATIVE',), item.sequences, item.orientations,
+            qualities=item.qualities, template=template))
+    return locus_id, updated
+
+
 def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_rounds=2,
-                        threads=1, audit_writer=None):
+                        threads=1, audit_writer=None, locus_executor=None):
     """Freeze the index per round; skip pairs already assigned to any locus."""
     assigned = {item.molecule_id for items in evidence.values() for item in items}
     learned = dict(templates)
@@ -324,6 +366,7 @@ def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_r
             break
     else:
         metadata['stop_reason'] = 'round_limit'
+    reclassify = []
     for locus_id, template in templates.items():
         with progress.phase(f'[{sample_id}] Final sample template {locus_id}',
                             f'{len(evidence[locus_id]):,} molecules'):
@@ -331,14 +374,12 @@ def recruit_sample_reads(evidence, templates, replay, progress, sample_id, max_r
                 learned[locus_id], metadata['loci'][locus_id] = learn_template(evidence[locus_id], template)
             if learned[locus_id] != template or any(item.template != learned[locus_id]
                                                      for item in evidence[locus_id]):
-                updated = []
-                for item in evidence[locus_id]:
-                    classified = classify_pair(evidence_pair(item), learned[locus_id])
-                    # Measurements and flank coordinates belong to the template
-                    # that produced them. Keep unanchored reads for assembly,
-                    # but never reinterpret stale coordinates in a new template.
-                    updated.append(classified or MoleculeEvidence(item.molecule_id, item.locus_id,
-                        ('UNINFORMATIVE',), item.sequences, item.orientations,
-                        qualities=item.qualities, template=learned[locus_id]))
-                evidence[locus_id] = updated
+                reclassify.append((locus_id, evidence[locus_id], learned[locus_id]))
+    # Reuse the allocated locus workers; recovering more graphs must not force
+    # every newly informative molecule through serial native alignments.
+    from .concurrency import bounded_ordered_map, resolve_threads
+    with progress.phase(f'[{sample_id}] Classifying learned repeat boundaries'):
+        updates = (bounded_ordered_map(locus_executor, _reclassify_locus, reclassify, resolve_threads(threads))
+                   if locus_executor else map(_reclassify_locus, reclassify))
+        evidence.update(updates)
     return learned, metadata

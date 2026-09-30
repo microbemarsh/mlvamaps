@@ -976,5 +976,675 @@
         "fixed": 11.060282604012173
       }
     }
+  },
+  "primer_linked_motif_validation": {
+    "environment": {
+      "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+      "python": "3.13.13",
+      "pysam": "0.24.0",
+      "samtools": "1.23.1"
+    },
+    "molecules": 12000,
+    "threads": 4,
+    "timing_scope": "Sequential runs, no profiling; call execution including outputs, excluding input generation and imports",
+    "measurements": [
+      {
+        "revision": "1d22002",
+        "scenario": "direct",
+        "repeat": 1,
+        "seconds": 1.9613220840110444,
+        "peak_rss_bytes": 100810752,
+        "peak_child_rss_bytes": 75120640,
+        "stage_seconds": {
+          "template_loading": 2.2833002731204033e-05,
+          "recruitment": 1.115196915983688,
+          "reconstruction_probe": 0.24709070898825303,
+          "reconstruction_sassy_pcr": 0.32816333300434053,
+          "locus_recovery": 0.3551659999648109,
+          "genotype_and_evidence_output": 0.025381999963428825
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ]
+      },
+      {
+        "revision": "primer_linked_arms",
+        "scenario": "direct",
+        "repeat": 1,
+        "seconds": 1.7665326250134967,
+        "peak_rss_bytes": 100089856,
+        "peak_child_rss_bytes": 75120640,
+        "stage_seconds": {
+          "template_loading": 2.78339721262455e-05,
+          "recruitment": 1.042172290966846,
+          "reconstruction_probe": 0.27356900001177564,
+          "reconstruction_sassy_pcr": 0.1893075829721056,
+          "locus_recovery": 0.21714500000234693,
+          "genotype_and_evidence_output": 0.022031208034604788
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ]
+      },
+      {
+        "revision": "1d22002",
+        "scenario": "direct",
+        "repeat": 2,
+        "seconds": 1.9959827919956297,
+        "peak_rss_bytes": 102662144,
+        "peak_child_rss_bytes": 74088448,
+        "stage_seconds": {
+          "template_loading": 2.241699257865548e-05,
+          "recruitment": 1.0817186670028605,
+          "reconstruction_probe": 0.24764904100447893,
+          "reconstruction_sassy_pcr": 0.410791541042272,
+          "locus_recovery": 0.43761095899390057,
+          "genotype_and_evidence_output": 0.03050287498626858
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ]
+      },
+      {
+        "revision": "primer_linked_arms",
+        "scenario": "direct",
+        "repeat": 2,
+        "seconds": 1.7780780000030063,
+        "peak_rss_bytes": 100679680,
+        "peak_child_rss_bytes": 73842688,
+        "stage_seconds": {
+          "template_loading": 2.3083004634827375e-05,
+          "recruitment": 1.044613375037443,
+          "reconstruction_probe": 0.27709454199066386,
+          "reconstruction_sassy_pcr": 0.19138491700869054,
+          "locus_recovery": 0.21893716702470556,
+          "genotype_and_evidence_output": 0.023257458000443876
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ]
+      },
+      {
+        "revision": "1d22002",
+        "scenario": "pileup",
+        "repeat": 1,
+        "seconds": 10.660734415985644,
+        "peak_rss_bytes": 139788288,
+        "peak_child_rss_bytes": 100745216,
+        "stage_seconds": {
+          "template_loading": 2.154201501980424e-05,
+          "recruitment": 1.3174009579815902,
+          "reconstruction_probe": 0.9545863340026699,
+          "sample_recruitment": 4.540957416989841,
+          "reconstruction_sassy_pcr": 0.18981704203179106,
+          "locus_recovery": 3.657064166967757,
+          "genotype_and_evidence_output": 0.025138292054180056
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ],
+        "graph_ready_loci": [
+          "L0",
+          "L3"
+        ]
+      },
+      {
+        "revision": "primer_linked_arms",
+        "scenario": "pileup",
+        "repeat": 1,
+        "seconds": 11.084633124992251,
+        "peak_rss_bytes": 155566080,
+        "peak_child_rss_bytes": 108724224,
+        "stage_seconds": {
+          "template_loading": 2.3291970137506723e-05,
+          "recruitment": 1.287077999964822,
+          "reconstruction_probe": 0.9886800840031356,
+          "sample_recruitment": 4.63828866701806,
+          "reconstruction_sassy_pcr": 0.4701241669827141,
+          "locus_recovery": 3.9576724159996957,
+          "genotype_and_evidence_output": 0.025646874972153455
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ],
+        "graph_ready_loci": [
+          "L0",
+          "L1",
+          "L2",
+          "L3",
+          "L4",
+          "L5"
+        ]
+      },
+      {
+        "revision": "1d22002",
+        "scenario": "pileup",
+        "repeat": 2,
+        "seconds": 11.298687209025957,
+        "peak_rss_bytes": 141115392,
+        "peak_child_rss_bytes": 99811328,
+        "stage_seconds": {
+          "template_loading": 2.1040963474661112e-05,
+          "recruitment": 1.5402322500012815,
+          "reconstruction_probe": 1.0092066249926575,
+          "sample_recruitment": 4.465150917007122,
+          "reconstruction_sassy_pcr": 0.41639908304205164,
+          "locus_recovery": 3.8772529999841936,
+          "genotype_and_evidence_output": 0.024207042006310076
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ],
+        "graph_ready_loci": [
+          "L0",
+          "L3"
+        ]
+      },
+      {
+        "revision": "primer_linked_arms",
+        "scenario": "pileup",
+        "repeat": 2,
+        "seconds": 11.103778584045358,
+        "peak_rss_bytes": 156876800,
+        "peak_child_rss_bytes": 111165440,
+        "stage_seconds": {
+          "template_loading": 2.1000043489038944e-05,
+          "recruitment": 1.3421090829651803,
+          "reconstruction_probe": 1.0200122499954887,
+          "sample_recruitment": 4.842314125038683,
+          "reconstruction_sassy_pcr": 0.19434654200449586,
+          "locus_recovery": 3.687881792022381,
+          "genotype_and_evidence_output": 0.025351124990265816
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ],
+        "graph_ready_loci": [
+          "L0",
+          "L1",
+          "L2",
+          "L3",
+          "L4",
+          "L5"
+        ]
+      },
+      {
+        "revision": "1d22002",
+        "scenario": "rescue",
+        "repeat": 1,
+        "seconds": 2.4075936669833027,
+        "peak_rss_bytes": 101449728,
+        "peak_child_rss_bytes": 70909952,
+        "stage_seconds": {
+          "template_loading": 2.437504008412361e-05,
+          "recruitment": 0.6960392500041053,
+          "reconstruction_probe": 0.3527515409514308,
+          "sample_recruitment": 0.8496269999886863,
+          "reconstruction_sassy_pcr": 0.19821870798477903,
+          "locus_recovery": 0.2858159170136787,
+          "genotype_and_evidence_output": 0.024817375000566244
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ],
+        "graph_ready_loci": [
+          "L0",
+          "L1",
+          "L2",
+          "L3",
+          "L4",
+          "L5"
+        ]
+      },
+      {
+        "revision": "primer_linked_arms",
+        "scenario": "rescue",
+        "repeat": 1,
+        "seconds": 2.3403252919670194,
+        "peak_rss_bytes": 117293056,
+        "peak_child_rss_bytes": 78544896,
+        "stage_seconds": {
+          "template_loading": 2.0250037778168917e-05,
+          "recruitment": 0.7055552910314873,
+          "reconstruction_probe": 0.34625483298441395,
+          "sample_recruitment": 0.8200609590276144,
+          "reconstruction_sassy_pcr": 0.17488974996376783,
+          "locus_recovery": 0.25760474998969585,
+          "genotype_and_evidence_output": 0.024263042025268078
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ],
+        "graph_ready_loci": [
+          "L0",
+          "L1",
+          "L2",
+          "L3",
+          "L4",
+          "L5"
+        ]
+      },
+      {
+        "revision": "1d22002",
+        "scenario": "rescue",
+        "repeat": 2,
+        "seconds": 2.5218954159645364,
+        "peak_rss_bytes": 101007360,
+        "peak_child_rss_bytes": 71401472,
+        "stage_seconds": {
+          "template_loading": 2.3833999875932932e-05,
+          "recruitment": 0.6924636249896139,
+          "reconstruction_probe": 0.34611916600260884,
+          "sample_recruitment": 0.8618363750283606,
+          "reconstruction_sassy_pcr": 0.1881529579986818,
+          "locus_recovery": 0.27168208302464336,
+          "genotype_and_evidence_output": 0.02551662496989593
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ],
+        "graph_ready_loci": [
+          "L0",
+          "L1",
+          "L2",
+          "L3",
+          "L4",
+          "L5"
+        ]
+      },
+      {
+        "revision": "primer_linked_arms",
+        "scenario": "rescue",
+        "repeat": 2,
+        "seconds": 2.343018875049893,
+        "peak_rss_bytes": 115785728,
+        "peak_child_rss_bytes": 78069760,
+        "stage_seconds": {
+          "template_loading": 2.1834042854607105e-05,
+          "recruitment": 0.6957299159839749,
+          "reconstruction_probe": 0.3448186250170693,
+          "sample_recruitment": 0.8217963330098428,
+          "reconstruction_sassy_pcr": 0.19144866697024554,
+          "locus_recovery": 0.27490445802686736,
+          "genotype_and_evidence_output": 0.024528332985937595
+        },
+        "calls": [
+          [
+            "L0",
+            "5",
+            "PASS"
+          ],
+          [
+            "L1",
+            "6",
+            "PASS"
+          ],
+          [
+            "L2",
+            "7",
+            "PASS"
+          ],
+          [
+            "L3",
+            "8",
+            "PASS"
+          ],
+          [
+            "L4",
+            "9",
+            "PASS"
+          ],
+          [
+            "L5",
+            "10",
+            "PASS"
+          ]
+        ],
+        "graph_ready_loci": [
+          "L0",
+          "L1",
+          "L2",
+          "L3",
+          "L4",
+          "L5"
+        ]
+      }
+    ],
+    "synthetic": true,
+    "baseline_revision": "1d22002",
+    "validation": "428 tests passed, 10 optional-tool skips; actual DRR125654 FASTQs unavailable locally",
+    "median_seconds": {
+      "direct": {
+        "1d22002": 1.978652438003337,
+        "primer_linked_arms": 1.7723053125082515
+      },
+      "pileup": {
+        "1d22002": 10.9797108125058,
+        "primer_linked_arms": 11.094205854518805
+      },
+      "rescue": {
+        "1d22002": 2.4647445414739195,
+        "primer_linked_arms": 2.341672083508456
+      }
+    }
   }
 }

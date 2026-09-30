@@ -59,12 +59,18 @@ also perform sample recruitment; no external mapper or reference is required.
 
 Motif discovery uses the panel unit length and lagged sequence identity, with
 at least two units, 12 bases, 90% consensus identity, and two supporting
-molecules. Competing motifs of comparable molecule support remain ambiguous.
-Primer arms extend through unique nonperiodic overlaps only where extensions
-agree. High-depth sequences are consolidated by coordinate pileup before
+molecules. Motifs must belong to a family observed on both primer-linked arms;
+abundant repeats in unlinked mates or outside the primers cannot choose the
+VNTR. Same-length cyclic motifs with at least 85% identity are treated as
+substitution variants, with both boundaries placed in the same cyclic phase.
+Distinct families supported on both arms remain ambiguous. Primer arms extend
+through unique nonperiodic overlaps only where extensions agree. The pysam
+pileup retains longer primer-linked observations when shorter fragments end,
+without letting those fragments vote at uncovered positions.
+High-depth sequences are consolidated by coordinate pileup before
 selecting up to 256 supported sequences per locus. At most eight
 arm extensions are inspected. A graph is enabled only after both observed
-primer-to-repeat arms and a dominant motif are recovered. The two arms are
+primer-to-repeat arms and a single compatible motif family are recovered. The two arms are
 placed at compatible motif phases. This is a small graph with one variable
 repeat edge; bounded path expansion reuses the native candidate alignments.
 Substitutions and small indels are alignment differences, not a fully learned
@@ -78,8 +84,11 @@ do not determine an exact traversal count. No depth-only estimator is applied
 to this selected read pool. Empirical or supplied fragment statistics remain
 necessary for fragment-based estimates.
 
-`sample_repeat_graphs.json` records motif candidates and support, learned arm
-sequences, graph structure, recruitment rounds, caps and stopping reasons.
+`sample_repeat_graphs.json` records global motif candidates and support, the
+selected primer-linked motif, learned arm sequences, graph structure,
+recruitment rounds, caps and stopping reasons. Sample-learned entries identify
+this selection policy with `motif_selection: primer_linked_arms`; the global
+candidate list can still contain abundant unrelated repeats.
 `sample_recruitment.tsv` records recruited pairs and witnesses for ambiguous
 assignments in each round. These files are created only when rescue runs.
 

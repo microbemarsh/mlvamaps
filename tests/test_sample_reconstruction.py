@@ -196,6 +196,87 @@ def test_noisy_primer_arms_retain_partial_length_evidence(tmp_path):
     assert calls[0]['inference_method'] == 'INFERRED'
 
 
+def test_primer_linked_repeat_beats_abundant_unlinked_homopolymers(tmp_path):
+    from dataclasses import asdict
+    from mlvamaps.io import read_profiles, write_fastq, write_tsv
+    from mlvamaps.short_reads import run_short_read_call
+    locus, template, sequence, _ = fixture(30)
+    reads = [pair(sequence[:210], sequence[-210:], f'boundaries{i}') for i in range(12)]
+    # Retained mates and outward-facing sequence can contain unrelated repeats.
+    reads += [pair(sequence[:120], 'A'*150, f'decoy{i}') for i in range(40)]
+    items = ShortReadRecruiter({locus.locus_id: template}, 's').recruit(reads).evidence
+    learned, info = learn_template(items, template)
+    assert info['graph_ready']
+    assert set(learned.motif) != {'A'}
+    first, second, panel = tmp_path/'r1.fq', tmp_path/'r2.fq', tmp_path/'panel.tsv'
+    write_fastq([p.read1 for p in reads], first)
+    write_fastq([p.read2 for p in reads], second)
+    write_tsv([asdict(locus)], panel, list(asdict(locus)))
+    paths = run_short_read_call(str(first), str(second), str(panel), str(tmp_path/'result'), 's',
+        threads=1, show_progress=False,
+        insert_mean=len(sequence), insert_sd=3)
+    assert read_profiles(paths['calls'])[0]['repeat_count'] == '30'
+    assert read_profiles(paths['repeat_counts'])[0]['repeat_count'] == '30'
+    assert '30 repeats' in paths['report'].read_text()
+    evidence = read_profiles(paths['short_read_repeat_evidence'])[0]
+    assert evidence['call_method'] == 'INFERRED' and evidence['best_repeat'] == '30'
+
+
+def test_short_primer_fragment_does_not_discard_longer_boundary_reads():
+    locus, template, sequence, _ = fixture(30)
+    rng = random.Random(63)
+    upstream = ''.join(rng.choices('ACGT', k=40))
+    downstream = ''.join(rng.choices('ACGT', k=40))
+    reads = [pair(upstream+sequence[:210], sequence[-210:]+downstream, str(i)) for i in range(5)]
+    reads.append(pair(sequence[:24], sequence[-24:], 'short'))
+    items = ShortReadRecruiter({locus.locus_id: template}, 's').recruit(reads).evidence
+    learned, info = learn_template(items, template)
+    assert info['graph_ready']
+    assert learned.sequence((len(sequence)-len(learned.left)-len(learned.right))/9) == sequence
+
+
+@pytest.mark.parametrize('motif,variant', [
+    ('AAATAACGGAGGAGGTCAAGGAAATACAACCCCTCCAGC', 'AAATAACGGAGGAGGTCAAGGAAATACAACTCCTCCAGC'),
+    ('CCTGTTGCT', 'CCCGTTGCT'),
+])
+@pytest.mark.parametrize('interspersed', [False, True])
+def test_primer_linked_motif_variants_keep_length_evidence(tmp_path, motif, variant, interspersed):
+    rng = random.Random(51)
+    left, right = [''.join(rng.choices('ACGT', k=90)) for _ in range(2)]
+    unit, count = len(motif), 30
+    sequence = left+((motif*3+variant*3)*5 if interspersed else motif*15+variant*15)+right
+    locus = Locus('variant', forward_primer=left[:20], reverse_primer=revcomp(right[-20:]),
+                  repeat_unit_length_bp=unit, expected_product_size_bp=len(sequence), nominal_repeat_units=count)
+    template = locus_templates([locus])[locus.locus_id]
+    length = 90+6*unit
+    reads = [pair(sequence[:length], sequence[-length:], str(i)) for i in range(12)]
+    items = ShortReadRecruiter({locus.locus_id: template}, 's').recruit(reads).evidence
+    learned, info = learn_template(items, template)
+    assert info['graph_ready']
+    assert not learned.primer_only
+    calls, _, _, _ = run_reconstructed_fastq_inference(reads1=None, reads2=None,
+        pairs=iter(reads), loci=[locus], database_path=None, outdir=tmp_path,
+        sample_id='s', technology='illumina', minimum_molecules=2, minimum_probability=.8,
+        insert_mean=len(sequence), insert_sd=3)
+    assert calls[0]['repeat_count'] == count
+    assert calls[0]['inference_method'] == 'INFERRED'
+
+
+@pytest.mark.parametrize('outside', [False, True])
+def test_unrelated_or_outside_primer_repeats_do_not_make_a_graph(outside):
+    locus, template, sequence, _ = fixture(30)
+    if outside:
+        # The same abundant repeat occurs beyond both primers, not within them.
+        reads = [pair('A'*60+sequence[:120], sequence[-120:]+'A'*60, str(i)) for i in range(5)]
+    else:
+        # Two different repeat families at opposite boundaries cannot be joined.
+        reads = [pair(sequence[:180]+'ATGACCGTA'*4, 'GCCTTACGA'*4+sequence[-180:], str(i))
+                 for i in range(5)]
+    items = ShortReadRecruiter({locus.locus_id: template}, 's').recruit(reads).evidence
+    learned, info = learn_template(items, template)
+    assert learned.primer_only and not info['graph_ready']
+
+
 def test_sample_learning_reuses_unchanged_pileups(monkeypatch):
     from mlvamaps import sample_reconstruction
     from mlvamaps.progress import ProgressReporter

@@ -241,6 +241,7 @@ def cyclic_match(sequence: str, motif: str) -> bool:
 
 
 @lru_cache(maxsize=4096)
+@lru_cache(maxsize=4096)
 def repeat_fraction(sequence: str, motif: str) -> float:
     """Matched bases in the best cyclic, gapped repeat alignment / read length.
 
