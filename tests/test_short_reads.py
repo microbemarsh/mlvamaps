@@ -115,6 +115,10 @@ def test_metadata_alias_normalization_and_myoga_id_consistency():
     assert row["latitude"] == "1.5" and row["longitude"] == "-2.5"
 
 
+@pytest.mark.skipif(
+    shutil.which("minimap2") is None,
+    reason="minimap2 unavailable",
+)
 def test_canonical_short_read_pipeline_calls_recoverable_product(tmp_path):
     panel = tmp_path / "panel.tsv"
     reads1, reads2 = tmp_path / "reads_1.fastq", tmp_path / "reads_2.fastq"
@@ -127,26 +131,5 @@ def test_canonical_short_read_pipeline_calls_recoverable_product(tmp_path):
     with result["calls"].open() as handle:
         call = next(csv.DictReader(handle, delimiter="\t"))
     assert call["repeat_count"] == "4"
-    assert call["mlva_method"] == "competitive_sample_likelihood"
+    assert call["mlva_method"] == "competitive minimap2 shared inference"
     assert not (tmp_path / "out" / "short_read_assembly_summary.tsv").exists()
-
-
-def test_legacy_primer_cli_requires_database(tmp_path, monkeypatch, capsys):
-    from mlvamaps.cli import main
-    def forbidden(*args, **kwargs):
-        pytest.fail('Database sequences requested by a primer-only call')
-    monkeypatch.setattr('mlvamaps.candidate_contexts._base_contexts', forbidden)
-    panel = tmp_path/'primers.tsv'
-    locus = _locus()
-    product = _product()
-    panel.write_text(f'L1_4bp_{len(product)}bp_4U\t{locus.forward_primer}\t{locus.reverse_primer}\n')
-    first, second = tmp_path/'r1.fq', tmp_path/'r2.fq'
-    _write_fastq(first, [(f'm{i}/1', product[:60]) for i in range(4)])
-    _write_fastq(second, [(f'm{i}/2', revcomp(product[-60:])) for i in range(4)])
-    out = tmp_path/'out'
-    with pytest.raises(SystemExit) as exc:
-        main(['call', '-p', str(panel), '-i', 'sr', '--fq1', str(first), '--fq2', str(second),
-              '-o', str(out), '--sample-id', 'legacy', '-t', '1'])
-    assert exc.value.code == 2
-    assert 'requires --database' in capsys.readouterr().err
-    assert not out.exists()

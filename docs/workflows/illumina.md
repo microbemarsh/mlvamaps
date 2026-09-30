@@ -1,124 +1,150 @@
-# Illumina paired-end FASTQ
+# Illumina short-read workflow
 
-SR FASTQ calling requires **`--database`**. Assembly and default accurate
-long-read calling remain database independent. Taxonomic classification always
-requires a database and runs separately from repeat measurement.
+Illumina mode uses the shared FASTQ architecture. Pair identity is retained
+through competitive minimap2 mapping against candidate MLVA allele contexts.
+Illumina-specific molecule, overlap, boundary, repeat-indel, and pair-geometry
+evidence then enters the same locus-level inference used for long reads.
 
-```bash
-mlvamaps call -i sr --fq1 sample_R1.fastq.gz --fq2 sample_R2.fastq.gz \
-  --database references -p primers.tsv -o results -t 8
-mlvamaps call -p panel.tsv -i reads/ --short-reads \
-  --database references -o results -t 8
-```
-
-A reference build can supply its saved panel when `-p` is omitted. Mate 2 is
-optional. QC retains usable orphan mates, and recruitment preserves both mates
-when only one maps. Minimap2 is required. There is no short-read engine selector.
-
-The calling sequence is:
-
-1. Filter and validate FASTQs.
-2. Competitively map reads against the database's candidate contexts for all
-   panel loci. Duplicate references and allele expansions do not multiply
-   molecule support. Cross-locus ties remain unassigned.
-3. Classify reads against supported reference flanks. Measure complete products
-   and reads spanning both repeat boundaries; reconstruct unique overlaps where
-   useful. Unobserved bases remain `N`.
-4. For unresolved lengths, use inward mate geometry with empirical or supplied
-   insert statistics. A single boundary supplies a lower bound, never an exact
-   count. Equally supported lengths retain a provisional best count, its
-   conditional probability, and alternatives.
-5. Estimate remaining lengths from whole-input k-mer coverage only when an
-   observed, primer-connected graph and usable flank depth exist.
-6. Apply shared assembly calibration and Sassy PCR to recovered complete
-   products, then write repeat/SNP results and database classification.
-
-The database identifies locus context; its stored repeat count is not a sample
-call. Reads can establish alleles outside the reference candidate grid, including
-half-repeat alleles. Reference-relative lengths assume the unobserved flanks
-have the reference lengths; validate these assumptions on real libraries.
-Up to eight equally supported reference backgrounds are evaluated. Conflicting
-lengths and larger background ties remain unresolved.
-
-Legacy three-column panels are supported. Calibrated locus names or panel
-columns supply repeat-unit and product-length calibration. Reference contexts
-provide the internal flanks missing from primer-only panels. A database lacking
-a locus cannot supply a call for that locus.
-
-There are no minimum supporting-molecule or depth cutoffs. Confidence, support,
-intervals and failure reasons remain explicit. The hierarchy is `DIRECT` →
-`RECONSTRUCTED` → `INFERRED`, with `AMBIGUOUS`, `MIXED` and no-call outcomes.
-`KMER_DEPTH` ratios remain in `repeat_length_estimates.json` as `diagnostic_only`.
-Matching sequence elsewhere and coverage bias can inflate these ratios even
-with balanced flank coverage. If no length-based point estimate exists, the
-ratio is also reported as `ESTIMATED`, with confidence 0 and coverage-sensitivity
-bounds. If no ratio is available, a `PANEL_PRIOR` uses the panel nominal count
-or midpoint of the panel range, constrained by observed lower bounds, with
-confidence 0. These values are visible in calls, fingerprints, and reports;
-they do not count as exact concordance or reference/profile support. Original
-likelihood distributions remain available. Missing repeat metadata is explicit.
-
-`reference_calling/summary.tsv` records outcomes and reference IDs, alongside
-candidate contexts and provenance. BAMs are retained with `--keep-intermediates`.
-Calls include `reference_assisted` provenance. `short_read_repeat_evidence.tsv`
-records evidence counts, product/VNTR lengths and uncertainty;
-`reconstructed_locus_variants.tsv` retains sample-derived sequence.
-`short_read_run_metadata.json` identifies the caller as
-`competitive_reference_likelihood`.
-
-## Performance and CPU allocation
-
-Reference mapping uses the sample's `--threads` budget. HTSlib streams alignment
-scores directly into molecule/background support; BAM writing and full alignment
-decoding are skipped unless needed. `--keep-intermediates` retains the BAMs.
-The database's `short.mmi` is reused when its candidate FASTA exactly matches the
-requested targets; a subset panel uses its own targets. Normal runs reuse the QC
-FASTQs. One combined replay retains mapped pairs and orphan mates; input is not
-replayed separately for each locus. Iterator-only API inputs use temporary FASTQs.
-Reference fitting runs across process workers within the sample's thread budget,
-capped by the locus count. Memory scales with recruited evidence, supported
-backgrounds and active workers. Optional rapidgzip/ISA-L acceleration remains available.
-
-Progress separates mapping, QC replay and individual locus fits.
-`reference_calling/performance.json` records their timings, alignment counts,
-candidate/background counts, index reuse and worker usage. The bracketed time
-in progress messages is elapsed run time, not the duration of the named step.
-
-Use `--force` when comparing previously completed server runs. Historical
-sample-only benchmarks exercise lower-level recovery helpers, which remain
-available for synthetic validation; they do not measure the database-backed
-SR command's total runtime.
-
-## Validation commands
+## Command line
 
 ```bash
-python -m pytest -q
-python scripts/benchmark_reconstruction.py --output bench/direct --molecules 10000 --threads 1
-python scripts/benchmark_reconstruction.py --output bench/unresolved --molecules 10000 --scenario unresolved --threads 1
-python scripts/benchmark_reconstruction.py --output bench/pileup --molecules 12000 --scenario pileup --threads 4
-python scripts/benchmark_reconstruction.py --output bench/depth --molecules 12000 --scenario depth --threads 2
-python scripts/benchmark_short_read_recruitment.py --help
-python scripts/benchmark_cross_mode.py manifest.tsv --output comparison.json
+mlvamaps call -p panel.tsv -i sr \
+  --fq1 SRR000001_1.fastq.gz \
+  --fq2 SRR000001_2.fastq.gz \
+  --profiles profiles.tsv \
+  --database reference_build \
+  --sample-metadata metadata.tsv \
+  --sample-id SRR000001 \
+  -o results/SRR000001 -t 8
 ```
 
-The cross-mode manifest has `sample_id`, `mode` (`assembly`, `sr`, `lr`, `mlva_finder`) and
-`outdir`. Run assembly and FASTQ independently with the same panel. Assembly is
-a validation target and is never supplied as training labels or expected calls.
-The comparison reports exact/±1 concordance, dropout, incorrect-call rate,
-per-locus call rates, SNP concordance and available short-read QC features.
-It also reports `best_estimates_including_ambiguous` concordance separately
-from confident-call metrics. The companion `.loci.tsv` includes both best
-estimates, statuses, and their absolute differences.
-For direct comparison with assembly + MLVA_finder, use its detailed
-`*_output.csv` as the `mlva_finder` row's `outdir` and its exact `strain` value
-as `source_sample`. Add `--require-exact` to fail on mismatched counts, missing
-calls or missing paired runs after writing the reports. See the
-[manifest example](../../scripts/README.md#cross-mode-validation).
-Unresolved SR loci count as missing recoveries when MLVA_finder calls them;
-preventing false counts alone does not establish equivalent call recovery.
-Synthetic performance fixtures are not a substitute for paired real assemblies
-and Illumina libraries. Resource measurements are described in the
-[refactor validation report](../reference/short-read-validation.md).
+For single-end data, omit `--fq2`. Mates are not inferred from filenames.
+Interleaved FASTQ is not supported. Compressed files are read without whole-file
+decompression. Pair files must have equal record counts and matching normalized
+IDs at every record.
+
+For multiple paired samples in one directory, filenames can supply the pairing:
+
+```bash
+mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads \
+  --sample-metadata metadata.tsv -o results -t 32
+```
+
+This recognizes exact `PREFIX_1.fastq.gz` and `PREFIX_2.fastq.gz` suffixes,
+uses `PREFIX` as the sample ID, and fails before analysis if either mate is
+missing. Discovery is non-recursive and ignores unrelated filenames.
+
+## QC
+
+The defaults require 40 post-trim bases and mean Q15. Three-prime trimming is
+disabled unless `--short-trim-quality` is set. With the default
+`--short-min-pair-retention 0.5`, a good mate remains as an orphan if the other
+mate fails. IDs and mate association are not rewritten.
+
+`short_read_qc_summary.tsv` reports input, rejected, retained, and orphan
+counts. When enough exact opposite-orientation mappings exist, it also records
+the empirical fragment-span median, median absolute deviation, and pair count.
+
+## Competitive locus-context mapping
+
+Contexts come from one of two explicit sources:
+
+1. the versioned `competitive_mapping/candidate_metadata.tsv` and
+   `competitive_mapping/candidate_contexts.fasta` files in a
+   current `--database`; or
+2. complete products synthesized from a rich panel's primers, flanks, motif,
+   and expected repeat range when no database is supplied.
+
+A primer-only panel cannot define the repeat boundaries required by this
+algorithm and is rejected with guidance to build a reference database or enrich
+the panel.
+
+Filtered mates are mapped once with minimap2 against all candidate MLVA contexts,
+without an early taxon restriction. Contexts retain locus, reference, taxon,
+repeat interval, expected allele, and flank provenance. Equivalent alignments
+remain available to inference rather than being forced to one reference.
+
+Mate scores are resolved together. A confident mate can rescue its unaligned
+mate, equal best scores across loci are ambiguous, and confident mates assigned
+to different loci are discordant. Neither category is counted as unique support
+for multiple loci. Conventional MAPQ contributes to locus assignment but does
+not define allele confidence among intentionally similar repeat states.
+
+When database resources are available, the candidate FASTA, metadata,
+provenance, and `short.mmi` index are reused directly. They are not copied or
+regenerated for every sample. Without a database, locally synthesized resources
+are written under the sample's `candidate_mapping/` directory.
+
+## Direct VNTR inference
+
+Candidate alleles vary only in whole repeat units. Evidence includes unique
+flank mappings, boundary junctions, full VNTR spans, opposite-flank proper pairs,
+forced. Candidate competition, not the primary alignment label alone, supplies
+repeat-state evidence; no per-locus de novo assembly is required.
+
+When `--database` is supplied, it must contain the versioned
+`competitive_mapping/candidate_metadata.tsv`, `candidate_contexts.fasta`, and
+technology-specific minimap2 indexes produced by the
+current reference builder. Older databases must be rebuilt rather than being
+silently reinterpreted. minimap2 output is streamed through htslib rather than
+materialized as text SAM. `--keep-intermediates` retains the filtered reads and
+compressed `candidate_mapping/candidate_alignments.bam`; with a database, the
+candidate bank and index continue to reside in the database.
+
+## Automatic taxon identification
+
+With `--database`, the original retained molecules are aligned competitively
+against observed reference amplicons. Sequence mismatches and resolvable
+repeat-length differences contribute to the shared alignment-likelihood model.
+Isolate mode combines evidence for one reference source; metagenome mode uses
+EM to estimate reference-component support. Taxon labels annotate reference
+groups without pooling their support.
+
+Results are written under `classification/`, appended to `profile_matches.tsv`,
+and shown in `report.html`. Sequence evidence can remain informative when a
+repeat count is unresolved. Low-support and indistinguishable references remain
+explicit. See [mapping classification](../concepts/mapping-classification.md).
+
+## Exact, interval, and presence evidence
+
+Each contig, merged pair, and original read is evaluated with the same panel
+anchors and assembly-calibrated repeat convention used elsewhere in mlvamaps.
+Evidence is classified as:
+
+- `COMPLETE_ASSEMBLED_PRODUCT`
+- `BOUNDARY_SPANNING_READ_PAIR`
+- `BOUNDARY_SPANNING_SINGLE_READ`
+- `PARTIAL_REPEAT_EVIDENCE`
+- `PRESENCE_ONLY`
+- `AMBIGUOUS_ASSEMBLY`
+- `MULTIPLE_ALLELES`
+- `LOW_DEPTH`
+- `NOT_FOUND`
+
+An exact `repeat_count` requires a contig, merged pair, or original read that
+directly resolves both repeat boundaries. The two boundaries may be the rich
+panel flanks or, when flanks are absent, the product primers. A read inside the
+repeat or covering one boundary cannot create an exact value.
+
+Opposite boundaries on separate mates may produce `repeat_count_min` and
+`repeat_count_max`. Empirical insert size can narrow that interval when at
+least two concordant spans support it. The midpoint is never copied into
+`repeat_count`. Without an adequate insert estimate, the panel's expected range
+is retained and the reason explains why.
+
+## Mixtures and confidence
+
+Allele support counts only molecules with discriminating boundary evidence.
+Repeat-internal locus reads remain in `uninformative_locus_reads`. Multiple
+defensible alleles are preserved with primary/secondary support, informative
+molecules, fractions, and `mixture_status`. Fractions are left empty when no
+allele-discriminating molecule exists.
+
+Confidence reasons are textual and auditable. A primer/flank-bounded local
+assembly with adequate molecule support is high confidence; direct molecule
+evidence without depth is provisional; conflicts lower confidence; interval or
+presence-only rows have no falsely precise probability. The HTML report uses a
+dedicated Illumina table and labels unresolved rows explicitly.
 
 ## Metadata and MYOGA
 
@@ -143,9 +169,9 @@ SRR000002\t/path/SRR000002.fastq.gz\t.\tSAMN000002
 ```
 
 ```bash
-mlvamaps call -p panel.tsv -i sr --manifest samples.tsv --database references \
+mlvamaps call -p panel.tsv -i sr --manifest samples.tsv \
   --sample-metadata metadata.tsv \
-  --profiles profiles.tsv \
+  --profiles profiles.tsv --database reference_build \
   -o results -t 32
 ```
 
@@ -164,13 +190,13 @@ large samples or memory-constrained nodes:
 
 ```bash
 export MLVAMAPS_MAX_CONCURRENT_SAMPLES=2
-mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads --database references \
-  -o results -t 32
+mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads \
+  --database reference_build -o results -t 32
 ```
 
 Completion order does not change combined output order. Within each sample,
-FASTQ/QC streams in bounded chunks and process workers recruit molecules
-against reference targets. Progress reports sample/worker allocation and stage
+FASTQ/QC streams in bounded chunks and minimap2 performs the allocated
+multithreaded alignment. Progress reports sample/worker allocation and stage
 transitions unless `--quiet` is selected.
 
 For Slurm arrays, split the manifest by row while preserving its header and run
@@ -188,7 +214,7 @@ python examples/make_illumina_example.py examples/illumina_demo
 Then run:
 
 ```bash
-mlvamaps call -p examples/illumina_demo/panel.tsv -i sr --database references \
+mlvamaps call -p examples/illumina_demo/panel.tsv -i sr \
   --fq1 examples/illumina_demo/SRR_DEMO_1.fastq.gz \
   --fq2 examples/illumina_demo/SRR_DEMO_2.fastq.gz \
   --sample-id SRR_DEMO \
@@ -209,14 +235,12 @@ mlvamaps call -p examples/illumina_demo/panel.tsv \
 
 - **Different FASTQ counts or IDs:** regenerate mates together; do not sort one
   file independently.
-- **Many ambiguous pairs:** review similar primers in the panel. Where known,
-  provide longer, divergent locus flanks in a rich panel.
-- **Presence-only locus:** examine the evidence reason. Informative partial
-  reads retain a provisional estimate or lower bound; flank-only reads without
-  usable fragment-length information cannot estimate repeat number. An
-  incomplete primer-only product also needs reconstruction or additional
-  repeat-boundary information. Expected-range midpoints are not measurements.
+- **Many ambiguous pairs:** provide a reference build with longer, divergent
+  locus flanks and review similar loci in the panel.
+- **Presence-only locus:** this is expected when neither reads nor the local
+  graph resolve both boundaries. Do not replace the blank call with the
+  expected-range midpoint.
 - **Database predates the context schema:** rebuild it with the current
-  `mlvamaps build-reference`; SR FASTQ calling requires current reference assets.
+  `build-reference` command, or omit `--database` and provide a rich panel.
 - **MYOGA row does not attach to a tip:** make `genome_id` exactly equal to the
   Newick label, including suffixes and case.

@@ -190,14 +190,15 @@ def parse_minimap2_sam(
     sample_id: str,
     min_mapping_quality: int = 0,
     min_base_quality: int = 20,
-    min_snp_depth: int = 0,
-    min_snp_alternate_reads: int = 0,
+    min_snp_depth: int = 3,
+    min_snp_alternate_reads: int = 2,
     min_snp_frequency: float = 0.2,
 ) -> tuple[list[dict], list[dict]]:
     """Summarize locus-relative mappings and call simple quality-filtered SNPs."""
     if min_mapping_quality < 0 or min_base_quality < 0:
         raise ValueError("mapping and base quality thresholds must be non-negative")
-    # Legacy SNP count thresholds remain accepted without censoring observations.
+    if min_snp_depth < 1 or min_snp_alternate_reads < 1:
+        raise ValueError("SNP depth and alternate-read thresholds must be at least 1")
     if not 0.0 <= min_snp_frequency <= 1.0:
         raise ValueError("min_snp_frequency must be between 0 and 1")
     total_reads = Counter(row["locus_id"] for row in queries.values())
@@ -255,6 +256,8 @@ def parse_minimap2_sam(
             if position < 0 or position >= len(sequence):
                 continue
             depth = sum(counts.values())
+            if depth < min_snp_depth:
+                continue
             reference_base = sequence[position]
             if reference_base not in _DNA_BASES:
                 continue
@@ -264,7 +267,7 @@ def parse_minimap2_sam(
                 alternate_depth = counts[alternate_base]
                 frequency = alternate_depth / depth
                 if (
-                    not alternate_depth
+                    alternate_depth < min_snp_alternate_reads
                     or frequency < min_snp_frequency
                 ):
                     continue
@@ -336,8 +339,8 @@ def run_locus_mapping(
     preset: str | None = "sr",
     min_mapping_quality: int = 0,
     min_base_quality: int = 20,
-    min_snp_depth: int = 0,
-    min_snp_alternate_reads: int = 0,
+    min_snp_depth: int = 3,
+    min_snp_alternate_reads: int = 2,
     min_snp_frequency: float = 0.2,
     primary_product_sequences: dict[str, str] | None = None,
 ) -> tuple[list[dict], list[dict], dict[str, Path]]:

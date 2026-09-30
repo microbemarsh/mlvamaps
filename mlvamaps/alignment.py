@@ -5,13 +5,6 @@ import parasail
 
 _DNA_MATRIX = parasail.matrix_create("ACGTN", 0, -1)
 
-# Unknown positions in recovered products carry no nucleotide evidence. A
-# mismatch penalty can otherwise turn a masked terminal run into deletions.
-MASKED_DNA_MATRIX = parasail.matrix_create("ACGTN", 2, -4)
-for _base in range(5):
-    MASKED_DNA_MATRIX.set_value(4, _base, 0)
-    MASKED_DNA_MATRIX.set_value(_base, 4, 0)
-
 
 def alignment_metrics(query: str, target: str) -> dict[str, int | str]:
     """Return exact edit metrics from a SIMD Parasail global traceback."""

@@ -1,4 +1,4 @@
-"""Shared read QC and the targeted FASTQ reconstruction entry point."""
+"""Shared Illumina helpers and the competitive minimap2 entry point."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ SHORT_CALL_EXTRA_FIELDS = [
     "read_technology", "evidence_class", "informative_molecule_count",
     "boundary_1_support", "boundary_2_support", "both_boundary_support",
     "repeat_count_min", "repeat_count_max",
-    "repeat_count_interval_kind",
     "repeat_count_interval_reason", "confidence_reason", "short_read_warning",
     "recruited_read_pairs",
     "failure_reason", "primary_allele_support", "secondary_allele_support",
@@ -111,12 +110,24 @@ def merge_read_pair(
     return ReadRecord(f"{pair.molecule_id}/merged", "".join(sequence), "".join(quality))
 
 
+def _merge_overlap_is_repeat_only(pair: ReadPair, merged: ReadRecord, locus: Locus) -> bool:
+    if pair.read2 is None or not locus.repeat_motif:
+        return False
+    overlap = len(pair.read1.sequence) + len(pair.read2.sequence) - len(merged.sequence)
+    if overlap <= 0:
+        return False
+    motif = locus.repeat_motif.upper()
+    if not motif or set(motif) - set("ACGT"):
+        return False
+    periodic = motif * math.ceil((overlap + len(motif) * 2) / len(motif))
+    return pair.read1.sequence[-overlap:].upper() in periodic
+
+
 def _allele_rows(call_rows: list[dict]) -> list[dict]:
     return [{
         "sample_id": row["sample_id"], "locus_id": row["locus_id"],
         "called_repeat_count": row["repeat_count"],
         "posterior_probability": row["allele_confidence"],
-        "confidence_kind": row.get("confidence_kind", ""),
         "second_best_repeat_count": row["second_best_repeat_count"],
         "second_best_posterior": row["second_best_probability"],
         "read_depth": row["read_depth"], "primary_read_depth": row["primary_read_depth"],
@@ -141,31 +152,22 @@ def run_short_read_call(
     profiles_path: str | None = None, database_path: str | None = None,
     sample_metadata: dict[str, str] | None = None, short_min_read_length: int = 40,
     short_min_mean_quality: float = 15.0, short_trim_quality: int = 0,
-    short_min_pair_retention: float = 0.5, min_depth: int = 0,
+    short_min_pair_retention: float = 0.5, min_depth: int = 3,
     threads: int = DEFAULT_THREADS, keep_intermediates: bool = False,
     sample_mode: str = "isolate", minimap2_bin: str = "minimap2",
-    short_min_spanning_pairs: int = 0, short_confidence_threshold: float = 0.8,
-    short_max_candidate_repeat_count: int = 100,
+    short_min_mapping_quality: int = 0,
+    short_min_spanning_pairs: int = 2, short_confidence_threshold: float = 0.8,
+    short_max_candidate_repeat_count: int = 100, short_consider_secondary: bool = True,
     reference_metadata_path: str | None = None,
     taxon_min_loci: int | None = None,
     taxon_identification: bool | None = None,
     show_progress: bool = True,
-    missing_locus_min_depth: float = 0.0,
+    missing_locus_min_depth: float = 3.0,
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
-    insert_mean: float | None = None,
-    insert_sd: float | None = None,
-    technology: str = "illumina",
-    round_tolerance: float = .25,
-    max_anchor_edits: int = 3,
-    min_mixture_fraction: float = .01,
-    min_secondary_reads: int = 0,
-    sr_recruitment_audit: str = "compact",
-    short_repeat_fraction: float = .7,
-    taxon_screen_summary: dict | None = None,
 ) -> dict[str, Path]:
-    """Call reference-backed Illumina data; retain the sample-only library helper."""
+    """Call Illumina data with competitive minimap2 candidate mapping."""
     from .short_read_mapping import run_mapping_short_read_call
 
     return run_mapping_short_read_call(
@@ -177,18 +179,15 @@ def run_short_read_call(
         short_min_pair_retention=short_min_pair_retention, min_depth=min_depth,
         threads=threads, keep_intermediates=keep_intermediates, sample_mode=sample_mode,
         minimap2_bin=minimap2_bin,
+        short_min_mapping_quality=short_min_mapping_quality,
         short_min_spanning_pairs=short_min_spanning_pairs,
         short_confidence_threshold=short_confidence_threshold,
         short_max_candidate_repeat_count=short_max_candidate_repeat_count,
+        short_consider_secondary=short_consider_secondary,
         missing_locus_min_depth=missing_locus_min_depth,
         missing_locus_min_fraction=missing_locus_min_fraction,
         missing_locus_penalty=missing_locus_penalty,
         classification_repeat_scale=classification_repeat_scale,
-        insert_mean=insert_mean, insert_sd=insert_sd,
-        sr_recruitment_audit=sr_recruitment_audit, short_repeat_fraction=short_repeat_fraction,
-        taxon_screen_summary=taxon_screen_summary,
-        technology=technology, max_anchor_edits=max_anchor_edits, round_tolerance=round_tolerance,
-        min_mixture_fraction=min_mixture_fraction, min_secondary_reads=min_secondary_reads,
         reference_metadata_path=reference_metadata_path,
         taxon_min_loci=taxon_min_loci,
         taxon_identification=taxon_identification,

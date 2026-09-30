@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from collections import defaultdict
-from contextlib import nullcontext
 from pathlib import Path
-from tempfile import TemporaryFile
 
 import pysam
 
@@ -117,64 +114,32 @@ def run_minimap2_competitive(command: list[str], sam_path: str | Path) -> None:
         )
 
 
-def run_minimap2_competitive_bam(command: list[str], bam_path: str | Path | None,
-                               *, score_groups=None, on_progress=None, statistics=None):
-    """Stream SAM through HTSlib, optionally reducing scores without a BAM round trip."""
-    bam_path = Path(bam_path) if bam_path is not None else None
-    if bam_path is not None:
-        bam_path.parent.mkdir(parents=True, exist_ok=True)
-    scores = defaultdict(dict)
-    records = 0
-    # Drain stderr to disk while consuming stdout: a full stderr pipe must not
-    # block minimap2 midway through a large input.
-    with TemporaryFile() as errors, subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors) as process:
+def run_minimap2_competitive_bam(command: list[str], bam_path: str | Path) -> None:
+    """Stream minimap2 SAM directly through htslib into compressed BAM."""
+    bam_path = Path(bam_path)
+    bam_path.parent.mkdir(parents=True, exist_ok=True)
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
         assert process.stdout is not None
         try:
-            with pysam.AlignmentFile(process.stdout, "r") as source, (
-                pysam.AlignmentFile(str(bam_path), "wb", template=source)
-                if bam_path is not None else nullcontext()
+            with pysam.AlignmentFile(process.stdout, "r") as source, pysam.AlignmentFile(
+                str(bam_path), "wb", template=source
             ) as output:
-                groups = [score_groups.get(name) for name in source.references] if score_groups is not None else []
                 for alignment in source.fetch(until_eof=True):
-                    records += 1
-                    if output is not None:
-                        output.write(alignment)
-                    if on_progress is not None and records % 100000 == 0:
-                        on_progress(records)
-                    if score_groups is None or alignment.is_unmapped or alignment.is_supplementary:
-                        continue
-                    group = groups[alignment.reference_id]
-                    if group is None:
-                        continue
-                    molecule, named_mate = normalize_read_id(alignment.query_name)
-                    mate = 1 if alignment.is_read1 else 2 if alignment.is_read2 else named_mate
-                    try:
-                        score = float(alignment.get_tag('AS'))
-                    except KeyError:
-                        score = float(max(alignment.query_alignment_length, 0))
-                    mates = scores[molecule].setdefault(group, {})
-                    if mate not in mates or score > mates[mate]:
-                        mates[mate] = score
+                    output.write(alignment)
         except Exception:
             process.kill()
             process.wait()
-            if bam_path is not None:
-                bam_path.unlink(missing_ok=True)
-            raise
-        returncode = process.wait()
-        errors.seek(0)
-        stderr = errors.read().decode(errors="replace") if returncode else ''
-    if returncode:
-        if bam_path is not None:
             bam_path.unlink(missing_ok=True)
+            raise
+        stderr = (process.stderr.read() if process.stderr is not None else b"").decode(
+            errors="replace"
+        )
+        returncode = process.wait()
+    if returncode:
+        bam_path.unlink(missing_ok=True)
         raise RuntimeError(
             f"minimap2 competitive candidate mapping failed ({returncode}): {stderr.strip()}"
         )
-    if statistics is not None:
-        statistics.update(alignment_records=records, mapped_molecules=len(scores))
-    if on_progress is not None:
-        on_progress(records)
-    return dict(scores) if score_groups is not None else None
 
 
 def parse_candidate_alignments(
@@ -266,8 +231,7 @@ def map_reads_to_candidates_bam(
     max_secondary: int = 100,
     include_unknown_repeats: bool = False,
     retain_all_competitors: bool = False,
-    score_groups=None, keep_alignments: bool = True, on_progress=None, statistics=None,
-) -> list[CandidateAlignment] | dict:
+) -> list[CandidateAlignment]:
     """Map without materializing text SAM; pysam/htslib decodes CIGAR and tags."""
     resolved = shutil.which(executable) or (executable if Path(executable).is_file() else None)
     if resolved is None:
@@ -278,16 +242,5 @@ def map_reads_to_candidates_bam(
     if retain_all_competitors:
         position = command.index("-t")
         command[position:position] = ["-p", "0"]
-    if score_groups is not None:
-        score_groups = {context.candidate_id: score_groups[context.candidate_id] for context in contexts
-                        if context.candidate_id in score_groups
-                        and (context.repeat_count is not None or include_unknown_repeats)}
-        if not keep_alignments:
-            command.remove('--cs=long')  # Recruitment consumes AS, not base-difference strings.
-        return run_minimap2_competitive_bam(command, bam_path if keep_alignments else None,
-            score_groups=score_groups, on_progress=on_progress, statistics=statistics)
     run_minimap2_competitive_bam(command, bam_path)
-    rows = parse_candidate_alignments(bam_path, contexts, include_unknown_repeats)
-    if not keep_alignments:
-        Path(bam_path).unlink(missing_ok=True)
-    return rows
+    return parse_candidate_alignments(bam_path, contexts, include_unknown_repeats)

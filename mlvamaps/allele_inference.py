@@ -9,68 +9,14 @@ from dataclasses import dataclass
 from .alignment_evidence import CandidateEvidence
 from .candidate_contexts import CandidateContext
 from .models import Locus
-from .repeat_calibration import repeat_unit_length
-
-
-def retain_detected_estimate(call: dict, locus: Locus, depth_estimate: dict | None = None) -> dict:
-    """Retain a point estimate without claiming unsupported exact confidence.
-
-    Depth ratios and panel priors have no validated probability of correctness.
-    Their zero confidence means unassessed, not a probability that the count is
-    wrong. They never generate sequence or become definitive calls.
-    """
-    if call['status'] == 'not_found' or call.get('repeat_count') not in ('', None):
-        return call
-    estimate = (depth_estimate or {}).get('repeat_count')
-    reason = call.get('reason', '')
-    lower = call.get('repeat_count_min')
-    if (estimate is not None and 'repeat_length_lower_bound' in reason
-            and lower not in ('', None) and estimate < float(lower)):
-        estimate = None
-        reason += '; depth_estimate_below_observed_lower_bound'
-    if estimate is not None:
-        interval = depth_estimate['repeat_interval']
-        size = depth_estimate['amplicon_length']
-        call.update(product_size_bp=size,
-                    repeat_count_raw=depth_estimate.get('repeat_count_raw', ''),
-                    inference_method='KMER_DEPTH', confidence_kind='unvalidated_depth',
-                    repeat_count_interval_kind='coverage_sensitivity')
-        reason = '; '.join(filter(None, (reason, 'depth_estimate_unvalidated_locus_ownership_and_coverage')))
-    else:
-        if not repeat_unit_length(locus) and not locus.nominal_repeat_units:
-            call.update(confidence=0.0, best_probability=0.0, confidence_kind='missing_repeat_definition',
-                        reason='; '.join(filter(None, (reason, 'missing_repeat_unit_or_nominal_count'))))
-            return call
-        nominal = bool(locus.expected_product_size_bp or locus.nominal_repeat_units)
-        estimate = (locus.nominal_repeat_units if nominal else
-                    (locus.expected_min_repeats + locus.expected_max_repeats) / 2)
-        lower, upper = call.get('repeat_count_min'), call.get('repeat_count_max')
-        # A censored boundary constrains a prior, but the search ceiling is not
-        # an observed upper bound and must not truncate the nominal estimate.
-        if lower not in ('', None):
-            estimate = max(estimate, float(lower))
-        if upper not in ('', None) and 'repeat_length_lower_bound' not in reason:
-            estimate = min(estimate, float(upper))
-        interval = (lower if lower not in ('', None) else min(estimate, locus.expected_min_repeats),
-                    '' if 'repeat_length_lower_bound' in reason else
-                    max(estimate, float(upper)) if upper not in ('', None) else max(estimate, locus.expected_max_repeats))
-        call.update(repeat_count_raw='', inference_method='PANEL_PRIOR', confidence_kind='prior_only',
-                    repeat_count_interval_kind='lower_bound' if interval[1] == '' else 'prior_range')
-        reason = '; '.join(filter(None, (reason, 'nominal_count_prior' if nominal else 'panel_range_midpoint_prior')))
-    call.update(repeat_count=estimate, status='estimated', confidence=0.0, best_probability=0.0,
-                margin=0.0, best_candidate_repeat=estimate, dominant_repeat=estimate,
-                second_best_repeat_count='', second_best_probability=0.0,
-                candidate_distribution='', repeat_count_min=interval[0], repeat_count_max=interval[1],
-                reason=reason)
-    return call
 
 
 @dataclass(frozen=True)
 class InferenceThresholds:
-    minimum_molecules: int = 0  # Compatibility only; no molecule-count cutoff.
+    minimum_molecules: int = 3
     minimum_probability: float = 0.8
     minimum_margin: float = 0.2
-    mixture_min_molecules: int = 0  # Compatibility only.
+    mixture_min_molecules: int = 2
     mixture_min_fraction: float = 0.2
     temperature: float = 8.0
 
@@ -89,10 +35,6 @@ def _tier_weight(evidence: CandidateEvidence) -> float:
         return 12.0
     if evidence.full_repeat_span:
         return 8.0
-    if evidence.technology == "illumina" and not evidence.pair_geometry_support:
-        # One repeat boundary establishes presence, not the unseen tract length.
-        # Repeating that observation must not select a truncated candidate.
-        return 0.0
     if evidence.left_boundary_span and evidence.right_boundary_span:
         return 5.0
     if evidence.left_boundary_span or evidence.right_boundary_span:
@@ -148,10 +90,6 @@ def infer_alleles(
     for context in contexts:
         if context.repeat_count is not None and context.repeat_count not in states_by_locus[context.locus_id]:
             states_by_locus[context.locus_id].append(context.repeat_count)
-    # Direct observations need not lie on the reference candidate grid.
-    for row in evidence:
-        if row.measured_repeat_count is not None and row.measured_repeat_count not in states_by_locus[row.locus_id]:
-            states_by_locus[row.locus_id].append(row.measured_repeat_count)
     for states in states_by_locus.values():
         states.sort(key=float)
     by_locus_molecule: dict[tuple[str, str], list[CandidateEvidence]] = defaultdict(list)
@@ -194,11 +132,15 @@ def infer_alleles(
             secondary_fraction = mixture[1][1] / total if len(mixture) > 1 else 0.0
             if (
                 len(mixture) > 1
+                and mixture[1][1] >= thresholds.mixture_min_molecules
                 and secondary_fraction >= thresholds.mixture_min_fraction
+                and (technology != "illumina" or mixture[1][1] >= max(3, thresholds.mixture_min_molecules))
             ):
                 status = "mixed"
             elif best_probability < thresholds.minimum_probability or best_probability - second_probability < thresholds.minimum_margin:
                 status = "ambiguous"
+            elif len(informative) < thresholds.minimum_molecules:
+                status = "low_coverage"
             else:
                 status = "called"
 
@@ -221,17 +163,20 @@ def infer_alleles(
         )
         mixture = molecule_counts.most_common()
         total_informative = sum(molecule_counts.values())
-        calls.append(retain_detected_estimate({
+        calls.append({
             "sample": sample_id,
             "locus": locus.locus_id,
-            "repeat_count": best[0],
+            "repeat_count": best[0] if status in {"called", "low_coverage", "mixed"} else "",
             "status": status,
-            "confidence": round(best[1], 8),
-            "confidence_kind": "conditional_posterior",
+            "confidence": (
+                "high" if status == "called" and best[1] >= 0.95
+                else "moderate" if status == "called" else "low" if status == "low_coverage"
+                else "unresolved"
+            ),
             "best_probability": round(best[1], 8),
             "second_best_probability": round(second[1], 8),
             "margin": round(best[1] - second[1], 8),
-            "molecule_support": len(locus_items),
+            "molecule_support": len(informative),
             "direct_product_support": len(direct),
             "full_span_support": len(full),
             "junction_support": len(junction),
@@ -242,16 +187,14 @@ def infer_alleles(
             "secondary_repeat": mixture[1][0] if len(mixture) > 1 else "",
             "dominant_fraction": round(mixture[0][1] / total_informative, 8) if mixture else "",
             "secondary_fraction": round(mixture[1][1] / total_informative, 8) if len(mixture) > 1 else "",
-        }, locus))
+        })
     return calls, molecule_calls
 
 
 COMMON_LOCUS_CALL_FIELDS = [
-    "sample", "locus", "repeat_count", "repeat_count_raw", "status", "confidence",
+    "sample", "locus", "repeat_count", "status", "confidence",
     "best_probability", "second_best_probability", "margin", "molecule_support",
     "direct_product_support", "full_span_support", "junction_support",
     "best_candidate_repeat", "candidate_distribution", "technology",
     "dominant_repeat", "secondary_repeat", "dominant_fraction", "secondary_fraction",
-    "product_size_bp", "inference_method", "reason", "repeat_count_min", "repeat_count_max",
-    "confidence_kind", "repeat_count_interval_kind",
 ]

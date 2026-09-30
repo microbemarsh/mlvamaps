@@ -157,7 +157,6 @@ ALLELE_FIELDS = [
     "locus_id",
     "called_repeat_count",
     "posterior_probability",
-    "confidence_kind",
     "second_best_repeat_count",
     "second_best_posterior",
     "read_depth",
@@ -234,7 +233,6 @@ SIMPLE_CALL_FIELDS = [
     "primary_read_depth",
     "mean_coverage",
     "allele_confidence",
-    "confidence_kind",
     "second_best_repeat_count",
     "second_best_probability",
     "inference_method",
@@ -255,7 +253,6 @@ REPEAT_COUNT_FIELDS = [
     "read_depth",
     "primary_read_depth",
     "allele_confidence",
-    "confidence_kind",
     "dominant_variant_fraction",
     "secondary_alleles",
     "status",
@@ -329,7 +326,6 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
                 "primary_read_depth": int(row.get("primary_read_depth") or 0),
                 "mean_coverage": "",
                 "allele_confidence": row.get("posterior_probability", 0.0),
-                "confidence_kind": row.get("confidence_kind", "conditional_posterior"),
                 "second_best_repeat_count": row.get("second_best_repeat_count", ""),
                 "second_best_probability": row.get("second_best_posterior", 0.0),
                 "inference_method": (
@@ -367,11 +363,11 @@ def run_call(
     max_read_length: int = 100000,
     min_qscore: float = 15.0,
     max_primer_mismatches: int = 3,
-    min_depth: int = 0,
+    min_depth: int = 1,
     min_posterior: float = 0.75,
     repeat_range_tolerance: float = 1.0,
     min_mixture_fraction: float = 0.01,
-    min_secondary_reads: int = 0,
+    min_secondary_reads: int = 2,
     minimap2_bin: str = "minimap2",
     reference_metadata_path: str | None = None,
     taxon_min_loci: int | None = None,
@@ -379,8 +375,8 @@ def run_call(
     locus_mapping: bool = True,
     min_mapping_quality: int = 0,
     min_base_quality: int = 20,
-    min_snp_depth: int = 0,
-    min_snp_alternate_reads: int = 0,
+    min_snp_depth: int = 3,
+    min_snp_alternate_reads: int = 2,
     min_snp_frequency: float = 0.2,
     threads: int = DEFAULT_THREADS,
     show_progress: bool = False,
@@ -396,11 +392,10 @@ def run_call(
     taxon_screen_abs_threshold: int = 2,
     taxon_screen_rel_threshold: float = 0.01,
     deacon_bin: str = "deacon",
-    missing_locus_min_depth: float = 0.0,
+    missing_locus_min_depth: float = 3.0,
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
-    lr_engine: str = "spanning",
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
@@ -476,28 +471,6 @@ def run_call(
     progress.step(f"Kept {len(filtered_reads):,}/{len(reads):,} reads after QC")
     write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
-
-    if lr_engine not in {"spanning", "competitive"}:
-        raise ValueError("unknown long-read engine")
-    if lr_engine == "spanning":
-        from .short_reads import run_short_read_call
-        result = run_short_read_call(
-            reads1_path=str(outdir_path / "filtered_reads.fastq.gz"), reads2_path=None,
-            loci_path=loci_path, primers_path=primers_path, profiles_path=profiles_path,
-            database_path=database_path, outdir=str(outdir_path), sample_id=sample_id,
-            short_min_read_length=min_read_length, short_min_mean_quality=min_qscore,
-            min_depth=min_depth, short_confidence_threshold=min_posterior, threads=thread_count,
-            sample_mode=sample_mode, minimap2_bin=minimap2_bin, technology="hifi",
-            max_anchor_edits=max_primer_mismatches, min_mixture_fraction=min_mixture_fraction,
-            round_tolerance=assembly_round_tolerance,
-            min_secondary_reads=min_secondary_reads, reference_metadata_path=reference_metadata_path,
-            taxon_min_loci=taxon_min_loci, taxon_identification=taxon_identification,
-            show_progress=show_progress, missing_locus_min_depth=missing_locus_min_depth,
-            missing_locus_min_fraction=missing_locus_min_fraction, missing_locus_penalty=missing_locus_penalty,
-            classification_repeat_scale=classification_repeat_scale, taxon_screen_summary=screen_summary,
-        )
-        result.update(screen_paths)
-        return result
 
     # Candidate-competition inference is independent of SPOARS and runs first.
     # The established downstream sequence workflow remains confirmatory and
@@ -801,13 +774,11 @@ def run_call(
         status_map = {
             "called": "PASS", "low_coverage": "LOW_DEPTH",
             "detected_unresolved": "LOCUS_DROPOUT", "ambiguous": "AMBIGUOUS",
-            "estimated": "ESTIMATED",
             "not_found": "LOCUS_DROPOUT", "mixed": "MULTIPLE_VARIANTS",
         }
         row.update({
             "called_repeat_count": shared["repeat_count"],
             "posterior_probability": shared["best_probability"],
-            "confidence_kind": shared.get("confidence_kind", "conditional_posterior"),
             "second_best_repeat_count": (
                 str(shared["candidate_distribution"]).split(";")[1].split(":", 1)[0]
                 if len(str(shared["candidate_distribution"]).split(";")) > 1 else ""
@@ -818,7 +789,7 @@ def run_call(
             "dominant_variant_fraction": shared["dominant_fraction"] or 0,
             "allele_distribution": shared["candidate_distribution"],
             "call_status": status_map[str(shared["status"])],
-            "primary_measurement_source": shared.get("inference_method", "shared_competitive_minimap2_inference"),
+            "primary_measurement_source": "shared_competitive_minimap2_inference",
             "evidence_status": str(shared["status"]).upper(),
             "full_product_reads": shared["direct_product_support"],
             "repeat_informative_reads": shared["full_span_support"],

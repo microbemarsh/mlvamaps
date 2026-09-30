@@ -60,8 +60,6 @@ def match_profiles(
 ) -> list[dict]:
     if not profiles:
         return []
-    unvalidated = {str(row['locus_id']) for row in allele_rows or [] if row.get('call_status') == 'ESTIMATED'}
-    fingerprint = {locus: value for locus, value in fingerprint.items() if locus not in unvalidated}
     probability_by_locus = {
         str(row["locus_id"]): _allele_probability_map(row)
         for row in allele_rows or []
@@ -233,7 +231,6 @@ def profile_match_locus_rows(
     allele_rows: list[dict] | None = None,
 ) -> list[dict]:
     """Expand ranked profile comparisons to one machine-readable row per locus."""
-    unvalidated = {str(row['locus_id']) for row in allele_rows or [] if row.get('call_status') == 'ESTIMATED'}
     profile_by_id = {
         str(profile.get("profile_id", "")): profile for profile in profiles
     }
@@ -254,9 +251,7 @@ def profile_match_locus_rows(
             expected = profile.get(locus, "")
             difference: float | str = ""
             status = "NOT_COMPARED"
-            if locus in unvalidated:
-                status = 'ESTIMATED_NOT_COMPARED'
-            elif called not in ("", None) and expected not in ("", None):
+            if called not in ("", None) and expected not in ("", None):
                 try:
                     difference = abs(float(called) - float(expected))
                     status = "MATCH" if difference == 0 else "MISMATCH"

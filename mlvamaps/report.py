@@ -403,7 +403,6 @@ _STATUS_COLORS = {
     "PASS": "#56b4e9",
     "LOW_DEPTH": "#e69f00",
     "AMBIGUOUS": "#f0e442",
-    "ESTIMATED": "#f0e442",
     "MULTIPLE_VARIANTS": "#cc79a7",
     "OUT_OF_RANGE": "#ff9f80",
     "LOCUS_DROPOUT": "#a6b2bd",
@@ -420,15 +419,14 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
         count = _called_count(row.get(value_key))
         raw = row.get(raw_key, "")
         status = str(row.get("status" if assembly else "call_status", ""))
-        confidence = row.get('allele_confidence' if assembly else 'posterior_probability', '')
-        normalized.append((str(row.get("locus_id", "")), count, raw, status, confidence))
-    max_count = max((count for _locus, count, _raw, _status, _confidence in normalized if count is not None), default=1)
-    row_height = 42
+        normalized.append((str(row.get("locus_id", "")), count, raw, status))
+    max_count = max((count for _locus, count, _raw, _status in normalized if count is not None), default=1)
+    row_height = 29
     plot_left = 190
     plot_width = 600
     height = 65 + len(normalized) * row_height
     marks = []
-    for index, (locus_id, count, raw, status, confidence) in enumerate(normalized):
+    for index, (locus_id, count, raw, status) in enumerate(normalized):
         y = 42 + index * row_height
         color = _STATUS_COLORS.get(status, "#bdcbd6")
         width = 0 if count is None else (count / max(max_count, 1)) * plot_width
@@ -439,18 +437,17 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
             f'<text class="chart-label" x="8" y="{y + 14:.1f}">{_safe(locus_id)}</text>'
             f'<rect class="mapping-track" x="{plot_left}" y="{y:.1f}" width="{plot_width}" height="18" rx="3"/>'
             f'<rect x="{plot_left}" y="{y:.1f}" width="{width:.2f}" height="18" rx="3" fill="{color}" opacity="0.82">'
-            f'<title>{_safe(locus_id)}: {_safe(exact)}; {_safe(status)}; confidence {_safe(confidence)}</title></rect>'
+            f'<title>{_safe(locus_id)}: {_safe(exact)}; {_safe(status)}</title></rect>'
             f'<text class="chart-value" x="{plot_left + plot_width + 18}" y="{y + 13:.1f}">{_safe(exact)} · {_safe(status)}</text>'
-            f'<text class="chart-value" x="{plot_left + plot_width + 18}" y="{y + 29:.1f}">confidence {_safe(confidence)}</text>'
         )
     return f"""
 <figure class="chart-panel" aria-label="Individual locus repeat counts">
   <svg viewBox="0 0 1080 {height}" role="img">
     <title>Individual locus repeat counts</title>
-    <desc>Repeat-count calls and estimates at every panel locus, with call status.</desc>
+    <desc>Exact repeat count at every panel locus, shown independently of amplicon SNP bands.</desc>
     {"".join(marks)}
   </svg>
-  <figcaption>Bar length represents repeat units. AMBIGUOUS and ESTIMATED values are provisional. Confidence 0 for depth-based or prior-based estimates means the exact count has no validated confidence, not that it is certainly wrong. Depth intervals describe coverage sensitivity; prior ranges and lower bounds are not confidence intervals. Call status and confidence are printed beside each bar.</figcaption>
+  <figcaption>Bar length represents repeat units, with the exact call (and raw assembly estimate when applicable) printed at right. Call status is printed beside each bar as well as indicated by color.</figcaption>
 </figure>
 """
 
@@ -487,19 +484,19 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
             f'<text class="chart-label" x="8" y="{y + 4:.1f}">{_safe(row.get("locus_id", ""))}</text>'
             f'<line class="confidence-track" x1="{plot_left}" y1="{y:.1f}" x2="{x:.1f}" y2="{y:.1f}"/>'
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}">'
-            f'<title>{_safe(row.get("locus_id", ""))}: confidence {posterior:.3f}; depth {depth}; {status}</title></circle>'
+            f'<title>{_safe(row.get("locus_id", ""))}: posterior {posterior:.3f}; depth {depth}; {status}</title></circle>'
             f'<text class="chart-value" x="{plot_left + plot_width + 22}" y="{y + 4:.1f}">'
             f'{_safe(row.get("called_repeat_count", ""))}U · {_safe(status)}</text>'
         )
     return f"""
-<figure class="chart-panel" aria-label="Locus call confidence plot">
+<figure class="chart-panel" aria-label="Locus call posterior plot">
   <svg viewBox="0 0 {width} {height}" role="img">
     <title>Locus call confidence</title>
-    <desc>Confidence by locus. Point size reflects primary-cluster read depth and color reflects call status.</desc>
+    <desc>Posterior probability by locus. Point size reflects primary-cluster read depth and color reflects call status.</desc>
     {"".join(ticks)}
     {"".join(marks)}
   </svg>
-  <figcaption>Farther right is more confident under the reported evidence model. Zero confidence for depth or prior estimates means unvalidated. Point size scales with dominant-cluster read depth; status is also printed beside each point.</figcaption>
+  <figcaption>Farther right is more confident. Point size scales with dominant-cluster read depth; status is also printed beside each point.</figcaption>
 </figure>
 """
 
@@ -602,7 +599,7 @@ def _variant_mixture_svg(
             f'{_safe(dominant.get("variant_id", ""))} {dominant_fraction * 100:.1f}%</text>'
         )
     return f"""
-<figure class="chart-panel" aria-label="Variant abundance plot">
+<figure class="chart-panel" aria-label="EM-estimated variant abundance plot">
   <svg viewBox="0 0 1000 {height}" role="img">
     <title>Variant mixture abundance</title>
     <desc>Stacked estimated fractions of confirmed, candidate, and trace variants at each locus.</desc>
@@ -610,7 +607,7 @@ def _variant_mixture_svg(
     <text class="chart-axis" x="{plot_left + plot_width}" y="26" text-anchor="end">100%</text>
     {"".join(rows_svg)}
   </svg>
-  <figcaption>Estimated within-locus variant fractions. Confirmed variants are colored separately, candidates are amber, and trace components are combined in gray.</figcaption>
+  <figcaption>Abundance estimates from competitive read-mapping groups. Confirmed variants are colored separately, candidates are amber, and trace components are combined in gray.</figcaption>
 </figure>
 """
 
@@ -682,8 +679,6 @@ def write_report(
     local_assembly_rows = local_assembly_rows or []
     taxon_screen_summary = taxon_screen_summary or {}
     short_read_rows = short_read_rows or []
-    is_short_read = any(row.get("read_technology", "illumina") == "illumina" for row in short_read_rows)
-    canonical_mapping = any(row.get("method") == "canonical_variant_alignment" for row in mapping_rows)
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
@@ -696,7 +691,7 @@ def write_report(
     reference_best = reference_rows[0] if reference_rows else {}
     total_loci = len(allele_rows)
     flagged = low_depth + dropout + multiple + sum(
-        row.get("call_status") in {"AMBIGUOUS", "ESTIMATED", "OUT_OF_RANGE", "PRESENT_COUNT_UNKNOWN", "NOT_FOUND"}
+        row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE"}
         for row in allele_rows
     )
     summary_cards = [
@@ -745,13 +740,13 @@ def write_report(
         )
         summary_cards.append(
             _metric_card(
-                "Measured short-read products" if is_short_read else "POA assembly calls",
+                "POA assembly calls",
                 f"{poa_passed}/{len(local_assembly_rows)}",
-                "Recovered products with calibrated repeat counts" if is_short_read else "Dominant locus consensuses resolved by assembly PCR",
+                "Dominant locus consensuses resolved by assembly PCR",
                 "good" if poa_passed == len(local_assembly_rows) else "warn",
             )
         )
-    if mapping_rows and not canonical_mapping:
+    if mapping_rows:
         summary_cards.extend(
             [
                 _metric_card(
@@ -790,12 +785,9 @@ def write_report(
         )
     for status, title in (
         ("LOCUS_DROPOUT", "Missing loci"),
-        ("NOT_FOUND", "Missing loci"),
-        ("PRESENT_COUNT_UNKNOWN", "Detected loci without length evidence"),
         ("LOW_DEPTH", "Low-depth loci"),
         ("MULTIPLE_VARIANTS", "Mixed loci"),
         ("AMBIGUOUS", "Ambiguous loci"),
-        ("ESTIMATED", "Loci with provisional repeat estimates"),
         ("OUT_OF_RANGE", "Out-of-range loci"),
     ):
         affected = [str(row.get("locus_id", "")) for row in allele_rows if row.get("call_status") == status]
@@ -874,40 +866,23 @@ def write_report(
         local_assembly_section = f"""
       <section class="report-section">
         <h2>FASTQ Local Assembly Concordance</h2>
-        <p class="section-intro">Locus-associated reads provide observed or locally reconstructed sequences. The standard Sassy assembly PCR caller measures the primer-bounded products using the assembly repeat-count calibration. Compare the PCR product and final repeat columns directly with the corresponding assembly report. Counts depend on recovering a complete product.</p>
+        <p class="section-intro">SPOARS assembles the dominant mapping-derived product group, then the standard assembly PCR caller measures the consensus. Compare the PCR product and final repeat columns directly with the corresponding assembly report. Min / mode / max shows the uncorrected read-product length distribution.</p>
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>Dominant mapped group</th><th>Reads</th><th>Unique products</th><th>Raw bp min / mode / max</th><th>POA bp</th><th>Assembly PCR bp</th><th>Raw repeats</th><th>Final repeats</th><th>Call source</th><th>POA status</th></tr></thead>
           <tbody>{local_assembly_table_rows}</tbody>
         </table></div>
       </section>
 """
-        if is_short_read:
-            local_assembly_table_rows = "\n".join(
-                "<tr>" + "".join(f"<td>{_safe(row.get(field, ''))}</td>" for field in (
-                    "locus_id", "dominant_variant_id", "input_molecules", "poa_consensus_bp",
-                    "pcr_product_size_bp", "raw_repeat_count", "called_repeat_count", "pcr_status")) + "</tr>"
-                for row in local_assembly_rows
-            )
-            local_assembly_section = f"""
-      <details>
-        <summary>Recovered short-read products</summary>
-        <p class="section-intro">Observed or reconstructed products use the same primer-product measurement and repeat calibration as assembly inputs. Likelihood-only estimates appear in Illumina Evidence.</p>
-        <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Variant</th><th>Molecules</th><th>Recovered bp</th><th>Primer product bp</th><th>Raw repeats</th><th>Repeats</th><th>Measurement status</th></tr></thead>
-          <tbody>{local_assembly_table_rows}</tbody>
-        </table></div>
-      </details>
-"""
     short_read_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
-        f"<td><span class=\"status-pill {'status-good' if row.get('status') == 'PASS' else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
+        f"<td><span class=\"status-pill {'status-good' if row.get('repeat_count') not in ('', None) else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
         f"<td>{_safe(row.get('recruited_read_pairs', ''))}</td>"
-        f"<td>{_safe(row.get('call_method', ''))}</td>"
+        f"<td>{_safe(row.get('informative_molecule_count', ''))}</td>"
+        f"<td>{_safe(row.get('mean_mapq', ''))}</td>"
         f"<td>{_safe(row.get('proper_spanning_pairs', ''))}</td>"
         f"<td>{_safe(row.get('boundary_1_support', ''))} / {_safe(row.get('boundary_2_support', ''))} / {_safe(row.get('both_boundary_support', ''))}</td>"
-        f"<td>{_safe(row.get('repeat_count')) if row.get('repeat_count') not in ('', None) else 'unresolved'}</td>"
-        f"<td>{_safe(row.get('repeat_count_min', ''))} / {_safe(row.get('repeat_count_max', ''))}</td>"
+        f"<td>{_safe(row.get('repeat_count', '')) if row.get('repeat_count') not in ('', None) else _safe(str(row.get('repeat_count_min', '')) + '..' + str(row.get('repeat_count_max', ''))) if row.get('repeat_count_min') not in ('', None) else 'unresolved'}</td>"
         f"<td>{_safe(row.get('allele_confidence', ''))}</td>"
         f"<td>{_safe(row.get('short_read_warning') or row.get('failure_reason', ''))}</td>"
         "</tr>"
@@ -918,9 +893,9 @@ def write_report(
         short_read_section = f"""
       <section class="report-section">
         <h2>Illumina Evidence</h2>
-        <p class="section-intro">Detected loci retain a best repeat estimate with its method and confidence. Observed products, reconstruction and fragment likelihoods take priority. If those cannot supply a point estimate, read-depth estimates or a panel prior are shown as ESTIMATED with confidence 0 (unvalidated). A prior is constrained by observed lower bounds. Tied likelihood candidates retain alternatives and conditional probabilities. Depth sensitivity intervals and prior ranges are not genotype confidence intervals. A locus without a defined repeat unit or nominal count cannot be expressed in repeat units.</p>
+        <p class="section-intro">Exact values require VNTR-specific evidence derived from competing minimap2 candidate alignments. Conventional mapping uniqueness is not allele confidence; unresolved and presence-only evidence remains explicit.</p>
         <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Status</th><th>Recruited molecules</th><th>Call method</th><th>Spanning pairs</th><th>Left / right / full span</th><th>Best repeat count</th><th>Interval min / max</th><th>Confidence</th><th>Evidence / uncertainty</th></tr></thead>
+          <thead><tr><th>Locus</th><th>Evidence</th><th>Recruited pairs</th><th>Informative molecules</th><th>Mean MAPQ</th><th>Proper spanning pairs</th><th>Boundary 1 / 2 / both</th><th>Repeat or interval</th><th>Confidence</th><th>Warning / failure</th></tr></thead>
           <tbody>{short_read_table_rows}</tbody>
         </table></div>
       </section>
@@ -979,12 +954,6 @@ def write_report(
         "</tr>"
         for row in mapping_rows
     )
-    if canonical_mapping:
-        mapping_table_rows = (
-            '<tr><td colspan="7">Canonical variant alignments: depths are effective molecule counts; '
-            'SNP positions refer to the repeat-masked dominant product. Raw-read mapping fields are blank.</td></tr>'
-            + mapping_table_rows
-        )
     if not mapping_table_rows:
         mapping_table_rows = (
             '<tr><td colspan="7">Locus representative mapping was disabled or no retained '
@@ -1072,30 +1041,6 @@ def write_report(
         <summary>SNP evidence details ({len(snp_rows)} rows)</summary>
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>POA reference</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
-          <tbody>{snp_table_rows}</tbody>
-        </table></div>
-      </details>
-"""
-        if canonical_mapping:
-            mapping_overview_section = ""
-            mapping_table_rows = "\n".join(
-                "<tr>" + "".join(f"<td>{_safe(row.get(field, ''))}</td>" for field in (
-                    "locus_id", "reference_variant_id", "mean_depth", "snp_count")) + "</tr>"
-                for row in mapping_rows
-            )
-            mapping_detail_section = f"""
-      <details>
-        <summary>Recovered variant sequence evidence</summary>
-        <p class="section-intro">Variant sequences are compared with the repeat-masked dominant product. Support is effective molecule depth.</p>
-        <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Dominant variant</th><th>Effective molecules</th><th>SNPs</th></tr></thead>
-          <tbody>{mapping_table_rows}</tbody>
-        </table></div>
-      </details>
-      <details>
-        <summary>SNP evidence details ({len(snp_rows)} rows)</summary>
-        <div class="table-scroll"><table>
-          <thead><tr><th>Locus</th><th>Dominant variant</th><th>Position</th><th>Change</th><th>Alt/depth</th><th>Frequency</th><th>Mean alt Q</th></tr></thead>
           <tbody>{snp_table_rows}</tbody>
         </table></div>
       </details>

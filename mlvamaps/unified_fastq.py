@@ -10,11 +10,12 @@ from .allele_inference import (
     InferenceThresholds,
     infer_alleles,
 )
-from .candidate_contexts import CandidateContext, generate_candidate_contexts, write_candidate_contexts
+from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
 from .io import write_fasta, write_tsv
 from .long_read_evidence import extract_long_read_evidence
 from .minimap_mapping import map_reads_to_candidates_bam
 from .models import Locus
+from .short_read_evidence import extract_short_read_evidence
 
 
 def taxonomic_query_sequences(
@@ -83,19 +84,7 @@ def run_unified_fastq_inference(
     minimum_probability: float,
     maximum_candidate_repeat_count: int = 100,
     keep_alignments: bool = False,
-    orphan_path: str | Path | None = None,
-    round_tolerance: float = .25,
-    min_mixture_fraction: float = .2,
-    repeat_threshold: float = .7,
 ) -> tuple[list[dict[str, object]], list[CandidateEvidence], dict[tuple[str, str], int | float], dict[str, Path]]:
-    if technology == "illumina":
-        from .locus_reconstruction import run_reconstructed_fastq_inference
-        return run_reconstructed_fastq_inference(reads1=reads1, reads2=reads2, loci=loci,
-            database_path=database_path, outdir=outdir, sample_id=sample_id, technology=technology,
-            threads=threads, minimum_molecules=minimum_molecules, minimum_probability=minimum_probability,
-            maximum_candidate_repeat_count=maximum_candidate_repeat_count, orphan_path=orphan_path,
-            round_tolerance=round_tolerance, min_fraction=min_mixture_fraction, repeat_threshold=repeat_threshold,
-            minimap2_bin=minimap2_bin, keep_alignments=keep_alignments)
     outdir = Path(outdir)
     work = outdir / "candidate_mapping"
     work.mkdir(parents=True, exist_ok=True)
@@ -120,20 +109,22 @@ def run_unified_fastq_inference(
     else:
         paths = write_candidate_contexts(contexts, work)
     bam = work / "candidate_alignments.bam"
-    index_name = "long.mmi"
+    index_name = "short.mmi" if technology == "illumina" else "long.mmi"
     cached_index = resource / index_name if resource is not None else None
     mapping_reference = cached_index if cached_index is not None and cached_index.is_file() else paths["fasta"]
     alignments = map_reads_to_candidates_bam(
         mapping_reference, reads1, reads2, contexts, bam, threads, technology,
         executable=minimap2_bin,
     )
-    evidence = extract_long_read_evidence(alignments, contexts, loci, technology)
+    if technology == "illumina":
+        evidence = extract_short_read_evidence(alignments, contexts, loci)
+    else:
+        evidence = extract_long_read_evidence(alignments, contexts, loci, technology)
     calls, molecule_calls = infer_alleles(
         evidence, loci, contexts, sample_id, technology,
         InferenceThresholds(
             minimum_molecules=minimum_molecules,
             minimum_probability=minimum_probability,
-            mixture_min_fraction=min_mixture_fraction,
         ),
     )
     common_calls = outdir / "common_locus_calls.tsv"
@@ -170,7 +161,6 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
         "low_coverage": "LOW_DEPTH",
         "detected_unresolved": "PRESENT_COUNT_UNKNOWN",
         "ambiguous": "AMBIGUOUS",
-        "estimated": "ESTIMATED",
         "not_found": "NOT_FOUND",
         "mixed": "MULTIPLE_VARIANTS",
     }
@@ -182,27 +172,25 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
             "locus_id": row["locus"],
             "present": "no" if row["status"] == "not_found" else "yes",
             "repeat_count": repeat,
-            "repeat_count_raw": row.get("repeat_count_raw", ""),
-            "product_size_bp": row.get("product_size_bp", ""),
+            "repeat_count_raw": repeat,
+            "product_size_bp": "",
             "read_depth": row["molecule_support"],
             "primary_read_depth": row["molecule_support"],
             "mean_coverage": "",
             "allele_confidence": row["best_probability"],
-            "confidence_kind": row.get("confidence_kind", "conditional_posterior"),
-            "repeat_count_interval_kind": row.get("repeat_count_interval_kind", ""),
-            "second_best_repeat_count": row.get("second_best_repeat_count", ""),
+            "second_best_repeat_count": "",
             "second_best_probability": row["second_best_probability"],
-            "inference_method": row.get("inference_method", "shared_competitive_minimap2_inference"),
+            "inference_method": "shared_competitive_minimap2_inference",
             "dominant_variant_fraction": row["dominant_fraction"],
-            "num_candidate_variants": row.get("num_variants", len(str(row["candidate_distribution"]).split(";")) if row["candidate_distribution"] else 0),
-            "num_confirmed_secondary_variants": row.get("num_secondary", 1 if row["status"] == "mixed" else 0),
+            "num_candidate_variants": len(str(row["candidate_distribution"]).split(";")) if row["candidate_distribution"] else 0,
+            "num_confirmed_secondary_variants": 1 if row["status"] == "mixed" else 0,
             "secondary_alleles": row["secondary_repeat"],
             "allele_distribution": row["candidate_distribution"],
             "status": statuses[str(row["status"])],
             "evidence": (
-                f"{row['molecule_support']} recruited molecule(s); "
+                f"{row['molecule_support']} informative molecule(s); "
                 f"{row['direct_product_support']} direct product; "
                 f"{row['full_span_support']} full repeat span"
-            ) + (f"; {row['reason']}" if row.get("reason") else ""),
+            ),
         })
     return output

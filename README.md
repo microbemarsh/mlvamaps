@@ -8,49 +8,31 @@ The main outputs are an MLVA fingerprint, per-locus calls and evidence, and a
 self-contained HTML report. Reference databases add alignment-based reference support using nucleotide
 variation and VNTR repeat-length evidence.
 
-mlvamaps uses input-specific evidence to produce compatible locus calls:
+<p align="center">
+  <img width="960" alt="Alignment-based workflow: assembly products and FASTQ molecules align to observed references for isolate support or EM mixture inference." src="figures/software_workflow/mlvamaps_sample_calling_github.png" />
+</p>
 
-```mermaid
-flowchart LR
-  A[Assembly] --> P[Sassy PCR products]
-  L[Accurate long reads] --> M[Complete spanning molecules]
-  S[Paired or single short reads] --> E[Reference recruitment and targeted reconstruction]
-  P --> C[Canonical locus products]
-  M --> C
-  C --> G[Shared repeat and SNP typing]
-  G --> O[Profiles, reference comparison and reports]
-  E --> C
-```
+Assembly and FASTQ inputs retain their own evidence-recovery paths:
 
-Assembly and accurate long-read calling are database independent. SR FASTQ
-calling requires `--database`: minimap2 competitively recruits reads across
-reference loci, and the shared caller measures repeat lengths from observed
-spans, reconstructed products, or calibrated fragment geometry. A stored
-reference allele is never substituted for a measured sample length; novel
-alleles remain callable. Every detected locus with a repeat definition retains
-a point estimate and confidence. When length evidence is insufficient, a
-read-depth estimate or explicitly labeled panel prior is reported with zero
-confidence (unvalidated).
+- **Genome assemblies:** Sassy-backed, primer-directed in silico PCR recovers
+  candidate amplicons; the assembly caller applies MLVA_finder-compatible
+  product selection and size-to-repeat conversion.
+- **Paired-end or single-end Illumina reads:** competitive minimap2 alignment
+  against candidate MLVA allele contexts supplies paired-molecule, boundary,
+  indel, and direct-product evidence to the shared allele caller.
+- **Long-read or amplicon FASTQ:** the same competitive candidate mapping is
+  followed by direct molecule measurement and shared allele inference. SPOARS
+  remains available for representative sequence correction and confirmation;
+  it is not required before a repeat-count call.
 
-Legacy three-column primer panels (`locus_id forward_primer reverse_primer`)
-remain supported. Names such as `vrrA_12bp_314bp_10U` provide product-length
-calibration, while the database supplies repeat flanks and mapping targets.
-`reference_calling/summary.tsv` records reference support and call outcomes.
-Taxonomic classification requires a database in every input mode and runs
-separately from allele measurement.
+Locus detection does not by itself imply a confident repeat-count call.
+Unresolved and missing calls remain explicit and are never converted to zero.
 
-The evidence hierarchy is **direct → reconstructed → inferred**, with explicit
-ambiguous, estimated, missing and mixed outcomes. Depth estimates and panel
-priors remain provisional and do not count as exact matches. There is one short-read pathway. The
-long-read default remains `--lr-engine spanning`. See the [Illumina workflow](docs/workflows/illumina.md)
-and [method, diagnostics and limitations](docs/concepts/locus-reconstruction.md).
-Undetected loci remain missing. Panels without a repeat unit or nominal count
-cannot express an estimate in repeat units and retain an explicit metadata failure.
-
-Calling has no minimum read-depth or molecule-support cutoff. A single usable
-observation can contribute a repeat, variant, or SNP call. Support counts,
-confidence, ambiguity and depth-estimate sensitivity remain visible, including
-at very low coverage. Missing sequence or length information stays unresolved.
+mlvamaps uses competitive minimap2 alignment against candidate MLVA allele
+contexts for both short- and long-read sequencing data. Technology-specific
+evidence is extracted from these alignments and integrated by a shared
+locus-level allele inference framework. minimap2 supplies competing alignments;
+it does not by itself determine the MLVA allele.
 
 Reference typing uses one Emu-inspired alignment-likelihood framework:
 Sassy-recovered assembly amplicons are aligned to observed reference loci with
@@ -82,20 +64,6 @@ conda env create -f environment.yml
 conda activate mlvamaps
 python -m pip install --no-deps .
 ```
-
-For large compressed FASTQs, enable the optional native I/O accelerators:
-
-```bash
-conda install -c conda-forge rapidgzip python-isal
-# Alternatively, inside the existing environment:
-python -m pip install '.[fastq]'
-```
-
-Rapidgzip supplies parallel input decompression; ISA-L accelerates gzip output.
-Both expose Python APIs. The caller automatically budgets decompression within
-`--threads` and retains HTSlib parsing. See the
-[Illumina performance notes](docs/workflows/illumina.md#performance-and-cpu-allocation)
-for platform support, timings, and the I/O benchmark.
 
 Verify the installation:
 
@@ -144,7 +112,6 @@ mlvamaps call \
 mlvamaps call \
   -p panel.tsv \
   -i sr \
-  --database references \
   --fq1 sample_R1.fastq.gz \
   --fq2 sample_R2.fastq.gz \
   --sample-id sample \
@@ -156,7 +123,7 @@ For a directory containing exact `SAMPLE_1.fastq.gz` / `SAMPLE_2.fastq.gz`
 pairs:
 
 ```bash
-mlvamaps call -p panel.tsv -i reads/ --short-reads --database references -o results -t 8
+mlvamaps call -p panel.tsv -i reads/ --short-reads -o results -t 8
 ```
 
 ### Accurate long or amplicon reads
@@ -242,9 +209,9 @@ mlvamaps call \
 
 Current databases store reusable `competitive_mapping/candidate_contexts.fasta`,
 `candidate_metadata.tsv`, short/long minimap2 indexes, and a broad real-genome
-Deacon recruitment index. These resources support optional reference
-classification and SR FASTQ calling. Assembly and default long-read calling
-use the supplied panel and sample sequences independently of these resources.
+Deacon recruitment index. A rich panel may still be used without a
+database; bounded contexts are then synthesized from its primers, flanks,
+repeat motif, expected range, and observed database states when available.
 
 For a multi-taxid build, that command automatically loads the saved panel and
 taxon metadata, then identifies the closest reference IDs with taxon annotations. No separate panel,

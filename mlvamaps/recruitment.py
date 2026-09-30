@@ -468,9 +468,9 @@ def recruitment_summary_rows(
         informative = sum(
             row["genotype_informative"] == "yes" for row in locus_rows
         )
-        if full:
+        if full > 1:
             status = "PRESENT_GENOTYPED"
-        elif informative:
+        elif full == 1 or informative:
             status = "PRESENT_PROVISIONAL"
         elif locus_rows:
             status = "PRESENT_UNTYPED"

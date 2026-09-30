@@ -245,8 +245,8 @@ def _resolve_panel_option(
 
 
 def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    if not math.isfinite(args.missing_locus_min_depth) or args.missing_locus_min_depth < 0:
-        parser.error("--missing-locus-min-depth must be finite and non-negative")
+    if not math.isfinite(args.missing_locus_min_depth) or args.missing_locus_min_depth <= 0:
+        parser.error("--missing-locus-min-depth must be finite and positive")
     if not math.isfinite(args.missing_locus_min_fraction) or not 0 < args.missing_locus_min_fraction <= 1:
         parser.error("--missing-locus-min-fraction must be in (0, 1]")
     if not math.isfinite(args.missing_locus_penalty) or args.missing_locus_penalty < 0:
@@ -291,8 +291,6 @@ def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         parser.error("--short-reads requires -i DIRECTORY, not -i sr")
     if not args.short_read_mode and (args.reads1 or args.reads2):
         parser.error("--fq1/--fq2 require the short-read selector: -i sr")
-    if args.short_read_mode and not args.database:
-        parser.error("SR FASTQ calling requires --database; assembly and long-read calling do not")
     if args.taxon_identification is True and not args.database:
         parser.error("--taxon-identification requires --database")
     if not args.loci and not args.primers and args.database:
@@ -389,7 +387,7 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     call.add_argument("--profiles")
     call.add_argument(
         "--database",
-        help="Reference-build directory (required for SR FASTQ calling; enables reference classification in all modes)",
+        help="Reference-build directory for alignment-based reference classification",
     )
     taxon_toggle = call.add_mutually_exclusive_group()
     taxon_toggle.add_argument(
@@ -423,24 +421,20 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     call.add_argument("--short-min-mean-quality", type=_nonnegative_float, default=15.0)
     call.add_argument("--short-trim-quality", type=_nonnegative_int, default=0)
     call.add_argument("--short-min-pair-retention", type=_fraction, default=0.5)
-    call.add_argument("--short-min-spanning-pairs", type=_nonnegative_int, default=0,
-                      help="Deprecated compatibility option; no spanning-pair count cutoff")
+    call.add_argument("--short-min-mapq", type=_nonnegative_int, default=0)
+    call.add_argument("--short-min-spanning-pairs", type=_nonnegative_int, default=2)
     call.add_argument("--short-confidence-threshold", type=_fraction, default=0.8)
     call.add_argument("--short-max-candidate-repeat-count", type=_positive_int, default=100)
-    call.add_argument("--short-repeat-fraction", type=_fraction, default=.7,
-                      help="Minimum motif-compatible read fraction for repeat-rich evidence (default: %(default)s)")
+    call.add_argument(
+        "--no-short-secondary-alignments", action="store_true",
+        help="Ignore secondary candidate alignments (not recommended for homologous contexts)",
+    )
     call.add_argument(
         "--short-min-informative-molecules",
-        type=_nonnegative_int,
-        default=0,
-        help="Deprecated compatibility option; no molecule-count cutoff",
+        type=_positive_int,
+        default=3,
+        help="Informative molecules required to avoid Illumina LOW_DEPTH (default: %(default)s)",
     )
-    call.add_argument("--sr-recruitment-audit", choices=("compact", "full"), default="compact",
-                      help="Ambiguous-pair diagnostics: compact records the two strongest loci; full records all matching loci")
-    call.add_argument("--lr-engine", choices=("spanning", "competitive"), default="spanning",
-                      help="Long-read recovery engine; competitive is legacy/debug")
-    call.add_argument("--insert-mean", type=_positive_float, help="Library fragment mean in bp (requires --insert-sd)")
-    call.add_argument("--insert-sd", type=_positive_float, help="Library fragment SD in bp (requires --insert-mean)")
     call.add_argument("--min-read-length", type=int, default=50)
     call.add_argument("--max-read-length", type=int, default=100000)
     call.add_argument(
@@ -526,9 +520,12 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--min-depth",
-        type=_nonnegative_int,
-        default=0,
-        help="Deprecated compatibility option; no read-depth cutoff",
+        type=_positive_int,
+        default=1,
+        help=(
+            "Minimum informative reads required to avoid LOW_DEPTH "
+            "(default: %(default)s)"
+        ),
     )
     call.add_argument("--min-posterior", type=float, default=0.75)
     call.add_argument(
@@ -558,27 +555,30 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--min-secondary-reads",
-        type=_nonnegative_int,
-        default=0,
-        help="Deprecated compatibility option; no secondary-read count cutoff",
+        type=_positive_int,
+        default=2,
+        help=(
+            "Minimum reads required to promote a secondary variant from "
+            "candidate to confirmed (default: %(default)s)"
+        ),
     )
     call.add_argument(
         "--minimap2-bin",
         default="minimap2",
         metavar="PATH",
-        help="minimap2 executable for reference classification, optional long-read mapping, and assembly support (default: %(default)s)",
+        help="minimap2 executable for short-read recruitment, representative mapping, and assembly support (default: %(default)s)",
     )
     call.add_argument(
         "--classification-repeat-scale", type=_positive_float, default=1.0,
         help="Repeat-count difference scale in mapping likelihoods, in repeat units (default: %(default)s)",
     )
     call.add_argument(
-        "--missing-locus-min-depth", type=_nonnegative_float, default=0.0,
-        help="Deprecated compatibility option; no per-locus depth cutoff",
+        "--missing-locus-min-depth", type=_positive_float, default=3.0,
+        help="Minimum supporting molecules per locus for the missing-locus gate (default: %(default)s)",
     )
     call.add_argument(
         "--missing-locus-min-fraction", type=_positive_float, default=0.8,
-        help="Fraction of panel loci observed before applying missing-locus penalties, in (0, 1] (default: %(default)s)",
+        help="Fraction of panel loci meeting missing-locus depth, in (0, 1] (default: %(default)s)",
     )
     call.add_argument(
         "--missing-locus-penalty", type=_nonnegative_float, default=8.0,
@@ -609,15 +609,15 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     )
     call.add_argument(
         "--min-snp-depth",
-        type=_nonnegative_int,
-        default=0,
-        help="Deprecated compatibility option; no SNP depth cutoff",
+        type=_positive_int,
+        default=3,
+        help="Minimum quality-filtered depth for a SNP call (default: %(default)s)",
     )
     call.add_argument(
         "--min-snp-alternate-reads",
-        type=_nonnegative_int,
-        default=0,
-        help="Deprecated compatibility option; no alternate-read count cutoff",
+        type=_positive_int,
+        default=2,
+        help="Minimum reads supporting a non-reference SNP allele (default: %(default)s)",
     )
     call.add_argument(
         "--min-snp-frequency",
@@ -863,7 +863,6 @@ def _run_single_input(
             profiles_path=args.profiles,
             database_path=args.database,
             recruitment_database_path=args.recruitment_database,
-            lr_engine=args.lr_engine,
             outdir=str(outdir),
             sample_id=sample_id,
             min_read_length=args.min_read_length,
@@ -907,20 +906,15 @@ def _run_single_input(
         print(f"Wrote easy MLVA calls to {result['calls']}")
         print(f"Wrote detailed allele evidence to {result['allele_calls']}")
         print(f"Wrote individual locus repeat counts to {result['repeat_counts']}")
-        if "mapped_variant_table" in result:
-            print(f"Wrote mapped VNTR variant groups to {result['mapped_variant_table']}")
-        if "mixture_abundance" in result:
-            print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
-        if "mapped_read_memberships" in result:
-            print(f"Wrote mapped read-group evidence to {result['mapped_read_memberships']}")
+        print(f"Wrote mapped VNTR variant groups to {result['mapped_variant_table']}")
+        print(f"Wrote EM variant abundance estimates to {result['mixture_abundance']}")
+        print(f"Wrote mapped read-group evidence to {result['mapped_read_memberships']}")
         if args.profiles or args.database:
             print(f"Wrote ranked profile matches to {result['profile_matches']}")
             print(f"Wrote per-locus profile comparisons to {result['profile_match_loci']}")
         if not args.no_locus_mapping:
-            if "mapping_summary" in result:
-                print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
-            if "mapping_snps" in result:
-                print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
+            print(f"Wrote locus mapping summaries to {result['mapping_summary']}")
+            print(f"Wrote locus SNP evidence to {result['mapping_snps']}")
         print(f"Wrote report to {result['report']}")
         if args.database:
             print(f"Wrote reference matches to {result['mapping_reference_matches']}")
@@ -999,13 +993,11 @@ def _run_short_input(
         keep_intermediates=args.keep_intermediates,
         sample_mode=args.sample_mode,
         minimap2_bin=args.minimap2_bin,
+        short_min_mapping_quality=args.short_min_mapq,
         short_min_spanning_pairs=args.short_min_spanning_pairs,
         short_confidence_threshold=args.short_confidence_threshold,
         short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
-        short_repeat_fraction=args.short_repeat_fraction,
-        insert_mean=args.insert_mean, insert_sd=args.insert_sd,
-        sr_recruitment_audit=args.sr_recruitment_audit,
-        min_mixture_fraction=args.min_mixture_fraction, min_secondary_reads=args.min_secondary_reads,
+        short_consider_secondary=not args.no_short_secondary_alignments,
         missing_locus_min_depth=args.missing_locus_min_depth,
         missing_locus_min_fraction=args.missing_locus_min_fraction,
         missing_locus_penalty=args.missing_locus_penalty,
@@ -1018,7 +1010,7 @@ def _run_short_input(
     print(f"Wrote conservative Illumina calls to {result['calls']}")
     print(f"Wrote short-read QC to {result['short_read_qc']}")
     print(f"Wrote locus recruitment to {result['short_read_recruitment']}")
-    print(f"Wrote locus evidence to {result['short_read_mapping']}")
+    print(f"Wrote minimap2-derived mapping evidence to {result['short_read_mapping']}")
     print(f"Wrote MYOGA metadata to {result['myoga_samples']}")
     if "mapping_reference_matches" in result:
         print(f"Wrote mapping reference matches to {result['mapping_reference_matches']}")

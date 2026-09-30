@@ -127,7 +127,7 @@ def _database_root(database: str | Path | None) -> Path | None:
     if not database:
         return None
     path = Path(database)
-    for candidate in (path / "database", path):
+    for candidate in (path, path / "database"):
         if candidate.is_dir():
             return candidate
     return None
@@ -339,7 +339,7 @@ def _base_contexts(loci: list[Locus], database_path: str | Path | None) -> list[
                 if path.is_file():
                     records = list(read_fasta(path))
                     break
-        if not records and database is None:
+        if not records:
             sequence = _synthetic_product(locus)
             if sequence:
                 records = [("panel", sequence)]

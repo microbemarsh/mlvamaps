@@ -5,9 +5,9 @@ assembly FASTA and sequencing FASTQ. Both calling paths produce compatible
 locus calls, fingerprints, profile matches, and reports, but they preserve the
 different evidence available from assembled contigs and individual molecules.
 
-Short reads use [targeted paired-end reconstruction](illumina.md).
-Long reads default to spanning-molecule recovery. Both use the shared
-[locus interpreter](../concepts/locus-reconstruction.md).
+![Alignment-based workflow from reference construction to sample classification](../../figures/software_workflow/mlvamaps_workflow.png)
+
+[SVG](../../figures/software_workflow/mlvamaps_workflow.svg) · [PDF](../../figures/software_workflow/mlvamaps_workflow.pdf)
 
 ## Resource ownership
 
@@ -31,15 +31,24 @@ finalization.
 Local-assembly `build-reference` input already represents one complete cohort,
 so it proceeds directly from extraction to one finalization.
 
-## Locus reconstruction and candidate mapping
+## Shared candidate mapping
 
-Assembly products, complete LR molecules, and SR recovered sequences enter
-`locus_products.genotype_product`. Short reads use a combined flank index,
-competitive context assignment, direct/overlap recovery, bounded local assembly,
-and a haploid candidate fallback. Reference classification is separate.
+Illumina, ONT, ONT-HQ, and HiFi calls use the same versioned candidate contexts.
+With `--database`, candidates and the appropriate minimap2 index are loaded from
+the completed database. They are not regenerated in each sample directory.
+Without a database, a rich panel may synthesize a bounded local candidate bank;
+a primer-only panel does not contain enough information to do so.
 
-`--lr-engine competitive` retains the optional long-read candidate-mapping
-workflow and cached minimap2 indexes. See [competitive workflows](competitive-fastq.md).
+minimap2 emits SAM on a pipe. htslib, through `pysam`, decodes it and writes a
+compressed temporary BAM while the candidate alignments are interpreted. Normal
+operation removes that BAM. `--keep-intermediates` retains
+`candidate_mapping/candidate_alignments.bam`; this option does not produce a
+text `candidate_alignments.sam`.
+
+The current Python-facing evidence API preserves competing taxa and repeat
+states after htslib decoding. Sequence and quality evidence retain molecule
+identity, including Illumina mate identity. Missing or presence-only evidence is
+not converted into an allele value.
 
 ## Global thread budget
 
@@ -58,7 +67,7 @@ memory-constrained nodes:
 
 ```bash
 export MLVAMAPS_MAX_CONCURRENT_SAMPLES=2
-mlvamaps call -p panel.tsv -i reads/ --short-reads --database references -o results -t 32
+mlvamaps call -p panel.tsv -i reads/ --short-reads -o results -t 32
 ```
 
 Input discovery and final combined tables retain deterministic input order even

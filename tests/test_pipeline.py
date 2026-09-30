@@ -210,8 +210,7 @@ def test_emu_style_mixture_filters_trace_variants_and_refines_status():
     assert by_variant["VNTR_ASV1"]["abundance_class"] == "DOMINANT"
     assert by_variant["VNTR_ASV2"]["meaningful"] == "yes"
     assert by_variant["VNTR_ASV3"]["meaningful"] == "no"
-    assert 0 <= by_variant["VNTR_ASV3"]["estimated_fraction"] < 0.01
-    assert by_variant["VNTR_ASV3"]["adaptive_em_floor"] == 0
+    assert by_variant["VNTR_ASV3"]["estimated_fraction"] == 0.0
 
     locus = Locus(locus_id="VNTR", expected_min_repeats=3, expected_max_repeats=7)
     predictions = [
@@ -676,7 +675,7 @@ def test_cli_has_conventional_output_and_thread_options():
     )
     assert call_args.outdir == "run"
     assert call_args.threads == 4
-    assert call_args.min_depth == 0
+    assert call_args.min_depth == 1
     assert call_args.repeat_range_tolerance == 1.0
 
     default_call_args = parser.parse_args(
@@ -684,11 +683,6 @@ def test_cli_has_conventional_output_and_thread_options():
     )
     assert default_call_args.outdir == "results"
     assert default_call_args.threads == 32
-    assert not hasattr(default_call_args, 'sr_engine')
-    assert default_call_args.lr_engine == 'spanning'
-    assert default_call_args.sr_recruitment_audit == 'compact'
-    assert parser.parse_args(['call', '-p', 'primers.tsv', '-i', 'sample.fastq.gz',
-                              '--sr-recruitment-audit', 'full']).sr_recruitment_audit == 'full'
     assert default_call_args.min_qscore == 15.0
     assert default_call_args.sample_mode == "metagenome"
     assert default_call_args.recruitment_preset is None
@@ -696,18 +690,15 @@ def test_cli_has_conventional_output_and_thread_options():
     assert default_call_args.recruitment_min_aligned_bp == 100
     assert default_call_args.recruitment_min_locus_margin == 10
     assert default_call_args.recruitment_database is None
-    assert default_call_args.min_secondary_reads == 0
+    assert default_call_args.min_secondary_reads == 2
     assert default_call_args.max_confidence_depth == 25.0
     assert default_call_args.min_mixture_fraction == 0.01
     assert default_call_args.minimap2_bin == "minimap2"
     assert default_call_args.no_locus_mapping is False
     assert default_call_args.min_mapping_quality == 0
     assert default_call_args.min_base_quality == 20
-    assert default_call_args.min_snp_depth == 0
-    assert default_call_args.min_snp_alternate_reads == 0
-    assert default_call_args.short_min_spanning_pairs == 0
-    assert default_call_args.short_min_informative_molecules == 0
-    assert default_call_args.missing_locus_min_depth == 0
+    assert default_call_args.min_snp_depth == 3
+    assert default_call_args.min_snp_alternate_reads == 2
     assert default_call_args.min_snp_frequency == 0.2
     assert default_call_args.max_primer_mismatches == 2
     assert not hasattr(default_call_args, "phylogenetics")
@@ -873,16 +864,6 @@ def test_minimap2_command_and_reference_relative_snp_parser(tmp_path):
             "mean_alternate_base_quality": 40.0,
         }
     ]
-
-    # A single quality-filtered alternate remains reportable even when an old
-    # command supplies large (now ignored) depth/support thresholds.
-    one_sam = tmp_path / 'one.sam'
-    one_sam.write_text('@HD\tVN:1.6\tSO:unsorted\n@SQ\tSN:VNTR_ASV1\tLN:4\n'
-                       'q3\t0\tVNTR_ASV1\t1\t60\t4M\t*\t0\t0\tACGA\tIIII\n')
-    _, single_snps = parse_minimap2_sam(one_sam, references, queries, 'SAMPLE',
-                                      min_snp_depth=100, min_snp_alternate_reads=100)
-    assert len(single_snps) == 1
-    assert single_snps[0]['depth'] == single_snps[0]['alternate_depth'] == 1
 
 
 def test_assembly_alignment_depth_from_sam(tmp_path):

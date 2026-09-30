@@ -54,35 +54,6 @@ def test_repeat_indels_count_once_and_partial_flanks_do_not_imply_length():
     assert partial[("L1", "m1")]["A"] == partial[("L1", "m1")]["B"] == 0
 
 
-def test_alignment_statistics_reuse_preserves_context_and_each_molecule(monkeypatch):
-    from mlvamaps import mapping_classification as module
-    a = context('a')
-    contexts = [a, replace(a, candidate_id='b', repeat_start=8),
-                replace(a, candidate_id='c', repeat_unit_length=4),
-                replace(a, candidate_id='d', repeat_count=None)]
-    rows = [alignment(c, molecule=f'm{i}', cs=':6-ga:12') for i in range(4) for c in contexts]
-    members = {c.candidate_id: [c.candidate_id.upper()] for c in contexts}
-    calls = []
-    def tracked(row, c):
-        calls.append((row, c))
-        return alignment_statistics(row, c)
-    monkeypatch.setattr(module, 'alignment_statistics', tracked)
-    scores, errors = molecule_log_likelihoods(rows, contexts, members)
-    assert len(calls) == 4
-    import math
-    for observed in scores.values():
-        assert observed == {'A': -1., 'B': 2*math.log(errors['deletions']),
-                            'C': -.5, 'D': 0., UNKNOWN: -4.}
-    assert len(scores) == 4
-
-
-def test_reference_column_signatures_preserve_signed_zero_and_rounding():
-    likelihoods = {('L', f'm{i}'): {'A': 0., 'B': -1e-12, 'C': -1e-8, UNKNOWN: -4.}
-                   for i in range(3)}
-    groups, _ = classify_molecules(likelihoods, ['A', 'B', 'C'])
-    assert sorted(tuple(g['references']) for g in groups) == [('A', 'B'), ('C',), (UNKNOWN,)]
-
-
 def test_sequence_mismatches_and_nonrepeat_gaps_still_contribute():
     a = context("a")
     perfect = alignment(a)
@@ -268,7 +239,7 @@ def test_raw_read_mapping_preserves_alternatives_and_low_coverage(tmp_path, monk
     assert seen["include_unknown_repeats"]
     matches = read_tsv(result["mapping_reference_matches"])
     assert matches[0]["reference_id"] == "A"
-    assert matches[0]["missing_locus_gate_passed"] == "yes"
+    assert matches[0]["missing_locus_gate_passed"] == "no"
     assert float(matches[0]["missing_locus_penalty"]) == 0
     assert read_tsv(result["taxonomic_identification"])[0]["best_taxon"] == "1"
     assert json.loads(result["classification_details"].read_text())["molecules"] == 3
@@ -392,14 +363,11 @@ def test_coverage_penalty_is_reference_specific_and_applied_once(tmp_path, monke
         technology="illumina", locus_quality=quality, missing_locus_min_fraction=2 / 3)
     low = run_mapping_classification(**kwargs, outdir=tmp_path / "low")
     low_groups = json.loads(low["classification_details"].read_text())["groups"]
-    assert next(g for g in low_groups if "A" in g["references"])["references"] == ["A"]
+    assert next(g for g in low_groups if "A" in g["references"])["references"] == ["A", "B"]
     for locus in ("L1", "L2"):
         quality[locus]["depth"] = 3
     high = run_mapping_classification(**kwargs, outdir=tmp_path / "high")
     matches = {r["reference_id"]: r for r in read_tsv(high["mapping_reference_matches"])}
-    low_matches = {r["reference_id"]: r for r in read_tsv(low["mapping_reference_matches"])}
-    assert {ref: r['log_likelihood'] for ref, r in low_matches.items()} == {
-        ref: r['log_likelihood'] for ref, r in matches.items()}
     assert float(matches["A"]["log_likelihood"]) == -8
     assert float(matches["B"]["log_likelihood"]) == 0
     assert float(matches["A"]["missing_locus_penalty"]) == 8
@@ -485,8 +453,7 @@ def test_missing_locus_gate_requires_explicit_undetected_status(status):
 
 @pytest.mark.parametrize("depth, mode, penalty, expected", [
     (3, "illumina", 1, {"missing"}),
-    (1, "fastq", 1, {"missing"}),
-    (0, "fastq", 1, set()),
+    (2, "fastq", 1, set()),
     ("", "fastq", 1, set()),
     (float("nan"), "fastq", 1, set()),
     (float("inf"), "fastq", 1, set()),
@@ -508,7 +475,7 @@ def test_missing_locus_gate_preserves_low_or_unknown_coverage(depth, mode, penal
 
 
 @pytest.mark.parametrize("min_depth, fraction, penalty", [
-    (-1, 0.8, 1), (3, 0, 1), (3, 1.1, 1), (3, 0.8, -1),
+    (0, 0.8, 1), (3, 0, 1), (3, 1.1, 1), (3, 0.8, -1),
     (float("nan"), 0.8, 1), (3, float("inf"), 1), (3, 0.8, float("nan")),
 ])
 def test_missing_locus_gate_rejects_invalid_settings(min_depth, fraction, penalty):

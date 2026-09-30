@@ -30,8 +30,7 @@ class ProgressReporter:
         elapsed = time.monotonic() - self.started
         print(f"[{elapsed:6.1f}s] {message}", file=self.stream, flush=True)
 
-    def count(self, label: str, current: int, total: int | None = None, force: bool = False,
-              detail: str = "") -> None:
+    def count(self, label: str, current: int, total: int | None = None, force: bool = False) -> None:
         if not self.enabled:
             return
         now = time.monotonic()
@@ -39,9 +38,8 @@ class ProgressReporter:
         if not force and now - last < self.min_interval:
             return
         self._last_update[label] = now
-        suffix = f"; {detail}" if detail else ""
         if total:
             pct = min(100.0, current / total * 100)
-            self.step(f"{label}: {current:,}/{total:,} ({pct:.1f}%){suffix}")
+            self.step(f"{label}: {current:,}/{total:,} ({pct:.1f}%)")
         else:
-            self.step(f"{label}: {current:,}{suffix}")
+            self.step(f"{label}: {current:,}")

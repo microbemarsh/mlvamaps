@@ -43,9 +43,10 @@ variant counts, and a compact secondary-allele representation.
 
 ## Status logic
 
-A single informative molecule is retained as `SINGLE_MOLECULE_PROVISIONAL`.
-There is no minimum-depth cutoff; the legacy `--min-depth` option is ignored.
-A locus is `AMBIGUOUS` when the top posterior is below `--min-posterior` or leads the
+A locus is `LOW_DEPTH` when its dominant cluster has fewer reads than
+`--min-depth`, which defaults to one. A single informative molecule is
+retained as `SINGLE_MOLECULE_PROVISIONAL`. With enough primary reads, a locus
+is `AMBIGUOUS` when the top posterior is below `--min-posterior` or leads the
 second-best count by less than 0.2.
 
 An otherwise decisive call is `OUT_OF_RANGE` when it lies outside the panel's
@@ -69,13 +70,6 @@ EM-meaningful variants, plus the dominant estimated fraction. See
 `mlva_fingerprint.tsv` contains one row with one column per panel locus.
 `mlva_fingerprint_probabilistic.tsv` contains long-form repeat counts and
 posterior values.
-
-Detected loci retain provisional counts even when exact sizing is unsupported.
-`ESTIMATED` rows use read-depth estimates or an explicit panel prior, with zero
-confidence (unvalidated); they remain visible in fingerprints and reports.
-`confidence_kind` distinguishes those estimates from sequence support and
-conditional likelihood probabilities. Undetected loci remain blank. A panel
-without a repeat definition cannot express a repeat count.
 
 Assembly calls use the same fingerprint shape and historical integer/half-unit
 rounding convention. Product selection follows the MLVA_finder-compatible rule
@@ -140,7 +134,3 @@ per profile and locus.
 
 Profiles from different panels or repeat-number conventions should not be
 compared without a documented conversion.
-
-`ESTIMATED` values are excluded from profile-match distances and confidence,
-while remaining visible in `profile_match_loci.tsv` as `ESTIMATED_NOT_COMPARED`.
-A prior matching a reference is not independent evidence of agreement.

@@ -103,10 +103,18 @@ def _run_em(
     return frequencies, max_iterations, False
 
 
+def _adaptive_em_floor(read_count: int) -> float:
+    if read_count <= 0:
+        return 0.0
+    if read_count > 1000:
+        return min(1.0, 10.0 / read_count)
+    return 1.0 / (read_count + 1.0)
+
+
 def estimate_variant_mixtures(
     asv_rows: list[dict],
     min_fraction: float = 0.01,
-    min_secondary_reads: int = 0,
+    min_secondary_reads: int = 2,
     tolerance: float = 1e-7,
     max_iterations: int = 200,
 ) -> list[dict]:
@@ -118,7 +126,8 @@ def estimate_variant_mixtures(
     """
     if not 0.0 <= min_fraction <= 1.0:
         raise ValueError("min_fraction must be between 0 and 1")
-    # Legacy min_secondary_reads is accepted but no longer gates variants.
+    if min_secondary_reads < 1:
+        raise ValueError("min_secondary_reads must be at least 1")
     if tolerance <= 0:
         raise ValueError("tolerance must be positive")
     if max_iterations < 1:
@@ -143,6 +152,7 @@ def estimate_variant_mixtures(
 
         observed_fractions = counts / total_reads
         error_rate = _estimated_error_rate(rows)
+        adaptive_floor = _adaptive_em_floor(total_reads)
         if len(rows) == 1:
             frequencies = np.asarray([1.0], dtype=np.float64)
             iterations = 0
@@ -159,7 +169,22 @@ def estimate_variant_mixtures(
                 tolerance,
                 max_iterations,
             )
-        fraction_supported = frequencies >= min_fraction
+            retained = frequencies >= adaptive_floor
+            if not np.any(retained):
+                retained[int(np.argmax(frequencies))] = True
+            if not np.all(retained):
+                frequencies, extra_iterations, reconverged = _run_em(
+                    counts,
+                    log_likelihoods,
+                    frequencies,
+                    retained,
+                    tolerance,
+                    max_iterations,
+                )
+                iterations += extra_iterations
+                converged = converged and reconverged
+
+        fraction_supported = frequencies >= max(min_fraction, adaptive_floor)
         ranking = np.argsort(-frequencies, kind="stable")
         rank_by_index = {int(index): rank for rank, index in enumerate(ranking, start=1)}
 
@@ -175,7 +200,7 @@ def estimate_variant_mixtures(
                 abundance_class = "TRACE"
                 evidence_class = "TRACE"
                 is_meaningful = False
-            elif observed_reads > 0:
+            elif observed_reads >= min_secondary_reads:
                 abundance_class = "SECONDARY"
                 evidence_class = "CONFIRMED_SECONDARY"
                 is_meaningful = True
@@ -197,9 +222,11 @@ def estimate_variant_mixtures(
                     "abundance_class": abundance_class,
                     "evidence_class": evidence_class,
                     "meaningful": "yes" if is_meaningful else "no",
-                    "minimum_secondary_reads": 0,
-                    "meaningful_threshold": round(min_fraction, 8),
-                    "adaptive_em_floor": 0.0,
+                    "minimum_secondary_reads": min_secondary_reads,
+                    "meaningful_threshold": round(
+                        max(min_fraction, adaptive_floor), 8
+                    ),
+                    "adaptive_em_floor": round(adaptive_floor, 8),
                     "estimated_error_rate": round(error_rate, 8),
                     "em_iterations": iterations,
                     "em_converged": "yes" if converged else "no",

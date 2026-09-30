@@ -43,9 +43,9 @@ def _coverage_gated_missing_loci(
     min_fraction: float,
     penalty: float,
 ) -> tuple[set[str], dict]:
-    """Use observed locus presence without a minimum read-depth requirement."""
-    if not math.isfinite(min_depth) or min_depth < 0:
-        raise ValueError("Legacy missing-locus minimum depth must be finite and non-negative")
+    """Use molecule support as a coverage proxy, never as confirmed absence."""
+    if not math.isfinite(min_depth) or min_depth <= 0:
+        raise ValueError("Missing-locus minimum depth must be finite and positive")
     if not math.isfinite(min_fraction) or not 0 < min_fraction <= 1:
         raise ValueError("Missing-locus minimum fraction must be in (0, 1]")
     if not math.isfinite(penalty) or penalty < 0:
@@ -65,10 +65,10 @@ def _coverage_gated_missing_loci(
             if status == "not_found":
                 if depth == 0 and not query_sequences.get(locus_id):
                     missing.add(locus_id)
-            elif depth > 0 and status in {
+            elif depth >= min_depth and status in {
                 "called", "pass", "low_coverage", "low_depth", "ambiguous",
                 "mixed", "multiple_variants", "detected_unresolved",
-                "present_count_unknown", "present", "estimated",
+                "present_count_unknown", "present",
             }:
                 covered.add(locus_id)
     fraction = len(covered) / len(requested_loci) if requested_loci else 0.0
@@ -76,7 +76,7 @@ def _coverage_gated_missing_loci(
     return (missing if passed and penalty > 0 else set()), {
         "missing_locus_gate_passed": "yes" if passed else "no",
         "well_covered_locus_fraction": f"{fraction:.6f}",
-        "missing_locus_min_depth": 0,
+        "missing_locus_min_depth": min_depth,
         "missing_locus_min_fraction": min_fraction,
         "missing_locus_penalty_per_locus": penalty,
     }
@@ -207,17 +207,7 @@ def molecule_log_likelihoods(alignments, contexts, members, repeat_scale=1.0):
         key = (alignment.molecule_id, alignment.mate, alignment.candidate_id)
         if key not in best or alignment.alignment_score > best[key].alignment_score:
             best[key] = alignment
-    stats, statistics_cache = {}, {}
-    for key, row in best.items():
-        context = context_by_id[row.candidate_id]
-        signature = (row.cs, row.cigar, row.reference_start, row.reference_end,
-                     context.repeat_start, context.repeat_end, context.repeat_unit_length,
-                     context.repeat_count is not None)
-        if signature not in statistics_cache:
-            if len(statistics_cache) >= 4096:
-                statistics_cache.clear()
-            statistics_cache[signature] = alignment_statistics(row, context)
-        stats[key] = statistics_cache[signature]
+    stats = {key: alignment_statistics(row, context_by_id[row.candidate_id]) for key, row in best.items()}
     best = {key: row for key, row in best.items() if stats[key]["outside_bases"] >= 6}
     # Estimate errors from the best observed alignment per read, with pseudocounts.
     primary = {}
@@ -333,9 +323,7 @@ def classify_molecules(likelihoods, reference_ids, *, sample_mode="isolate", pen
     # references must not add taxon support just because the catalog is larger.
     equivalent = {}
     for j, ref in enumerate(references):
-        rounded = np.round(matrix[:, j], 10)
-        rounded[rounded == 0] = 0  # Preserve numeric equality of signed zero.
-        signature = (ref == UNKNOWN, rounded.tobytes())
+        signature = (ref == UNKNOWN, tuple(np.round(matrix[:, j], 10)))
         equivalent.setdefault(signature, []).append(j)
     groups = list(equivalent.values())
     grouped_matrix = matrix[:, [indexes[0] for indexes in groups]]
@@ -362,8 +350,7 @@ def classify_molecules(likelihoods, reference_ids, *, sample_mode="isolate", pen
 
 def _assembly_alignments(queries, contexts):
     import parasail
-    from .alignment import MASKED_DNA_MATRIX
-    matrix = MASKED_DNA_MATRIX
+    matrix = parasail.matrix_create("ACGTN", 2, -4)
     rows = []
     for context in contexts:
         query = queries.get(context.locus_id)
@@ -385,7 +372,7 @@ def run_mapping_classification(
     query_sequences=None, technology="hifi", threads=1, minimap2_bin="minimap2",
     sample_mode="isolate", locus_quality=None, reference_metadata_path=None,
     taxon_identification=None, minimum_loci=2, repeat_scale=1.0,
-    missing_locus_min_depth=0.0, missing_locus_min_fraction=0.8,
+    missing_locus_min_depth=3.0, missing_locus_min_fraction=0.8,
     missing_locus_penalty=8.0, keep_alignments=False,
     query_repeat_counts=None,
 ):
@@ -496,20 +483,6 @@ def run_mapping_classification(
     if reads1 is None:
         paths["assembly_reference_evidence"] = output / "assembly_reference_evidence.tsv"
         paths["classification_query_amplicons"] = output / "query_amplicons.fasta"
-    repeat_comparison = []
-    for locus_id, observed in (query_repeat_counts or {}).items():
-        if observed in (None, ""):
-            continue
-        states = sorted({float(c.repeat_count) for c in contexts
-                         if c.locus_id == locus_id and c.repeat_count is not None})
-        closest = min(states, key=lambda state: abs(state-float(observed))) if states else None
-        repeat_comparison.append({"sample_id": sample_id, "locus_id": locus_id,
-            "observed_repeat_count": observed, "closest_known_repeat_count": closest,
-            "repeat_difference": float(observed)-closest if closest is not None else "",
-            "status": "KNOWN" if float(observed) in states else "NOVEL" if states else "NO_REFERENCE"})
-    paths["reference_repeat_comparison"] = output / "reference_repeat_comparison.tsv"
-    write_tsv(repeat_comparison, paths["reference_repeat_comparison"],
-              ["sample_id", "locus_id", "observed_repeat_count", "closest_known_repeat_count", "repeat_difference", "status"])
     paths.update(write_profile_tree(
         contexts, members, query_repeat_counts or {}, matches, sample_id, output, metadata,
     ))

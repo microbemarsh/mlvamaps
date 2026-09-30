@@ -113,9 +113,6 @@ def _finite_repeat(value: object) -> float | None:
 def _read_delimited(path: Path) -> list[dict[str, str]]:
     if not path.is_file():
         return []
-    # Sequences and molecule-ID evidence can exceed csv's default 128 KiB limit.
-    # File bytes bound field characters; only raise the process-wide limit.
-    csv.field_size_limit(max(csv.field_size_limit(), path.stat().st_size))
     with path.open(newline="", encoding="utf-8") as handle:
         return [dict(row) for row in csv.DictReader(handle, delimiter="\t")]
 
@@ -142,16 +139,6 @@ def _retained_sample_sequences(
             assembly_sequences = dict(_read_fasta(path))
             break
     candidates: dict[str, list[tuple[int, str, str]]] = {}
-    canonical_table = sample_dir / "reconstructed_locus_variants.tsv"
-    for row in _read_delimited(canonical_table):
-        import json
-        evidence = json.loads(row.get("evidence") or "{}")
-        if evidence.get("meaningful") == "no":
-            continue
-        if row.get("sequence"):
-            candidates.setdefault(str(row["locus_id"]), []).append(
-                (-1, str(canonical_table), str(row["sequence"]))
-            )
     for name in ("classification/query_amplicons.fasta", "taxonomic_query_sequences.fasta"):
         query_amplicons = sample_dir / name
         if query_amplicons.is_file():
