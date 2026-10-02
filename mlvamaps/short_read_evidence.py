@@ -7,6 +7,8 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 
+import regex
+
 from .alignment_evidence import CandidateAlignment, CandidateEvidence
 from .candidate_contexts import CandidateContext
 from .locus_measurement import measure_locus_product
@@ -41,19 +43,49 @@ def extract_short_read_evidence(
     contexts: list[CandidateContext],
     loci: list[Locus],
     *, round_tolerance: float = 0.25,
+    recruited_fragments: dict | None = None,
 ) -> list[CandidateEvidence]:
     context_by_id = {context.candidate_id: context for context in contexts}
     locus_by_id = {locus.locus_id: locus for locus in loci}
+    span_patterns = {}
+    if recruited_fragments is not None:
+        for locus in loci:
+            anchors = (locus.forward_primer, revcomp(locus.reverse_primer),
+                       locus.left_flank_sequence, locus.right_flank_sequence)
+            span_patterns[locus.locus_id] = [
+                regex.compile(f"(?:{anchor}){{e<={min(3, max(1, len(anchor) // 5))}}}")
+                if anchor and set(anchor) <= set("ACGT") else None
+                for anchor in anchors
+            ]
+        assigned = {name: locus_id for locus_id, pool in recruited_fragments.items() for name in pool}
+        # A repeat-only competitor cannot establish locus identity. For pairs
+        # missed by exact seeds, retain the mapper's aligned unique-flank bases.
+        alignments = [row for row in alignments if (
+            assigned.get(row.molecule_id) == row.locus_id
+            or (row.molecule_id not in assigned and row.alignment_identity >= 0.9 and max(
+                min(row.reference_end, context_by_id[row.candidate_id].repeat_start) - row.reference_start,
+                row.reference_end - max(row.reference_start, context_by_id[row.candidate_id].repeat_end),
+            ) >= 21)
+        )]
 
     @lru_cache(maxsize=512)
     def measure_sequence(locus_id: str, sequence: str, quality: str | None):
         # Cache only the compact outcome, including failed measurements.
         # The cache is bounded and local to this sample/rounding setting;
         # quality and locus remain part of the key, and molecules stay distinct.
-        measurements = (
-            measure_locus_product(sequence, locus_by_id[locus_id], quality, source="illumina_molecule", round_tolerance=round_tolerance),
-            measure_locus_product(revcomp(sequence), locus_by_id[locus_id], quality[::-1] if quality else None, source="illumina_molecule", round_tolerance=round_tolerance),
-        )
+        measurements = []
+        for oriented, qualities in ((sequence, quality), (revcomp(sequence), quality[::-1] if quality else None)):
+            patterns = span_patterns.get(locus_id)
+            if patterns and all(pattern is not None for pattern in patterns) and not (
+                (patterns[0].search(oriented) and patterns[1].search(oriented))
+                or (patterns[2].search(oriented) and patterns[3].search(oriented))
+            ):
+                continue
+            measurements.append(measure_locus_product(
+                oriented, locus_by_id[locus_id], qualities, source="illumina_molecule", round_tolerance=round_tolerance,
+            ))
+        if not measurements:
+            return None, "PRESENCE_ONLY", 0
         best = max(measurements, key=lambda item: (item.status == "FULL_PRODUCT", item.status == "REPEAT_INFORMATIVE", item.confidence or 0))
         return best.called_allele, best.status, best.confidence or 0
 
@@ -62,7 +94,28 @@ def extract_short_read_evidence(
         grouped[(alignment.molecule_id, alignment.locus_id, alignment.repeat_count)].append(alignment)
     evidence = []
     direct_by_molecule: dict[tuple[str, str], tuple[int | float, str]] = {}
+    fragment_methods = {}
+    for locus_id, fragments in (recruited_fragments or {}).items():
+        for molecule, fragment in fragments.items():
+            pair = fragment.pair
+            reads = [pair.read1, pair.read2]
+            measured = [measure_sequence(locus_id, read.sequence, read.quality) for read in reads if read]
+            complete = [item for item in measured if item[0] is not None and item[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}]
+            method = "direct_spanning"
+            if not complete:
+                merged = merge_read_pair(pair, require_unique=True)
+                if merged is not None and not _merge_overlap_is_repeat_only(pair, merged, locus_by_id[locus_id]):
+                    item = measure_sequence(locus_id, merged.sequence, merged.quality)
+                    if item[0] is not None and item[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:
+                        complete.append(item)
+                        method = "merged_fragment"
+            if complete and len({item[0] for item in complete}) == 1:
+                best = max(complete, key=lambda item: (item[1] == "FULL_PRODUCT", item[2]))
+                direct_by_molecule[(molecule, locus_id)] = best[:2]
+                fragment_methods[(molecule, locus_id)] = method
     for (molecule, locus_id, _repeat), rows in grouped.items():
+        if molecule in (recruited_fragments or {}).get(locus_id, {}):
+            continue
         if (molecule, locus_id) in direct_by_molecule:
             continue
         mates = {row.mate: row for row in rows if row.mate in (1, 2)}
@@ -73,7 +126,7 @@ def extract_short_read_evidence(
                 ReadRecord(mates[1].read_id, mates[1].query_sequence, mates[1].query_quality),
                 ReadRecord(mates[2].read_id, mates[2].query_sequence, mates[2].query_quality),
             )
-            merged = merge_read_pair(pair)
+            merged = merge_read_pair(pair, require_unique=recruited_fragments is not None)
             if merged is not None and not _merge_overlap_is_repeat_only(pair, merged, locus_by_id[locus_id]):
                 sequences.append(merged)
         sequences.extend(ReadRecord(row.read_id, row.query_sequence, row.query_quality) for row in rows)
@@ -124,4 +177,21 @@ def extract_short_read_evidence(
                 "background_alignment_margin": background_margin,
             },
         ))
+    # Candidate-independent evidence also covers mates absent from every
+    # competitive alignment. Shared inference groups by the original molecule
+    # ID, so seed, mate, and mapping paths never multiply fragment support.
+    for locus_id, fragments in (recruited_fragments or {}).items():
+        for molecule, fragment in fragments.items():
+            measured = direct_by_molecule.get((molecule, locus_id))
+            evidence.append(CandidateEvidence(
+                locus_id, measured[0] if measured else 0, molecule,
+                locus_confidence=1.0,
+                direct_product_measurement=bool(measured and measured[1] == "FULL_PRODUCT"),
+                full_repeat_span=measured is not None,
+                # Flank recruitment alone establishes presence, not repeat size.
+                technology="illumina", measured_repeat_count=measured[0] if measured else None,
+                evidence_tier=fragment_methods.get((molecule, locus_id), "flank_recruitment"),
+                metadata={"left_anchor": fragment.left, "right_anchor": fragment.right,
+                          "mate_rescue": fragment.rescued},
+            ))
     return evidence

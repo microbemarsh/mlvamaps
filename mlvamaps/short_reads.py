@@ -6,6 +6,8 @@ import math
 from collections import Counter
 from pathlib import Path
 
+import regex
+
 from .concurrency import DEFAULT_THREADS
 from .models import Locus, ReadPair, ReadRecord
 from .pipeline import SIMPLE_CALL_FIELDS
@@ -82,6 +84,7 @@ def qc_read_pairs(
 
 def merge_read_pair(
     pair: ReadPair, min_overlap: int = 20, max_mismatch_fraction: float = 0.03,
+    *, require_unique: bool = False,
 ) -> ReadRecord | None:
     """Merge a directly overlapping pair; this does not perform assembly."""
     if pair.read2 is None:
@@ -90,11 +93,24 @@ def merge_read_pair(
     right_sequence = revcomp(pair.read2.sequence)
     right_quality = pair.read2.quality[::-1] if pair.read2.quality else "I" * len(right_sequence)
     left_quality = left.quality or "I" * len(left.sequence)
-    overlap = next((
-        size for size in range(min(len(left.sequence), len(right_sequence)), min_overlap - 1, -1)
-        if sum(a != b for a, b in zip(left.sequence[-size:], right_sequence[:size])) / size
-        <= max_mismatch_fraction
-    ), None)
+    maximum = min(len(left.sequence), len(right_sequence))
+    sizes = range(maximum, min_overlap - 1, -1)
+    if require_unique:
+        # Every valid overlap must match this prefix within the full overlap's
+        # error budget. Native prefiltering avoids a Python all-offset scan.
+        prefix = regex.escape(right_sequence[:min_overlap])
+        matcher = regex.compile(f"(?:{prefix}){{s<={int(maximum * max_mismatch_fraction)}}}")
+        sizes = (len(left.sequence) - match.start() for match in matcher.finditer(left.sequence, overlapped=True)
+                 if min_overlap <= len(left.sequence) - match.start() <= maximum)
+    overlap = None
+    for size in sizes:
+        if (left.sequence.endswith(right_sequence[:size])
+            or sum(a != b for a, b in zip(left.sequence[-size:], right_sequence[:size])) / size <= max_mismatch_fraction):
+            if overlap is not None:
+                return None
+            overlap = size
+            if not require_unique:
+                break
     if overlap is None:
         return None
     sequence = list(left.sequence)

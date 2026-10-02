@@ -52,6 +52,8 @@ reserved and cannot be used as a sample ID in a batch.
 | `common_locus_calls.tsv` | Technology-neutral FASTQ calls with probability, margin, molecule support, and explicit called/low-coverage/unresolved/ambiguous/mixed/not-found status. |
 | `molecule_candidate_evidence.tsv` | Optional detailed competitive-alignment and VNTR evidence for each molecule/candidate state; intended for validation rather than the default report. |
 | `candidate_mapping/candidate_alignments.bam` | Optional (`--keep-intermediates`) compressed competitive candidate alignments streamed from minimap2 through htslib. It is removed during normal operation; no text candidate SAM is produced. |
+| `short_read_diagnostics.tsv` | Paired-end calls only: unique recruited and rescued fragments, direct count, original candidate estimate, graph attempt/outcome/length, final count and call method. Dedicated audit output; primary call columns are unchanged. |
+| `short_read_microassembly.fasta` | Paired-end calls with `--keep-intermediates`: successful read-supported local products, including an empty file when none were recovered. |
 
 ## Dataset-level MYOGA export outputs
 

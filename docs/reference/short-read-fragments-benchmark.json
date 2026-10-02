@@ -1,0 +1,972 @@
+{
+  "date": "2026-10-02",
+  "baseline_commit": "5b79e47ba80b511f467e26da7a501f95b0b434f6",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "python": "3.13.15",
+  "dependencies": {
+    "numpy": "2.5.2",
+    "pysam": "0.24.0",
+    "parasail": "1.3.4",
+    "regex": "2026.7.19",
+    "spoars": "0.1.3"
+  },
+  "native_tools": {
+    "minimap2": "2.31-r1302",
+    "sassy": "sassy 0.2.1"
+  },
+  "threads": 2,
+  "trials_per_version": 3,
+  "classification_database": null,
+  "method": "Alternating serial fresh-process baseline/updated trials. Timing inside run_short_read_call includes QC, native tools and output writing; excludes imports. Peak RSS is max(parent, largest child), not concurrent aggregate. OS caches not cleared.",
+  "limitations": [
+    "Synthetic data only; the matched real dataset is on the user server.",
+    "Difficult cases deliberately contain recoverable imperfect repeats; this is not a prevalence estimate.",
+    "Random background reads do not model bacterial off-target homology.",
+    "Perfect unbridged repeat cycles remain unresolved; no arbitrary traversal count is selected."
+  ],
+  "workloads": {
+    "easy": {
+      "pairs": 1160,
+      "loci": 11,
+      "generator": "tests/test_fastq_assembly_concordance.py::_sample; random.Random(locus_id) creates 100-bp exterior flanks; 180-bp fragments every 5 bp, four names per fragment, paired 100-bp Q40 reads.",
+      "inputs_sha256": {
+        "r1.fastq": "3690691ada9c8c35f033a286a6143c7d44b26d9007ce85f3117399ee435e8f69",
+        "r2.fastq": "90b470c9a6b9ee6498c9686431ab3931897cf5102836fafd4f64cec1d4ddfbad",
+        "panel.tsv": "4375d437dfbd9a48558d93520c3fc9c0395affbd636a4a323692f11b5b5425f8",
+        "assembly.fasta": "ebfe865cff821b544a5a3c1a87decc37451e749b911bf5a9a3e598cc120f1c8e"
+      },
+      "runtime_percent_difference": -77.42383684759551,
+      "results": {
+        "baseline": {
+          "trials": [
+            {
+              "seconds": 10.077704083989374,
+              "peak_rss_mib": 71.953125,
+              "microassembly_fraction": null
+            },
+            {
+              "seconds": 9.704786290996708,
+              "peak_rss_mib": 72.0625,
+              "microassembly_fraction": null
+            },
+            {
+              "seconds": 10.678723208024167,
+              "peak_rss_mib": 72.5,
+              "microassembly_fraction": null
+            }
+          ],
+          "median_seconds": 10.077704083989374,
+          "median_peak_rss_mib": 72.0625,
+          "accuracy": {
+            "overall": {
+              "n": 11,
+              "exact_agreement": 1.0,
+              "within_1": 1.0,
+              "within_2": 1.0,
+              "mae": 0.0,
+              "median_absolute_error": 0.0,
+              "spearman": 1.0,
+              "total_sample_loci": 11,
+              "missing_assembly": 0,
+              "missing_short_read": 0
+            },
+            "per_locus": {
+              "contraction_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "forwarddel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "forwardins_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "half_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "integer_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "novel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "quarter_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "reversedel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "reverseins_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "threequarter_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "zero_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              }
+            }
+          }
+        },
+        "updated": {
+          "trials": [
+            {
+              "seconds": 2.821321166935377,
+              "peak_rss_mib": 74.421875,
+              "microassembly_fraction": 0.0
+            },
+            {
+              "seconds": 1.998914459021762,
+              "peak_rss_mib": 73.3125,
+              "microassembly_fraction": 0.0
+            },
+            {
+              "seconds": 2.275158916017972,
+              "peak_rss_mib": 73.171875,
+              "microassembly_fraction": 0.0
+            }
+          ],
+          "median_seconds": 2.275158916017972,
+          "median_peak_rss_mib": 73.3125,
+          "accuracy": {
+            "overall": {
+              "n": 11,
+              "exact_agreement": 1.0,
+              "within_1": 1.0,
+              "within_2": 1.0,
+              "mae": 0.0,
+              "median_absolute_error": 0.0,
+              "spearman": 1.0,
+              "total_sample_loci": 11,
+              "missing_assembly": 0,
+              "missing_short_read": 0
+            },
+            "per_locus": {
+              "contraction_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "forwarddel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "forwardins_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "half_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "integer_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "novel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "quarter_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "reversedel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "reverseins_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "threequarter_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "zero_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "difficult": {
+      "pairs": 660,
+      "loci": 6,
+      "generator": "tests/test_short_read_fragments.py::locus_and_product(count, imperfect=True) for counts 5,8,12,16,20,24; replace primer/flank sequences with random.Random(count).choices(ACGT,k=20,40,40,20); locus IDs L<count>; recruited_tiling produces three fragment names per start at lengths 150,190,230 and 100-bp Q40 reads. Candidate range 3..6. Assembly is generated from the identical product sequences.",
+      "inputs_sha256": {
+        "r1.fastq": "f9fdccf43689489493a04b3165fc940dfa362afb716c51a10d1338f0e7516f28",
+        "r2.fastq": "d2526695d28bb64c6be1c175f4bc0f8b168504a2ce92a2cf523646e78870b6b0",
+        "panel.tsv": "55d72f1f840ccf1e4d1a3362b15430f78104daed96f1364102344bb765ee1806",
+        "assembly.fasta": "a3d957e1eea8824ad33df0718e3e94560ea956904095d351ded9444fa56aa565"
+      },
+      "runtime_percent_difference": -81.46769256500441,
+      "results": {
+        "baseline": {
+          "trials": [
+            {
+              "seconds": 3.084467291017063,
+              "peak_rss_mib": 76.6875,
+              "microassembly_fraction": null
+            },
+            {
+              "seconds": 2.3010668749921024,
+              "peak_rss_mib": 76.234375,
+              "microassembly_fraction": null
+            },
+            {
+              "seconds": 2.4963373750215396,
+              "peak_rss_mib": 76.171875,
+              "microassembly_fraction": null
+            }
+          ],
+          "median_seconds": 2.4963373750215396,
+          "median_peak_rss_mib": 76.234375,
+          "accuracy": {
+            "overall": {
+              "n": 6,
+              "exact_agreement": 0.0,
+              "within_1": 0.16666666666666666,
+              "within_2": 0.3333333333333333,
+              "mae": 8.666666666666666,
+              "median_absolute_error": 8.5,
+              "spearman": 0.13093073414159545,
+              "total_sample_loci": 6,
+              "missing_assembly": 0,
+              "missing_short_read": 0
+            },
+            "per_locus": {
+              "L12": {
+                "n": 1,
+                "exact_agreement": 0.0,
+                "within_1": 0.0,
+                "within_2": 0.0,
+                "mae": 7.0,
+                "median_absolute_error": 7.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L16": {
+                "n": 1,
+                "exact_agreement": 0.0,
+                "within_1": 0.0,
+                "within_2": 0.0,
+                "mae": 10.0,
+                "median_absolute_error": 10.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L20": {
+                "n": 1,
+                "exact_agreement": 0.0,
+                "within_1": 0.0,
+                "within_2": 0.0,
+                "mae": 14.0,
+                "median_absolute_error": 14.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L24": {
+                "n": 1,
+                "exact_agreement": 0.0,
+                "within_1": 0.0,
+                "within_2": 0.0,
+                "mae": 18.0,
+                "median_absolute_error": 18.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L5": {
+                "n": 1,
+                "exact_agreement": 0.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 1.0,
+                "median_absolute_error": 1.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L8": {
+                "n": 1,
+                "exact_agreement": 0.0,
+                "within_1": 0.0,
+                "within_2": 1.0,
+                "mae": 2.0,
+                "median_absolute_error": 2.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              }
+            }
+          }
+        },
+        "updated": {
+          "trials": [
+            {
+              "seconds": 0.4731234160717577,
+              "peak_rss_mib": 74.765625,
+              "microassembly_fraction": 0.8333333333333334
+            },
+            {
+              "seconds": 0.4618606250733137,
+              "peak_rss_mib": 75.28125,
+              "microassembly_fraction": 0.8333333333333334
+            },
+            {
+              "seconds": 0.46262891695369035,
+              "peak_rss_mib": 75.25,
+              "microassembly_fraction": 0.8333333333333334
+            }
+          ],
+          "median_seconds": 0.46262891695369035,
+          "median_peak_rss_mib": 75.25,
+          "accuracy": {
+            "overall": {
+              "n": 6,
+              "exact_agreement": 1.0,
+              "within_1": 1.0,
+              "within_2": 1.0,
+              "mae": 0.0,
+              "median_absolute_error": 0.0,
+              "spearman": 1.0,
+              "total_sample_loci": 6,
+              "missing_assembly": 0,
+              "missing_short_read": 0
+            },
+            "per_locus": {
+              "L12": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L16": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L20": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L24": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L5": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "L8": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "background": {
+      "pairs": 51160,
+      "loci": 11,
+      "generator": "easy plus 50,000 random paired 150-bp Q40 reads from random.Random(691), with IDs background<i>/1 and /2.",
+      "inputs_sha256": {
+        "r1.fastq": "bd8853bb57c818415f13a14d2c039ce07afa5d1fc4046bfd2f9c8a9f3c8bd46d",
+        "r2.fastq": "ad97dee5d7852ff5c251551f53ae1c5e518d6b7c1961e6e5d1271b88d78e7230",
+        "panel.tsv": "4375d437dfbd9a48558d93520c3fc9c0395affbd636a4a323692f11b5b5425f8",
+        "assembly.fasta": "ebfe865cff821b544a5a3c1a87decc37451e749b911bf5a9a3e598cc120f1c8e"
+      },
+      "runtime_percent_difference": -65.504661011875,
+      "results": {
+        "baseline": {
+          "trials": [
+            {
+              "seconds": 12.439378832932562,
+              "peak_rss_mib": 73.046875,
+              "microassembly_fraction": null
+            },
+            {
+              "seconds": 11.775999292032793,
+              "peak_rss_mib": 75.96875,
+              "microassembly_fraction": null
+            },
+            {
+              "seconds": 10.05231850000564,
+              "peak_rss_mib": 72.703125,
+              "microassembly_fraction": null
+            }
+          ],
+          "median_seconds": 11.775999292032793,
+          "median_peak_rss_mib": 73.046875,
+          "accuracy": {
+            "overall": {
+              "n": 11,
+              "exact_agreement": 1.0,
+              "within_1": 1.0,
+              "within_2": 1.0,
+              "mae": 0.0,
+              "median_absolute_error": 0.0,
+              "spearman": 1.0,
+              "total_sample_loci": 11,
+              "missing_assembly": 0,
+              "missing_short_read": 0
+            },
+            "per_locus": {
+              "contraction_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "forwarddel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "forwardins_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "half_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "integer_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "novel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "quarter_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "reversedel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "reverseins_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "threequarter_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "zero_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              }
+            }
+          }
+        },
+        "updated": {
+          "trials": [
+            {
+              "seconds": 3.6836839170427993,
+              "peak_rss_mib": 74.859375,
+              "microassembly_fraction": 0.0
+            },
+            {
+              "seconds": 4.3804158749990165,
+              "peak_rss_mib": 74.953125,
+              "microassembly_fraction": 0.0
+            },
+            {
+              "seconds": 4.062170875025913,
+              "peak_rss_mib": 74.6875,
+              "microassembly_fraction": 0.0
+            }
+          ],
+          "median_seconds": 4.062170875025913,
+          "median_peak_rss_mib": 74.859375,
+          "accuracy": {
+            "overall": {
+              "n": 11,
+              "exact_agreement": 1.0,
+              "within_1": 1.0,
+              "within_2": 1.0,
+              "mae": 0.0,
+              "median_absolute_error": 0.0,
+              "spearman": 1.0,
+              "total_sample_loci": 11,
+              "missing_assembly": 0,
+              "missing_short_read": 0
+            },
+            "per_locus": {
+              "contraction_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "forwarddel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "forwardins_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "half_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "integer_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "novel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "quarter_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "reversedel_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "reverseins_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "threequarter_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              },
+              "zero_4bp_106bp_4U": {
+                "n": 1,
+                "exact_agreement": 1.0,
+                "within_1": 1.0,
+                "within_2": 1.0,
+                "mae": 0.0,
+                "median_absolute_error": 0.0,
+                "spearman": null,
+                "total_sample_loci": 1,
+                "missing_assembly": 0,
+                "missing_short_read": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "source_sha256": {
+    "mlvamaps/short_reads.py": "46e0876d92b9c2b02f4a471e9b883e3c70773763e8998d555e7a3b4d5cde938f",
+    "mlvamaps/short_read_mapping.py": "88fb34076276b597bb5bdb56962233a47f209211fbf7189e1560e7f2e3e84910",
+    "mlvamaps/short_read_evidence.py": "c698027144234092265bbabef9e1690715ea3ccb7bcf79912782096126adc2b6",
+    "mlvamaps/short_read_fragments.py": "238b6c30bc3119fe6078cf359c8b222e9e9acdadb86d5415ab79a72003114fd1",
+    "mlvamaps/unified_fastq.py": "f68b1d87fa1cc03d93e7418bbcb3b2b7d77f235649694bfba82598cb0fa5f628"
+  }
+}

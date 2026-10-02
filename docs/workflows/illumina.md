@@ -1,9 +1,10 @@
 # Illumina short-read workflow
 
-Illumina mode uses the shared FASTQ architecture. Pair identity is retained
-through competitive minimap2 mapping against candidate MLVA allele contexts.
-Illumina-specific molecule, overlap, boundary, repeat-indel, and pair-geometry
-evidence then enters the same locus-level inference used for long reads.
+Illumina mode uses the shared FASTQ architecture. Paired reads are recruited by
+unique flank seeds during QC, retaining both mates independently of competitive
+minimap2 mapping. Direct sequence measurements enter shared allele inference;
+uncertain loci can use a bounded local graph. Single-end and long-read paths
+retain their existing behavior.
 
 ## Command line
 
@@ -42,8 +43,32 @@ disabled unless `--short-trim-quality` is set. With the default
 mate fails. IDs and mate association are not rewritten.
 
 `short_read_qc_summary.tsv` reports input, rejected, retained, and orphan
-counts. When enough exact opposite-orientation mappings exist, it also records
-the empirical fragment-span median, median absolute deviation, and pair count.
+counts. Insert-size fields remain empty: candidate-relative template lengths
+do not provide an independent estimate of a sample's library geometry.
+
+## Flank recruitment and mate rescue
+
+The existing `pysam.FastxFile` parser streams paired files once through QC.
+`normalize_read_id` removes mate suffixes and validates synchronized names.
+During this same pass, a compiled literal-prefix trie searches both mates for
+21-base seeds from candidate sequences outside their repeat intervals. Seeds
+shared between loci, non-concrete/low-complexity seeds, and seeds found inside
+configured repeat sequences are excluded. Both orientations are searched.
+
+Either mate can identify a locus. Both QC-passing reads are retained, including
+repeat-only, soft-clipped, or unmapped mates. A dictionary keyed by normalized
+fragment name prevents duplicate seed hits, mates, or repeated records from
+multiplying support. Conflicting flank assignments are not recruited. Existing
+QC rejection thresholds still apply; mate rescue does not bypass quality QC.
+Seed uniqueness is checked against configured locus contexts, not every genome
+in a reference cohort. Background homology can therefore still recruit reads;
+sequence measurements or a covered two-flank graph must support sizing.
+
+Competitive mapping continues unchanged for reference classification. In paired
+allele inference, an exact flank assignment excludes competitors at other loci.
+Mapper-only recovery requires at least 21 aligned bases outside the repeat and
+90% alignment identity. Repeat-only mappings cannot independently identify a
+locus. Fragment IDs also remain the unit of support in shared inference.
 
 ## Competitive locus-context mapping
 
@@ -77,10 +102,50 @@ are written under the sample's `candidate_mapping/` directory.
 
 ## Direct VNTR inference
 
-Candidate alleles vary only in whole repeat units. Evidence includes unique
-flank mappings, boundary junctions, full VNTR spans, opposite-flank proper pairs,
-forced. Candidate competition, not the primary alignment label alone, supplies
-repeat-state evidence; no per-locus de novo assembly is required.
+Direct measurements use both original mates, regardless of which candidates
+retained their alignments. Overlapping pairs use the existing merger, with a
+native prefix precheck and a requirement for a unique compatible overlap.
+Repeat-only overlaps remain excluded. Native fuzzy-anchor prechecks avoid
+launching Sassy for reads that cannot contain a complete primer pair or both
+repeat flanks; the existing measurement function still makes the final call.
+
+When at least the configured minimum number of directly measured fragments
+agree on one count, weaker candidate-relative mappings remain presence evidence
+and cannot move that count. The default minimum is three fragments.
+
+## Conditional micro-assembly
+
+The graph is attempted only when a locus has flank-recruited fragments and
+lacks an agreeing direct count supported by the configured minimum fragments.
+This includes absent direct spans, insufficient direct support, and conflicting
+direct measurements. Strong direct calls skip it, including calls with some
+soft-clipped or unmapped mates.
+
+The in-process de Bruijn graph uses both mates, native overlapping k-mer
+extraction, and a small Python adjacency dictionary. Each fragment contributes
+at most once per edge; edges need two distinct fragments. The k-mer length is
+at most 41 and also bounded by read and flank lengths. Only a single covered,
+acyclic path between the configured outer flank anchors is accepted. Every
+base in the reconstructed path comes from read-supported edges. No repeat
+sequence or copy number is filled in from a candidate template.
+
+The pool must contain at least three fragments (or the larger configured
+minimum). Limits of 2,000 fragments, 50,000 edges, and eight flank backgrounds
+bound work. Short anchors, gaps, competing branches, repeat cycles, or exceeded
+limits yield no assembled sequence. Supported contigs pass through
+`measure_locus_product` and the existing assembly-equivalent product-length and
+rounding functions. Original fragment IDs supply support; an assembled product
+is not reported as multiple independently observed full-spanning reads.
+
+If assembly fails and there is no independent sequence measurement, the locus
+remains detected but unresolved. The candidate estimate is retained in the
+diagnostic file. Perfect repeats longer than the information spanned by the
+reads cannot be sized by selecting an arbitrary number of graph cycles.
+
+No dependency, assembler subprocess, extra FASTQ pass, whole-genome alignment,
+or new thread pool is introduced. Minimap2 and sample-level concurrency retain
+their existing budgets. SPOARS consensus in `local_assembly.py` is unchanged;
+it was not part of this competitive short-read entry path.
 
 When `--database` is supplied, it must contain the versioned
 `competitive_mapping/candidate_metadata.tsv`, `candidate_contexts.fasta`, and
@@ -131,7 +196,57 @@ produce different calls. A mixed sample's read-supported allele need not equal
 MLVA_finder's selected assembly product. Custom MLVA_finder binning corrections
 are not applied by this FASTQ caller.
 
+The former short-read path measured mates only after candidate mapping retained
+them. Unmapped mates were discarded, candidate-relative spans could favor short
+templates, and repeat-only competitors could outweigh direct evidence. Direct
+measurements already extended the shared allele state set beyond candidate
+bounds; final rounding was not the source of this compression. Recovered direct
+and assembled counts continue to extend that state set on demand. Candidate
+libraries are not enlarged speculatively when partial reads cannot distinguish
+longer alleles.
+
+`short_read_diagnostics.tsv` separates recruitment, direct measurements, the
+original candidate estimate, graph outcome, and final count. It includes rescued
+mate, boundary, clipping, unmapped-mate and unique-fragment counts, plus the call
+method. `--keep-intermediates` also retains successful products in
+`short_read_microassembly.fasta`. Primary table columns and report layout are
+unchanged.
+
 ## Runtime checks
+
+The paired-fragment changes were compared against `5b79e47` on 2026-10-02,
+using two threads and three alternating fresh-process trials. No database
+classification was included. Counts below were compared with assembly mode on
+the identical synthetic products, without supplying assembly calls to inference.
+
+| Workload | Exact agreement, before → after | Median seconds, before → after | Runtime change | Median peak RSS MiB, before → after | Graph attempts |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 11 easy loci, 1,160 pairs | 11/11 → 11/11 | 10.08 → 2.28 | −77.4% | 72.06 → 73.31 | 0/11 |
+| Six difficult imperfect-repeat loci, 660 pairs | 0/6 → 6/6 | 2.50 → 0.46 | −81.5% | 76.23 → 75.25 | 5/6 |
+| Easy loci plus 50,000 random background pairs | 11/11 → 11/11 | 11.78 → 4.06 | −65.5% | 73.05 → 74.86 | 0/11 |
+
+On the difficult set, within-one agreement improved from 1/6 to 6/6,
+within-two from 2/6 to 6/6, MAE from 8.67 to 0, median absolute error from
+8.5 to 0, and Spearman correlation from 0.131 to 1. Counts were
+5, 8, 12, 16, 20 and 24, with a candidate range ending at 6. Neither version
+had missing calls on these measured datasets. Easy-set MAE stayed zero.
+
+[Full trials, input hashes, generation recipes, and per-locus metrics](../reference/short-read-fragments-benchmark.json)
+are retained. RSS is the larger of parent and largest child, not concurrent
+total. These small synthetic workloads do not establish real-isolate accuracy,
+whole-genome throughput, off-target homology behavior, or how often assembly
+will be needed in routine samples. The matched real dataset remains on the
+user's server. The [comparison and timing utility](../../scripts/README.md)
+can run there unchanged.
+
+The regression checks include recruitment/mate rescue, duplicate and ambiguous
+seeds, repeat-only competitors, unique versus periodic pair overlaps, graph
+coverage, branching/cycles, and complete paired inference through 24 repeats.
+The existing full suite also exercises assembly, long-read inference, profiles,
+classification, and reporting. Run `python -m pytest -q` with native tools on
+`PATH`; tests requiring unavailable tools are otherwise skipped.
+
+### Earlier runtime baseline
 
 Anchor measurement rejects impossible matches before starting Sassy: a window
 must be long enough, and a concrete primer with at most `k` edits must retain

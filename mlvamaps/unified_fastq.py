@@ -10,7 +10,7 @@ from .allele_inference import (
     InferenceThresholds,
     infer_alleles,
 )
-from .candidate_contexts import generate_candidate_contexts, write_candidate_contexts
+from .candidate_contexts import CandidateContext, generate_candidate_contexts, write_candidate_contexts
 from .io import write_fasta, write_tsv
 from .long_read_evidence import extract_long_read_evidence
 from .minimap_mapping import map_reads_to_candidates_bam
@@ -85,11 +85,13 @@ def run_unified_fastq_inference(
     maximum_candidate_repeat_count: int = 100,
     keep_alignments: bool = False,
     round_tolerance: float = 0.25,
+    contexts: list[CandidateContext] | None = None,
+    recruited_fragments: dict | None = None,
 ) -> tuple[list[dict[str, object]], list[CandidateEvidence], dict[tuple[str, str], int | float], dict[str, Path]]:
     outdir = Path(outdir)
     work = outdir / "candidate_mapping"
     work.mkdir(parents=True, exist_ok=True)
-    contexts = generate_candidate_contexts(
+    contexts = contexts if contexts is not None else generate_candidate_contexts(
         loci, database_path, maximum=maximum_candidate_repeat_count
     )
     database = Path(database_path) if database_path else None
@@ -118,16 +120,33 @@ def run_unified_fastq_inference(
         executable=minimap2_bin,
     )
     if technology == "illumina":
-        evidence = extract_short_read_evidence(alignments, contexts, loci, round_tolerance=round_tolerance)
+        evidence = extract_short_read_evidence(
+            alignments, contexts, loci, round_tolerance=round_tolerance,
+            recruited_fragments=recruited_fragments,
+        )
     else:
         evidence = extract_long_read_evidence(alignments, contexts, loci, technology, round_tolerance=round_tolerance)
+    thresholds = InferenceThresholds(
+        minimum_molecules=minimum_molecules,
+        minimum_probability=minimum_probability,
+    )
     calls, molecule_calls = infer_alleles(
         evidence, loci, contexts, sample_id, technology,
-        InferenceThresholds(
-            minimum_molecules=minimum_molecules,
-            minimum_probability=minimum_probability,
-        ),
+        thresholds,
     )
+    fragment_paths = {}
+    if technology == "illumina" and reads2 is not None and recruited_fragments is not None:
+        from .short_read_fragments import resolve_fragment_calls
+
+        calls, evidence, molecule_calls, diagnostics, products = resolve_fragment_calls(
+            calls, evidence, molecule_calls, alignments, contexts, loci,
+            recruited_fragments, sample_id, thresholds, round_tolerance,
+        )
+        fragment_paths["short_read_diagnostics"] = outdir / "short_read_diagnostics.tsv"
+        write_tsv(diagnostics, fragment_paths["short_read_diagnostics"], list(diagnostics[0]) if diagnostics else [])
+        if keep_alignments:
+            fragment_paths["short_read_microassembly"] = outdir / "short_read_microassembly.fasta"
+            write_fasta(products, fragment_paths["short_read_microassembly"])
     common_calls = outdir / "common_locus_calls.tsv"
     evidence_path = outdir / "molecule_candidate_evidence.tsv"
     write_tsv(calls, common_calls, COMMON_LOCUS_CALL_FIELDS)
@@ -152,6 +171,7 @@ def run_unified_fastq_inference(
         "candidate_provenance": paths["provenance"],
         **({"taxonomic_query_sequences": taxonomic_queries} if database_path else {}),
         **({"candidate_alignments": bam} if keep_alignments else {}),
+        **fragment_paths,
     }
 
 

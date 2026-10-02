@@ -17,9 +17,10 @@ Assembly and FASTQ inputs retain their own evidence-recovery paths:
 - **Genome assemblies:** Sassy-backed, primer-directed in silico PCR recovers
   candidate amplicons; the assembly caller applies MLVA_finder-compatible
   product selection and size-to-repeat conversion.
-- **Paired-end or single-end Illumina reads:** competitive minimap2 alignment
-  against candidate MLVA allele contexts supplies paired-molecule, boundary,
-  indel, and direct-product evidence to the shared allele caller.
+- **Illumina reads:** competitive minimap2 alignment supplies molecule evidence
+  to the shared allele caller. Paired reads also use flank recruitment with mate
+  rescue and, for uncertain loci, bounded local assembly through the shared
+  product-length parser.
 - **Long-read or amplicon FASTQ:** the same competitive candidate mapping is
   followed by direct molecule measurement and shared allele inference. SPOARS
   remains available for representative sequence correction and confirmation;
