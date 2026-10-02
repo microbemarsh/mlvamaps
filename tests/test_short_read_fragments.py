@@ -185,7 +185,7 @@ def test_graph_coverage_counts_fragments_not_repeated_mates():
     assert not assemble_fragments(isolated, generate_candidate_contexts([locus]))[0]
 
 
-def test_inconclusive_graph_reports_presence_instead_of_candidate_edge():
+def test_inconclusive_graph_retains_candidate_estimate_with_low_confidence():
     from mlvamaps.alignment_evidence import CandidateEvidence
     from mlvamaps.allele_inference import InferenceThresholds
     from mlvamaps.short_read_fragments import resolve_fragment_calls
@@ -196,6 +196,62 @@ def test_inconclusive_graph_reports_presence_instead_of_candidate_edge():
     calls, molecules = infer_alleles(evidence, [locus], contexts, "s", "illumina")
     resolved, _, _, diagnostics, _ = resolve_fragment_calls(
         calls, evidence, molecules, [], contexts, [locus], {"L": pool}, "s", InferenceThresholds(), .25)
-    assert resolved[0]["repeat_count"] == ""
-    assert resolved[0]["status"] == "detected_unresolved"
+    assert resolved[0]["repeat_count"] == 6
+    assert resolved[0]["status"] == "estimated"
+    assert resolved[0]["confidence"] == "low"
+    assert resolved[0]["best_probability"] == calls[0]["best_probability"]
+    assert resolved[0]["candidate_distribution"] == calls[0]["candidate_distribution"]
+    assert "candidate range boundary" in resolved[0]["estimation_reason"]
     assert diagnostics[0]["microassembly_success"] == "no"
+    assert diagnostics[0]["final_repeat_count"] == 6
+    assert diagnostics[0]["call_method"] == "candidate_likelihood"
+
+
+def test_ambiguous_candidate_estimate_is_retained_without_inventing_missing_calls():
+    from mlvamaps.alignment_evidence import CandidateEvidence
+    from mlvamaps.allele_inference import InferenceThresholds
+    from mlvamaps.short_read_fragments import resolve_fragment_calls
+    from mlvamaps.unified_fastq import common_calls_to_compatibility
+    locus, _ = locus_and_product()
+    missing = replace(locus, locus_id="missing")
+    contexts = generate_candidate_contexts([locus, missing])
+    evidence = [CandidateEvidence("L", count, "m", left_boundary_span=True, technology="illumina")
+                for count in (5, 6)]
+    calls, molecules = infer_alleles(evidence, [locus, missing], contexts, "s", "illumina")
+    assert calls[0]["status"] == "ambiguous"
+    resolved, _, _, _, _ = resolve_fragment_calls(
+        calls, evidence, molecules, [], contexts, [locus, missing], {}, "s", InferenceThresholds(), .25)
+    estimate, absent = resolved
+    assert estimate["repeat_count"] == 5
+    assert estimate["status"] == "estimated"
+    assert estimate["best_probability"] == .5
+    assert absent["repeat_count"] == "" and absent["status"] == "not_found"
+    row = common_calls_to_compatibility(resolved)[0]
+    assert row["repeat_count"] == 5 and row["status"] == "ESTIMATED"
+    assert row["allele_confidence"] == .5
+    assert "not a calibrated probability" in row["evidence"]
+
+
+@pytest.mark.skipif(not shutil.which("minimap2") or not shutil.which("sassy"), reason="native tools unavailable")
+def test_failed_assembly_estimate_reaches_report_fingerprint_and_summary(tmp_path):
+    from mlvamaps.short_reads import run_short_read_call
+    locus, product = locus_and_product(24)
+    fragments = recruited_tiling(locus, product)
+    first, second, panel = (tmp_path / name for name in ("r1.fastq", "r2.fastq", "panel.tsv"))
+    write_fastq((item.pair.read1 for item in fragments.values()), first)
+    write_fastq((item.pair.read2 for item in fragments.values()), second)
+    write_tsv([vars(locus)], panel, list(vars(locus)))
+    paths = run_short_read_call(str(first), str(second), str(panel), str(tmp_path / "out"), "s",
+                                threads=2, show_progress=False)
+    with paths["calls"].open() as handle:
+        call = next(csv.DictReader(handle, delimiter="\t"))
+    assert call["repeat_count"] != "" and call["status"] == "ESTIMATED"
+    assert call["allele_confidence"] != "" and call["allele_distribution"] != ""
+    with paths["fingerprint"].open() as handle:
+        assert next(csv.DictReader(handle, delimiter="\t"))["L"] == call["repeat_count"]
+    with paths["sample_summary"].open() as handle:
+        summary = next(csv.DictReader(handle, delimiter="\t"))
+    assert summary["partial_loci"] == "1" and summary["complete_loci"] == "0"
+    report = paths["report"].read_text()
+    assert f"≈{call['repeat_count']} repeats · ESTIMATED" in report
+    assert "Low confidence; model support" in report

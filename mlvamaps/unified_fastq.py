@@ -184,6 +184,7 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
         "ambiguous": "AMBIGUOUS",
         "not_found": "NOT_FOUND",
         "mixed": "MULTIPLE_VARIANTS",
+        "estimated": "ESTIMATED",
     }
     output = []
     for row in calls:
@@ -212,6 +213,9 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
                 f"{row['molecule_support']} informative molecule(s); "
                 f"{row['direct_product_support']} direct product; "
                 f"{row['full_span_support']} full repeat span"
+                + (f"; low-confidence estimate: {row.get('estimation_reason', 'unresolved product')}; "
+                   "model support is relative to tested candidates, not a calibrated probability of correctness"
+                   if row["status"] == "estimated" else "")
             ),
         })
     return output

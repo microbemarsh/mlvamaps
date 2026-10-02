@@ -136,6 +136,15 @@ complete dominant local product includes its `product_size_bp` and unrounded
 blank. An assembly-only call has product size but no read depth unless support
 data are supplied.
 
+Paired short-read calls retain a best candidate approximation when a complete
+product cannot be resolved. These rows have `status=ESTIMATED`, a numeric
+`repeat_count`, and the existing `allele_confidence`/`allele_distribution`
+model-support values. `report.html` marks them with ≈ and **low confidence**.
+Model support is conditional on the tested candidates, not a calibrated
+probability of correctness; the evidence text flags candidate-range boundaries.
+Fingerprints include these approximations, so consult `calls.tsv` for their
+status and uncertainty. Truly missing evidence remains blank.
+
 ## FASTQ outputs
 
 ### Illumina-specific evidence

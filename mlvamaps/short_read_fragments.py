@@ -260,20 +260,30 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
                     method = "microassembly"
                 else:
                     diagnostic["microassembly_reason"] = "product_not_measurable"
-            if diagnostic["microassembly_success"] == "no" and not measured:
-                # Candidate-relative boundary coordinates do not resolve how
-                # many copies occur in an unbridged repeat. Keep presence and
-                # the original candidate estimate in diagnostics, not a capped
-                # allele fabricated from this inconclusive graph.
-                rows = [replace(row, full_repeat_span=False, left_boundary_span=False,
-                                right_boundary_span=False, repeat_indel_support=0,
-                                pair_geometry_support=0) for row in rows]
-                method = "existing_fallback"
+            # An inconclusive graph does not erase the existing candidate
+            # estimate. Retain its likelihoods and label the approximation below.
         rows_by_locus[locus_id] = rows
         diagnostic["call_method"] = method
         diagnostics.append(diagnostic)
     evidence = [row for locus in loci for row in rows_by_locus[locus.locus_id]]
     calls, molecule_calls = infer_alleles(evidence, loci, contexts, sample_id, "illumina", thresholds)
     for diagnostic, call in zip(diagnostics, calls):
+        if call["best_candidate_repeat"] != "" and (
+            call["status"] == "ambiguous"
+            or (not diagnostic["spanning_fragment_count"] and diagnostic["microassembly_success"] == "no")
+        ):
+            reason = (
+                "candidate likelihoods do not separate sufficiently"
+                if call["status"] == "ambiguous" else "no independently resolved product"
+            )
+            if diagnostic["microassembly_attempted"] == "yes":
+                reason += "; local assembly: " + str(diagnostic["microassembly_reason"]).replace("_", " ")
+            candidates = [context.repeat_count for context in contexts_by_locus[call["locus"]]
+                          if context.repeat_count is not None]
+            if candidates and call["best_candidate_repeat"] in {min(candidates), max(candidates)}:
+                reason += "; estimate is at the tested candidate range boundary"
+            call.update(repeat_count=call["best_candidate_repeat"], status="estimated",
+                        confidence="low", estimation_reason=reason)
+            diagnostic["call_method"] = "candidate_likelihood"
         diagnostic["final_repeat_count"] = call["repeat_count"]
     return calls, evidence, molecule_calls, diagnostics, products

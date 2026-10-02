@@ -187,3 +187,26 @@ def test_reports_prioritize_sample_findings_and_remove_novelty(tmp_path):
     assert "POA assembly calls" in fastq_report
     assert "Generated " in fastq_report
     assert "Cache-Control" in fastq_report
+
+
+def test_report_displays_estimates_with_support_without_labelling_them_confident(tmp_path):
+    allele = {
+        "locus_id": "L1", "called_repeat_count": 6,
+        "posterior_probability": .63, "read_depth": 10,
+        "call_status": "ESTIMATED",
+    }
+    write_report(tmp_path, "sample", [allele], [Locus("L1", repeat_motif="AT")],
+                 short_read_rows=[{
+                     "locus_id": "L1", "repeat_count": 6, "status": "ESTIMATED",
+                     "evidence_class": "ESTIMATED", "allele_confidence": .63,
+                     "short_read_warning": "estimate is at the tested candidate range boundary",
+                 }])
+    report = (tmp_path / "report.html").read_text()
+    assert "≈6 repeats · ESTIMATED" in report
+    assert "Low confidence; model support 0.63" in report
+    assert "Estimated repeat counts (low confidence)" in report
+    assert "candidate range boundary" in report
+    assert "not a calibrated probability" in report
+    assert "status-warn\">ESTIMATED" in report
+    assert "No locus-level review flags" not in report
+    assert "NA · ESTIMATED" not in report

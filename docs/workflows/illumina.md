@@ -137,10 +137,19 @@ limits yield no assembled sequence. Supported contigs pass through
 rounding functions. Original fragment IDs supply support; an assembled product
 is not reported as multiple independently observed full-spanning reads.
 
-If assembly fails and there is no independent sequence measurement, the locus
-remains detected but unresolved. The candidate estimate is retained in the
-diagnostic file. Perfect repeats longer than the information spanned by the
-reads cannot be sized by selecting an arbitrary number of graph cycles.
+If assembly fails, the existing best candidate estimate and its likelihood
+distribution are retained in the report, calls and fingerprint outputs. Without
+an independently resolved sequence, the call is `ESTIMATED` with low confidence.
+Ambiguous candidate rankings also retain their best estimate. The report marks
+these counts with ≈ and shows their relative model support. A high model support
+compares only tested candidates; it is not a calibrated probability that an
+unresolved repeat count is correct. Estimates at the candidate-range boundary
+are flagged in the evidence text.
+
+This fallback preserves an available approximation without choosing an arbitrary
+number of graph cycles. A locus with no count-informative evidence or ranked
+candidates still has no defensible numeric estimate; missing calls are not filled
+from the reference allele or panel midpoint.
 
 No dependency, assembler subprocess, extra FASTQ pass, whole-genome alignment,
 or new thread pool is introduced. Minimap2 and sample-level concurrency retain

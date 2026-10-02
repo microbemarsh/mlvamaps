@@ -402,11 +402,16 @@ def _assembly_gel_svg(
 _STATUS_COLORS = {
     "PASS": "#56b4e9",
     "LOW_DEPTH": "#e69f00",
+    "ESTIMATED": "#e69f00",
     "AMBIGUOUS": "#f0e442",
     "MULTIPLE_VARIANTS": "#cc79a7",
     "OUT_OF_RANGE": "#ff9f80",
     "LOCUS_DROPOUT": "#a6b2bd",
 }
+
+
+def _confidence_label(value, status: str) -> str:
+    return f"Low confidence; model support {value}" if status == "ESTIMATED" else str(value)
 
 
 def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
@@ -419,18 +424,21 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
         count = _called_count(row.get(value_key))
         raw = row.get(raw_key, "")
         status = str(row.get("status" if assembly else "call_status", ""))
-        normalized.append((str(row.get("locus_id", "")), count, raw, status))
-    max_count = max((count for _locus, count, _raw, _status in normalized if count is not None), default=1)
-    row_height = 29
+        normalized.append((str(row.get("locus_id", "")), count, raw, status, row.get("posterior_probability", "")))
+    max_count = max((count for _locus, count, _raw, _status, _support in normalized if count is not None), default=1)
+    has_estimates = any(status == "ESTIMATED" for _locus, _count, _raw, status, _support in normalized)
+    row_height = 44 if has_estimates else 29
     plot_left = 190
     plot_width = 600
     height = 65 + len(normalized) * row_height
     marks = []
-    for index, (locus_id, count, raw, status) in enumerate(normalized):
+    for index, (locus_id, count, raw, status, support) in enumerate(normalized):
         y = 42 + index * row_height
         color = _STATUS_COLORS.get(status, "#bdcbd6")
         width = 0 if count is None else (count / max(max_count, 1)) * plot_width
         exact = "NA" if count is None else f"{count} repeats"
+        if count is not None and status == "ESTIMATED":
+            exact = "≈" + exact
         if raw not in ("", None) and str(raw) != str(count):
             exact += f" (raw {raw})"
         marks.append(
@@ -440,14 +448,24 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
             f'<title>{_safe(locus_id)}: {_safe(exact)}; {_safe(status)}</title></rect>'
             f'<text class="chart-value" x="{plot_left + plot_width + 18}" y="{y + 13:.1f}">{_safe(exact)} · {_safe(status)}</text>'
         )
+        if status == "ESTIMATED":
+            marks.append(
+                f'<text class="chart-value" x="{plot_left + plot_width + 18}" y="{y + 30:.1f}">'
+                f'{_safe(_confidence_label(support, status))}</text>'
+            )
+    estimate_note = (
+        " Estimated values are marked ≈ and have low confidence. Model support compares tested candidates; "
+        "it is not a calibrated probability that the count is correct."
+        if has_estimates else ""
+    )
     return f"""
 <figure class="chart-panel" aria-label="Individual locus repeat counts">
-  <svg viewBox="0 0 1080 {height}" role="img">
+  <svg viewBox="0 0 {1240 if has_estimates else 1080} {height}" role="img">
     <title>Individual locus repeat counts</title>
-    <desc>Exact repeat count at every panel locus, shown independently of amplicon SNP bands.</desc>
+    <desc>{"Repeat counts and labelled approximations" if has_estimates else "Exact repeat count"} at every panel locus, shown independently of amplicon SNP bands.</desc>
     {"".join(marks)}
   </svg>
-  <figcaption>Bar length represents repeat units, with the exact call (and raw assembly estimate when applicable) printed at right. Call status is printed beside each bar as well as indicated by color.</figcaption>
+  <figcaption>Bar length represents repeat units, with the {"call" if has_estimates else "exact call"} (and raw assembly estimate when applicable) printed at right. Call status is printed beside each bar as well as indicated by color.{estimate_note}</figcaption>
 </figure>
 """
 
@@ -469,6 +487,7 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
             f'<text class="chart-axis" x="{x:.1f}" y="28" text-anchor="middle">{value:.2g}</text>'
         )
     marks = []
+    has_estimates = any(row.get("call_status") == "ESTIMATED" for row in rows)
     for index, row in enumerate(rows):
         y = 54 + (index * row_height)
         posterior = max(0.0, min(1.0, float(row.get("posterior_probability") or 0)))
@@ -480,11 +499,12 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
         status = str(row.get("call_status") or "")
         color = _STATUS_COLORS.get(status, "#bdcbd6")
         x = plot_left + (posterior * plot_width)
+        support_label = _confidence_label(f"{posterior:.3f}", status) if status == "ESTIMATED" else f"posterior {posterior:.3f}"
         marks.append(
             f'<text class="chart-label" x="8" y="{y + 4:.1f}">{_safe(row.get("locus_id", ""))}</text>'
             f'<line class="confidence-track" x1="{plot_left}" y1="{y:.1f}" x2="{x:.1f}" y2="{y:.1f}"/>'
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}">'
-            f'<title>{_safe(row.get("locus_id", ""))}: posterior {posterior:.3f}; depth {depth}; {status}</title></circle>'
+            f'<title>{_safe(row.get("locus_id", ""))}: {_safe(support_label)}; depth {depth}; {status}</title></circle>'
             f'<text class="chart-value" x="{plot_left + plot_width + 22}" y="{y + 4:.1f}">'
             f'{_safe(row.get("called_repeat_count", ""))}U · {_safe(status)}</text>'
         )
@@ -496,7 +516,7 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
     {"".join(ticks)}
     {"".join(marks)}
   </svg>
-  <figcaption>Farther right is more confident. Point size scales with dominant-cluster read depth; status is also printed beside each point.</figcaption>
+  <figcaption>{"Farther right means greater model support among tested candidates. ESTIMATED calls remain low confidence even at high model support." if has_estimates else "Farther right is more confident."} Point size scales with dominant-cluster read depth; status is also printed beside each point.</figcaption>
 </figure>
 """
 
@@ -691,7 +711,7 @@ def write_report(
     reference_best = reference_rows[0] if reference_rows else {}
     total_loci = len(allele_rows)
     flagged = low_depth + dropout + multiple + sum(
-        row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE"}
+        row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE", "ESTIMATED"}
         for row in allele_rows
     )
     summary_cards = [
@@ -699,7 +719,7 @@ def write_report(
         _metric_card(
             "Loci needing review",
             flagged,
-            "Low depth, mixed, ambiguous, out-of-range, or missing",
+            "Low depth, estimated, mixed, ambiguous, out-of-range, or missing",
             "warn" if flagged else "good",
         ),
     ]
@@ -789,6 +809,7 @@ def write_report(
         ("MULTIPLE_VARIANTS", "Mixed loci"),
         ("AMBIGUOUS", "Ambiguous loci"),
         ("OUT_OF_RANGE", "Out-of-range loci"),
+        ("ESTIMATED", "Estimated repeat counts (low confidence)"),
     ):
         affected = [str(row.get("locus_id", "")) for row in allele_rows if row.get("call_status") == status]
         if affected:
@@ -835,7 +856,7 @@ def write_report(
         f"<td>{_safe(row.get('primary_product_size_bp', ''))}</td>"
         f"<td>{_safe(row.get('primary_repeat_count_raw', ''))}</td>"
         f"<td>{_safe(row.get('primary_measurement_source', ''))}</td>"
-        f"<td>{_safe(row['posterior_probability'])}</td>"
+        f"<td>{_safe(_confidence_label(row['posterior_probability'], row['call_status']))}</td>"
         f"<td>{_safe(row.get('primary_read_depth', ''))}/{_safe(row['read_depth'])}</td>"
         f"<td>{_safe(row.get('num_meaningful_variants', ''))}</td>"
         f"<td>{_safe(row.get('dominant_variant_fraction', ''))}</td>"
@@ -876,14 +897,14 @@ def write_report(
     short_read_table_rows = "\n".join(
         "<tr>"
         f"<td>{_safe(row.get('locus_id', ''))}</td>"
-        f"<td><span class=\"status-pill {'status-good' if row.get('repeat_count') not in ('', None) else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
+        f"<td><span class=\"status-pill {'status-good' if row.get('repeat_count') not in ('', None) and row.get('status') != 'ESTIMATED' else 'status-warn'}\">{_safe(row.get('evidence_class', ''))}</span></td>"
         f"<td>{_safe(row.get('recruited_read_pairs', ''))}</td>"
         f"<td>{_safe(row.get('informative_molecule_count', ''))}</td>"
         f"<td>{_safe(row.get('mean_mapq', ''))}</td>"
         f"<td>{_safe(row.get('proper_spanning_pairs', ''))}</td>"
         f"<td>{_safe(row.get('boundary_1_support', ''))} / {_safe(row.get('boundary_2_support', ''))} / {_safe(row.get('both_boundary_support', ''))}</td>"
         f"<td>{_safe(row.get('repeat_count', '')) if row.get('repeat_count') not in ('', None) else _safe(str(row.get('repeat_count_min', '')) + '..' + str(row.get('repeat_count_max', ''))) if row.get('repeat_count_min') not in ('', None) else 'unresolved'}</td>"
-        f"<td>{_safe(row.get('allele_confidence', ''))}</td>"
+        f"<td>{_safe(_confidence_label(row.get('allele_confidence', ''), row.get('status', '')))}</td>"
         f"<td>{_safe(row.get('short_read_warning') or row.get('failure_reason', ''))}</td>"
         "</tr>"
         for row in short_read_rows
@@ -893,7 +914,7 @@ def write_report(
         short_read_section = f"""
       <section class="report-section">
         <h2>Illumina Evidence</h2>
-        <p class="section-intro">Exact values require VNTR-specific evidence derived from competing minimap2 candidate alignments. Conventional mapping uniqueness is not allele confidence; unresolved and presence-only evidence remains explicit.</p>
+        <p class="section-intro">ESTIMATED values retain the best candidate approximation when a product cannot be resolved. They have low confidence; their model support compares tested candidates and is not a calibrated probability of correctness. Resolved calls retain their existing status and confidence.</p>
         <div class="table-scroll"><table>
           <thead><tr><th>Locus</th><th>Evidence</th><th>Recruited pairs</th><th>Informative molecules</th><th>Mean MAPQ</th><th>Proper spanning pairs</th><th>Boundary 1 / 2 / both</th><th>Repeat or interval</th><th>Confidence</th><th>Warning / failure</th></tr></thead>
           <tbody>{short_read_table_rows}</tbody>

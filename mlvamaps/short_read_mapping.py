@@ -282,7 +282,7 @@ def run_mapping_short_read_call(
         "total_reads": counters.get("input_reads", 0), "total_read_pairs": counters.get("input_pairs", 0),
         "retained_reads": counters.get("retained_reads", 0), "retained_pairs": counters.get("retained_pairs", 0),
         "callable_loci": states["called"], "complete_loci": states["called"],
-        "partial_loci": states["detected_unresolved"] + states["low_coverage"] + states["ambiguous"],
+        "partial_loci": states["detected_unresolved"] + states["low_coverage"] + states["ambiguous"] + states["estimated"],
         "presence_only_loci": states["detected_unresolved"], "mixed_loci": states["ambiguous"],
         "missing_loci": states["no_evidence"], "best_profile_id": best.get("best_profile_id", ""),
         "best_profile_distance": best.get("distance", ""), "profile_confidence": best.get("confidence", ""),
