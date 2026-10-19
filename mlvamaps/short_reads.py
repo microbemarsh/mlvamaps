@@ -159,6 +159,9 @@ def _allele_rows(call_rows: list[dict]) -> list[dict]:
         "primary_repeat_count_raw": row["repeat_count_raw"],
         "primary_measurement_source": row["evidence_sources"],
         "evidence_status": row["evidence_class"],
+        "estimation_method": row.get("estimation_method", ""),
+        "estimation_reason": row.get("estimation_reason", ""),
+        "estimate_support": row.get("estimate_support", ""),
     } for row in call_rows]
 
 

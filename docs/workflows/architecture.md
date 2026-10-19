@@ -47,7 +47,10 @@ in memory. No reference build migration is required for current-schema databases
 Long reads undergo Sassy primer recovery before observed mapping. Paired short
 reads undergo flank recruitment and mate rescue during QC. Both paths measure
 molecules with the shared product parser. A reference alignment without a
-measurement establishes presence only; unresolved calls have no numeric allele.
+measurement establishes presence. A separate fallback can report a low-confidence
+`ESTIMATED` count from competing measurements, repeat-spanning CIGAR evidence,
+or reference-conditioned partial mappings with flank support. Estimates remain
+separate from measured molecule evidence; loci without either remain unavailable.
 Primer-recovered long-read products can contribute even when mapping misses them.
 
 The observed alignments are retained in memory for reference classification,

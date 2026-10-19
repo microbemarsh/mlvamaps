@@ -146,7 +146,7 @@ def run_mapping_short_read_call(
     calls = common_calls_to_compatibility(common_calls)
     if database_path:
         for call in calls:
-            call["inference_method"] = "observed_reference_molecule_measurement"
+            call["inference_method"] = call.get("estimation_method") or "observed_reference_molecule_measurement"
     by_locus = {str(row["locus"]): row for row in common_calls}
     evidence_rows = []
     for locus in loci:
@@ -184,7 +184,7 @@ def run_mapping_short_read_call(
             "estimated_primary_fraction": common["dominant_fraction"],
             "estimated_secondary_fraction": common["secondary_fraction"],
             "mixture_status": "MIXED" if common["status"] == "mixed" else "SINGLE",
-            "evidence_sources": "competitive_minimap2", "mapping_state": common["status"],
+            "evidence_sources": common.get("estimation_method") or "competitive_minimap2", "mapping_state": common["status"],
             "supporting_fragments": common["molecule_support"], "proper_spanning_pairs": 0,
             "junction_read_count": common["junction_support"],
             "full_spanning_read_count": common["full_span_support"], "cigar_indel_read_count": 0,

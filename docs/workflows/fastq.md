@@ -2,8 +2,8 @@
 
 FASTQ calling requires a completed `--database`. Short and long reads map
 directly to its observed reference loci and share molecule-level repeat
-inference and reference classification. A reference match alone never supplies
-the sample's repeat count.
+inference and reference classification. Directly measured counts take precedence;
+unresolved sizing can fall back to an explicitly labelled low-confidence estimate.
 
 ```bash
 mlvamaps call --database reference_build -i sample.fastq.gz -o results
@@ -68,10 +68,13 @@ For concrete DNA anchors in windows of at most 512 bases, an in-process edit-dis
 existence check rejects impossible matches before launching Sassy. Accepted
 approximate matches still use Sassy's coordinates and traceback.
 
-Only measured evidence supplies a numeric allele. Flank-only mappings,
-reference-relative alignment scores, and paired geometry establish presence
-without filling in a count. Conflicting measurements of the same molecule remain
-unresolved. Reference copies and mate records do not multiply molecule support.
+Measured evidence supplies direct alleles. If direct sizing remains unresolved,
+report the best supported approximation as `ESTIMATED`: prefer competing measured
+observations, then repeat-spanning CIGAR projections, then reference-conditioned
+partial-alignment support. Alignment estimates require locus-flank support and
+remain low confidence even when only one catalog allele is available. Reference
+copies and mate records do not multiply molecule support. Estimates are kept
+separate from measured counts used in reference classification.
 Novel and fractional measured alleles remain callable outside the catalog range.
 
 `common_locus_calls.tsv` distinguishes `presence_support` from informative
@@ -80,7 +83,8 @@ alignment diagnostics, evidence types, and inferred molecule counts.
 
 Low-depth calls, mixtures, ambiguous measurements, detected-but-unresolved loci,
 and missing loci retain distinct statuses. `PRESENT_COUNT_UNKNOWN` has no numeric
-repeat count; missing values are never converted to zero.
+repeat count when neither sizing nor estimation is possible. The report shows
+every locus in an always-visible table; missing values are never converted to zero.
 
 ## 5. Confirm representative sequences
 
@@ -100,7 +104,8 @@ it does not map the FASTQ a second time. Sequence mismatches and measured repeat
 length differences both inform reference likelihoods. A measured paired-fragment
 count contributes once per molecule, even when both mates align. Where no measured
 count exists, the existing alignment-derived repeat evidence remains available
-to classification without becoming a numeric locus call.
+to classification. A reported estimate does not become an independent measured
+count in that classification model.
 
 Equivalent references remain grouped. Isolate support and metagenome mixture EM
 retain an unclassified component, and weak or ambiguous evidence remains explicit.

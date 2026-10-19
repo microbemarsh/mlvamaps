@@ -154,6 +154,9 @@ def extract_short_read_evidence(
         right = any(row.reference_start < context.repeat_end < row.reference_end for row in rows)
         full = any(row.reference_start <= context.repeat_start and row.reference_end >= context.repeat_end for row in rows)
         indel_delta = _repeat_indel_delta(best, context)
+        spanning = [row for row in rows if row.candidate_id == best.candidate_id
+                    and row.reference_start < context.repeat_start and row.reference_end > context.repeat_end]
+        spanning_best = max(spanning, key=lambda row: row.alignment_score) if spanning else None
         measured = direct_by_molecule.get((molecule, locus_id))
         # Paired geometry is candidate-relative: deviation from the aligned
         # candidate product is represented in repeat units without using MAPQ.
@@ -174,6 +177,11 @@ def extract_short_read_evidence(
             else "generic_locus_mapping",
             {
                 "repeat_indel_observed_delta": indel_delta,
+                "spanning_repeat_indel_delta": _repeat_indel_delta(spanning_best, context) if spanning_best else None,
+                "aligned_flank_bases": max(
+                    0, min(best.reference_end, context.repeat_start) - best.reference_start,
+                    best.reference_end - max(best.reference_start, context.repeat_end),
+                ),
                 "background_alignment_margin": background_margin,
             },
         ))

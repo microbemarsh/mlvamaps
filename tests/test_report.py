@@ -210,3 +210,28 @@ def test_report_displays_estimates_with_support_without_labelling_them_confident
     assert "status-warn\">ESTIMATED" in report
     assert "No locus-level review flags" not in report
     assert "NA · ESTIMATED" not in report
+
+
+@pytest.mark.parametrize("assembly", [False, True])
+def test_repeat_table_is_visible_and_includes_every_panel_locus(tmp_path, assembly):
+    loci = [Locus("zero"), Locus("estimated"), Locus("missing<locus>")]
+    rows = [
+        {"locus_id": "zero", "called_repeat_count": 0, "repeat_count": 0,
+         "posterior_probability": 1, "allele_confidence": 1, "read_depth": 3,
+         "call_status": "PASS", "status": "PASS", "present": "yes"},
+        {"locus_id": "estimated", "called_repeat_count": 7, "repeat_count": 7,
+         "posterior_probability": .6, "allele_confidence": .6, "read_depth": 5,
+         "call_status": "ESTIMATED", "status": "ESTIMATED", "present": "yes",
+         "estimation_reason": "Partial mappings < uncertain", "estimate_support": 5},
+    ]
+    if assembly:
+        write_assembly_report(tmp_path, "sample", rows, [], loci=loci)
+    else:
+        write_report(tmp_path, "sample", rows, loci)
+    report = (tmp_path / "report.html").read_text()
+    table = report.split('<table aria-label="Per-locus repeat counts">')[1].split('</table>')[0]
+    assert "<strong>0</strong>" in table
+    assert "<strong>≈7</strong>" in table and "Low confidence; model support 0.6" in table
+    assert "Partial mappings &lt; uncertain" in table
+    assert "missing&lt;locus&gt;" in table and "Unavailable" in table
+    assert report.index('aria-label="Per-locus repeat counts"') < report.index('<details>')

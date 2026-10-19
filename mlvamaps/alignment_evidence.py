@@ -67,7 +67,7 @@ EVIDENCE_FIELDS = [
     "mapping_quality", "query_coverage", "reference_coverage",
     "direct_product", "full_repeat_span", "left_boundary", "right_boundary",
     "repeat_indel_delta", "pair_geometry_score", "evidence_tier",
-    "inferred_molecule_repeat", "cigar", "cs",
+    "inferred_molecule_repeat", "cigar", "cs", "aligned_flank_bases", "spanning_repeat_indel_delta",
 ]
 
 
@@ -99,4 +99,6 @@ def evidence_row(
         "inferred_molecule_repeat": "" if inferred_repeat is None else inferred_repeat,
         "cigar": evidence.cigar,
         "cs": evidence.cs,
+        "aligned_flank_bases": evidence.metadata.get("aligned_flank_bases", ""),
+        "spanning_repeat_indel_delta": evidence.metadata.get("spanning_repeat_indel_delta", ""),
     }

@@ -57,21 +57,31 @@ Both FASTQ paths call `run_unified_fastq_inference`:
    Preserve alternative reference alignments. Decode SAM through htslib into
    temporary BAM and collect alignment evidence.
 2. Measure the sample sequence using complete primer products or resolved
-   repeat flanks. A reference match or paired-end geometry alone cannot supply
-   a numeric repeat count.
+   repeat flanks. A reference match or paired-end geometry alone does not supply
+   a direct measurement.
 3. Group evidence by locus and molecule. Multiple reference alignments and two
    mates do not become independent molecule votes. Conflicting measurements
    within a molecule remain unresolved.
 4. Infer alleles from measured molecule support. Short-read pairs can additionally
    enter the local assembly fallback described below.
-5. Write `common_locus_calls.tsv` and `molecule_candidate_evidence.tsv`, then
+5. For unresolved calls, report a low-confidence `ESTIMATED` count when evidence
+   permits: use the best ambiguous measured allele, conflicting direct
+   observations, repeat-spanning CIGAR projections, or finally a reference-based
+   approximation from partial mappings. Mapping estimates require flank support;
+   repeat-only cross-mappings cannot establish the estimate. Average support
+   over molecules without multiplying duplicate reference alignments. Keep these
+   estimates separate from measured molecule counts used for classification.
+6. Write `common_locus_calls.tsv` and `molecule_candidate_evidence.tsv`, then
    project the calls into the workflow's public output tables.
 
 `presence_support` counts detected molecules; `molecule_support` counts informative
 molecules. Novel or fractional measured alleles can be called outside the
-reference catalog. Detected loci without a resolved count become
-`PRESENT_COUNT_UNKNOWN`, with a blank count. Low depth, ambiguity, mixtures, and
-missing loci retain separate statuses; missing is never converted to zero.
+reference catalog. Estimates carry `estimation_method`, `estimation_reason`, and
+`estimate_support`; their model support is not a calibrated probability of
+correctness. When neither measurement nor estimation is possible, detected loci
+remain `PRESENT_COUNT_UNKNOWN`. Every panel locus appears in the report's visible
+count table, with `Unavailable` when there is no usable sizing evidence. Missing
+is never converted to zero.
 
 ## Short-read FASTQ
 
@@ -296,7 +306,8 @@ and additional compatibility outputs.
 
 Reference classification combines sequence differences and repeat-length
 evidence. FASTQ passes measured counts once per molecule; unmeasured alignments
-can still inform classification without becoming numeric locus calls. Isolate
+can still inform classification. Estimated locus counts are not fed back as
+independent measured evidence. Isolate
 mode ranks a single-source interpretation; metagenome mode fits reference
 fractions with EM. Indistinguishable references remain grouped, an unclassified
 component remains available, and missing-locus penalties are gated by coverage.

@@ -414,6 +414,36 @@ def _confidence_label(value, status: str) -> str:
     return f"Low confidence; model support {value}" if status == "ESTIMATED" else str(value)
 
 
+def _repeat_count_table(rows: list[dict], loci: list[Locus], assembly: bool = False) -> str:
+    """Keep every panel locus and its numeric call visible without expanding details."""
+    by_locus = {str(row["locus_id"]): row for row in rows}
+    order = list(dict.fromkeys([locus.locus_id for locus in loci or []] + list(by_locus)))
+    table_rows = []
+    for locus_id in order:
+        row = by_locus.get(locus_id, {})
+        count = _called_count(row.get("repeat_count" if assembly else "called_repeat_count"))
+        status = row.get("status" if assembly else "call_status", "NOT_FOUND")
+        value = "Unavailable" if count is None else ("≈" if status == "ESTIMATED" else "") + str(count)
+        reason = row.get("estimation_reason") or row.get("evidence") or row.get("primary_measurement_source", "")
+        if count is None:
+            reason = reason or "No usable repeat-size evidence; a count cannot be estimated."
+        support = row.get("estimate_support") if status == "ESTIMATED" else row.get("primary_read_depth", row.get("read_depth", ""))
+        confidence = row.get("allele_confidence" if assembly else "posterior_probability", "")
+        table_rows.append(
+            f"<tr><td>{_safe(locus_id)}</td><td><strong>{_safe(value)}</strong></td>"
+            f"<td>{_safe(status)}</td><td>{_safe('' if support is None else support)}</td>"
+            f"<td>{_safe(_confidence_label(confidence, status))}</td><td>{_safe(reason)}</td></tr>"
+        )
+    return (
+        '<div class="table-scroll"><table aria-label="Per-locus repeat counts">'
+        '<thead><tr><th>Locus</th><th>Repeat count</th><th>Status</th><th>Supporting reads / molecules</th>'
+        '<th>Confidence / model support</th><th>Evidence / uncertainty</th></tr></thead>'
+        '<tbody>' + "".join(table_rows) + '</tbody></table></div>'
+        '<p class="terminal-note">≈ marks a low-confidence estimate. Model support compares the available '
+        'alleles and is not a calibrated probability of correctness. Unavailable means there is no usable sizing evidence.</p>'
+    )
+
+
 def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
     if not rows:
         return '<p class="terminal-note">No repeat-count calls were available.</p>'
@@ -1203,6 +1233,7 @@ def write_report(
       <div class="findings">{findings_html}</div>
       {classification_section}
       <h2>Individual Locus Repeat Counts</h2>
+      {_repeat_count_table(allele_rows, loci)}
       <div class="chart-scroll">{repeat_count_plot}</div>
       {short_read_section}
       {local_assembly_section}
@@ -1214,7 +1245,7 @@ def write_report(
       {gel}
       {profile_section}
       <h2>Detailed Evidence</h2>
-      <p class="terminal-note">The plots above are the primary interpretation view. Expand a section below when exact values are needed.</p>
+      <p class="terminal-note">Per-locus calls are listed above. Expand these sections for additional evidence.</p>
       <details>
         <summary>Allele call details</summary>
         <div class="table-scroll"><table>
@@ -1511,6 +1542,7 @@ def write_assembly_report(
       <div class="findings">{findings_html}</div>
       {classification_section}
       <h2>Individual Locus Repeat Counts</h2>
+      {_repeat_count_table(call_rows, loci, assembly=True)}
       <div class="chart-scroll">{repeat_count_plot}</div>
       <h2>Generated Gel</h2>
       {gel}

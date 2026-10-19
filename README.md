@@ -48,9 +48,12 @@ See [how each workflow works](workflow.md) for source-traced diagrams, processin
 steps, and evidence outputs for short reads, long reads, and assemblies.
 
 FASTQ genotyping and reference typing share one competitive mapping to the
-actual observed database amplicons. Repeat counts require a measured product,
-resolved repeat flanks, or a supported local assembly; a matching reference
-alone does not supply the sample's allele. Novel measured alleles remain callable.
+actual observed database amplicons. Measured products, resolved repeat flanks,
+or supported local assemblies supply direct counts. If direct sizing is
+unresolved, the caller reports its best supported approximation as `ESTIMATED`,
+using repeat-spanning alignment indels or reference-conditioned alignment support.
+The report lists every locus with its count, status, support, and uncertainty.
+Loci without usable sizing evidence remain explicitly unavailable. Novel measured alleles remain callable.
 The same alignments and molecule-level repeat measurements inform reference
 classification, preserving equivalent references and unresolved evidence.
 

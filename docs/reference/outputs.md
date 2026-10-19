@@ -136,12 +136,25 @@ complete dominant local product includes its `product_size_bp` and unrounded
 blank. An assembly-only call has product size but no read depth unless support
 data are supplied.
 
-Database-backed FASTQ calls require an independent sequence measurement for a
-numeric repeat count. A locus supported only by reference mapping is reported as
-`PRESENT_COUNT_UNKNOWN` with an empty count, rather than copying the nearest
-reference allele into the fingerprint. Historical `ESTIMATED` rows can still
-appear in older results or the panel-only library compatibility path; they are
-not emitted by the database-backed primary caller.
+Database-backed FASTQ calls retain direct measurements and also report
+low-confidence `ESTIMATED` counts when direct sizing is unresolved. The fallback
+uses competing measured observations, flank-supported repeat-spanning CIGAR
+indels, or reference-conditioned alignment support, in that order. Estimates
+are included in calls and fingerprints, but not promoted to measured molecule
+evidence for reference classification. Model support compares available alleles;
+it is not a calibrated probability of correctness.
+
+`estimation_method`, `estimation_reason`, and `estimate_support` are appended to
+`common_locus_calls.tsv`, `calls.tsv`, `locus_repeat_counts.tsv`, and long-read
+`allele_calls.tsv`. They identify the method, uncertainty, and supporting molecule
+count. `molecule_candidate_evidence.tsv` also records `aligned_flank_bases` and
+`spanning_repeat_indel_delta` for auditing alignment estimates. Estimates do not
+inflate measured `molecule_support`.
+
+`report.html` includes an always-visible table for every panel locus, with the
+count, status, support, and evidence or uncertainty reason. `≈` marks estimates.
+`PRESENT_COUNT_UNKNOWN` and missing loci remain `Unavailable` when there is no
+usable basis for a numeric estimate; they are never filled with zero.
 
 ## FASTQ outputs
 

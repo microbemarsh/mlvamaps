@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .bayesian_caller import call_loci
+from .allele_inference import ESTIMATION_FIELDS
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
@@ -187,7 +188,7 @@ ALLELE_FIELDS = [
     "median_mapping_quality",
     "median_anchor_identity",
     "consensus_read_agreement",
-]
+] + ESTIMATION_FIELDS
 
 MATCH_FIELDS = [
     "equivalent_references", "log_likelihood", "model_weight", "locus_balanced_fraction",
@@ -243,7 +244,7 @@ SIMPLE_CALL_FIELDS = [
     "allele_distribution",
     "status",
     "evidence",
-]
+] + ESTIMATION_FIELDS
 
 REPEAT_COUNT_FIELDS = [
     "sample_id",
@@ -256,7 +257,7 @@ REPEAT_COUNT_FIELDS = [
     "dominant_variant_fraction",
     "secondary_alleles",
     "status",
-]
+] + ESTIMATION_FIELDS
 
 ALLELE_DISTRIBUTION_FIELDS = [
     "sample_id",
@@ -274,7 +275,7 @@ def allele_distribution_rows(sample_id: str, call_rows: list[dict]) -> list[dict
     rows = []
     for call in call_rows:
         selected = call.get("called_repeat_count", call.get("repeat_count", ""))
-        method = call.get("inference_method", "read_distribution")
+        method = call.get("estimation_method") or call.get("inference_method", "read_distribution")
         for rank, entry in enumerate(
             filter(None, str(call.get("allele_distribution", "")).split(";")),
             start=1,
@@ -344,7 +345,9 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
                 "secondary_alleles": row.get("secondary_alleles", ""),
                 "allele_distribution": row.get("allele_distribution", ""),
                 "status": row["call_status"],
-                "evidence": evidence,
+                "evidence": evidence + (f"; low-confidence estimate: {row['estimation_reason']}"
+                                        if row.get("estimation_reason") else ""),
+                **{field: row.get(field, "") for field in ESTIMATION_FIELDS},
             }
         )
     return rows
@@ -779,7 +782,7 @@ def run_call(
         status_map = {
             "called": "PASS", "low_coverage": "LOW_DEPTH",
             "detected_unresolved": "PRESENT_COUNT_UNKNOWN", "ambiguous": "AMBIGUOUS",
-            "not_found": "LOCUS_DROPOUT", "mixed": "MULTIPLE_VARIANTS",
+            "not_found": "LOCUS_DROPOUT", "mixed": "MULTIPLE_VARIANTS", "estimated": "ESTIMATED",
         }
         row.update({
             "called_repeat_count": shared["repeat_count"],
@@ -794,12 +797,16 @@ def run_call(
             "dominant_variant_fraction": shared["dominant_fraction"] or 0,
             "allele_distribution": shared["candidate_distribution"],
             "call_status": status_map[str(shared["status"])],
-            "primary_measurement_source": ("observed_reference_molecule_measurement"
-                                           if database_path else "shared_competitive_minimap2_inference"),
+            "primary_measurement_source": shared.get("estimation_method") or (
+                "observed_reference_molecule_measurement" if database_path else "shared_competitive_minimap2_inference"),
+            **{field: shared.get(field, "") for field in ESTIMATION_FIELDS},
             "evidence_status": str(shared["status"]).upper(),
             "full_product_reads": shared["direct_product_support"],
             "repeat_informative_reads": shared["full_span_support"],
         })
+        if shared["status"] == "estimated":
+            # Consensus sizing is separate evidence, not the source of this estimate.
+            row.update(primary_product_size_bp="", primary_repeat_count_raw="")
     write_tsv(allele_rows, outdir_path / "allele_calls.tsv", ALLELE_FIELDS)
     allele_distribution_path = outdir_path / "allele_probability_distribution.tsv"
     write_tsv(

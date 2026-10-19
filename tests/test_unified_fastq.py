@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mlvamaps.alignment_evidence import CandidateEvidence
-from mlvamaps.allele_inference import InferenceThresholds, infer_alleles
+from mlvamaps.allele_inference import InferenceThresholds, estimate_unresolved_calls, infer_alleles
 from mlvamaps.candidate_contexts import (
     CandidateContext,
     candidate_repeat_counts,
@@ -225,6 +225,78 @@ def test_observed_reference_cannot_supply_an_unmeasured_repeat_count():
     )
     assert calls[0]["status"] == "detected_unresolved"
     assert molecules == {}
+
+
+def test_estimates_project_spanning_indels_without_creating_measurements():
+    from dataclasses import replace
+
+    locus = _locus()
+    contexts = generate_candidate_contexts([locus])
+    context = contexts[0]
+    spanning = CandidateEvidence(
+        "L1", context.repeat_count, "m1", alignment_score=80, alignment_identity=.98,
+        full_repeat_span=True, query_coverage=1, candidate_id=context.candidate_id,
+        metadata={"spanning_repeat_indel_delta": 7, "aligned_flank_bases": 21},
+    )
+    partial = replace(spanning, molecule_id="m2", full_repeat_span=False,
+                      alignment_score=200, metadata={"aligned_flank_bases": 21})
+    calls, molecules = infer_alleles([spanning, partial], [locus], contexts, "s", "hifi", require_measurement=True)
+    estimate_unresolved_calls(calls, [spanning, partial], contexts)
+    assert calls[0]["repeat_count"] == context.repeat_count + 7
+    assert calls[0]["status"] == "estimated" and calls[0]["confidence"] == "low"
+    assert calls[0]["estimation_method"] == "alignment_repeat_span"
+    assert calls[0]["estimate_support"] == 1
+    assert calls[0]["molecule_support"] == 0 and molecules == {}
+
+
+def test_reference_estimates_use_alignment_support_without_reference_copy_votes():
+    locus = _locus()
+    contexts = generate_candidate_contexts([locus])
+    rows = [CandidateEvidence(
+        "L1", context.repeat_count, "m1", alignment_score=100 if index == 1 else 40,
+        alignment_identity=.99, query_coverage=1, candidate_id=context.candidate_id,
+        metadata={"aligned_flank_bases": 21},
+    ) for index, context in enumerate(contexts)]
+    missing = Locus("missing")
+    calls, molecules = infer_alleles(rows, [locus, missing], contexts, "s", "illumina", require_measurement=True)
+    duplicates = rows + [rows[0]] * 100
+    other, _ = infer_alleles(duplicates, [locus, missing], contexts, "s", "illumina", require_measurement=True)
+    estimate_unresolved_calls(calls, rows, contexts)
+    estimate_unresolved_calls(other, duplicates, contexts)
+    assert calls == other
+    assert calls[0]["repeat_count"] == contexts[1].repeat_count
+    assert calls[0]["estimation_method"] == "reference_conditioned"
+    assert calls[0]["estimate_support"] == 1
+    assert "outside the catalog" in calls[0]["estimation_reason"]
+    assert calls[1]["repeat_count"] == "" and calls[1]["status"] == "not_found"
+    assert molecules == {}
+
+
+def test_estimation_preserves_measured_zero_and_reports_conflicting_counts():
+    from dataclasses import replace
+
+    locus = _locus()
+    contexts = generate_candidate_contexts([locus])
+    row = CandidateEvidence("L1", 0, "m1", measured_repeat_count=0, direct_product_measurement=True)
+    calls, molecules = infer_alleles([row], [locus], contexts, "s", "hifi", require_measurement=True)
+    before = dict(calls[0])
+    estimate_unresolved_calls(calls, [row], contexts)
+    assert calls[0] == before and calls[0]["repeat_count"] == 0
+    conflicting = [replace(row, measured_repeat_count=8)] * 20 + [replace(row, measured_repeat_count=9)]
+    calls, molecules = infer_alleles(conflicting, [locus], contexts, "s", "hifi", require_measurement=True)
+    estimate_unresolved_calls(calls, conflicting, contexts)
+    assert calls[0]["repeat_count"] == 8 and calls[0]["best_probability"] == .5
+    assert calls[0]["estimation_method"] == "conflicting_measurements"
+    assert calls[0]["estimate_support"] == 1 and molecules == {}
+
+
+def test_flank_recruitment_without_alignment_does_not_create_a_zero_estimate():
+    locus = _locus()
+    contexts = generate_candidate_contexts([locus])
+    rows = [CandidateEvidence("L1", 0, "m1", evidence_tier="flank_recruitment")]
+    calls, _ = infer_alleles(rows, [locus], contexts, "s", "illumina", require_measurement=True)
+    estimate_unresolved_calls(calls, rows, contexts)
+    assert calls[0]["repeat_count"] == "" and calls[0]["status"] == "detected_unresolved"
 
 
 def test_primer_recovery_rejects_tied_loci_and_different_product_sizes():

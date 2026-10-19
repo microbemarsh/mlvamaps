@@ -53,6 +53,11 @@ def extract_long_read_evidence(
             "direct_product" if direct and direct[1] == "FULL_PRODUCT" else
             "complete_vntr_span" if full or direct else "repeat_boundary" if left or right else
             "repeat_indel" if indel_delta else "generic_locus_mapping",
-            {"repeat_indel_observed_delta": indel_delta},
+            {"repeat_indel_observed_delta": indel_delta,
+             "spanning_repeat_indel_delta": indel_delta if left and right else None,
+             "aligned_flank_bases": max(
+                 0, min(best.reference_end, context.repeat_start) - best.reference_start,
+                 best.reference_end - max(best.reference_start, context.repeat_end),
+             )},
         ))
     return evidence

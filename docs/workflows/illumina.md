@@ -273,15 +273,19 @@ explicit. See [mapping classification](../concepts/mapping-classification.md).
 ## Measured and presence-only evidence
 
 Each assembled product, merged pair, and original read uses the same panel
-anchors and assembly-calibrated repeat convention. Numeric counts require an
+anchors and assembly-calibrated repeat convention. Direct counts require an
 independent product or flank measurement. Both boundaries on separate unmerged
-mates do not establish a repeat count or a measured repeat interval.
+mates do not establish a measured repeat interval. Unresolved calls can instead
+carry an `ESTIMATED` count based on conflicting observations, repeat-spanning
+CIGAR evidence, or reference-conditioned alignment support. These remain low
+confidence and include their estimation method, support, and uncertainty reason.
 
 `common_locus_calls.tsv` separates all detected molecules (`presence_support`)
 from informative molecules (`molecule_support`). The compact call table uses
-`PRESENT_COUNT_UNKNOWN` for detected loci without a resolved allele and retains
-an empty `repeat_count`. Interval fields remain empty when no interval has been
-measured.
+`PRESENT_COUNT_UNKNOWN` for detected loci without either a measurement or an
+estimate and retains an empty `repeat_count`. Interval fields remain empty when
+no interval has been measured. The report's visible per-locus table includes
+all counts and estimates, with `Unavailable` for loci lacking sizing evidence.
 
 ## Mixtures and confidence
 

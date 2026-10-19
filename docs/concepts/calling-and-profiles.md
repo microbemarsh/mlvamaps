@@ -24,9 +24,13 @@ Reads with more edits receive less weight. These records are written to
 
 The primary FASTQ caller maps molecules to observed database loci and measures
 primer-bounded products, resolved repeat flanks, or supported local assemblies.
-Only measured molecule counts contribute allele likelihoods. Reference mapping
+Only measured molecule counts contribute the primary allele likelihoods. Reference mapping
 without a measurement establishes presence. Measurements can introduce alleles
-outside the reference catalog; the closest reference does not supply a count.
+outside the reference catalog. A separate fallback reports an explicitly labelled
+`ESTIMATED` count when direct sizing is unresolved: first use competing measured
+observations, then flank-supported repeat-spanning CIGAR evidence, then a
+reference-conditioned approximation from partial mappings. Estimates do not
+become measured molecule evidence for reference classification.
 
 Independent molecules contribute to the locus posterior. Duplicate reference
 contexts and two mates from one fragment do not multiply support. Conflicting
@@ -48,7 +52,15 @@ allele needs at least 20% of informative molecules and at least two molecules
 for long reads or three for Illumina. Reference classification separately uses
 isolate support or mixture EM according to `--sample-mode`.
 
-`PRESENT_COUNT_UNKNOWN` retains presence with an empty count. Missing data are
+`ESTIMATED` retains the best available approximation at low confidence, including
+ambiguous measured calls. `estimation_method`, `estimation_reason`, and
+`estimate_support` explain its source, uncertainty, and molecule support.
+Partial-mapping estimates are limited to supported catalog alleles. Duplicate
+reference matches do not multiply support, and repeat-only cross-mappings do
+not qualify for an alignment estimate.
+
+`PRESENT_COUNT_UNKNOWN` retains presence with an empty count when neither direct
+sizing nor estimation is possible. Missing data are
 never zero-filled. `presence_support` records detected molecules and
 `molecule_support` records informative molecules in the common table. The
 probabilities describe model support, not a calibrated probability of correctness.
@@ -58,6 +70,9 @@ probabilities describe model support, not a calibrated probability of correctnes
 `mlva_fingerprint.tsv` contains one row with one column per panel locus.
 `mlva_fingerprint_probabilistic.tsv` contains long-form repeat counts and
 posterior values.
+Estimated counts are included; consult the call status and estimation fields
+before treating a fingerprint value as measured. The HTML report presents every
+panel locus in an always-visible count table, marking estimates with `≈`.
 
 Assembly calls use the same fingerprint shape and historical integer/half-unit
 rounding convention. Product selection follows the MLVA_finder-compatible rule

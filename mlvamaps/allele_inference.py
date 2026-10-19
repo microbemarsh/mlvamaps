@@ -206,10 +206,91 @@ def infer_alleles(
     return calls, molecule_calls
 
 
+def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0):
+    """Fill unresolved calls with labelled estimates, without creating measurements.
+
+    Prefer conflicting direct observations, then repeat-spanning CIGAR projections,
+    then reference-conditioned alignment support. Average per-molecule support so
+    duplicate mappings cannot multiply votes or manufacture depth confidence.
+    """
+    known = {context.candidate_id: context for context in contexts}
+    by_locus = defaultdict(list)
+    for row in evidence:
+        by_locus[row.locus_id].append(row)
+    for call in calls:
+        if call["repeat_count"] != "" or call["status"] == "not_found":
+            continue
+        rows = by_locus[call["locus"]]
+        support = call["molecule_support"]
+        if call["best_candidate_repeat"] != "":
+            # The strict caller already ranked measured but ambiguous evidence.
+            method = "ambiguous_measurements"
+            reason = "Competing molecule measurements; reporting the highest-support allele."
+        else:
+            measured = [row for row in rows if row.measured_repeat_count is not None]
+            mapped = [row for row in rows if row.candidate_id in known
+                      and row.repeat_count is not None and row.alignment_identity > 0
+                      and math.isfinite(row.alignment_score)
+                      and row.metadata.get("aligned_flank_bases", 0) >= max(1, min(21, max(
+                          known[row.candidate_id].repeat_start,
+                          len(known[row.candidate_id].sequence) - known[row.candidate_id].repeat_end,
+                      )))]
+            spanning = [row for row in mapped if row.metadata.get("spanning_repeat_indel_delta") is not None]
+            selected = measured or spanning or mapped
+            if not selected:
+                continue
+            method, reason = (
+                ("conflicting_measurements", "Conflicting measurements within molecules; no unique direct count.")
+                if measured else
+                ("alignment_repeat_span", "Reference repeat count adjusted by repeat-region CIGAR indels; no direct product measurement.")
+                if spanning else
+                ("reference_conditioned", "Partial mappings support a reference allele; repeat length is not directly resolved and alternatives outside the catalog are untested.")
+            )
+            molecule_scores, weights = defaultdict(dict), {}
+            for row in selected:
+                count = row.measured_repeat_count if measured else row.repeat_count
+                if spanning and not measured:
+                    count += float(row.metadata["spanning_repeat_indel_delta"])
+                if not math.isfinite(count) or count < 0:
+                    continue
+                count = int(count) if float(count).is_integer() else count
+                score = 0.0 if measured else row.alignment_score / max(temperature, 1e-6)
+                scores = molecule_scores[row.molecule_id]
+                scores[count] = max(scores.get(count, -math.inf), score)
+                weight = 1.0 if measured else max(0.01, min(1.0, row.alignment_identity * row.query_coverage))
+                weights[row.molecule_id] = max(weights.get(row.molecule_id, 0), weight)
+            if not molecule_scores:
+                continue
+            totals = defaultdict(float)
+            for molecule, scores in molecule_scores.items():
+                for count, probability in _softmax(scores).items():
+                    totals[count] += weights[molecule] * probability
+            total_weight = sum(weights.values())
+            ranked = sorted(((count, value / total_weight) for count, value in totals.items()),
+                            key=lambda item: (-item[1], item[0]))
+            best = ranked[0]
+            second = ranked[1][1] if len(ranked) > 1 else 0.0
+            support = len(molecule_scores)
+            if len(ranked) == 1:
+                reason += " Only one allele is supported by the available evidence; model support does not establish accuracy."
+            elif math.isclose(best[1], second):
+                reason += " Top alleles are tied; the smaller count is shown deterministically."
+            call.update(
+                best_candidate_repeat=best[0], best_probability=round(best[1], 8),
+                second_best_probability=round(second, 8), margin=round(best[1] - second, 8),
+                candidate_distribution=";".join(f"{count}:{probability:.8f}" for count, probability in ranked),
+            )
+        call.update(repeat_count=call["best_candidate_repeat"], status="estimated", confidence="low",
+                    estimation_method=method, estimation_reason=reason, estimate_support=support)
+
+
+ESTIMATION_FIELDS = ["estimation_method", "estimation_reason", "estimate_support"]
+
+
 COMMON_LOCUS_CALL_FIELDS = [
     "sample", "locus", "repeat_count", "status", "confidence",
     "best_probability", "second_best_probability", "margin", "molecule_support", "presence_support",
     "direct_product_support", "full_span_support", "junction_support",
     "best_candidate_repeat", "candidate_distribution", "technology",
     "dominant_repeat", "secondary_repeat", "dominant_fraction", "secondary_fraction",
-]
+] + ESTIMATION_FIELDS

@@ -8,6 +8,8 @@ from .alignment_evidence import CandidateAlignment, CandidateEvidence, EVIDENCE_
 from .allele_inference import (
     COMMON_LOCUS_CALL_FIELDS,
     InferenceThresholds,
+    ESTIMATION_FIELDS,
+    estimate_unresolved_calls,
     infer_alleles,
 )
 from .candidate_contexts import CandidateContext, generate_candidate_contexts, write_candidate_contexts
@@ -155,6 +157,7 @@ def run_unified_fastq_inference(
         require_measurement=bool(database_path),
     )
     fragment_paths = {}
+    diagnostics = []
     if technology == "illumina" and reads2 is not None and recruited_fragments is not None:
         from .short_read_fragments import resolve_fragment_calls
 
@@ -164,10 +167,16 @@ def run_unified_fastq_inference(
             require_measurement=bool(database_path),
         )
         fragment_paths["short_read_diagnostics"] = outdir / "short_read_diagnostics.tsv"
-        write_tsv(diagnostics, fragment_paths["short_read_diagnostics"], list(diagnostics[0]) if diagnostics else [])
         if keep_alignments:
             fragment_paths["short_read_microassembly"] = outdir / "short_read_microassembly.fasta"
             write_fasta(products, fragment_paths["short_read_microassembly"])
+    estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature)
+    if "short_read_diagnostics" in fragment_paths:
+        for diagnostic, call in zip(diagnostics, calls):
+            diagnostic["final_repeat_count"] = call["repeat_count"]
+            if call.get("estimation_method"):
+                diagnostic["call_method"] = call["estimation_method"]
+        write_tsv(diagnostics, fragment_paths["short_read_diagnostics"], list(diagnostics[0]) if diagnostics else [])
     common_calls = outdir / "common_locus_calls.tsv"
     evidence_path = outdir / "molecule_candidate_evidence.tsv"
     write_tsv(calls, common_calls, COMMON_LOCUS_CALL_FIELDS)
@@ -223,7 +232,8 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
             "allele_confidence": row["best_probability"],
             "second_best_repeat_count": "",
             "second_best_probability": row["second_best_probability"],
-            "inference_method": "shared_competitive_minimap2_inference",
+            "inference_method": row.get("estimation_method") or "shared_competitive_minimap2_inference",
+            **{field: row.get(field, "") for field in ESTIMATION_FIELDS},
             "dominant_variant_fraction": row["dominant_fraction"],
             "num_candidate_variants": len(str(row["candidate_distribution"]).split(";")) if row["candidate_distribution"] else 0,
             "num_confirmed_secondary_variants": 1 if row["status"] == "mixed" else 0,
