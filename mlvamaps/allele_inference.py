@@ -47,9 +47,14 @@ def _tier_weight(evidence: CandidateEvidence) -> float:
 
 
 def _molecule_distribution(
-    rows: list[CandidateEvidence], states: list[int | float], temperature: float
+    rows: list[CandidateEvidence], states: list[int | float], temperature: float,
+    require_measurement: bool = False,
 ) -> tuple[dict[int | float, float], int | float | None, float]:
     direct = [row.measured_repeat_count for row in rows if row.measured_repeat_count is not None]
+    if require_measurement and len(set(direct)) != 1:
+        # An observed reference is a recruitment target, not a measured allele.
+        # Conflicting measurements of the same molecule cannot vote by copies.
+        return {}, None, 0.0
     if direct:
         measured = Counter(direct).most_common(1)[0][0]
         scores = {state: -24.0 * abs(float(state) - float(measured)) for state in states}
@@ -83,6 +88,7 @@ def infer_alleles(
     sample_id: str,
     technology: str,
     thresholds: InferenceThresholds | None = None,
+    *, require_measurement: bool = False,
 ) -> tuple[list[dict[str, object]], dict[tuple[str, str], int | float]]:
     """Infer repeat states while preserving presence, ambiguity, and low depth."""
     thresholds = thresholds or InferenceThresholds()
@@ -112,7 +118,9 @@ def infer_alleles(
         states = states_by_locus[locus.locus_id]
         informative: list[tuple[dict[int | float, float], int | float, float, list[CandidateEvidence]]] = []
         for molecule, rows in locus_items.items():
-            distribution, winner, weight = _molecule_distribution(rows, states, thresholds.temperature)
+            distribution, winner, weight = _molecule_distribution(
+                rows, states, thresholds.temperature, require_measurement,
+            )
             if distribution and winner is not None:
                 informative.append((distribution, winner, weight, rows))
                 molecule_calls[(locus.locus_id, molecule)] = winner
@@ -183,6 +191,7 @@ def infer_alleles(
             "second_best_probability": round(second[1], 8),
             "margin": round(best[1] - second[1], 8),
             "molecule_support": len(informative),
+            "presence_support": len(locus_items),
             "direct_product_support": len(direct),
             "full_span_support": len(full),
             "junction_support": len(junction),
@@ -199,7 +208,7 @@ def infer_alleles(
 
 COMMON_LOCUS_CALL_FIELDS = [
     "sample", "locus", "repeat_count", "status", "confidence",
-    "best_probability", "second_best_probability", "margin", "molecule_support",
+    "best_probability", "second_best_probability", "margin", "molecule_support", "presence_support",
     "direct_product_support", "full_span_support", "junction_support",
     "best_candidate_repeat", "candidate_distribution", "technology",
     "dominant_repeat", "secondary_repeat", "dominant_fraction", "secondary_fraction",

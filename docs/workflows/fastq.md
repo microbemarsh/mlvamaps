@@ -1,262 +1,143 @@
 # FASTQ and amplicon sequencing workflow
 
-Both long reads and [Illumina reads](illumina.md) use competitive minimap2
-alignment against the same candidate MLVA allele contexts. The technologies
-differ in evidence extraction, not in the meaning of the final locus call.
-
-The FASTQ path accepts `.fastq`, `.fq`, and gzip-compressed equivalents. It
-is intended for current high-accuracy long-read sequencing. Reads may span a
-complete primer product or cover only part of a locus. The default
-minimum mean Q score is 15, approximately 97% per-base accuracy.
+FASTQ calling requires a completed `--database`. Short and long reads map
+directly to its observed reference loci and share molecule-level repeat
+inference and reference classification. A reference match alone never supplies
+the sample's repeat count.
 
 ```bash
-mlvamaps call -p primers.tsv -i sample.fastq.gz -o results
+mlvamaps call --database reference_build -i sample.fastq.gz -o results
 ```
 
-## 1. Load the panel
+For paired reads, see the [Illumina workflow](illumina.md).
 
-mlvamaps reads a minimal primer table or a richer locus table. Optional profile
-rows are loaded with `--profiles`.
+## 1. Load the database panel and filter reads
 
-The panel determines locus names, primer sequences, valid amplicon lengths,
-repeat interpretation, and fingerprint column order.
+The saved `reference_panel.tsv` supplies primers, locus names, repeat
+calibration, and fingerprint order unless `-p` supplies an explicit panel.
+The database's per-locus FASTAs supply the observed mapping targets.
+Current-schema databases remain usable; their older `competitive_mapping/`
+assets are retained for compatibility but do not supply the primary FASTQ
+mapping targets or numeric allele estimates.
 
-## 2. Filter reads
+An optional Deacon target screen can precede QC. In metagenome mode, an available
+database recruitment index is used automatically. Reads then pass the configured
+length and mean-quality filters; original qualities remain attached.
+The outputs include `qc_summary.tsv` and `filtered_reads.fastq.gz`.
 
-For metagenomic input, an optional target-taxon screen can run before ordinary
-read QC:
+## 2. Recover primer-bounded long-read products
 
-```bash
-mlvamaps call -p primers.tsv -i metagenome.fastq.gz \
-  --taxon-screen-index target_taxon.idx
-```
+Retained long reads are projected losslessly to FASTA and searched with the
+existing Sassy-backed in silico PCR engine. Primer orientation, pairing,
+IUPAC handling, and product-length constraints remain in use. Tied assignments
+to different loci or product sizes do not become accepted primer assignments.
+PCR searches share a Sassy process across batches of up to 64 records or 65,536
+input bases; a larger record occupies its own batch. Each record and orientation
+remains a separate search target, preserving molecule identities and coordinates.
 
-The index is supplied rather than built by mlvamaps. See
-[bede/deacon-indexes](https://github.com/bede/deacon-indexes) for
-index-building information.
+Recovered products contribute direct molecule measurements even if minimap2
+misses the read. This scan is not a gate that discards reads without both
+primers: partial reads continue to observed-reference mapping.
 
-Deacon performs native SIMD minimizer matching and retains target-like reads.
-mlvamaps records the original, retained, and rejected read totals in
-`qc_summary.tsv`; the retained FASTQ and full native summary are written under
-`taxon_screen/`. Screening is bypassed when no index is supplied, so pure
-culture FASTQ behavior is unchanged.
+Outputs include `filtered_reads.fasta.gz`, the `in_silico_pcr/` files, and
+`read_locus_assignments.tsv` from the subsequent combined assignment stage.
 
-Reads are parsed with their original qualities and filtered by:
+## 3. Map to observed reference loci
 
-- `--min-read-length`
-- `--max-read-length`
-- `--min-qscore`
+Minimap2 maps retained reads competitively against observed database amplicons.
+Identical sequences within a locus share a target while retaining all source
+reference IDs. Alternative reference mappings are preserved. Synthetic repeat
+expansions do not define the sample's allele hypotheses in this path.
 
-Lower `--min-qscore` explicitly when working with older or noisier base calls.
+For short reads, flank recruitment and mate rescue run during QC and feed the
+same measurement stage. The appropriate technology preset is used for mapping.
+The observed target FASTA, metadata, and provenance are recorded under
+`candidate_mapping/`; minimap2 builds its target index in memory.
 
-This stage returns:
+SAM is streamed through htslib to temporary BAM. The applicable intermediate or
+debug flag retains `candidate_mapping/candidate_alignments.bam`; normal operation
+removes it. Decoded alignments remain available to reference classification.
 
-- `qc_summary.tsv`
-- `filtered_reads.fastq.gz`
+## 4. Measure molecules and call repeats
 
-## 3. Recruit reads competitively to loci
+Complete primer products use the same calibrated product-length and rounding
+functions as assemblies. Independently resolved repeat flanks can also measure
+a repeat interval. Paired reads can contribute a uniquely merged fragment or a
+supported local assembly, as described in the Illumina workflow.
+For concrete DNA anchors in windows of at most 512 bases, an in-process edit-distance
+existence check rejects impossible matches before launching Sassy. Accepted
+approximate matches still use Sassy's coordinates and traceback.
 
-The long-read algorithm maps retained reads against all panel loci and allowed
-repeat alleles in one competitive minimap2 operation. With `--database`, it
-reuses the completed database's candidate FASTA, metadata, provenance, and
-`long.mmi` index. Candidate resources are not regenerated per sample. Complete
-products from `--recruitment-database` (or `--database`) are preferred for the
-additional recruitment path; the dedicated option does not activate
-reference classification. Without a database, a rich panel can generate a
-recorded, bounded synthetic candidate bank from primers, flanks, motif, and
-repeat range.
+Only measured evidence supplies a numeric allele. Flank-only mappings,
+reference-relative alignment scores, and paired geometry establish presence
+without filling in a count. Conflicting measurements of the same molecule remain
+unresolved. Reference copies and mate records do not multiply molecule support.
+Novel and fractional measured alleles remain callable outside the catalog range.
 
-minimap2 SAM is streamed to htslib instead of being written as a text
-intermediate. htslib decodes flags, CIGAR operations, and required tags and
-writes compressed BAM. The BAM is deleted in normal operation and retained as
-`candidate_mapping/candidate_alignments.bam` only when the applicable
-intermediate/debug option requests alignments.
+`common_locus_calls.tsv` distinguishes `presence_support` from informative
+`molecule_support`. `molecule_candidate_evidence.tsv` retains reference IDs,
+alignment diagnostics, evidence types, and inferred molecule counts.
 
-Mapped evidence is separated into:
+Low-depth calls, mixtures, ambiguous measurements, detected-but-unresolved loci,
+and missing loci retain distinct statuses. `PRESENT_COUNT_UNKNOWN` has no numeric
+repeat count; missing values are never converted to zero.
 
-- `FULL_PRODUCT`: covers the complete product and can enter the normal
-  assembly-equivalent calling path.
-- `REPEAT_INFORMATIVE`: spans both repeat boundaries but not the complete
-  product; supplies a provisional candidate allele.
-- `PRESENCE_ONLY`: maps specifically to the locus but cannot measure the
-  complete repeat.
+## 5. Confirm representative sequences
 
-This stage returns:
+The existing long-read recruitment, mapped-variant, SPOARS consensus, and SNP
+workflow remains available for sequence confirmation and reporting. It retains
+its own recruitment and representative mappings. Consensus is not required for
+a directly measured molecule call, and a nearest-reference allele does not
+overwrite the measured count.
 
-- `locus_recruited_reads.tsv`
-- `locus_presence.tsv`
-- `local_locus_products.fasta.gz`
-- Native references and alignments under `recruitment/`
+Relevant outputs include `local_locus_products.fasta.gz`,
+`local_assembly_concordance.tsv`, mapped-variant tables, and locus SNP evidence.
 
-Presence statuses are `PRESENT_GENOTYPED`, `PRESENT_PROVISIONAL`,
-`PRESENT_UNTYPED`, and `NO_EVIDENCE`. Presence is intentionally independent
-from whether a repeat count can be reported.
+## 6. Classify against references using the shared evidence
 
-## 4. Pair primers and apply the specificity fallback
+Reference classification reuses the observed-reference alignments from step 3;
+it does not map the FASTQ a second time. Sequence mismatches and measured repeat
+length differences both inform reference likelihoods. A measured paired-fragment
+count contributes once per molecule, even when both mates align. Where no measured
+count exists, the existing alignment-derived repeat evidence remains available
+to classification without becoming a numeric locus call.
 
-`mlvamaps` creates a lossless FASTA projection of retained reads and passes it
-through the same Sassy-backed in silico PCR engine used for assemblies. Sassy
-discovers approximate primer locations; `mlvamaps` handles deterministic IUPAC
-primer expansion, orientation, primer pairing, and product-length constraints.
-The original FASTQ qualities remain connected to the assigned read. A valid
-primer-pair assignment takes precedence when it and recruitment both recover
-the same read. Primer pairing also supplies a fallback when a panel lacks a
-usable complete recruitment product.
+Equivalent references remain grouped. Isolate support and metagenome mixture EM
+retain an unclassified component, and weak or ambiguous evidence remains explicit.
+Model support is conditional on the available reference catalog.
 
-This stage returns:
+Outputs include `classification/molecule_reference_likelihoods.tsv.gz`, reference
+matches, and taxonomic identification tables when applicable. Primer-only recovery
+without an observed-reference alignment can support a locus count but does not
+by itself establish a reference identity.
 
-- `filtered_reads.fasta.gz`
-- `read_locus_assignments.tsv`
-- Sassy-backed evidence under `in_silico_pcr/`
+## 7. Export results
 
-## 5. Extract repeat evidence and local products
+Start with `report.html`, `calls.tsv`, `mlva_fingerprint.tsv`, and
+`locus_repeat_counts.tsv`. Profile matching and reporting use the measured locus
+calls. Use the same panel calibration and `--assembly-round-tolerance` when
+comparing FASTQ and assembly fingerprints.
 
-Accepted reads are oriented to the forward-primer direction. mlvamaps defines
-the inner primer-to-primer region and refines it with optional locus flanks.
-For each usable read it calculates:
+Synthetic regression coverage includes single-end, paired, overlapping,
+shotgun, and long reads, novel and fractional alleles, zero-repeat products,
+primer indels, and primer rescue when mapping misses reads. Performance and
+accuracy on a particular sample still require comparison with its known truth.
 
-- Repeat-region coordinates and length.
-- Raw and nearest-integer repeat count.
-- Repeat pattern and motif k-mer count.
-- Motif mismatches.
-- Primer, flank, and mean read-quality scores.
+## Synthetic runtime check
 
-This stage returns `read_repeat_features.tsv`.
+On 2026-10-19, three alternating runs of the pre-optimization and updated workflows
+used two threads and fresh processes on the same machine. Median calling times,
+including output generation but excluding Python imports, were:
 
-Complete products in the EM-dominant cluster are globally aligned as a partial
-order alignment with the `spoars` Python bindings. Its consensus is written to
-`local_locus_products.fasta.gz`, then processed by the same Sassy-backed in
-silico PCR,
-legacy primer-coordinate product-size calculation, and repeat caller used for
-whole assemblies. This corrects minority read insertions and deletions before
-repeat counting. Repeat-spanning partial reads can produce provisional allele
-evidence only when no complete dominant product can be assembled and resolved
-by PCR. Presence-only reads never become allele calls.
+| Input | Before | After | Time reduction |
+| --- | ---: | ---: | ---: |
+| 11,100 pairs of 100-base reads | 7.60 s | 5.05 s | 34% |
+| 132 long-read amplicons | 2.69 s | 1.16 s | 57% |
 
-`local_assembly_concordance.tsv` records the observed read-length range and
-mode, POA consensus length, PCR-derived assembly product size, raw repeat
-measurement, final allele, support depth, and fallback state for every
-assembled locus.
-
-## 6. Build mapping-derived repeat groups
-
-The competitive recruitment mapping assigns each informative long read to a
-locus and candidate repeat-product class. These mappings define the groups
-used for abundance and dominant-product selection; sequence-ASV clustering is
-not run.
-Primer-only compatibility mode keeps all complete products at a locus together
-so SPOARS—not an individual read measurement—defines the allele.
-
-This stage returns:
-
-- `mapped_variant_table.tsv`
-- `mapped_variant_representatives.fasta.gz`
-- `mapped_read_memberships.tsv`
-
-The membership table retains the mapping group plus Parasail-derived
-substitution and indel diagnostics for every complete product.
-
-## 8. Estimate variant mixture abundance
-
-mlvamaps fits an Emu-inspired expectation-maximization model to mapped-product
-counts. Pairwise group-representative similarity supplies the
-assignment likelihoods, while the abundance estimate from each iteration
-becomes the prior for the next iteration. This separates meaningful secondary
-variants from trace clusters and estimates the fraction of each component.
-
-Secondary variants require both the configured abundance fraction and
-`--min-secondary-reads` (default 2) to become confirmed. Singleton secondaries
-remain visible as `CANDIDATE` evidence but do not alter the primary signature.
-
-This stage returns `vntr_mixture_abundance.tsv`. Control the meaningful/trace
-boundary with `--min-mixture-fraction`.
-
-## 9. Map to dominant POA products
-
-The assembly-PCR-resolved SPOARS product at each locus supplies the minimap2
-reference. All usable reads assigned to that locus are mapped back to the POA
-product. Raw reads and mapping groups therefore annotate confidence and
-mixtures but do not replace the primary assembly-derived sequence.
-
-This stage returns:
-
-- `locus_mapping_references.fasta.gz`
-- `locus_read_alignments.sam`
-- `locus_mapping_summary.tsv`
-- `locus_snps.tsv`
-- Native mapping inputs under `minimap2/locus_mapping/`
-
-See [representative mapping and SNP evidence](../concepts/representative-mapping.md)
-for thresholds and interpretation.
-
-## 10. Predict read alleles
-
-Reads in the EM-dominant cluster contribute primary repeat-count confidence.
-Representative-relative edits reduce evidence weight so clean observations
-contribute more than heavily edited sequences. Concordant likelihoods are
-combined multiplicatively, allowing confidence to increase with support.
-`--max-confidence-depth` caps the effective evidence at 25 by default to limit
-overconfidence from correlated reads.
-
-Each sufficiently informative long read contributes an explicit molecule-level
-allele observation before consensus generation. Complete primer-bounded reads
-use the same calibrated product-length conversion as assemblies; complete VNTR
-spans, repeat-sized indels, one-boundary reads, and flank-only reads occupy
-successively weaker evidence tiers. SPOARS supplies corrected representative
-sequences, confirmatory measurements, and sequence-variant characterization,
-but is not a prerequisite for a repeat-count call.
-
-Singleton clusters are retained by default (`--min-cluster-size 1` and
-`--min-depth 1`). A single spanning read can therefore contribute a
-provisional allele and remain in the fingerprint. The
-`SINGLE_MOLECULE_PROVISIONAL` evidence label preserves the distinction between
-detection and replicated support.
-
-This stage returns `read_level_allele_predictions.tsv`.
-
-## 11. Call each locus
-
-The caller fixes the primary allele from the dominant complete local product,
-then combines primary-cluster read probabilities to report its confidence and
-the alternatives. It also reports total and primary depth, retained candidate
-and confirmed variant counts, dominant fraction, and secondary alleles.
-Secondary variants are interpreted independently and never averaged into the
-primary allele posterior.
-
-This stage returns:
-
-- `allele_calls.tsv`
-- `calls.tsv`
-
-Statuses include `PASS`, `LOW_DEPTH`, `AMBIGUOUS`, `OUT_OF_RANGE`,
-`MULTIPLE_VARIANTS`, and `LOCUS_DROPOUT`.
-
-The default is `--sample-mode metagenome`, where any meaningful secondary allele causes
-`MULTIPLE_VARIANTS`, even when one allele exceeds 80%, so the dominant
-per-locus signature is not mistaken for an unqualified single-strain result.
-Use `--sample-mode isolate` explicitly for cultured material. Both modes keep
-the assembly-equivalent dominant allele, posterior probability, and dominant
-variant fraction, allowing a rapid metagenomic detection to be compared with a
-later cultured assembly without erasing the original uncertainty.
-Alleles at loci that are not linked by the same reads cannot be phased into
-organism-specific metagenomic signatures.
-
-## 12. Fingerprint, profiles, and report
-
-mlvamaps converts the locus calls to wide and probabilistic fingerprints. If a
-profile database is present, conventional repeat-count distance and
-matched-locus count are the primary ranking keys in both FASTQ and assembly
-modes. FASTQ allele probabilities break otherwise equal matches. The output
-also reports missing-locus-aware comparison counts and confidence.
-
-This stage returns:
-
-- `mlva_fingerprint.tsv`
-- `mlva_fingerprint_probabilistic.tsv`
-- `profile_matches.tsv`
-- `report.html`
-
-The report leads with panel completeness, locus-specific review findings, and
-the closest profile/reference interpretation. It only shows mixture and mapping
-sections when those data exist. Exact allele, mixture, mapping, SNP, and
-distance-component tables remain available in collapsed detail sections.
+Both inputs used an 11-locus synthetic panel. The paired input contained 1,100
+locus-associated pairs and 10,000 random background pairs; the long-read input
+contained 12 copies of each product. The baseline already used observed-reference
+mapping. All 28 short-read and 37 long-read output tables matched across versions
+in each trial after normalizing output-directory paths and decompressing gzip
+tables. These small synthetic timings measure reduced Sassy process overhead;
+they do not establish throughput or accuracy on real server datasets.

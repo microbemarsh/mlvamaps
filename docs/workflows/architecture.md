@@ -31,24 +31,38 @@ finalization.
 Local-assembly `build-reference` input already represents one complete cohort,
 so it proceeds directly from extraction to one finalization.
 
-## Shared candidate mapping
+## Shared observed-reference mapping
 
-Illumina, ONT, ONT-HQ, and HiFi calls use the same versioned candidate contexts.
-With `--database`, candidates and the appropriate minimap2 index are loaded from
-the completed database. They are not regenerated in each sample directory.
-Without a database, a rich panel may synthesize a bounded local candidate bank;
-a primer-only panel does not contain enough information to do so.
+FASTQ commands require `--database`. Illumina, ONT, ONT-HQ, and HiFi map directly
+to observed amplicons from its per-locus FASTAs. Identical sequences are collapsed
+within a locus while retaining every source reference ID. Synthetic repeat
+expansions are not used as the sample's allele hypotheses in this path.
 
-minimap2 emits SAM on a pipe. htslib, through `pysam`, decodes it and writes a
-compressed temporary BAM while the candidate alignments are interpreted. Normal
-operation removes that BAM. `--keep-intermediates` retains
-`candidate_mapping/candidate_alignments.bam`; this option does not produce a
-text `candidate_alignments.sam`.
+The observed target FASTA, metadata, and provenance are written under the
+sample's `candidate_mapping/` directory. The existing database candidate assets
+remain part of the database format and its compatibility checks; their indexes
+are not used for the observed mapping. Minimap2 builds its observed target index
+in memory. No reference build migration is required for current-schema databases.
 
-The current Python-facing evidence API preserves competing taxa and repeat
-states after htslib decoding. Sequence and quality evidence retain molecule
-identity, including Illumina mate identity. Missing or presence-only evidence is
-not converted into an allele value.
+Long reads undergo Sassy primer recovery before observed mapping. Paired short
+reads undergo flank recruitment and mate rescue during QC. Both paths measure
+molecules with the shared product parser. A reference alignment without a
+measurement establishes presence only; unresolved calls have no numeric allele.
+Primer-recovered long-read products can contribute even when mapping misses them.
+
+The observed alignments are retained in memory for reference classification,
+avoiding a second FASTQ mapping. Measured molecule repeat counts also contribute
+to reference likelihoods, once per molecule even when both mates align. Sequence
+mismatches and ambiguous reference memberships remain available to classification.
+
+minimap2 emits SAM on a pipe. htslib decodes it and writes temporary compressed
+BAM. Normal operation removes it; the applicable intermediate/debug flag retains
+`candidate_mapping/candidate_alignments.bam`.
+
+The long-read representative-consensus and SNP workflow still runs as a separate
+confirmation stage. Its recruitment and representative mappings remain; this
+change removes the repeated mapping for reference classification, not every
+alignment operation in the long-read pipeline.
 
 ## Global thread budget
 
@@ -67,7 +81,7 @@ memory-constrained nodes:
 
 ```bash
 export MLVAMAPS_MAX_CONCURRENT_SAMPLES=2
-mlvamaps call -p panel.tsv -i reads/ --short-reads -o results -t 32
+mlvamaps call --database reference_build -i reads/ --short-reads -o results -t 32
 ```
 
 Input discovery and final combined tables retain deterministic input order even

@@ -79,7 +79,12 @@ def run_mapping_short_read_call(
         from .candidate_contexts import generate_candidate_contexts
         from .short_read_fragments import FlankRecruiter
 
-        contexts = generate_candidate_contexts(loci, database_path, maximum=short_max_candidate_repeat_count)
+        if database_path:
+            from .mapping_classification import observed_reference_contexts
+
+            _root, contexts, _members = observed_reference_contexts(database_path, loci, assembly_round_tolerance)
+        else:
+            contexts = generate_candidate_contexts(loci, maximum=short_max_candidate_repeat_count)
         recruiter = FlankRecruiter(contexts)
 
     if show_progress:
@@ -118,6 +123,7 @@ def run_mapping_short_read_call(
 
     if show_progress:
         print(f"[{sample_id}] Competitively mapping Illumina molecules with minimap2")
+    reference_alignments = []
     common_calls, molecule_evidence, _molecule_calls, unified_paths = run_unified_fastq_inference(
         reads1=filtered1,
         reads2=filtered2 if reads2_path else None,
@@ -135,8 +141,12 @@ def run_mapping_short_read_call(
         round_tolerance=assembly_round_tolerance,
         contexts=contexts,
         recruited_fragments=recruiter.fragments if recruiter is not None else None,
+        reference_alignments=reference_alignments,
     )
     calls = common_calls_to_compatibility(common_calls)
+    if database_path:
+        for call in calls:
+            call["inference_method"] = "observed_reference_molecule_measurement"
     by_locus = {str(row["locus"]): row for row in common_calls}
     evidence_rows = []
     for locus in loci:
@@ -147,7 +157,7 @@ def run_mapping_short_read_call(
             "state": "no_evidence" if state == "not_found" else state,
             "repeat_count": row["repeat_count"], "locus_length_bp": "",
             "confidence": row["best_probability"],
-            "supporting_fragments": row["molecule_support"],
+            "supporting_fragments": row["presence_support"],
             "proper_spanning_pairs": 0, "junction_reads": row["junction_support"],
             "full_spanning_reads": row["full_span_support"], "cigar_indel_reads": 0,
             "mean_mapq": "", "median_mapq": "",
@@ -166,7 +176,7 @@ def run_mapping_short_read_call(
             "repeat_count_min": "", "repeat_count_max": "",
             "repeat_count_interval_reason": "", "confidence_reason": call["evidence"],
             "short_read_warning": "" if common["status"] == "called" else call["evidence"],
-            "recruited_read_pairs": common["molecule_support"],
+            "recruited_read_pairs": common["presence_support"],
             "failure_reason": "" if common["status"] in {"called", "low_coverage"} else call["evidence"],
             "primary_allele_support": common["molecule_support"], "secondary_allele_support": "",
             "informative_allele_reads": common["full_span_support"],
@@ -216,6 +226,8 @@ def run_mapping_short_read_call(
         classification_paths.update(run_mapping_classification(
             database_path=database_path, loci=loci, outdir=output, sample_id=sample_id,
             reads1=filtered1, reads2=filtered2 if reads2_path else None, technology="illumina",
+            read_alignments=reference_alignments, measured_repeats=_molecule_calls,
+            round_tolerance=assembly_round_tolerance,
             sample_mode=sample_mode,
             threads=thread_count, minimap2_bin=minimap2_bin,
             locus_quality={str(row["locus"]): {"depth": row["molecule_support"], "status": row["status"]} for row in common_calls},
@@ -261,7 +273,7 @@ def run_mapping_short_read_call(
                            "PRESENT_GENOTYPED" if row["state"] == "called" else "PRESENT_UNTYPED",
         "mapped_reads": row["supporting_fragments"], "full_product_reads": row["full_spanning_reads"],
         "genotype_informative_reads": row["junction_reads"], "candidate_alleles": row["candidate_scores"],
-        "reference_source": "minimap2_competitive_candidate_contexts",
+        "reference_source": "observed_reference_loci" if database_path else "minimap2_competitive_candidate_contexts",
     } for row in evidence_rows]
     recruitment_fields = [
         "sample_id", "locus_id", "read_pairs_examined", "read_pairs_recruited",
@@ -302,7 +314,7 @@ def run_mapping_short_read_call(
     metadata_path = output / "short_read_run_metadata.json"
     metadata_path.write_text(json.dumps({
                        "schema_version": "2.0", "mlvamaps_version": __version__,
-                       "method": "competitive_minimap2_shared_inference",
+                       "method": "observed_reference_molecule_measurement" if database_path else "competitive_minimap2_shared_inference",
                        "minimap2_version": minimap2_version(minimap2_bin),
                        "database": database_path or "panel-derived",
                        "insert_size": {"median": None, "mean": None, "standard_deviation": None, "mad": None, "pairs_used": 0}, "parameters": {"minimum_mapq": short_min_mapping_quality,
@@ -319,7 +331,9 @@ def run_mapping_short_read_call(
     )
     report_path = output / "report.html"
     report_path.write_text(report_path.read_text().replace(
-        "MLVA analysis report", "MLVA analysis report · Method: competitive minimap2 shared inference", 1
+        "MLVA analysis report", "MLVA analysis report · Method: " + (
+            "observed reference mapping and molecule measurement" if database_path
+            else "competitive minimap2 shared inference"), 1
     ))
     if show_progress:
         detected = len(loci) - states["no_evidence"]

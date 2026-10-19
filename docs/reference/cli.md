@@ -52,7 +52,7 @@ files. Directory discovery is non-recursive, and each file is written beneath
 | `--quiet` | Off | Suppress live progress. |
 | `--max-primer-mismatches` | `2` | Maximum edit distance allowed independently for each primer during Sassy-backed paired-primer detection. Searches proceed through error rounds 0 to this value. |
 | `--profiles` | None | Known MLVA profile TSV. |
-| `--database` | None | Completed reference-build directory containing observed amplicons and mapping assets. |
+| `--database` | Required for FASTQ | Completed reference build for the target taxon and panel, containing observed amplicons and mapping assets; optional for assembly-only calling. |
 | `--reference-metadata` | None | Reference date, coordinates, location, and source TSV/CSV; `reference_metadata.tsv` is auto-detected in database directories. |
 | `--classification-repeat-scale` | `1.0` | Repeat-count discrepancy scale in mapping log likelihoods, in repeat units. |
 | `--missing-locus-min-depth` | `3.0` | Minimum informative molecule support at a locus to count toward the coverage gate (read inputs only). |

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
+from pathlib import Path
 
 import pytest
 
 from mlvamaps import sassy_cli
-from mlvamaps.in_silico_pcr import _record_product_rows
+from mlvamaps.in_silico_pcr import _record_batch_product_rows, _record_product_rows
 from mlvamaps.models import Locus
 
 
@@ -90,3 +92,53 @@ def test_record_extraction_primes_both_orientations_once(monkeypatch):
     assert len(instances[0].prime_calls) == 2
     assert instances[0].prime_calls[0][0] == {b"AAA", b"AAG", b"GGG"}
     assert all(call[2] == 2 for call in instances[0].prime_calls)
+
+
+def test_batched_search_keeps_targets_and_cached_thresholds_separate(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        targets = Path(command[-1]).read_text()
+        calls.append(targets)
+        rows = ("p0\ttext\t2\t+\t2\t6\tACGT\t2=2X\n"
+                "p0\ttext1\t1\t+\t4\t8\tACGT\t3=1X\n")
+        return subprocess.CompletedProcess(command, 0,
+            "pat_id\ttext_id\tcost\tstrand\tstart\tend\tmatch_region\tcigar\n" + rows, "")
+
+    monkeypatch.setattr(sassy_cli, "_resolve_executable", lambda: "/conda/bin/sassy")
+    monkeypatch.setattr(sassy_cli.subprocess, "run", fake_run)
+    searcher = sassy_cli.Searcher(rc=False)
+    first, second = b"GGACGTAA", b"TTTTACGT"
+    searcher.prime_many([b"ACGT"], [first, second, first], 2)
+    assert len(calls) == 1
+    assert calls[0].count(">") == 2
+    assert searcher.search(b"ACGT", first, 1) == []
+    assert searcher.search(b"ACGT", first, 2)[0].text_start == 2
+    assert searcher.search(b"ACGT", second, 1)[0].text_start == 4
+    searcher.prime_many([b"ACGT"], [second, first], 1)
+    assert len(calls) == 1
+
+
+@pytest.mark.skipif(not shutil.which("sassy"), reason="Sassy is needed for batch equivalence")
+def test_native_batch_matches_individual_pcr_without_merging_records(monkeypatch):
+    from mlvamaps.sequence import revcomp
+
+    locus = Locus("L1", forward_primer="ACGTTGCAACGTCAGTACGA",
+                  reverse_primer="TGACCGTACAGTCAGGATCA")
+    product = locus.forward_primer + "GATA" * 5 + revcomp(locus.reverse_primer)
+    reads = [product, product, revcomp(product), product[:8] + "C" + product[8:],
+             product[:8] + product[9:], "T" * 80]
+    tasks = [("reads.fa", f"read{i}", sequence, [locus], 2, 1, 1000, True, False, 0.0)
+             for i, sequence in enumerate(reads)]
+    expected = [row for task in tasks for row in _record_product_rows(task)]
+    assert expected
+    real_run, calls = sassy_cli.subprocess.run, []
+
+    def counted_run(command, **kwargs):
+        calls.append(command)
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(sassy_cli.subprocess, "run", counted_run)
+    assert _record_batch_product_rows(tasks) == expected
+    assert len(calls) == 1
+    assert {row["reference_id"] for row in expected} >= {"read0", "read1", "read2"}

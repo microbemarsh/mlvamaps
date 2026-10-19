@@ -20,6 +20,9 @@ def test_impossible_anchors_do_not_start_native_searches(monkeypatch):
     assert find_anchor(pattern, "T" * 100, 3) is None
     assert find_anchor(pattern, "ACGT", 3) is None
     assert find_anchor(pattern, "T" * 100, 0) is None
+    # One exact partition survives the cheap seed check, but the other bases
+    # cannot fit the edit budget. Do not launch a process for this near miss.
+    assert find_anchor(pattern, "TT" + pattern[:5] + "T" * 40, 3) is None
     assert find_anchor(pattern, pattern, 3, search_start=5, search_end=10) is None
 
 

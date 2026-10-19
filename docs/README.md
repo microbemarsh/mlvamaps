@@ -6,6 +6,7 @@ path, intermediate stage, output, and interpretation boundary.
 
 ## Workflows
 
+- [All three calling workflows: diagrams and source trace](../workflow.md)
 - [Architecture and resource flow](workflows/architecture.md)
 - [Accurate long-read and amplicon FASTQ](workflows/fastq.md)
 - [Paired/single-end Illumina sequencing](workflows/illumina.md)

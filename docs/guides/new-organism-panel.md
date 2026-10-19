@@ -59,8 +59,11 @@ Check:
 
 ## 5. Validate with amplicon reads
 
+First prepare a reference build for the panel using the
+[reference-building workflow](../workflows/reference-building.md).
+
 ```bash
-mlvamaps call -p new_panel.tsv -i known_amplicons.fastq.gz -o validation/reads
+mlvamaps call --database reference_build -i known_amplicons.fastq.gz -o validation/reads
 ```
 
 Inspect assignment, repeat features, mapped product groups, SPOARS assemblies,

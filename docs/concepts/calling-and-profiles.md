@@ -22,48 +22,36 @@ Reads with more edits receive less weight. These records are written to
 
 ## Locus posterior
 
-The caller first identifies the dominant mapped product group and builds a
-SPOARS consensus. The standard assembly PCR caller defines the primary allele
-from that product. Read quality, primer/flank agreement, and group-alignment
-identity control confidence contributions. Effective confidence depth is
-capped at 25 by default to limit overconfidence from correlated amplification
-or systematic errors.
+The primary FASTQ caller maps molecules to observed database loci and measures
+primer-bounded products, resolved repeat flanks, or supported local assemblies.
+Only measured molecule counts contribute allele likelihoods. Reference mapping
+without a measurement establishes presence. Measurements can introduce alleles
+outside the reference catalog; the closest reference does not supply a count.
 
-Secondary clusters never average the primary call toward a false intermediate
-allele. They are retained and interpreted separately by the mixture model.
-
-The full ranked distribution is written to
-`allele_probability_distribution.tsv`; the compact representation is retained
-in `allele_calls.tsv`. A midpoint or a genuinely split distribution is marked
-`AMBIGUOUS` rather than being resolved by a rounding tie-break.
-
-`allele_calls.tsv` includes total and primary-cluster read depth, their
-edit-aware effective depths, capped confidence depth, confirmed and candidate
-variant counts, and a compact secondary-allele representation.
+Independent molecules contribute to the locus posterior. Duplicate reference
+contexts and two mates from one fragment do not multiply support. Conflicting
+measurements of one molecule remain unresolved. The shared primary results are
+recorded in `common_locus_calls.tsv` and projected into `allele_calls.tsv`,
+`calls.tsv`, and fingerprints. SPOARS and read-level predictions remain
+confirmation outputs; they do not replace the shared primary call.
 
 ## Status logic
 
-A locus is `LOW_DEPTH` when its dominant cluster has fewer reads than
-`--min-depth`, which defaults to one. A single informative molecule is
-retained as `SINGLE_MOLECULE_PROVISIONAL`. With enough primary reads, a locus
-is `AMBIGUOUS` when the top posterior is below `--min-posterior` or leads the
-second-best count by less than 0.2.
+Primary statuses distinguish called, low-coverage, ambiguous, mixed,
+detected-but-unresolved, and not-found loci. `--min-depth` defaults to one for
+long reads and three for Illumina. Low-depth measured counts remain visible.
+A call is ambiguous when the leading probability fails its configured threshold
+or leads the next allele by less than 0.2.
 
-An otherwise decisive call is `OUT_OF_RANGE` when it lies outside the panel's
-expected count range. Expected bounds are review thresholds rather than hard
-allele limits: an observed allele outside the interval remains callable and is
-reported without being pulled back to the nearest boundary. By default, calls
-up to one repeat beyond either boundary remain `PASS`; configure this margin
-with `--repeat-range-tolerance`. It is
-`MULTIPLE_VARIANTS` when at least two variants pass the EM mixture threshold.
-Metagenome interpretation is the default and flags
-every meaningful secondary variant; explicit isolate mode requires the
-dominant estimated fraction to be below 0.8. Raw low-count clusters that the
-mixture model classifies as trace evidence do not force this status.
+Mixture detection uses independently measured molecule winners. A secondary
+allele needs at least 20% of informative molecules and at least two molecules
+for long reads or three for Illumina. Reference classification separately uses
+isolate support or mixture EM according to `--sample-mode`.
 
-`allele_calls.tsv` records both the raw mapped-group count and the number of
-EM-meaningful variants, plus the dominant estimated fraction. See
-[variant mixture abundance](variant-mixtures.md) for the model and thresholds.
+`PRESENT_COUNT_UNKNOWN` retains presence with an empty count. Missing data are
+never zero-filled. `presence_support` records detected molecules and
+`molecule_support` records informative molecules in the common table. The
+probabilities describe model support, not a calibrated probability of correctness.
 
 ## Fingerprints
 

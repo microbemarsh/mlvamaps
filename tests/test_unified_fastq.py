@@ -192,6 +192,59 @@ def test_generic_flank_mapping_detects_but_does_not_call():
     assert calls[0]["status"] == "detected_unresolved"
 
 
+def test_observed_reference_cannot_supply_an_unmeasured_repeat_count():
+    from dataclasses import replace
+
+    locus = _locus()
+    context = generate_candidate_contexts([locus])[0]
+    row = CandidateEvidence(
+        "L1", context.repeat_count, "m1", alignment_score=100,
+        full_repeat_span=True, left_boundary_span=True, right_boundary_span=True,
+        candidate_id=context.candidate_id,
+    )
+    calls, molecules = infer_alleles(
+        [row], [locus], [context], "sample", "hifi", require_measurement=True,
+    )
+    assert calls[0]["status"] == "detected_unresolved"
+    assert calls[0]["repeat_count"] == ""
+    assert calls[0]["presence_support"] == 1
+    from mlvamaps.unified_fastq import common_calls_to_compatibility
+    exported = common_calls_to_compatibility(calls)[0]
+    assert exported["present"] == "yes"
+    assert exported["read_depth"] == 1
+    assert molecules == {}
+    calls, molecules = infer_alleles(
+        [replace(row, measured_repeat_count=9, direct_product_measurement=True)],
+        [locus], [context], "sample", "hifi", require_measurement=True,
+    )
+    assert calls[0]["repeat_count"] == 9
+    assert molecules == {("L1", "m1"): 9}
+    calls, molecules = infer_alleles(
+        [replace(row, measured_repeat_count=9)] * 20 + [replace(row, measured_repeat_count=8)],
+        [locus], [context], "sample", "hifi", require_measurement=True,
+    )
+    assert calls[0]["status"] == "detected_unresolved"
+    assert molecules == {}
+
+
+def test_primer_recovery_rejects_tied_loci_and_different_product_sizes():
+    from dataclasses import replace
+    from mlvamaps.locus_assignment import assignments_from_pcr
+    from mlvamaps.models import ReadRecord
+
+    locus = _locus()
+    other = replace(locus, locus_id="L2")
+    read = ReadRecord("m1", "AAAAGGGGATATATTTTTGGGG", None)
+    row = dict(reference_id="m1", primer_name="L1", full_len=22,
+               fwd_mismatches=0, rev_mismatches=0, strand="+",
+               fwd_start=0, fwd_end=4, rev_start=18, rev_end=22)
+    assert assignments_from_pcr([read], [locus], [row], "sample")[0].passes_assignment_qc
+    for competitor in (dict(row, primer_name="L2"), dict(row, full_len=24, rev_start=20, rev_end=24)):
+        assert not assignments_from_pcr(
+            [read], [locus, other], [row, competitor], "sample",
+        )[0].passes_assignment_qc
+
+
 def test_duplicate_reference_contexts_do_not_multiply_state_support():
     locus = _locus()
     contexts = generate_candidate_contexts([locus])

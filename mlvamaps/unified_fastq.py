@@ -4,17 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .alignment_evidence import CandidateEvidence, EVIDENCE_FIELDS, evidence_row
+from .alignment_evidence import CandidateAlignment, CandidateEvidence, EVIDENCE_FIELDS, evidence_row
 from .allele_inference import (
     COMMON_LOCUS_CALL_FIELDS,
     InferenceThresholds,
     infer_alleles,
 )
 from .candidate_contexts import CandidateContext, generate_candidate_contexts, write_candidate_contexts
-from .io import write_fasta, write_tsv
+from .io import normalize_read_id, write_fasta, write_tsv
 from .long_read_evidence import extract_long_read_evidence
 from .minimap_mapping import map_reads_to_candidates_bam
-from .models import Locus
+from .models import Assignment, Locus
 from .short_read_evidence import extract_short_read_evidence
 
 
@@ -87,38 +87,36 @@ def run_unified_fastq_inference(
     round_tolerance: float = 0.25,
     contexts: list[CandidateContext] | None = None,
     recruited_fragments: dict | None = None,
+    primer_assignments: list[Assignment] | None = None,
+    reference_alignments: list[CandidateAlignment] | None = None,
 ) -> tuple[list[dict[str, object]], list[CandidateEvidence], dict[tuple[str, str], int | float], dict[str, Path]]:
+    """Map observed loci, measure molecules, and optionally retain mappings for typing.
+
+    ``reference_alignments`` is filled in place so callers can reuse this exact
+    observed-reference mapping for classification without mapping FASTQ twice.
+    """
     outdir = Path(outdir)
     work = outdir / "candidate_mapping"
     work.mkdir(parents=True, exist_ok=True)
-    contexts = contexts if contexts is not None else generate_candidate_contexts(
-        loci, database_path, maximum=maximum_candidate_repeat_count
-    )
-    database = Path(database_path) if database_path else None
-    if database is not None and (database / "database").is_dir():
-        database = database / "database"
-    resource = (
-        database / "competitive_mapping"
-        if database is not None and (database / "competitive_mapping").is_dir()
-        else database
-    )
-    cached_fasta = resource / "candidate_contexts.fasta" if resource is not None else None
-    if cached_fasta is not None and cached_fasta.is_file():
-        paths = {
-            "fasta": cached_fasta,
-            "metadata": resource / "candidate_metadata.tsv",
-            "provenance": resource / "candidate_provenance.json",
-        }
+    if database_path:
+        from .mapping_classification import observed_reference_contexts
+
+        _root, contexts, _members = observed_reference_contexts(database_path, loci, round_tolerance)
     else:
-        paths = write_candidate_contexts(contexts, work)
+        contexts = contexts if contexts is not None else generate_candidate_contexts(
+            loci, maximum=maximum_candidate_repeat_count
+        )
+    paths = write_candidate_contexts(contexts, work)
     bam = work / "candidate_alignments.bam"
-    index_name = "short.mmi" if technology == "illumina" else "long.mmi"
-    cached_index = resource / index_name if resource is not None else None
-    mapping_reference = cached_index if cached_index is not None and cached_index.is_file() else paths["fasta"]
     alignments = map_reads_to_candidates_bam(
-        mapping_reference, reads1, reads2, contexts, bam, threads, technology,
+        paths["fasta"], reads1, reads2, contexts, bam, threads, technology,
         executable=minimap2_bin,
+        max_secondary=max(100, len(contexts)),
+        include_unknown_repeats=bool(database_path),
+        retain_all_competitors=bool(database_path),
     )
+    if database_path and reference_alignments is not None:
+        reference_alignments.extend(alignments)
     if technology == "illumina":
         evidence = extract_short_read_evidence(
             alignments, contexts, loci, round_tolerance=round_tolerance,
@@ -126,6 +124,27 @@ def run_unified_fastq_inference(
         )
     else:
         evidence = extract_long_read_evidence(alignments, contexts, loci, technology, round_tolerance=round_tolerance)
+    if primer_assignments:
+        from .locus_measurement import measure_locus_product
+
+        by_locus = {locus.locus_id: locus for locus in loci}
+        for assignment in primer_assignments:
+            if not assignment.passes_assignment_qc or assignment.assigned_locus not in by_locus:
+                continue
+            measurement = measure_locus_product(
+                assignment.oriented_sequence, by_locus[assignment.assigned_locus],
+                assignment.oriented_quality, source="primer_recovery",
+                round_tolerance=round_tolerance,
+            )
+            if measurement.called_allele is not None and measurement.status == "FULL_PRODUCT":
+                evidence.append(CandidateEvidence(
+                    assignment.assigned_locus, measurement.called_allele,
+                    normalize_read_id(assignment.read_id)[0],
+                    technology=technology, locus_confidence=1.0,
+                    direct_product_measurement=True, full_repeat_span=True,
+                    measured_repeat_count=measurement.called_allele,
+                    evidence_tier="primer_recovery",
+                ))
     thresholds = InferenceThresholds(
         minimum_molecules=minimum_molecules,
         minimum_probability=minimum_probability,
@@ -133,6 +152,7 @@ def run_unified_fastq_inference(
     calls, molecule_calls = infer_alleles(
         evidence, loci, contexts, sample_id, technology,
         thresholds,
+        require_measurement=bool(database_path),
     )
     fragment_paths = {}
     if technology == "illumina" and reads2 is not None and recruited_fragments is not None:
@@ -141,6 +161,7 @@ def run_unified_fastq_inference(
         calls, evidence, molecule_calls, diagnostics, products = resolve_fragment_calls(
             calls, evidence, molecule_calls, alignments, contexts, loci,
             recruited_fragments, sample_id, thresholds, round_tolerance,
+            require_measurement=bool(database_path),
         )
         fragment_paths["short_read_diagnostics"] = outdir / "short_read_diagnostics.tsv"
         write_tsv(diagnostics, fragment_paths["short_read_diagnostics"], list(diagnostics[0]) if diagnostics else [])
@@ -196,7 +217,7 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
             "repeat_count": repeat,
             "repeat_count_raw": repeat,
             "product_size_bp": "",
-            "read_depth": row["molecule_support"],
+            "read_depth": row.get("presence_support", row["molecule_support"]),
             "primary_read_depth": row["molecule_support"],
             "mean_coverage": "",
             "allele_confidence": row["best_probability"],

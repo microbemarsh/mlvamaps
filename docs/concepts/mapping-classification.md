@@ -10,10 +10,11 @@ and parasail dependencies; installing Emu is unnecessary.
 
 ## Evidence and scoring
 
-Read inputs are mapped competitively to **observed reference amplicons**. This is
-a second mapping pass: allele-calling contexts contain synthetic repeat states
-and their evidence projection discards competing sequence backgrounds. Those
-selected or synthetic sequences are not used as query observations here.
+Read inputs are mapped competitively to **observed reference amplicons**.
+FASTQ allele calling and reference classification reuse this same mapping,
+including competing sequence backgrounds. Measured molecule repeat counts
+are passed to classification alongside the original alignments; reference
+sequences are not substituted for read observations.
 Identical observed locus sequences share one mapping target and retain all
 reference IDs. The classifier requests secondary competitors up to the number
 of targets, with minimap2's secondary score-ratio filter disabled; candidates
@@ -38,7 +39,11 @@ For each retained alignment:
   When the alignment spans the repeat with at least three flanking bases on
   each side, the net repeat-length difference contributes
   `-abs(repeat_delta) / classification_repeat_scale` to the log score.
-  Partial coverage and paired geometry alone do not establish repeat length.
+  When independent molecule measurement resolves the count, its difference
+  from the reference allele replaces the alignment-derived repeat delta. This
+  also lets a resolved merged fragment inform classification when each mate
+  covers only part of the repeat. Partial coverage and paired geometry alone
+  do not establish repeat length.
 - Both mates contribute sequence evidence, but their repeat-length disagreement
   is scored once per molecule. Duplicate alignments do not add observations.
   Molecules tied between different loci are excluded rather than counted twice.
@@ -71,7 +76,7 @@ Low depth does not impose a new recovery-fraction requirement. Informative
 sequence evidence can support a closest taxon without a resolved repeat count.
 The optional missing-locus heuristic requires three informative molecules at
 80% of panel loci, then applies eight penalty units for an undetected query
-locus recorded in that reference. A locus detected by the new mapping pass is
+locus recorded in that reference. A locus detected by the shared mapping is
 not penalized even if the allele caller had no call. The penalty is subtracted
 once from each reference's joint log score; in mixture mode it is distributed
 across the weighted observations. It is not evidence of confirmed absence.

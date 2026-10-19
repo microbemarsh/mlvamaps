@@ -114,6 +114,10 @@ def _assignment_from_candidates(
         candidates, key=lambda item: item[0]
     )
     primers_ordered = f_pos is not None and r_pos is not None and r_pos > f_pos
+    unambiguous = len({
+        (candidate[4].locus_id, candidate[11])
+        for candidate in candidates if candidate[0] == score
+    }) == 1
     return Assignment(
         read.read_id,
         sample_id,
@@ -122,7 +126,7 @@ def _assignment_from_candidates(
         orientation,
         f_pos is not None,
         r_pos is not None,
-        score >= min_assignment_score and primers_ordered,
+        score >= min_assignment_score and primers_ordered and unambiguous,
         sequence,
         quality,
         f_pos,

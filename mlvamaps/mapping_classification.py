@@ -92,7 +92,7 @@ MATCH_FIELDS = [
 ]
 
 
-def observed_reference_contexts(database_path, loci):
+def observed_reference_contexts(database_path, loci, round_tolerance=0.25):
     root = Path(database_path)
     if (root / "database").is_dir():
         root = root / "database"
@@ -108,7 +108,7 @@ def observed_reference_contexts(database_path, loci):
     for index, ((locus_id, sequence), references) in enumerate(sorted(collapsed.items())):
         locus = by_id[locus_id]
         start, end = repeat_interval(sequence, locus)
-        count = assembly_equivalent_product_allele(locus, len(sequence))[1]
+        count = assembly_equivalent_product_allele(locus, len(sequence), round_tolerance)[1]
         unit = repeat_unit_length(locus)
         if count is None and unit and locus.left_flank_sequence and locus.right_flank_sequence:
             count = (end - start) / unit
@@ -116,6 +116,9 @@ def observed_reference_contexts(database_path, loci):
         contexts.append(CandidateContext(
             candidate_id, locus_id, sequence, count, unit, start, end,
             locus.left_flank_sequence, locus.right_flank_sequence,
+            reference_accession=";".join(sorted(references)),
+            reference_id=";".join(sorted(references)),
+            repeat_motif=locus.repeat_motif,
             observed_or_synthetic="observed", source_repeat_count=count,
         ))
         members[candidate_id] = sorted(references)
@@ -195,7 +198,8 @@ def alignment_statistics(alignment, context):
     }
 
 
-def molecule_log_likelihoods(alignments, contexts, members, repeat_scale=1.0):
+def molecule_log_likelihoods(alignments, contexts, members, repeat_scale=1.0,
+                           measured_repeats=None):
     if not math.isfinite(repeat_scale) or repeat_scale <= 0:
         raise ValueError("Classification repeat scale must be finite and positive")
     context_by_id = {c.candidate_id: c for c in contexts}
@@ -246,7 +250,12 @@ def molecule_log_likelihoods(alignments, contexts, members, repeat_scale=1.0):
         sequence_score = sum(values[field] * logs[field] for field in logs)
         uncovered = maximum_span[(row.molecule_id, row.mate, row.locus_id)] - values["outside_bases"]
         sequence_score += uncovered * logs["insertions"]
-        repeat_score = -abs(values["repeat_delta"]) / repeat_scale if values["repeat_delta"] is not None else 0.0
+        repeat_delta = values["repeat_delta"]
+        measured = (measured_repeats or {}).get((row.locus_id, row.molecule_id))
+        reference_count = context_by_id[row.candidate_id].repeat_count
+        if measured is not None and reference_count is not None:
+            repeat_delta = float(measured) - float(reference_count)
+        repeat_score = -abs(repeat_delta) / repeat_scale if repeat_delta is not None else 0.0
         for reference in members[row.candidate_id]:
             by_molecule[(row.locus_id, row.molecule_id)][reference][row.mate] = (sequence_score, repeat_score)
     results = {}
@@ -375,10 +384,11 @@ def run_mapping_classification(
     missing_locus_min_depth=3.0, missing_locus_min_fraction=0.8,
     missing_locus_penalty=8.0, keep_alignments=False,
     query_repeat_counts=None,
+    read_alignments=None, measured_repeats=None, round_tolerance=0.25,
 ):
     output = Path(outdir) / "classification"
     output.mkdir(parents=True, exist_ok=True)
-    root, contexts, members = observed_reference_contexts(database_path, loci)
+    root, contexts, members = observed_reference_contexts(database_path, loci, round_tolerance)
     if minimum_loci < 1:
         raise ValueError("Minimum classification loci must be positive")
     metadata_path = reference_metadata_path or (root / "reference_metadata.tsv" if root.is_dir() else None)
@@ -392,7 +402,7 @@ def run_mapping_classification(
         ["candidate_id", "locus_id", "reference_ids", "repeat_count", "repeat_start", "repeat_end"])
     if reads1 is not None:
         bam = output / "reference_alignments.bam"
-        alignments = map_reads_to_candidates_bam(
+        alignments = read_alignments if read_alignments is not None else map_reads_to_candidates_bam(
             fasta, reads1, reads2, contexts, bam, threads, technology,
             executable=minimap2_bin, max_secondary=max(100, len(contexts)),
             include_unknown_repeats=True, retain_all_competitors=True,
@@ -423,7 +433,9 @@ def run_mapping_classification(
             "reference_repeat_count", "cigar", "matches", "mismatches",
             "insertions", "deletions", "outside_bases", "repeat_delta",
         ])
-    likelihoods, errors = molecule_log_likelihoods(alignments, contexts, members, repeat_scale)
+    likelihoods, errors = molecule_log_likelihoods(
+        alignments, contexts, members, repeat_scale, measured_repeats,
+    )
     reference_loci = defaultdict(set)
     for context in contexts:
         for reference in members[context.candidate_id]:

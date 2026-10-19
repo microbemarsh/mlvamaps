@@ -977,6 +977,7 @@ def run_assembly_call(
         classification_paths.update(run_mapping_classification(
             database_path=database_path, loci=loci, outdir=outdir_path, sample_id=sample_id,
             query_sequences=query_sequences, sample_mode="isolate",
+            round_tolerance=assembly_round_tolerance,
             threads=thread_count, minimap2_bin=minimap2_bin,
             locus_quality=None,
             query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in call_rows if row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},

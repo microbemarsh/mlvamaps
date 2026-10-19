@@ -2,6 +2,9 @@
 
 ## Sequencing reads
 
+All FASTQ calling requires `--database` with a completed reference build for
+the target taxon and panel, including directory and manifest modes.
+
 Supported read suffixes:
 
 - `.fastq`
@@ -22,7 +25,7 @@ inferred from filenames. Paired directory mode provides opt-in filename
 discovery:
 
 ```bash
-mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads -o results
+mlvamaps call --database reference_build -i short_read_directory/ --short-reads -o results
 ```
 
 This mode non-recursively matches exact `PREFIX_1.fastq.gz` and

@@ -472,9 +472,30 @@ def run_call(
     write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
 
-    # Candidate-competition inference is independent of SPOARS and runs first.
-    # The established downstream sequence workflow remains confirmatory and
-    # supplies representative sequences for placement.
+    if filtered_reads:
+        progress.step("Assigning reads with MLVA_finder-compatible Sassy primer matching")
+        assignment_fasta = outdir_path / "filtered_reads.fasta.gz"
+        write_fasta(((read.read_id, read.sequence) for read in filtered_reads), assignment_fasta)
+        pcr_paths = run_in_silico_pcr_loci(
+            assignment_fasta,
+            loci,
+            outdir_path / "in_silico_pcr",
+            max_errors=max_primer_mismatches,
+            threads=threads,
+        )
+        primer_assignments = assignments_from_pcr(
+            filtered_reads,
+            loci,
+            read_pcr_results(pcr_paths["stats"], pcr_paths["products"]),
+            sample_id,
+            progress=progress,
+        )
+    else:
+        primer_assignments = []
+    # Primer recovery can supply measurements even when a read fails to map.
+    # Observed-reference alignments are shared with reference classification.
+    reference_alignments = []
+    _molecule_calls = {}
     unified_calls: list[dict] = []
     unified_paths: dict[str, Path] = {}
     if filtered_reads:
@@ -484,12 +505,13 @@ def run_call(
             "map-ont": "ont", "ont": "ont", "lr:hq": "ont-hq",
             "map-hifi": "hifi", "hifi": "hifi",
         }.get(str(recruitment_preset or "").lower(), "hifi")
+        progress.step("Mapping reads directly to observed reference loci")
         unified_calls, _candidate_evidence, _molecule_calls, unified_paths = (
             run_unified_fastq_inference(
                 reads1=outdir_path / "filtered_reads.fastq.gz",
                 reads2=None,
                 loci=loci,
-                database_path=recruitment_database_path or database_path,
+                database_path=database_path or recruitment_database_path,
                 outdir=outdir_path,
                 sample_id=sample_id,
                 technology=preset,
@@ -499,6 +521,8 @@ def run_call(
                 minimum_probability=min_posterior,
                 keep_alignments=debug_disagreements,
                 round_tolerance=assembly_round_tolerance,
+                primer_assignments=primer_assignments,
+                reference_alignments=reference_alignments,
             )
         )
 
@@ -536,26 +560,6 @@ def run_call(
         min_locus_score_margin=recruitment_min_locus_margin,
     )
 
-    if filtered_reads:
-        progress.step("Assigning reads with MLVA_finder-compatible Sassy primer matching")
-        assignment_fasta = outdir_path / "filtered_reads.fasta.gz"
-        write_fasta(((read.read_id, read.sequence) for read in filtered_reads), assignment_fasta)
-        pcr_paths = run_in_silico_pcr_loci(
-            assignment_fasta,
-            loci,
-            outdir_path / "in_silico_pcr",
-            max_errors=max_primer_mismatches,
-            threads=threads,
-        )
-        primer_assignments = assignments_from_pcr(
-            filtered_reads,
-            loci,
-            read_pcr_results(pcr_paths["stats"], pcr_paths["products"]),
-            sample_id,
-            progress=progress,
-        )
-    else:
-        primer_assignments = []
     recruited_by_read = {
         assignment.read_id: assignment for assignment in recruited_assignments
     }
@@ -774,7 +778,7 @@ def run_call(
             continue
         status_map = {
             "called": "PASS", "low_coverage": "LOW_DEPTH",
-            "detected_unresolved": "LOCUS_DROPOUT", "ambiguous": "AMBIGUOUS",
+            "detected_unresolved": "PRESENT_COUNT_UNKNOWN", "ambiguous": "AMBIGUOUS",
             "not_found": "LOCUS_DROPOUT", "mixed": "MULTIPLE_VARIANTS",
         }
         row.update({
@@ -785,12 +789,13 @@ def run_call(
                 if len(str(shared["candidate_distribution"]).split(";")) > 1 else ""
             ),
             "second_best_posterior": shared["second_best_probability"],
-            "read_depth": shared["molecule_support"],
+            "read_depth": shared["presence_support"],
             "primary_read_depth": shared["molecule_support"],
             "dominant_variant_fraction": shared["dominant_fraction"] or 0,
             "allele_distribution": shared["candidate_distribution"],
             "call_status": status_map[str(shared["status"])],
-            "primary_measurement_source": "shared_competitive_minimap2_inference",
+            "primary_measurement_source": ("observed_reference_molecule_measurement"
+                                           if database_path else "shared_competitive_minimap2_inference"),
             "evidence_status": str(shared["status"]).upper(),
             "full_product_reads": shared["direct_product_support"],
             "repeat_informative_reads": shared["full_span_support"],
@@ -882,6 +887,8 @@ def run_call(
         classification_paths.update(run_mapping_classification(
             database_path=database_path, loci=loci, outdir=outdir_path, sample_id=sample_id,
             reads1=outdir_path / "filtered_reads.fastq.gz", technology=preset if filtered_reads else "hifi",
+            read_alignments=reference_alignments, measured_repeats=_molecule_calls,
+            round_tolerance=assembly_round_tolerance,
             sample_mode=sample_mode,
             threads=thread_count, minimap2_bin=minimap2_bin,
             locus_quality={str(row["locus"]): {"depth": row["molecule_support"], "status": row["status"]} for row in unified_calls},

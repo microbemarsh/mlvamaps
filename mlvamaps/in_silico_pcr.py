@@ -368,6 +368,7 @@ def _record_product_rows(
         bool,
         float,
     ],
+    searcher=None,
 ) -> list[dict[str, str | int]]:
     (
         source,
@@ -381,7 +382,7 @@ def _record_product_rows(
         trim_primers,
         max_n_fraction,
     ) = task
-    searcher = _new_searcher()
+    searcher = searcher or _new_searcher()
     if hasattr(searcher, "prime"):
         # The CLI backend can search all concrete primers together. Prime both
         # orientations once at the maximum threshold; the legacy rounds below
@@ -414,6 +415,21 @@ def _record_product_rows(
             )
         )
     return rows
+
+
+def _record_batch_product_rows(tasks):
+    searcher = _new_searcher()
+    if hasattr(searcher, "prime_many"):
+        loci, max_errors, search_rc = tasks[0][3], tasks[0][4], tasks[0][7]
+        patterns = {
+            concrete.encode("ascii") for locus in loci
+            for primer in (locus.forward_primer, _reverse_complement(locus.reverse_primer))
+            for concrete in _expand_degenerate(primer)
+        }
+        texts = [sequence.upper().encode("ascii") for task in tasks
+                 for sequence in ((task[2], _reverse_complement(task[2])) if search_rc else (task[2],))]
+        searcher.prime_many(patterns, texts, max_errors)
+    return [row for task in tasks for row in _record_product_rows(task, searcher)]
 
 
 def _bounded_ordered_map(executor, function, iterable, max_pending: int):
@@ -487,6 +503,19 @@ def _product_rows(
                 max_n_fraction,
             )
 
+    def record_batches():
+        # Bound both input memory and the per-batch native match cache. A large
+        # contig occupies its own batch; FASTQ records share process launches.
+        batch, bases = [], 0
+        for task in record_tasks():
+            if batch and (len(batch) >= 64 or bases + len(task[2]) > 65536):
+                yield batch
+                batch, bases = [], 0
+            batch.append(task)
+            bases += len(task[2])
+        if batch:
+            yield batch
+
     rows = []
     if (
         thread_count > 1
@@ -521,15 +550,15 @@ def _product_rows(
             ):
                 rows.extend(locus_rows)
     elif thread_count == 1:
-        record_results = map(_record_product_rows, record_tasks())
+        record_results = map(_record_batch_product_rows, record_batches())
         for record_rows in record_results:
             rows.extend(record_rows)
     else:
         with ProcessPoolExecutor(max_workers=thread_count) as executor:
             for record_rows in _bounded_ordered_map(
                 executor,
-                _record_product_rows,
-                record_tasks(),
+                _record_batch_product_rows,
+                record_batches(),
                 max_pending=max(2, thread_count * 2),
             ):
                 rows.extend(record_rows)

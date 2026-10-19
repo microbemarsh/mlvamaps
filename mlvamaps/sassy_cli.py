@@ -69,17 +69,29 @@ class Searcher:
         Caching the maximum-threshold result is safe because Sassy reports each
         match's edit cost; :meth:`search` filters that result for each round.
         """
+        self.prime_many(patterns, [text], k)
+
+    def prime_many(self, patterns: Iterable[bytes], texts: Iterable[bytes], k: int) -> None:
+        """Search a bounded batch of targets in one native process."""
         unique_patterns = tuple(dict.fromkeys(pattern for pattern in patterns if pattern))
+        unique_texts = tuple(dict.fromkeys(text for text in texts if text))
         missing = [
             pattern
             for pattern in unique_patterns
-            if (pattern, text) not in self._cache or self._cache[(pattern, text)][0] < k
+            if any((pattern, text) not in self._cache or self._cache[(pattern, text)][0] < k
+                   for text in unique_texts)
         ]
-        if not missing or not text:
+        missing_texts = [
+            text for text in unique_texts
+            if any((pattern, text) not in self._cache or self._cache[(pattern, text)][0] < k
+                   for pattern in missing)
+        ]
+        if not missing or not missing_texts:
             return
 
         pattern_texts = [pattern.decode("ascii") for pattern in missing]
-        sequence_text = text.decode("ascii")
+        targets = {"text" if index == 0 else f"text{index}": text
+                   for index, text in enumerate(missing_texts)}
         with tempfile.TemporaryDirectory(prefix="mlvamaps-sassy-") as directory:
             directory_path = Path(directory)
             patterns_path = directory_path / "patterns.fasta"
@@ -87,7 +99,9 @@ class Searcher:
             patterns_path.write_text(
                 "".join(f">p{index}\n{pattern}\n" for index, pattern in enumerate(pattern_texts))
             )
-            texts_path.write_text(f">text\n{sequence_text}\n")
+            texts_path.write_text("".join(
+                f">{name}\n{text.decode('ascii')}\n" for name, text in targets.items()
+            ))
             completed = subprocess.run(
                 self._command(patterns_path, texts_path, k),
                 capture_output=True,
@@ -98,8 +112,8 @@ class Searcher:
             detail = completed.stderr.strip() or completed.stdout.strip() or "no diagnostic output"
             raise RuntimeError(f"Sassy search failed ({completed.returncode}): {detail}")
 
-        matches_by_pattern: dict[str, list[Match]] = {
-            f"p{index}": [] for index in range(len(missing))
+        matches_by_target: dict[tuple[str, str], list[Match]] = {
+            (f"p{index}", name): [] for index in range(len(missing)) for name in targets
         }
         for row in csv.DictReader(io.StringIO(completed.stdout), delimiter="\t"):
             if not row or not row.get("start"):
@@ -109,14 +123,18 @@ class Searcher:
             # one-pattern adapter and lightweight downstream test doubles.
             if pattern_id == "pattern" and len(missing) == 1:
                 pattern_id = "p0"
-            if pattern_id not in matches_by_pattern:
+            key = (pattern_id, row.get("text_id", "text"))
+            if key not in matches_by_target:
                 continue
             pattern_index = int(pattern_id[1:])
-            matches_by_pattern[pattern_id].append(
+            matches_by_target[key].append(
                 self._match_from_row(row, len(pattern_texts[pattern_index]))
             )
         for index, pattern in enumerate(missing):
-            self._cache[(pattern, text)] = (k, matches_by_pattern[f"p{index}"])
+            for name, text in targets.items():
+                previous = self._cache.get((pattern, text))
+                if previous is None or previous[0] < k:
+                    self._cache[(pattern, text)] = (k, matches_by_target[f"p{index}", name])
 
     def _command(self, patterns_path: Path, texts_path: Path, k: int) -> list[str]:
         command = [

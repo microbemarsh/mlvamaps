@@ -171,7 +171,8 @@ def assemble_fragments(
 
 
 def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts,
-                           loci, fragments, sample_id, thresholds, round_tolerance):
+                           loci, fragments, sample_id, thresholds, round_tolerance,
+                           *, require_measurement=False):
     """Try the graph only without a well-supported direct sequence measurement."""
     from .alignment_evidence import CandidateEvidence
     from .allele_inference import infer_alleles
@@ -266,9 +267,12 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
         diagnostic["call_method"] = method
         diagnostics.append(diagnostic)
     evidence = [row for locus in loci for row in rows_by_locus[locus.locus_id]]
-    calls, molecule_calls = infer_alleles(evidence, loci, contexts, sample_id, "illumina", thresholds)
+    calls, molecule_calls = infer_alleles(
+        evidence, loci, contexts, sample_id, "illumina", thresholds,
+        require_measurement=require_measurement,
+    )
     for diagnostic, call in zip(diagnostics, calls):
-        if call["best_candidate_repeat"] != "" and (
+        if not require_measurement and call["best_candidate_repeat"] != "" and (
             call["status"] == "ambiguous"
             or (not diagnostic["spanning_fragment_count"] and diagnostic["microassembly_success"] == "no")
         ):

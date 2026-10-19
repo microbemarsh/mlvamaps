@@ -49,7 +49,7 @@ reserved and cannot be used as a sample ID in a batch.
 | `report.html` | Self-contained interpretation report with sample findings, locus-quality flags, FASTQ SPOARS/assembly-PCR concordance, gel evidence, profile matches, closest reference genomes, and technical tables. |
 | `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
-| `common_locus_calls.tsv` | Technology-neutral FASTQ calls with probability, margin, molecule support, and explicit called/low-coverage/unresolved/ambiguous/mixed/not-found status. |
+| `common_locus_calls.tsv` | Technology-neutral FASTQ calls with probability, margin, informative molecule support, total presence support, and explicit called/low-coverage/unresolved/ambiguous/mixed/not-found status. |
 | `molecule_candidate_evidence.tsv` | Optional detailed competitive-alignment and VNTR evidence for each molecule/candidate state; intended for validation rather than the default report. |
 | `candidate_mapping/candidate_alignments.bam` | Optional (`--keep-intermediates`) compressed competitive candidate alignments streamed from minimap2 through htslib. It is removed during normal operation; no text candidate SAM is produced. |
 | `short_read_diagnostics.tsv` | Paired-end calls only: unique recruited and rescued fragments, direct count, original candidate estimate, graph attempt/outcome/length, final count and call method. Dedicated audit output; primary call columns are unchanged. |
@@ -136,14 +136,12 @@ complete dominant local product includes its `product_size_bp` and unrounded
 blank. An assembly-only call has product size but no read depth unless support
 data are supplied.
 
-Paired short-read calls retain a best candidate approximation when a complete
-product cannot be resolved. These rows have `status=ESTIMATED`, a numeric
-`repeat_count`, and the existing `allele_confidence`/`allele_distribution`
-model-support values. `report.html` marks them with ≈ and **low confidence**.
-Model support is conditional on the tested candidates, not a calibrated
-probability of correctness; the evidence text flags candidate-range boundaries.
-Fingerprints include these approximations, so consult `calls.tsv` for their
-status and uncertainty. Truly missing evidence remains blank.
+Database-backed FASTQ calls require an independent sequence measurement for a
+numeric repeat count. A locus supported only by reference mapping is reported as
+`PRESENT_COUNT_UNKNOWN` with an empty count, rather than copying the nearest
+reference allele into the fingerprint. Historical `ESTIMATED` rows can still
+appear in older results or the panel-only library compatibility path; they are
+not emitted by the database-backed primary caller.
 
 ## FASTQ outputs
 

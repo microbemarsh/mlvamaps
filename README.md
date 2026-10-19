@@ -8,32 +8,51 @@ The main outputs are an MLVA fingerprint, per-locus calls and evidence, and a
 self-contained HTML report. Reference databases add alignment-based reference support using nucleotide
 variation and VNTR repeat-length evidence.
 
-<p align="center">
-  <img width="960" alt="Alignment-based workflow: assembly products and FASTQ molecules align to observed references for isolate support or EM mixture inference." src="figures/software_workflow/mlvamaps_sample_calling_github.png" />
-</p>
+```mermaid
+flowchart TD
+    CLI[mlvamaps call] --> Route{Input selector}
+    Route -->|sr or short-reads directory| SR[Short-read recovery]
+    Route -->|FASTQ file| LR[Long-read recovery]
+    Route -->|FASTA file| AS[Assembly PCR and product selection]
+    DB[Database panel and observed locus sequences] --> SR
+    DB --> LR
+    SR --> Shared[Shared molecule measurement and allele inference]
+    LR --> Shared
+    Shared --> Calls[Calls and MLVA fingerprint]
+    AS --> Calls
+    Shared -->|Reuse observed-reference alignments| Typing[Reference classification]
+    AS -->|With database: align selected products| Typing
+    Calls --> Report[Profile comparison and HTML report]
+    Typing --> Report
+```
 
 Assembly and FASTQ inputs retain their own evidence-recovery paths:
 
 - **Genome assemblies:** Sassy-backed, primer-directed in silico PCR recovers
   candidate amplicons; the assembly caller applies MLVA_finder-compatible
   product selection and size-to-repeat conversion.
-- **Illumina reads:** competitive minimap2 alignment supplies molecule evidence
-  to the shared allele caller. Paired reads also use flank recruitment with mate
+- **Illumina reads:** minimap2 maps molecules directly to observed database
+  loci. Read-based repeat measurements supply the shared allele caller. Paired reads also use flank recruitment with mate
   rescue and, for uncertain loci, bounded local assembly through the shared
   product-length parser.
-- **Long-read or amplicon FASTQ:** the same competitive candidate mapping is
-  followed by direct molecule measurement and shared allele inference. SPOARS
+- **Long-read or amplicon FASTQ:** Sassy primer recovery supplies complete
+  products, followed by mapping to observed database loci and shared molecule
+  measurement. Primer-recovered products remain usable when mapping misses them. SPOARS
   remains available for representative sequence correction and confirmation;
   it is not required before a repeat-count call.
 
 Locus detection does not by itself imply a confident repeat-count call.
 Unresolved and missing calls remain explicit and are never converted to zero.
 
-mlvamaps uses competitive minimap2 alignment against candidate MLVA allele
-contexts for both short- and long-read sequencing data. Technology-specific
-evidence is extracted from these alignments and integrated by a shared
-locus-level allele inference framework. minimap2 supplies competing alignments;
-it does not by itself determine the MLVA allele.
+See [how each workflow works](workflow.md) for source-traced diagrams, processing
+steps, and evidence outputs for short reads, long reads, and assemblies.
+
+FASTQ genotyping and reference typing share one competitive mapping to the
+actual observed database amplicons. Repeat counts require a measured product,
+resolved repeat flanks, or a supported local assembly; a matching reference
+alone does not supply the sample's allele. Novel measured alleles remain callable.
+The same alignments and molecule-level repeat measurements inform reference
+classification, preserving equivalent references and unresolved evidence.
 
 Reference typing uses one Emu-inspired alignment-likelihood framework:
 Sassy-recovered assembly amplicons are aligned to observed reference loci with
@@ -48,7 +67,10 @@ a database also retain reference-relative mismatch counts, repeat differences,
 and alignment CIGARs in `classification/assembly_reference_evidence.tsv`.
 
 Optional repeat-profile trees visualize sample similarity and do not determine
-reference classification. See [alignment-based classification](docs/concepts/mapping-classification.md)
+reference classification. Taxon annotations describe the reference catalog;
+they do not turn a marker-similarity tree into a complete taxonomic phylogeny.
+The per-sample tree currently uses repeat counts only, even though reference
+classification also uses nucleotide variation. See [alignment-based classification](docs/concepts/mapping-classification.md)
 and [migration to the emu workflow](docs/workflows/emu-migration.md).
 
 ## Install
@@ -91,8 +113,12 @@ conda activate mlvamaps
 You need:
 
 1. a FASTA/FASTQ input; and
-2. a CSV or TSV primer panel with at least `locus_id`, `forward_primer`, and
-   `reverse_primer` columns.
+2. for FASTQ, a completed reference database built for the target taxon and
+   primer panel (`--database`); or, for assembly-only calling, a CSV/TSV panel
+   with at least `locus_id`, `forward_primer`, and `reverse_primer` columns.
+
+FASTQ commands load the saved database panel automatically. Build the database
+once using the [reference-building guide](docs/workflows/reference-building.md).
 
 A richer panel can also describe repeat motifs, flanks, expected repeat ranges,
 and accepted amplicon sizes. See the [input format reference](docs/reference/input-formats.md).
@@ -111,7 +137,7 @@ mlvamaps call \
 
 ```bash
 mlvamaps call \
-  -p panel.tsv \
+  --database references \
   -i sr \
   --fq1 sample_R1.fastq.gz \
   --fq2 sample_R2.fastq.gz \
@@ -124,13 +150,13 @@ For a directory containing exact `SAMPLE_1.fastq.gz` / `SAMPLE_2.fastq.gz`
 pairs:
 
 ```bash
-mlvamaps call -p panel.tsv -i reads/ --short-reads -o results -t 8
+mlvamaps call --database references -i reads/ --short-reads -o results -t 8
 ```
 
 ### Accurate long or amplicon reads
 
 ```bash
-mlvamaps call -p panel.tsv -i sample.fastq.gz -o results/sample -t 8
+mlvamaps call --database references -i sample.fastq.gz -o results/sample -t 8
 ```
 
 ## Find the results
@@ -208,11 +234,14 @@ mlvamaps call \
   -o results/sample
 ```
 
-Current databases store reusable `competitive_mapping/candidate_contexts.fasta`,
-`candidate_metadata.tsv`, short/long minimap2 indexes, and a broad real-genome
-Deacon recruitment index. A rich panel may still be used without a
-database; bounded contexts are then synthesized from its primers, flanks,
-repeat motif, expected range, and observed database states when available.
+Current databases retain `competitive_mapping/` assets and a broad real-genome
+Deacon recruitment index for database compatibility. FASTQ calling uses the
+observed per-locus FASTAs directly, rather than their synthetic allele expansion.
+The observed mapping FASTA and metadata are recorded under each sample’s
+`candidate_mapping/` directory. All FASTQ commands require `--database`, including
+single-end, paired-end, manifest, and directory inputs. A standalone panel or
+`--recruitment-database` alone does not satisfy this requirement. Assembly-only
+calling can still use a panel without a database.
 
 For a multi-taxid build, that command automatically loads the saved panel and
 taxon metadata, then identifies the closest reference IDs with taxon annotations. No separate panel,

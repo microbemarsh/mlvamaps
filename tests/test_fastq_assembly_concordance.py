@@ -14,6 +14,9 @@ import pytest
 from mlvamaps.assembly_call import run_assembly_call
 from mlvamaps.cli import main
 from mlvamaps.io import write_tsv
+from mlvamaps.io import read_loci
+from mlvamaps.candidate_contexts import generate_candidate_contexts, write_candidate_contexts
+from mlvamaps.minimap_mapping import build_competitive_indexes
 from mlvamaps.sequence import revcomp
 
 
@@ -76,9 +79,9 @@ def _fingerprint(path):
     not shutil.which("minimap2") or not shutil.which("sassy"),
     reason="minimap2 and sassy are needed for FASTQ/assembly concordance",
 )
-@pytest.mark.parametrize("layout", ["single", "paired", "overlap", "shotgun"])
+@pytest.mark.parametrize("layout", ["single", "paired", "overlap", "shotgun", "long", "long_unmapped"])
 @pytest.mark.parametrize("tolerance", [0.25, 0.4, 0])
-def test_short_read_fingerprint_matches_assembly(tmp_path, layout, tolerance):
+def test_short_read_fingerprint_matches_assembly(tmp_path, layout, tolerance, monkeypatch):
     records, panel, assembly, expected = _sample(tmp_path)
     if tolerance == 0.4:
         expected.update(quarter_4bp_106bp_4U="5", threequarter_4bp_106bp_4U="6")
@@ -90,6 +93,31 @@ def test_short_read_fingerprint_matches_assembly(tmp_path, layout, tolerance):
         assembly_round_tolerance=tolerance,
     )
     assert _fingerprint(assembly_result["fingerprint"]) == expected
+    # Use a real observed reference allele (4), distinct from most sample
+    # alleles. Old expanded candidate assets remain valid database assets but
+    # must not define the FASTQ measurement or restrict novel/half alleles.
+    database = tmp_path / "database"
+    database.mkdir()
+    loci = read_loci(panel)
+    for locus in loci:
+        sequence = (locus.forward_primer + locus.left_flank_sequence + "ATGC" * 4
+                    + locus.right_flank_sequence + revcomp(locus.reverse_primer))
+        alternate = list(sequence)
+        for position in (24, 29, 34, 39):
+            alternate[position] = "ACGT"[("ACGT".index(alternate[position]) + 1) % 4]
+        (database / f"{locus.locus_id}.fasta").write_text(
+            f">R1\n{sequence}\n>R1_copy\n{sequence}\n>R2\n{''.join(alternate)}\n"
+        )
+    assets = write_candidate_contexts(generate_candidate_contexts(loci, database), database / "competitive_mapping")
+    build_competitive_indexes(assets["fasta"], database / "competitive_mapping")
+    (database / "manifest.json").write_text("{}")
+
+    def redundant_mapping(*args, **kwargs):
+        pytest.fail("Reference classification must reuse the allele caller's observed alignments")
+
+    monkeypatch.setattr("mlvamaps.mapping_classification.map_reads_to_candidates_bam", redundant_mapping)
+    if layout == "long_unmapped":
+        monkeypatch.setattr("mlvamaps.unified_fastq.map_reads_to_candidates_bam", lambda *args, **kwargs: [])
     first, second = [], []
     for locus, product in records:
         if layout == "shotgun":
@@ -115,8 +143,17 @@ def test_short_read_fingerprint_matches_assembly(tmp_path, layout, tolerance):
         "call", "-p", str(panel), "-i", "sr", "--fq1", str(reads1),
         "-o", str(output), "--sample-id", "sample", "--sample-mode", "isolate",
         "-t", "2", "--quiet", "--assembly-round-tolerance", str(tolerance),
+        "--database", str(database),
     ]
-    if layout != "single":
+    if layout.startswith("long"):
+        args[args.index("sr")] = str(reads1)
+        del args[args.index("--fq1"):args.index("--fq1") + 2]
+    elif layout != "single":
         args.extend(["--fq2", str(reads2)])
     assert main(args) == 0
     assert _fingerprint(output / "mlva_fingerprint.tsv") == expected
+    if layout != "long_unmapped":
+        with (output / "classification" / "mapping_reference_matches.tsv").open() as handle:
+            match = next(csv.DictReader(handle, delimiter="\t"))
+        assert match["reference_id"] == "R1"
+        assert match["equivalent_references"] == "R1;R1_copy"

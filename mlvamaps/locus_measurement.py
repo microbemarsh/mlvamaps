@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import regex
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -74,6 +75,13 @@ def find_anchor(pattern: str, sequence: str, max_edits: int = 3, search_start: i
     if concrete and 0 < pieces <= len(pattern) and not any(
         pattern[index * len(pattern) // pieces:(index + 1) * len(pattern) // pieces] in window
         for index in range(pieces)
+    ):
+        return None
+    # Short windows are cheaper to reject in-process than with a Sassy launch.
+    # This checks existence only; Sassy still determines every accepted match
+    # and its traceback. Larger windows retain the native SIMD search directly.
+    if concrete and len(window) <= 512 and not regex.search(
+        f"(?:{pattern}){{e<={max_edits}}}", window,
     ):
         return None
     searcher = _sassy_searcher("iupac")

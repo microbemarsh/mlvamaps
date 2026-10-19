@@ -1,0 +1,349 @@
+# How mlvamaps workflows work
+
+This guide traces the current source implementation (2026-10-19), including the
+observed-reference FASTQ caller and the batched Sassy searches. It describes
+code paths, not a new accuracy evaluation. Function links at the end identify
+the implementation behind each stage.
+
+## Choose an input path
+
+| Workflow | CLI selector | Required resources | Source of the repeat count |
+| --- | --- | --- | --- |
+| Short-read FASTQ | `-i sr --fq1 R1.fastq.gz [--fq2 R2.fastq.gz]` | Completed `--database` | Measured reads, uniquely merged pairs, or supported local products |
+| Long-read/amplicon FASTQ | `-i reads.fastq.gz` | Completed `--database` | Measured molecules, including primer products recovered without mapping |
+| Assembly FASTA | `-i assembly.fasta` | `-p panel.tsv` or a database containing its panel | Selected primer-bounded assembly product |
+
+Use `-i sr` for single-end short reads as well as paired reads. A FASTQ supplied
+directly to `-i` enters the long-read workflow; read length does not select the
+short-read caller automatically. FASTA/FASTQ compression does not change routing.
+
+FASTQ commands load `reference_panel.tsv` from the database unless an explicit
+panel is supplied. Assembly calling can run without a database; adding one
+enables sequence-based reference classification. Repeat sizing also needs panel
+calibration or repeat/flank metadata: primer sequences alone do not define an
+MLVA allele scale.
+
+```mermaid
+flowchart TD
+    CLI[mlvamaps call] --> Route{Input selector}
+    Route -->|sr or short-reads directory| SR[Short-read recovery]
+    Route -->|FASTQ file| LR[Long-read recovery]
+    Route -->|FASTA file| AS[Assembly PCR and product selection]
+    DB[Database panel and observed locus sequences] --> SR
+    DB --> LR
+    SR --> Shared[Shared molecule measurement and allele inference]
+    LR --> Shared
+    Shared --> Calls[Calls and MLVA fingerprint]
+    AS --> Calls
+    Shared -->|Reuse observed-reference alignments| Typing[Reference classification]
+    AS -->|With database: align selected products| Typing
+    Calls --> Report[Profile comparison and HTML report]
+    Typing --> Report
+```
+
+## What FASTQ workflows share
+
+The mapping targets are the database's **observed per-locus amplicon sequences**.
+Identical sequences within a locus share one target while retaining all source
+reference IDs. The caller writes those targets and their metadata to
+`candidate_mapping/`; minimap2 builds their index in memory for the sample.
+The older database `competitive_mapping/` assets remain required by CLI database
+validation, but their synthetic allele expansions and prebuilt indexes do not
+supply the primary observed-reference mapping.
+
+Both FASTQ paths call `run_unified_fastq_inference`:
+
+1. Map retained reads competitively against observed targets with minimap2.
+   Preserve alternative reference alignments. Decode SAM through htslib into
+   temporary BAM and collect alignment evidence.
+2. Measure the sample sequence using complete primer products or resolved
+   repeat flanks. A reference match or paired-end geometry alone cannot supply
+   a numeric repeat count.
+3. Group evidence by locus and molecule. Multiple reference alignments and two
+   mates do not become independent molecule votes. Conflicting measurements
+   within a molecule remain unresolved.
+4. Infer alleles from measured molecule support. Short-read pairs can additionally
+   enter the local assembly fallback described below.
+5. Write `common_locus_calls.tsv` and `molecule_candidate_evidence.tsv`, then
+   project the calls into the workflow's public output tables.
+
+`presence_support` counts detected molecules; `molecule_support` counts informative
+molecules. Novel or fractional measured alleles can be called outside the
+reference catalog. Detected loci without a resolved count become
+`PRESENT_COUNT_UNKNOWN`, with a blank count. Low depth, ambiguity, mixtures, and
+missing loci retain separate statuses; missing is never converted to zero.
+
+## Short-read FASTQ
+
+```bash
+mlvamaps call --database references -i sr \
+  --fq1 sample_R1.fastq.gz --fq2 sample_R2.fastq.gz \
+  --sample-mode isolate --sample-id sample -o results/short -t 8
+```
+
+Omit `--fq2` for single-end data. Interleaved input is not supported. The explicit
+sample mode in these examples selects isolate reference interpretation; the
+CLI default is `metagenome`.
+
+```mermaid
+flowchart TD
+    Input[R1 and optional R2] --> QC[Validate pairs, trim if requested, filter]
+    QC --> Files[Filtered FASTQ]
+    QC -->|Complete pairs| Seeds[Unique flank seeds and mate rescue]
+    Files --> Map[Competitive observed-reference minimap2 mapping]
+    Map --> Measure[Measure individual reads and usable merged pairs]
+    Seeds --> Measure
+    Measure --> Strong{Strong agreeing direct measurements?}
+    Strong -->|Yes| Infer[Shared allele inference]
+    Strong -->|No, recruited pairs available| Graph[Bounded local assembly]
+    Graph -->|Measurable supported product| Infer
+    Graph -->|Unresolved| Existing[Retain existing evidence]
+    Existing --> Infer
+    Infer --> Output[Calls, diagnostics, fingerprint and report]
+    Map -->|Reuse alignments| Classify[Reference classification]
+    Infer -->|Measured molecule counts| Classify
+    Classify --> Output
+```
+
+1. **Validate and filter.** Paired files must have equal record counts and
+   matching normalized IDs. QC processes chunks of 5,000 pairs. Defaults retain
+   reads with at least 40 bases and mean Q15; 3-prime trimming is off unless
+   requested. Filtered paired reads are written to `filtered_reads_1.fastq.gz`
+   and `filtered_reads_2.fastq.gz`.
+2. **Recruit pairs during QC.** `FlankRecruiter` builds a lookup of 21-base flank
+   seeds from observed references, excluding seeds shared across loci or found
+   inside configured repeats. A pair whose seed hits identify exactly one locus
+   retains both mates, including a mate with no seed hit. This pool supplements
+   mapping; it does not filter the FASTQ sent to minimap2.
+3. **Map and measure.** The shared caller uses the Illumina preset. It measures
+   individual reads and merged pairs, rejecting ambiguous or repeat-only
+   overlaps. Recruited pairs can supply measurements independently of mapper
+   success. Separate unmerged mates spanning opposite boundaries do not by
+   themselves measure the intervening repeat length.
+4. **Try local assembly where needed.** If direct measurements lack strong,
+   agreeing support and recruited pairs exist, construct a bounded k-mer graph.
+   Accept only a unique, covered, acyclic flank-to-flank product that passes the
+   shared product measurement. Graph limits are 2,000 fragments and 50,000
+   distinct k-mer edges. Branches and repeat cycles remain unresolved; reference
+   length or coverage is not used to guess a traversal count.
+5. **Call, classify, and export.** Shared inference supplies repeat calls.
+   Classification reuses the original mapping and measured molecule counts.
+   Outputs also include short-read QC, recruitment and assembly diagnostics,
+   sample summaries, and MYOGA-compatible metadata.
+
+Single-end reads use mapping and direct measurement without paired flank
+recruitment or the paired graph fallback. One current implementation limitation
+is that QC can save surviving orphan mates to `filtered_orphan_reads.fastq.gz`,
+but paired-mode inference does not map that file and the flank recruiter skips
+orphans. They therefore do not contribute downstream calls in this path.
+
+| Inspect | What it explains |
+| --- | --- |
+| `short_read_qc_summary.tsv` | Filtering and pair retention |
+| `short_read_recruitment_summary.tsv` | Per-locus recruitment summary |
+| `short_read_diagnostics.tsv` | Paired recovery, mate rescue, graph attempts and failure reasons |
+| `molecule_candidate_evidence.tsv` | Mapping and measured repeat evidence per molecule |
+| `common_locus_calls.tsv` | Shared calls, informative support, ambiguity and mixtures |
+
+With `--keep-intermediates`, retain filtered FASTQ files, the candidate BAM, and
+paired microassembly FASTA. Filtered paired and orphan FASTQ files are removed
+at normal completion otherwise. See the [Illumina guide](docs/workflows/illumina.md)
+for batch input and the full output schema.
+
+## Long-read and amplicon FASTQ
+
+```bash
+mlvamaps call --database references -i sample.fastq.gz \
+  --sample-mode isolate --sample-id sample -o results/long -t 8
+```
+
+```mermaid
+flowchart TD
+    Input[Long-read FASTQ] --> Screen[Optional Deacon target screen]
+    Screen --> QC[Length and mean-quality filtering]
+    QC --> PCR[Batched Sassy primer recovery]
+    QC --> Map[Competitive observed-reference minimap2 mapping]
+    PCR --> Shared[Shared molecule measurement and inference]
+    Map --> Shared
+    QC --> Recruit[Separate locus-product recruitment]
+    PCR --> Combine[Combine primer and recruitment assignments]
+    Recruit --> Combine
+    Combine --> Features[Repeat features and mapped variant groups]
+    Features --> POA[Variant fractions and dominant SPOARS consensus]
+    POA --> Confirm[Consensus PCR and optional representative mapping / SNPs]
+    Shared --> Calls[Final repeat calls]
+    Confirm --> Report[Evidence tables and report]
+    Calls --> Report
+    Map -->|Reuse alignments| Classify[Reference classification]
+    Shared -->|Measured molecule counts| Classify
+    Classify --> Report
+```
+
+1. **Screen and filter.** An explicit Deacon screen can precede QC; metagenome
+   mode automatically uses the database's recruitment index when present.
+   Current long-read code loads the resulting reads into memory before QC.
+   Default QC keeps 50–100,000-base reads with mean Q15 or better and writes
+   `filtered_reads.fastq.gz` and `qc_summary.tsv`.
+2. **Recover primer products.** Project filtered sequences to FASTA while
+   retaining the original FASTQ qualities. Sassy finds primer matches; the PCR
+   wrapper applies IUPAC expansion, orientation, pairing, and length rules.
+   Ties between loci or product sizes do not become accepted primer assignments.
+   Searches batch up to 64 records or 65,536 input bases per native launch;
+   an oversized record occupies its own batch. Record identities and coordinates
+   stay separate.
+3. **Map and infer.** Send all QC-retained reads, including those without a
+   complete primer product, to observed-reference mapping. Accepted primer
+   products can contribute direct measurements even when mapping misses a read.
+   The shared caller controls final repeat-state selection. Without an explicit
+   recruitment preset, this mapping uses HiFi settings; the implementation also
+   recognizes ONT and ONT-HQ preset selections. Preset availability alone does
+   not establish accuracy on noisy long reads.
+4. **Build confirmation evidence.** A separate locus-product recruitment pass
+   combines mapped assignments with primer recovery. Extract repeat features,
+   form mapped variant groups, estimate variant fractions, and construct dominant
+   per-locus SPOARS partial-order consensus products. Re-examine those products
+   with PCR. Representative mapping and SNP extraction run unless disabled with
+   `--no-locus-mapping`. These stages still execute after shared inference;
+   their consensus calls do not replace the shared repeat-state selection.
+5. **Classify and export.** Reuse the initial observed-reference alignments and
+   measured molecule counts for classification. This removes a second mapping
+   for classification, but the recruitment and representative mappings in the
+   confirmation path still exist.
+
+| Inspect | What it explains |
+| --- | --- |
+| `in_silico_pcr/` | Primer search matches and recovered products |
+| `read_locus_assignments.tsv` | Combined primer/recruitment assignments |
+| `common_locus_calls.tsv` and `molecule_candidate_evidence.tsv` | Primary shared inference |
+| `mapped_variant_table.tsv` and `vntr_mixture_abundance.tsv` | Variant grouping and estimated fractions |
+| `local_locus_products.fasta.gz` and `local_assembly_concordance.tsv` | Consensus products and measurement concordance |
+| `locus_mapping_summary.tsv` and `locus_snps.tsv` | Representative-mapping confirmation |
+
+`--debug-disagreements` retains the candidate BAM and adds disagreement audit
+tables. Primer-only recovery supports sizing, but does not establish a reference
+identity without reference alignment evidence. See the
+[FASTQ guide](docs/workflows/fastq.md) for further stage details and the synthetic
+runtime measurements.
+
+## Assembly FASTA
+
+```bash
+mlvamaps call -p panel.tsv -i assembly.fasta \
+  --sample-id sample -o results/assembly -t 8
+```
+
+Add `--database references` for reference classification, or use it in place of
+`-p` when its saved panel is suitable. Optional `--reads support.fastq.gz` or
+`--bam assembly_reads.bam` adds depth support; these options are mutually exclusive.
+
+```mermaid
+flowchart TD
+    Input[Assembly FASTA and panel] --> PCR[Sassy primer search and product pairing]
+    PCR --> Products[All recovered candidate amplicons]
+    Products --> Select[Historical MLVA_finder product selection]
+    Select --> Count[Calibrated product length and repeat rounding]
+    Products --> Depth[Optional FASTQ mapping or SAM/BAM overlap depth]
+    Count --> Calls[Calls and fingerprint]
+    Depth -->|Annotate support| Calls
+    Select -->|With database| Align[Parasail alignment to observed locus references]
+    Align --> Classify[Isolate reference classification]
+    Calls --> Report[Profile matches, legacy tables and report]
+    Classify --> Report
+```
+
+1. **Find products.** Use the same Sassy-backed PCR engine, searching configured
+   primer expansions with the historical strand and pairing rules. The CLI
+   default permits two edits per primer. Assembly PCR permits interior `N`
+   gaps and uses global product bounds covering the historical allele range;
+   it does not apply each locus's rich-panel product bounds at this stage.
+2. **Select the assembly product.** Preserve MLVA_finder behavior: use the first
+   successful primer-error round with its strand and equal-length-match
+   precedence, then choose the smallest raw allele on the last eligible FASTA
+   record. Eligible raw counts must be below 100. This is historical product
+   selection, so contig order can matter when several products qualify.
+3. **Convert size to repeats.** With historical panel calibration, calculate
+   `abs(nominal_repeat_units + (product_size_bp - expected_product_size_bp) / repeat_unit_length_bp)`.
+   The shared conversion helper also supports nonrepeat/flank-based sizing when
+   historical calibration is absent. Default rounding uses strict 0.25-unit
+   integer boundaries, otherwise the intervening half allele;
+   `--assembly-round-tolerance 0` preserves raw counts. The same conversion and
+   rounding convention applies to direct FASTQ product measurements.
+4. **Annotate optional support.** FASTQ support maps to extracted products with
+   minimap2. Existing assembly-aligned SAM/BAM support is measured by overlap
+   with product coordinates. Neither changes the selected product or count.
+5. **Classify and export.** With a database, globally align selected product
+   sequences to observed references at the same locus using Parasail. Feed that
+   evidence into isolate reference classification. Write standard calls,
+   fingerprints, profile comparisons, legacy compatibility tables, and the report.
+
+Assembly statuses are `PASS` and `NOT_FOUND`. Here `NOT_FOUND` means no product
+qualified for repeat-count selection; a recovered product can still appear in
+the amplicon table when its count cannot be calculated or is out of the
+historical range.
+
+| Inspect | What it explains |
+| --- | --- |
+| `assembly_amplicons.tsv` and `assembly_amplicons.fasta.gz` | All recovered products and coordinates |
+| `calls.tsv` | Selected product, raw/called repeat count, and optional depth |
+| `read_support.tsv` | Optional read support |
+| `classification/assembly_reference_evidence.tsv` | Reference-relative sequence and repeat differences |
+| `legacy_output.csv` and `legacy_mlva_analysis.csv` | Historical compatibility views |
+
+See the [assembly guide](docs/workflows/assembly.md) for the detailed PCR rules
+and additional compatibility outputs.
+
+## Reference matches and final results
+
+Reference classification combines sequence differences and repeat-length
+evidence. FASTQ passes measured counts once per molecule; unmeasured alignments
+can still inform classification without becoming numeric locus calls. Isolate
+mode ranks a single-source interpretation; metagenome mode fits reference
+fractions with EM. Indistinguishable references remain grouped, an unclassified
+component remains available, and missing-locus penalties are gated by coverage.
+The model's support is conditional on the supplied reference catalog.
+
+Start with `report.html`, `calls.tsv`, `locus_repeat_counts.tsv`, and
+`mlva_fingerprint.tsv`. Use `classification/mapping_reference_matches.tsv` for
+ranked reference groups, `classification/molecule_reference_likelihoods.tsv.gz`
+for their underlying evidence, and `classification/classification.json` for
+model diagnostics. `profile_matches.tsv` combines optional repeat-profile
+comparisons with sequence-reference results. Profile trees visualize repeat
+similarity and do not determine classification.
+
+Single-input runs write directly to `-o`. Directory and manifest runs isolate
+samples under `OUTDIR/<sample_id>/` and aggregate results in `batch_summary/`.
+See [workflow architecture](docs/workflows/architecture.md) for thread allocation
+and [output reference](docs/reference/outputs.md) for complete file descriptions.
+
+## Source trace and checks
+
+| Stage | Source entry points |
+| --- | --- |
+| CLI routing and database validation | [cli.py](mlvamaps/cli.py): `_resolve_call_args`, `_run_short_input`, `_run_single_input` |
+| Short-read orchestration and QC | [short_reads.py](mlvamaps/short_reads.py): `run_short_read_call`, `qc_read_pairs`; [short_read_mapping.py](mlvamaps/short_read_mapping.py): `run_mapping_short_read_call` |
+| Paired recruitment and local assembly | [short_read_fragments.py](mlvamaps/short_read_fragments.py): `FlankRecruiter`, `assemble_fragments`, `resolve_fragment_calls` |
+| Long-read orchestration | [pipeline.py](mlvamaps/pipeline.py): `run_call` |
+| Shared FASTQ inference | [unified_fastq.py](mlvamaps/unified_fastq.py): `run_unified_fastq_inference`; [allele_inference.py](mlvamaps/allele_inference.py): `infer_alleles` |
+| Product measurement and rounding | [locus_measurement.py](mlvamaps/locus_measurement.py): `measure_locus_product`, `find_anchor`; [calling.py](mlvamaps/calling.py): `assembly_equivalent_product_allele`, `legacy_round_repeat_count` |
+| PCR batching and native search | [in_silico_pcr.py](mlvamaps/in_silico_pcr.py): `_product_rows`, `_record_batch_product_rows`; [sassy_cli.py](mlvamaps/sassy_cli.py): `Searcher.prime_many` |
+| Assembly selection and outputs | [assembly_call.py](mlvamaps/assembly_call.py): `run_assembly_call`, `legacy_assembly_call_rows` |
+| Observed targets and classification | [mapping_classification.py](mlvamaps/mapping_classification.py): `observed_reference_contexts`, `run_mapping_classification`, `classify_molecules` |
+
+The implementation also avoids unnecessary short-window Sassy launches with an
+in-process edit-distance existence check; accepted approximate matches still
+use Sassy coordinates and traceback. The batching and precheck changes affect
+execution cost, not the evidence required for a count.
+
+Existing synthetic checks cover FASTQ/assembly concordance, primer indels,
+novel and fractional alleles, primer rescue without mapping, native batch
+equivalence, and anchor filtering. To run those checks with native dependencies
+on `PATH`:
+
+```bash
+python -m pytest -q tests/test_fastq_assembly_concordance.py \
+  tests/test_sassy_cli.py tests/test_short_read_runtime.py
+```
+
+Native-dependent tests skip when their tools are unavailable. These tests and
+the source trace do not establish accuracy or throughput on the user's server
+datasets.

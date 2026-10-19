@@ -66,6 +66,35 @@ def test_sequence_mismatches_and_nonrepeat_gaps_still_contribute():
     assert alignment_statistics(flank_gap, a)["repeat_delta"] == 0
 
 
+def test_measured_fragment_length_informs_reference_match_once_per_molecule():
+    a, b = context("a", 4), context("b", 6)
+    rows = [alignment(c, end=6, cs=":6", mate=mate)
+            for c in (a, b) for mate in (1, 2)]
+    scores, _ = molecule_log_likelihoods(
+        rows, [a, b], {"a": ["A"], "b": ["B"]},
+        measured_repeats={("L1", "m1"): 6},
+    )
+    assert scores[("L1", "m1")]["A"] == -2
+    assert scores[("L1", "m1")]["B"] == 0
+
+
+@pytest.mark.parametrize("tolerance, expected", [(0, 4.25), (0.25, 4.5), (0.4, 4)])
+def test_reference_and_measured_alleles_share_rounding(tmp_path, tolerance, expected):
+    from mlvamaps.mapping_classification import observed_reference_contexts
+
+    locus = Locus("L1", forward_primer="ACGTAC", reverse_primer="CATGCA",
+                  repeat_motif="GATA", repeat_unit_length_bp=4,
+                  expected_product_size_bp=28, nominal_repeat_units=4)
+    (tmp_path / "L1.fasta").write_text(">R1\nACGTACGATAGATAGATAGATAGTGCATG\n")
+    _, contexts, members = observed_reference_contexts(tmp_path, [locus], tolerance)
+    assert contexts[0].repeat_count == expected
+    scores, _ = molecule_log_likelihoods(
+        [alignment(contexts[0])], contexts, members,
+        measured_repeats={("L1", "m1"): expected},
+    )
+    assert scores[("L1", "m1")]["R1"] == 0
+
+
 def test_duplicate_alignments_and_reference_copies_do_not_add_support():
     a, b = context("a"), context("b", 6)
     reads = [alignment(a), alignment(b, cs=":6-gaga:14")]

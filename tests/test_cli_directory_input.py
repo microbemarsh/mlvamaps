@@ -15,6 +15,18 @@ def _write_panel(path: Path) -> Path:
     return panel
 
 
+def _write_database(path: Path) -> Path:
+    database = path / "reference_build"
+    assets = database / "competitive_mapping"
+    assets.mkdir(parents=True, exist_ok=True)
+    # Dispatch tests do not run mapping; only the CLI asset contract is needed.
+    for name in ("candidate_contexts.fasta", "candidate_metadata.tsv", "short.mmi", "long.mmi"):
+        (assets / name).touch()
+    (database / "manifest.json").write_text("{}")
+    (database / "reference_panel.tsv").write_text(_write_panel(path).read_text())
+    return database
+
+
 def _fake_short_result(outdir: Path, sample_id: str) -> dict[str, Path]:
     outdir.mkdir(parents=True, exist_ok=True)
     files = {
@@ -77,7 +89,7 @@ def test_short_read_directory_rejects_orphaned_exact_mates(tmp_path):
 
 
 def test_short_read_directory_cli_routes_pairs_to_batch(tmp_path, monkeypatch):
-    panel = _write_panel(tmp_path)
+    database = _write_database(tmp_path)
     inputs = tmp_path / "short_reads"
     inputs.mkdir()
     (inputs / "sample_1.fastq.gz").write_bytes(b"")
@@ -91,7 +103,7 @@ def test_short_read_directory_cli_routes_pairs_to_batch(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_run_short_batch", fake_batch)
 
     assert cli.main(
-        ["call", "-p", str(panel), "-i", str(inputs), "--short-reads"]
+        ["call", "--database", str(database), "-i", str(inputs), "--short-reads"]
     ) == 0
     assert observed["short_read_mode"] is True
     assert [row["sample_id"] for row in observed["rows"]] == ["sample"]
@@ -107,7 +119,7 @@ def test_batch_thread_allocation_is_bounded(monkeypatch):
 def test_call_directory_dispatches_each_file_to_its_sample_outdir(
     tmp_path, monkeypatch
 ):
-    panel = _write_panel(tmp_path)
+    database = _write_database(tmp_path)
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "reads.fastq.gz").write_bytes(b"")
@@ -121,7 +133,7 @@ def test_call_directory_dispatches_each_file_to_its_sample_outdir(
     monkeypatch.setattr(cli, "_run_single_input", fake_run)
 
     assert cli.main(
-        ["call", "-p", str(panel), "-i", str(inputs), "--outdir", str(tmp_path / "results")]
+        ["call", "--database", str(database), "-i", str(inputs), "--outdir", str(tmp_path / "results")]
     ) == 0
     assert observed == [
         ("assembly.fna", tmp_path / "results" / "assembly", "assembly"),
@@ -132,7 +144,7 @@ def test_call_directory_dispatches_each_file_to_its_sample_outdir(
 def test_call_directory_rejects_duplicate_derived_sample_ids(
     tmp_path, monkeypatch
 ):
-    panel = _write_panel(tmp_path)
+    database = _write_database(tmp_path)
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "sample.fastq").write_text("")
@@ -140,7 +152,7 @@ def test_call_directory_rejects_duplicate_derived_sample_ids(
     monkeypatch.setattr(cli, "_run_single_input", lambda *args: None)
 
     with pytest.raises(SystemExit, match="2"):
-        cli.main(["call", "-p", str(panel), "-i", str(inputs)])
+        cli.main(["call", "--database", str(database), "-i", str(inputs)])
 
 
 def test_empty_input_directory_has_a_clear_error(tmp_path, capsys):
@@ -217,7 +229,7 @@ def test_call_directory_writes_combined_mlva_finder_analysis(
 def test_normal_directory_batches_keep_samples_separate_from_batch_outputs(
     tmp_path, monkeypatch, filename, contents
 ):
-    panel = _write_panel(tmp_path)
+    database = _write_database(tmp_path)
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / filename).write_text(contents)
@@ -234,7 +246,7 @@ def test_normal_directory_batches_keep_samples_separate_from_batch_outputs(
     results = tmp_path / "results"
 
     assert cli.main(
-        ["call", "-p", str(panel), "-i", str(inputs), "-o", str(results)]
+        ["call", "--database", str(database), "-i", str(inputs), "-o", str(results)]
     ) == 0
     assert {path.name for path in results.iterdir()} == {"A", "B", "batch_summary"}
     assert (results / "A" / "calls.tsv").exists()
@@ -279,7 +291,7 @@ def test_directory_batch_rejects_reserved_sample_id(tmp_path, capsys):
 
 
 def test_paired_fastq_directory_writes_clean_batch_layout(tmp_path, monkeypatch):
-    panel = _write_panel(tmp_path)
+    database = _write_database(tmp_path)
     inputs = tmp_path / "reads"
     inputs.mkdir()
     for sample_id in ("sample1", "sample2"):
@@ -293,7 +305,7 @@ def test_paired_fastq_directory_writes_clean_batch_layout(tmp_path, monkeypatch)
     results = tmp_path / "results"
 
     assert cli.main(
-        ["call", "-p", str(panel), "-i", str(inputs), "--short-reads", "-o", str(results)]
+        ["call", "--database", str(database), "-i", str(inputs), "--short-reads", "-o", str(results)]
     ) == 0
     assert {path.name for path in results.iterdir()} == {
         "sample1", "sample2", "batch_summary"
@@ -311,7 +323,7 @@ def test_paired_fastq_directory_writes_clean_batch_layout(tmp_path, monkeypatch)
 
 
 def test_manifest_batch_layout_resumes_from_sample_directory(tmp_path, monkeypatch):
-    panel = _write_panel(tmp_path)
+    database = _write_database(tmp_path)
     reads = tmp_path / "reads.fastq"
     reads.write_text("@r\nACGT\n+\nIIII\n")
     manifest = tmp_path / "manifest.tsv"
@@ -324,12 +336,16 @@ def test_manifest_batch_layout_resumes_from_sample_directory(tmp_path, monkeypat
 
     def fake_run(args, reads1, reads2, outdir, sample_id, metadata):
         calls.append(sample_id)
+        classification = outdir / "classification"
+        classification.mkdir(parents=True, exist_ok=True)
+        (classification / "mapping_reference_matches.tsv").write_text("sample_id\treference_id\n")
+        (classification / "classification.json").write_text('{"method": "mapping_em"}')
         return _fake_short_result(outdir, sample_id)
 
     monkeypatch.setattr(cli, "_run_short_input", fake_run)
     results = tmp_path / "results"
     command = [
-        "call", "-p", str(panel), "-i", "sr", "--manifest", str(manifest),
+        "call", "--database", str(database), "-i", "sr", "--manifest", str(manifest),
         "-o", str(results),
     ]
 
@@ -346,7 +362,7 @@ def test_manifest_batch_layout_resumes_from_sample_directory(tmp_path, monkeypat
 
 
 def test_manifest_rejects_reserved_batch_summary_sample_id(tmp_path, capsys):
-    panel = _write_panel(tmp_path)
+    database = _write_database(tmp_path)
     reads = tmp_path / "reads.fastq"
     reads.write_text("@r\nACGT\n+\nIIII\n")
     manifest = tmp_path / "manifest.tsv"
@@ -354,7 +370,7 @@ def test_manifest_rejects_reserved_batch_summary_sample_id(tmp_path, capsys):
 
     with pytest.raises(SystemExit, match="2"):
         cli.main(
-            ["call", "-p", str(panel), "-i", "sr", "--manifest", str(manifest)]
+            ["call", "--database", str(database), "-i", "sr", "--manifest", str(manifest)]
         )
 
     assert "reserved for batch aggregate outputs" in capsys.readouterr().err
@@ -421,3 +437,59 @@ def test_batch_reruns_legacy_classification_and_resumes_new_tables(tmp_path, mon
     assert calls == ["sample"]
     with (Path(args.outdir) / "batch_summary" / "taxonomic_identification.tsv").open() as handle:
         assert next(csv.DictReader(handle, delimiter="\t"))["best_taxon"] == "1"
+
+
+@pytest.mark.parametrize("mode", ["long", "extensionless", "mixed_directory", "paired", "single_end", "short_directory", "manifest", "recruitment_only"])
+def test_fastq_requires_database_before_processing(tmp_path, monkeypatch, capsys, mode):
+    panel = _write_panel(tmp_path)
+    reads = tmp_path / "reads.fastq"
+    reads.write_text("@r\nACGT\n+\nIIII\n")
+    outdir = tmp_path / "results"
+    flags = ["-i", str(reads)]
+    if mode == "extensionless":
+        reads = reads.rename(tmp_path / "reads")
+        flags = ["-i", str(reads)]
+    elif mode == "mixed_directory":
+        inputs = tmp_path / "inputs"
+        inputs.mkdir()
+        reads.rename(inputs / reads.name)
+        (inputs / "a.fasta").write_text(">a\nACGT\n")
+        flags = ["-i", str(inputs)]
+    elif mode in {"paired", "single_end"}:
+        flags = ["-i", "sr", "--fq1", str(reads)]
+        if mode == "paired":
+            flags += ["--fq2", str(reads)]
+    elif mode == "short_directory":
+        flags = ["-i", str(tmp_path), "--short-reads"]
+    elif mode == "manifest":
+        manifest = tmp_path / "samples.tsv"
+        manifest.write_text(f"sample_id\treads1\nsample\t{reads}\n")
+        flags = ["-i", "sr", "--manifest", str(manifest)]
+    elif mode == "recruitment_only":
+        flags += ["--recruitment-database", str(_write_database(tmp_path))]
+
+    def unexpected_run(*args, **kwargs):
+        pytest.fail("sample processing started without a reference database")
+
+    monkeypatch.setattr(cli, "_run_single_input", unexpected_run)
+    monkeypatch.setattr(cli, "_run_short_input", unexpected_run)
+    monkeypatch.setattr(cli, "_run_short_batch", unexpected_run)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["call", "-p", str(panel), *flags, "-o", str(outdir)])
+    assert exc.value.code == 2
+    assert "FASTQ calling requires --database" in capsys.readouterr().err
+    assert not outdir.exists()
+
+
+def test_fastq_uses_saved_database_panel(tmp_path, monkeypatch):
+    database = _write_database(tmp_path)
+    reads = tmp_path / "reads.fastq"
+    reads.write_text("@r\nACGT\n+\nIIII\n")
+    observed = {}
+
+    def fake_run(args, *unused):
+        observed.update(database=args.database, panel=args.loci)
+
+    monkeypatch.setattr(cli, "_run_single_input", fake_run)
+    assert cli.main(["call", "-i", str(reads), "--database", str(database)]) == 0
+    assert observed == {"database": str(database), "panel": str(database / "reference_panel.tsv")}

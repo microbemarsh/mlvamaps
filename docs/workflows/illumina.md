@@ -3,10 +3,13 @@
 Illumina mode uses the shared FASTQ architecture. Paired reads are recruited by
 unique flank seeds during QC, retaining both mates independently of competitive
 minimap2 mapping. Direct sequence measurements enter shared allele inference;
-uncertain loci can use a bounded local graph. Single-end and long-read paths
-retain their existing behavior.
+uncertain loci can use a bounded local graph. Single-end and long-read paths use the same observed-reference mapping and
+measurement requirement.
 
 ## Command line
+
+All FASTQ modes require a completed `--database` for the target taxon and panel.
+The saved panel is used automatically when `-p` is omitted.
 
 ```bash
 mlvamaps call -p panel.tsv -i sr \
@@ -27,7 +30,7 @@ IDs at every record.
 For multiple paired samples in one directory, filenames can supply the pairing:
 
 ```bash
-mlvamaps call -p panel.tsv -i short_read_directory/ --short-reads \
+mlvamaps call --database reference_build -i short_read_directory/ --short-reads \
   --sample-metadata metadata.tsv -o results -t 32
 ```
 
@@ -51,7 +54,7 @@ do not provide an independent estimate of a sample's library geometry.
 The existing `pysam.FastxFile` parser streams paired files once through QC.
 `normalize_read_id` removes mate suffixes and validates synchronized names.
 During this same pass, a compiled literal-prefix trie searches both mates for
-21-base seeds from candidate sequences outside their repeat intervals. Seeds
+21-base seeds from observed reference sequences outside their repeat intervals. Seeds
 shared between loci, non-concrete/low-complexity seeds, and seeds found inside
 configured repeat sequences are excluded. Both orientations are searched.
 
@@ -64,41 +67,24 @@ Seed uniqueness is checked against configured locus contexts, not every genome
 in a reference cohort. Background homology can therefore still recruit reads;
 sequence measurements or a covered two-flank graph must support sizing.
 
-Competitive mapping continues unchanged for reference classification. In paired
+The same observed-reference mapping is reused for reference classification. In paired
 allele inference, an exact flank assignment excludes competitors at other loci.
 Mapper-only recovery requires at least 21 aligned bases outside the repeat and
 90% alignment identity. Repeat-only mappings cannot independently identify a
 locus. Fragment IDs also remain the unit of support in shared inference.
 
-## Competitive locus-context mapping
+## Direct reference-locus mapping
 
-Contexts come from one of two explicit sources:
+Targets are actual observed sequences from the required database's per-locus
+FASTAs. Duplicate sequences within a locus retain all source reference IDs.
+Filtered mates map competitively to these targets with minimap2, without an early
+taxon restriction. Both equivalent reference mappings and sequence mismatches
+remain available to reference classification.
 
-1. the versioned `competitive_mapping/candidate_metadata.tsv` and
-   `competitive_mapping/candidate_contexts.fasta` files in a
-   current `--database`; or
-2. complete products synthesized from a rich panel's primers, flanks, motif,
-   and expected repeat range when no database is supplied.
-
-A primer-only panel cannot define the repeat boundaries required by this
-algorithm and is rejected with guidance to build a reference database or enrich
-the panel.
-
-Filtered mates are mapped once with minimap2 against all candidate MLVA contexts,
-without an early taxon restriction. Contexts retain locus, reference, taxon,
-repeat interval, expected allele, and flank provenance. Equivalent alignments
-remain available to inference rather than being forced to one reference.
-
-Mate scores are resolved together. A confident mate can rescue its unaligned
-mate, equal best scores across loci are ambiguous, and confident mates assigned
-to different loci are discordant. Neither category is counted as unique support
-for multiple loci. Conventional MAPQ contributes to locus assignment but does
-not define allele confidence among intentionally similar repeat states.
-
-When database resources are available, the candidate FASTA, metadata,
-provenance, and `short.mmi` index are reused directly. They are not copied or
-regenerated for every sample. Without a database, locally synthesized resources
-are written under the sample's `candidate_mapping/` directory.
+The sample's `candidate_mapping/` directory records the observed FASTA, metadata,
+and provenance. Existing database candidate indexes remain compatibility assets;
+they do not determine the sample's repeat count. Reference classification reuses
+these alignments and the measured fragment counts without another FASTQ mapping.
 
 ## Direct VNTR inference
 
@@ -137,33 +123,14 @@ limits yield no assembled sequence. Supported contigs pass through
 rounding functions. Original fragment IDs supply support; an assembled product
 is not reported as multiple independently observed full-spanning reads.
 
-If assembly fails, the existing best candidate estimate and its likelihood
-distribution are retained in the report, calls and fingerprint outputs. Without
-an independently resolved sequence, the call is `ESTIMATED` with low confidence.
-Ambiguous candidate rankings also retain their best estimate. The report marks
-these counts with ≈ and shows their relative model support. A high model support
-compares only tested candidates; it is not a calibrated probability that an
-unresolved repeat count is correct. Estimates at the candidate-range boundary
-are flagged in the evidence text.
+If assembly fails and no independent sequence measurement resolves the count,
+the locus remains detected but unresolved. Reference alignment scores, paired
+geometry, and a single available database allele do not justify filling in a
+repeat count. Conflicting measurements of one molecule are also unresolved.
 
-This fallback preserves an available approximation without choosing an arbitrary
-number of graph cycles. A locus with no count-informative evidence or ranked
-candidates still has no defensible numeric estimate; missing calls are not filled
-from the reference allele or panel midpoint.
-
-No dependency, assembler subprocess, extra FASTQ pass, whole-genome alignment,
-or new thread pool is introduced. Minimap2 and sample-level concurrency retain
-their existing budgets. SPOARS consensus in `local_assembly.py` is unchanged;
-it was not part of this competitive short-read entry path.
-
-When `--database` is supplied, it must contain the versioned
-`competitive_mapping/candidate_metadata.tsv`, `candidate_contexts.fasta`, and
-technology-specific minimap2 indexes produced by the
-current reference builder. Older databases must be rebuilt rather than being
-silently reinterpreted. minimap2 output is streamed through htslib rather than
-materialized as text SAM. `--keep-intermediates` retains the filtered reads and
-compressed `candidate_mapping/candidate_alignments.bam`; with a database, the
-candidate bank and index continue to reside in the database.
+The current database schema is still required. Minimap2 output is streamed
+through htslib rather than materialized as text SAM. `--keep-intermediates`
+retains filtered reads and `candidate_mapping/candidate_alignments.bam`.
 
 ## Matching assembly fingerprints
 
@@ -221,7 +188,10 @@ method. `--keep-intermediates` also retains successful products in
 `short_read_microassembly.fasta`. Primary table columns and report layout are
 unchanged.
 
-## Runtime checks
+## Historical runtime checks
+
+These measurements predate observed-reference FASTQ inference and do not
+benchmark the current algorithm. Recheck runtime and accuracy on server data.
 
 The paired-fragment changes were compared against `5b79e47` on 2026-10-02,
 using two threads and three alternating fresh-process trials. No database
@@ -288,7 +258,7 @@ python -m pytest -q tests/test_short_read_runtime.py
 
 ## Automatic taxon identification
 
-With `--database`, the original retained molecules are aligned competitively
+With `--database`, classification reuses the original molecules’ alignments
 against observed reference amplicons. Sequence mismatches and resolvable
 repeat-length differences contribute to the shared alignment-likelihood model.
 Isolate mode combines evidence for one reference source; metagenome mode uses
@@ -300,32 +270,18 @@ and shown in `report.html`. Sequence evidence can remain informative when a
 repeat count is unresolved. Low-support and indistinguishable references remain
 explicit. See [mapping classification](../concepts/mapping-classification.md).
 
-## Exact, interval, and presence evidence
+## Measured and presence-only evidence
 
-Each contig, merged pair, and original read is evaluated with the same panel
-anchors and assembly-calibrated repeat convention used elsewhere in mlvamaps.
-Evidence is classified as:
+Each assembled product, merged pair, and original read uses the same panel
+anchors and assembly-calibrated repeat convention. Numeric counts require an
+independent product or flank measurement. Both boundaries on separate unmerged
+mates do not establish a repeat count or a measured repeat interval.
 
-- `COMPLETE_ASSEMBLED_PRODUCT`
-- `BOUNDARY_SPANNING_READ_PAIR`
-- `BOUNDARY_SPANNING_SINGLE_READ`
-- `PARTIAL_REPEAT_EVIDENCE`
-- `PRESENCE_ONLY`
-- `AMBIGUOUS_ASSEMBLY`
-- `MULTIPLE_ALLELES`
-- `LOW_DEPTH`
-- `NOT_FOUND`
-
-An exact `repeat_count` requires a contig, merged pair, or original read that
-directly resolves both repeat boundaries. The two boundaries may be the rich
-panel flanks or, when flanks are absent, the product primers. A read inside the
-repeat or covering one boundary cannot create an exact value.
-
-Opposite boundaries on separate mates may produce `repeat_count_min` and
-`repeat_count_max`. Empirical insert size can narrow that interval when at
-least two concordant spans support it. The midpoint is never copied into
-`repeat_count`. Without an adequate insert estimate, the panel's expected range
-is retained and the reason explains why.
+`common_locus_calls.tsv` separates all detected molecules (`presence_support`)
+from informative molecules (`molecule_support`). The compact call table uses
+`PRESENT_COUNT_UNKNOWN` for detected loci without a resolved allele and retains
+an empty `repeat_count`. Interval fields remain empty when no interval has been
+measured.
 
 ## Mixtures and confidence
 
@@ -406,10 +362,10 @@ Generate the tiny offline example:
 python examples/make_illumina_example.py examples/illumina_demo
 ```
 
-Then run:
+With a completed reference build for this synthetic panel at `reference_build`, run:
 
 ```bash
-mlvamaps call -p examples/illumina_demo/panel.tsv -i sr \
+mlvamaps call --database reference_build -i sr \
   --fq1 examples/illumina_demo/SRR_DEMO_1.fastq.gz \
   --fq2 examples/illumina_demo/SRR_DEMO_2.fastq.gz \
   --sample-id SRR_DEMO \
