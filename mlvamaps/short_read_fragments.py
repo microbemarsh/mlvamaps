@@ -184,7 +184,7 @@ def assemble_fragments(
 
 def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts,
                            loci, fragments, sample_id, thresholds, round_tolerance,
-                           *, require_measurement=False):
+                           *, require_measurement=False, sample_mode="metagenome"):
     """Try the graph only without a well-supported direct sequence measurement."""
     from .alignment_evidence import CandidateEvidence
     from .allele_inference import infer_alleles
@@ -202,6 +202,7 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
         alignments_by_locus[alignment.locus_id].append(alignment)
     calls_by_locus = {row["locus"]: row for row in calls}
     diagnostics, products = [], []
+    changed = not require_measurement
     for locus in loci:
         locus_id = locus.locus_id
         call = calls_by_locus[locus_id]
@@ -268,6 +269,7 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
                     [locus], pcr_products, sample_id, round_tolerance=round_tolerance,
                 )[0]
                 if assembly_call["status"] == "PASS":
+                    changed = True
                     allele = assembly_call["repeat_count"]
                     # Preserve each input fragment's ID; assembled support is
                     # not reported as independent complete spanning reads.
@@ -278,6 +280,8 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
                         right_boundary_span=pool[name].right, technology="illumina",
                         measured_repeat_count=allele,
                         evidence_tier="microassembly",
+                        raw_repeat_count=float(assembly_call["repeat_count_raw"]),
+                        repeat_sigma=0.08,
                     ) for name in sorted(support))
                     rows = [row if row.measured_repeat_count is not None else replace(
                         row, full_repeat_span=False, left_boundary_span=False,
@@ -294,10 +298,12 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
         diagnostic["call_method"] = method
         diagnostics.append(diagnostic)
     evidence = [row for locus in loci for row in rows_by_locus[locus.locus_id]]
-    calls, molecule_calls = infer_alleles(
-        evidence, loci, contexts, sample_id, "illumina", thresholds,
-        require_measurement=require_measurement,
-    )
+    if changed:
+        calls, molecule_calls = infer_alleles(
+            evidence, loci, contexts, sample_id, "illumina", thresholds,
+            require_measurement=require_measurement,
+            sample_mode=sample_mode, round_tolerance=round_tolerance,
+        )
     for diagnostic, call in zip(diagnostics, calls):
         if not require_measurement and call["best_candidate_repeat"] != "" and (
             call["status"] == "ambiguous"

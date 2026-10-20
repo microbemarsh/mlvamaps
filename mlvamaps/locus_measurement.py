@@ -269,6 +269,11 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
         anchor_indels = sum(anchor.insertions + anchor.deletions for anchor in (forward, reverse, left, right) if anchor is not None)
         qscore = mean_qscore(quality[repeat_start:repeat_end] if quality is not None and repeat_start is not None and repeat_end is not None else quality)
         sigma = max(0.08, (0.35 + 0.12 * anchor_indels + max(0.0, 15.0 - qscore) / 30.0) / max(math.sqrt(unit_length or 1), 1.0))
+        if quality is not None:
+            start, end = (forward.end, reverse.start) if forward and reverse else (repeat_start, repeat_end)
+            sizing_quality = mean_qscore(quality[start:end])
+            # Longer/noisier products have more opportunities for sizing errors.
+            sigma = max(sigma, math.sqrt(max(0, end - start) * 10 ** (-sizing_quality / 10)) / (unit_length or 1))
         probabilities = gaussian_allele_probabilities(raw_count, candidates, sigma)
         ranked = sorted(zip(candidates, probabilities), key=lambda item: (-item[1], float(item[0])))
         likelihoods = {allele: round(probability, 8) for allele, probability in ranked}
@@ -286,4 +291,5 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
         status, failure = "ANCHOR_FAILURE", "no complete locus anchors were identified"
     product_sequence = sequence[product_start:product_end] if product_start is not None and product_end is not None else ""
     product_quality = quality[product_start:product_end] if quality is not None and product_start is not None and product_end is not None else None
-    return LocusMeasurement(locus_model.locus_id, sequence_id, source, product_start, product_end, forward.start if forward else None, forward.end if forward else None, reverse.start if reverse else None, reverse.end if reverse else None, repeat_start, repeat_end, repeat_length, unit_length, raw_count, called, forward.identity if forward else None, reverse.identity if reverse else None, motif_identity, likelihoods, confidence, status, failure, forward, reverse, credible, second_allele, second_probability, product_sequence, product_quality, repeat_sequence, method)
+    return LocusMeasurement(locus_model.locus_id, sequence_id, source, product_start, product_end, forward.start if forward else None, forward.end if forward else None, reverse.start if reverse else None, reverse.end if reverse else None, repeat_start, repeat_end, repeat_length, unit_length, raw_count, called, forward.identity if forward else None, reverse.identity if reverse else None, motif_identity, likelihoods, confidence, status, failure, forward, reverse, credible, second_allele, second_probability, product_sequence, product_quality, repeat_sequence, method,
+                            {"repeat_sigma": sigma} if raw_count is not None else {})

@@ -245,6 +245,8 @@ def _resolve_panel_option(
 
 
 def _resolve_call_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if (args.short_insert_mean is None) != (args.short_insert_sd is None):
+        parser.error("--short-insert-mean and --short-insert-sd must be supplied together")
     if not math.isfinite(args.missing_locus_min_depth) or args.missing_locus_min_depth <= 0:
         parser.error("--missing-locus-min-depth must be finite and positive")
     if not math.isfinite(args.missing_locus_min_fraction) or not 0 < args.missing_locus_min_fraction <= 1:
@@ -440,6 +442,10 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     call.add_argument("--short-min-mapq", type=_nonnegative_int, default=0)
     call.add_argument("--short-min-spanning-pairs", type=_nonnegative_int, default=2)
     call.add_argument("--short-confidence-threshold", type=_fraction, default=0.8)
+    call.add_argument("--short-insert-mean", type=_positive_float, metavar="BP",
+                      help="Independently calibrated library fragment-length mean; requires --short-insert-sd")
+    call.add_argument("--short-insert-sd", type=_positive_float, metavar="BP",
+                      help="Library fragment-length standard deviation; enables labelled pair-length estimates")
     call.add_argument("--short-max-candidate-repeat-count", type=_positive_int, default=100)
     call.add_argument(
         "--no-short-secondary-alignments", action="store_true",
@@ -1017,6 +1023,8 @@ def _run_short_input(
         short_confidence_threshold=args.short_confidence_threshold,
         short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
         short_consider_secondary=not args.no_short_secondary_alignments,
+        short_insert_mean=args.short_insert_mean, short_insert_sd=args.short_insert_sd,
+        min_mixture_fraction=args.min_mixture_fraction, min_secondary_reads=args.min_secondary_reads,
         assembly_round_tolerance=args.assembly_round_tolerance,
         missing_locus_min_depth=args.missing_locus_min_depth,
         missing_locus_min_fraction=args.missing_locus_min_fraction,

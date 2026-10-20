@@ -151,6 +151,19 @@ count. `molecule_candidate_evidence.tsv` also records `aligned_flank_bases` and
 `spanning_repeat_indel_delta` for auditing alignment estimates. Estimates do not
 inflate measured `molecule_support`.
 
+`common_locus_calls.tsv` also includes `repeat_count_raw`, `inference_method`,
+`probability_kind`, `allele_fractions`, `em_iterations`, `em_converged`, and
+`consensus_status`. `best_probability` and `candidate_distribution` describe
+single-allele model support; `allele_fractions` and dominant/secondary fractions
+describe the mixture model and are not probabilities of a correct call.
+The model supports have not been calibrated against real-sample error rates.
+
+`molecule_candidate_evidence.tsv` preserves `raw_repeat_count` and `repeat_sigma`
+in repeat units, plus optional `pair_repeat_count` and `pair_repeat_sigma`.
+Methods `paired_fragment_length` and `consensus_supported` identify estimates
+from external library calibration and supported long-read consensus,
+respectively. Neither adds independently measured classification evidence.
+
 `report.html` includes an always-visible table for every panel locus, with the
 count, status, support, and evidence or uncertainty reason. `≈` marks estimates.
 `PRESENT_COUNT_UNKNOWN` and missing loci remain `Unavailable` when there is no

@@ -1,0 +1,101 @@
+{
+  "date": "2026-10-20",
+  "baseline_commit": "4815f6e7f90b88f2672f18abc5e333e806e72929",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "python": "3.13.15",
+  "command": "python scripts/benchmark_fastq_inference.py --repetitions 5 --copies 100",
+  "conditions": {
+    "loci": 11,
+    "paired_fragments": 4400,
+    "shotgun_fragments": 29000,
+    "long_reads": 4400,
+    "threads": 2,
+    "sample_mode": "isolate",
+    "timing": "FASTQ calling only; database construction and assembly truth excluded; five sequential runs per layout in each checkout; no concurrent tests",
+    "truth": "Synthetic assembly concordance including novel, fractional, zero-repeat and primer-indel cases; replicated high-quality sequences",
+    "limitation": "Does not establish real-sample accuracy, noisy-read throughput, or mixture throughput"
+  },
+  "before": {
+    "copies": 100,
+    "repetitions": 5,
+    "sample_mode": "isolate",
+    "threads": 2,
+    "fingerprints_match_assembly": true,
+    "workflows": {
+      "paired": {
+        "seconds": [
+          0.8516055829823017,
+          0.7277319589629769,
+          0.715072707971558,
+          0.7102848330978304,
+          0.7225293329684064
+        ],
+        "median_seconds": 0.7225293329684064
+      },
+      "shotgun": {
+        "seconds": [
+          5.041834999923594,
+          3.723279832978733,
+          3.743030708981678,
+          3.751066916040145,
+          3.862497250083834
+        ],
+        "median_seconds": 3.751066916040145
+      },
+      "long": {
+        "seconds": [
+          15.195346874999814,
+          15.409716000081971,
+          14.57922483398579,
+          14.570757958921604,
+          14.642933624912985
+        ],
+        "median_seconds": 14.642933624912985
+      }
+    }
+  },
+  "after": {
+    "copies": 100,
+    "repetitions": 5,
+    "sample_mode": "isolate",
+    "threads": 2,
+    "fingerprints_match_assembly": true,
+    "workflows": {
+      "paired": {
+        "seconds": [
+          0.8049157909117639,
+          0.7289390410296619,
+          0.7219016249291599,
+          0.7212618329795077,
+          0.7107841250253841
+        ],
+        "median_seconds": 0.7219016249291599
+      },
+      "shotgun": {
+        "seconds": [
+          4.269409667002037,
+          3.502170875086449,
+          3.6923103330191225,
+          3.500887457979843,
+          3.506740208948031
+        ],
+        "median_seconds": 3.506740208948031
+      },
+      "long": {
+        "seconds": [
+          10.12665587500669,
+          10.479703208897263,
+          10.37116054201033,
+          10.195765875047073,
+          9.999600166105665
+        ],
+        "median_seconds": 10.195765875047073
+      }
+    }
+  },
+  "time_reduction_percent": {
+    "paired": 0.09,
+    "shotgun": 6.51,
+    "long": 30.37
+  }
+}

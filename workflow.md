@@ -1,6 +1,6 @@
 # How mlvamaps workflows work
 
-This guide traces the current source implementation (2026-10-19), including the
+This guide traces the current source implementation (2026-10-20), including the
 observed-reference FASTQ caller and the batched Sassy searches. It describes
 code paths, not a new accuracy evaluation. Function links at the end identify
 the implementation behind each stage.
@@ -62,8 +62,12 @@ Both FASTQ paths call `run_unified_fastq_inference`:
 3. Group evidence by locus and molecule. Multiple reference alignments and two
    mates do not become independent molecule votes. Conflicting measurements
    within a molecule remain unresolved.
-4. Infer alleles from measured molecule support. Short reads can additionally
-   enter the local assembly fallback described below.
+4. Fit raw molecule lengths and their measurement uncertainty, then apply
+   assembly rounding to the selected allele. Isolate mode fits one allele with
+   an outlier-tolerant likelihood; metagenome mode additionally fits allele
+   fractions with EM. Identical observations share weighted likelihood rows,
+   preserving molecule counts while avoiding repeated calculations. Short reads
+   can additionally enter the local assembly fallback described below.
 5. For unresolved calls, report a low-confidence `ESTIMATED` count when evidence
    permits: use the best ambiguous measured allele, conflicting direct
    observations, repeat-spanning CIGAR projections, or finally a reference-based
@@ -75,7 +79,10 @@ Both FASTQ paths call `run_unified_fastq_inference`:
    project the calls into the workflow's public output tables.
 
 `presence_support` counts detected molecules; `molecule_support` counts informative
-molecules. Novel or fractional measured alleles can be called outside the
+molecules. `repeat_count_raw` preserves the selected unrounded length.
+`allele_fractions` describes the mixture fit; `best_probability` remains
+single-allele model support, not a mixture fraction or calibrated accuracy.
+Novel or fractional measured alleles can be called outside the
 reference catalog. Estimates carry `estimation_method`, `estimation_reason`, and
 `estimate_support`; their model support is not a calibrated probability of
 correctness. When neither measurement nor estimation is possible, detected loci
@@ -131,7 +138,11 @@ flowchart TD
    individual reads and merged pairs, rejecting ambiguous or repeat-only
    overlaps. Recruited pairs can supply measurements independently of mapper
    success. Separate unmerged mates spanning opposite boundaries do not by
-   themselves measure the intervening repeat length.
+   themselves measure the intervening repeat length. Supplying both
+   `--short-insert-mean` and `--short-insert-sd` from independent library
+   calibration enables an `ESTIMATED` length from inward-facing, opposite-flank
+   pairs when there are no direct measurements. These estimates add no measured
+   molecule counts to classification.
 4. **Try local assembly where needed.** If direct measurements lack strong,
    agreeing support and recruited reads exist, construct a bounded k-mer graph.
    Start at 41 bases (or shorter for short reads), increasing by 20 bases up to
@@ -189,6 +200,7 @@ flowchart TD
     POA --> Confirm[Consensus PCR and optional representative mapping / SNPs]
     Shared --> Calls[Final repeat calls]
     Confirm --> Report[Evidence tables and report]
+    Confirm -->|Resolve supported ambiguity| Calls
     Calls --> Report
     Map -->|Reuse alignments| Classify[Reference classification]
     Shared -->|Measured molecule counts| Classify
@@ -221,8 +233,11 @@ flowchart TD
    form mapped variant groups, estimate variant fractions, and construct dominant
    per-locus SPOARS partial-order consensus products. Re-examine those products
    with PCR. Representative mapping and SNP extraction run unless disabled with
-   `--no-locus-mapping`. These stages still execute after shared inference;
-   their consensus calls do not replace the shared repeat-state selection.
+   `--no-locus-mapping`. For uncertain calls, a consensus with sufficient input
+   support can resolve competing lengths if the original molecule likelihoods
+   support its allele within fourfold of the best allele. Such calls remain
+   low-confidence `ESTIMATED` with method `consensus_supported`. Consensus adds
+   no independent molecule votes and does not override decisive or mixed calls.
 5. **Classify and export.** Reuse the initial observed-reference alignments and
    measured molecule counts for classification. This removes a second mapping
    for classification, but the recruitment and representative mappings in the

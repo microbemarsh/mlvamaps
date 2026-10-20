@@ -47,8 +47,9 @@ disabled unless `--short-trim-quality` is set. With the default
 mate fails. IDs and mate association are not rewritten.
 
 `short_read_qc_summary.tsv` reports input, rejected, retained, and orphan
-counts. Insert-size fields remain empty: candidate-relative template lengths
-do not provide an independent estimate of a sample's library geometry.
+counts. Insert-size fields remain empty unless external calibration is supplied:
+candidate-relative template lengths do not provide an independent estimate of
+a sample's library geometry.
 
 ## Flank recruitment and mate rescue
 
@@ -99,6 +100,23 @@ repeat flanks; the existing measurement function still makes the final call.
 When at least the configured minimum number of directly measured fragments
 agree on one count, weaker candidate-relative mappings remain presence evidence
 and cannot move that count. The default minimum is three fragments.
+
+Raw fragment lengths and measurement uncertainty enter a single-allele model
+in isolate mode, or an allele-mixture EM model in metagenome mode. The selected
+raw allele is then rounded using the assembly convention. Mates and duplicate
+reference alignments never add independent molecule votes.
+
+If library fragment lengths have been calibrated independently, supply
+`--short-insert-mean BP --short-insert-sd BP` together. The caller can then
+estimate an unresolved repeat length from complete inward-facing reads on
+opposite unique flanks. Mean and standard deviation describe the full library
+fragment length, including both reads. Estimates use Gaussian insert-length
+likelihoods and remain low-confidence `ESTIMATED`, with method
+`paired_fragment_length`. They cannot replace direct measurements or create
+measured support for classification. Calibration is not inferred from
+overlapping pairs or locus-only template lengths, which can be length-biased.
+The Gaussian fallback does not correct for target-selection bias; targeted or
+amplicon libraries may violate its fragment-sampling assumptions.
 
 ## Conditional micro-assembly
 

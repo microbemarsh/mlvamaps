@@ -186,6 +186,10 @@ def run_short_read_call(
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
     assembly_round_tolerance: float = 0.25,
+    short_insert_mean: float | None = None,
+    short_insert_sd: float | None = None,
+    min_mixture_fraction: float = 0.2,
+    min_secondary_reads: int = 2,
 ) -> dict[str, Path]:
     """Call Illumina data with competitive minimap2 candidate mapping."""
     from .short_read_mapping import run_mapping_short_read_call
@@ -209,6 +213,8 @@ def run_short_read_call(
         missing_locus_penalty=missing_locus_penalty,
         classification_repeat_scale=classification_repeat_scale,
         assembly_round_tolerance=assembly_round_tolerance,
+        short_insert_mean=short_insert_mean, short_insert_sd=short_insert_sd,
+        min_mixture_fraction=min_mixture_fraction, min_secondary_reads=min_secondary_reads,
         reference_metadata_path=reference_metadata_path,
         taxon_min_loci=taxon_min_loci,
         taxon_identification=taxon_identification,

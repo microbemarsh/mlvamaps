@@ -50,6 +50,10 @@ def run_mapping_short_read_call(
     show_progress: bool = True,
     classification_repeat_scale: float = 1.0,
     assembly_round_tolerance: float = 0.25,
+    short_insert_mean: float | None = None,
+    short_insert_sd: float | None = None,
+    min_mixture_fraction: float = 0.2,
+    min_secondary_reads: int = 2,
 ) -> dict[str, Path]:
     """Run competitive minimap2 mapping and emit established output views."""
     # Lazy imports avoid a module cycle with the shared Illumina helpers.
@@ -138,11 +142,14 @@ def run_mapping_short_read_call(
         contexts=contexts,
         recruited_fragments=recruiter.fragments,
         reference_alignments=reference_alignments,
+        sample_mode=sample_mode,
+        insert_mean=short_insert_mean, insert_sd=short_insert_sd,
+        mixture_min_fraction=min_mixture_fraction, mixture_min_molecules=min_secondary_reads,
     )
     calls = common_calls_to_compatibility(common_calls)
     if database_path:
         for call in calls:
-            call["inference_method"] = call.get("estimation_method") or "observed_reference_molecule_measurement"
+            call["inference_method"] = call.get("estimation_method") or call["inference_method"]
     by_locus = {str(row["locus"]): row for row in common_calls}
     evidence_rows = []
     for locus in loci:
@@ -251,8 +258,8 @@ def run_mapping_short_read_call(
 
     qc_values = dict(counters)
     qc_values.update({
-        "insert_size_median": "", "insert_size_mean": "",
-        "insert_size_standard_deviation": "", "insert_size_mad": "",
+        "insert_size_median": "", "insert_size_mean": short_insert_mean or "",
+        "insert_size_standard_deviation": short_insert_sd or "", "insert_size_mad": "",
         "insert_size_pairs": 0,
     })
     write_tsv(({"sample_id": sample_id, "metric": key, "value": value}
@@ -313,7 +320,9 @@ def run_mapping_short_read_call(
                        "method": "observed_reference_molecule_measurement" if database_path else "competitive_minimap2_shared_inference",
                        "minimap2_version": minimap2_version(minimap2_bin),
                        "database": database_path or "panel-derived",
-                       "insert_size": {"median": None, "mean": None, "standard_deviation": None, "mad": None, "pairs_used": 0}, "parameters": {"minimum_mapq": short_min_mapping_quality,
+                       "insert_size": {"mean": short_insert_mean, "standard_deviation": short_insert_sd,
+                                       "source": "external_calibration" if short_insert_mean else "unavailable",
+                                       "pairs_used": 0}, "parameters": {"minimum_mapq": short_min_mapping_quality,
                        "minimum_supporting_fragments": min_depth,
                        "minimum_spanning_pairs": short_min_spanning_pairs,
                        "confidence_threshold": short_confidence_threshold,

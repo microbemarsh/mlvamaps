@@ -526,6 +526,9 @@ def run_call(
                 round_tolerance=assembly_round_tolerance,
                 primer_assignments=primer_assignments,
                 reference_alignments=reference_alignments,
+                sample_mode=sample_mode,
+                mixture_min_fraction=min_mixture_fraction,
+                mixture_min_molecules=min_secondary_reads,
             )
         )
 
@@ -710,6 +713,37 @@ def run_call(
         local_assembly_path,
         LOCAL_ASSEMBLY_FIELDS,
     )
+    if unified_calls and primary_product_measurements:
+        from .allele_inference import COMMON_LOCUS_CALL_FIELDS, InferenceThresholds, infer_alleles
+
+        for row in unified_calls:
+            measurement = primary_product_measurements.get(row["locus"], {})
+            if measurement.get("supporting_reads", 0) >= min_depth:
+                row["consensus_status"] = (
+                    "agrees" if measurement.get("called_repeat_count") == row["best_candidate_repeat"]
+                    else "disagrees"
+                )
+        # Reuse the existing POA products only for uncertain loci. Consensus
+        # proposes an allele; the original molecules still supply all depth.
+        uncertain = {row["locus"] for row in unified_calls
+                     if row["status"] in {"ambiguous", "estimated", "detected_unresolved"}
+                     and row["locus"] in primary_product_measurements}
+        if uncertain:
+            resolved, _ = infer_alleles(
+                [row for row in _candidate_evidence if row.locus_id in uncertain],
+                [locus for locus in loci if locus.locus_id in uncertain], [],
+                sample_id, preset, InferenceThresholds(minimum_molecules=min_depth,
+                                                      minimum_probability=min_posterior,
+                                                      mixture_min_fraction=min_mixture_fraction,
+                                                      mixture_min_molecules=min_secondary_reads),
+                require_measurement=True, sample_mode=sample_mode,
+                round_tolerance=assembly_round_tolerance,
+                consensus_measurements=primary_product_measurements,
+            )
+            replacements = {row["locus"]: row for row in resolved
+                            if row["consensus_status"] == "resolved_ambiguity"}
+            unified_calls = [replacements.get(row["locus"], row) for row in unified_calls]
+        write_tsv(unified_calls, unified_paths["common_locus_calls"], COMMON_LOCUS_CALL_FIELDS)
 
     mapping_rows: list[dict] = []
     snp_rows: list[dict] = []
@@ -786,6 +820,7 @@ def run_call(
         }
         row.update({
             "called_repeat_count": shared["repeat_count"],
+            "primary_repeat_count_raw": shared.get("repeat_count_raw", ""),
             "posterior_probability": shared["best_probability"],
             "second_best_repeat_count": (
                 str(shared["candidate_distribution"]).split(";")[1].split(":", 1)[0]
@@ -797,7 +832,7 @@ def run_call(
             "dominant_variant_fraction": shared["dominant_fraction"] or 0,
             "allele_distribution": shared["candidate_distribution"],
             "call_status": status_map[str(shared["status"])],
-            "primary_measurement_source": shared.get("estimation_method") or (
+            "primary_measurement_source": shared.get("estimation_method") or shared.get("inference_method") or (
                 "observed_reference_molecule_measurement" if database_path else "shared_competitive_minimap2_inference"),
             **{field: shared.get(field, "") for field in ESTIMATION_FIELDS},
             "evidence_status": str(shared["status"]).upper(),

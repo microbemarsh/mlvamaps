@@ -94,6 +94,8 @@ model and [migration](../workflows/emu-migration.md) for removed options.
 | `--short-min-mapq` | `0` | Locus-assignment aid only; allele competition retains low-MAPQ alternatives. |
 | `--short-min-spanning-pairs` | `2` | Opposite-flank pairs required as decisive geometry evidence. |
 | `--short-confidence-threshold` | `0.8` | Minimum normalized candidate score for a call. |
+| `--short-insert-mean BP` | Unset | Independently calibrated library fragment-length mean; requires `--short-insert-sd`. |
+| `--short-insert-sd BP` | Unset | Library fragment-length standard deviation. Enables labelled opposite-flank pair estimates when direct measurements are unavailable. |
 
 Separate mates are supported. Interleaved data are not guessed or accepted.
 Directory discovery is non-recursive, uses the shared prefix as `sample_id`,

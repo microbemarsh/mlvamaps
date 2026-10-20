@@ -45,6 +45,15 @@ Assembly and FASTQ inputs retain their own evidence-recovery paths:
 Locus detection does not by itself imply a confident repeat-count call.
 Unresolved and missing calls remain explicit and are never converted to zero.
 
+FASTQ inference retains raw molecule lengths and measurement uncertainty until
+the final assembly-compatible rounding step. Isolate mode fits one allele;
+metagenome mode fits per-locus allele fractions with EM. Bounded measurement
+caches and weighted groups of identical observations avoid repeated work.
+Supported consensus and independently calibrated paired-fragment lengths can
+resolve uncertain loci as explicitly labelled estimates. See
+[workflow.md](workflow.md) for the evidence rules and
+[FASTQ benchmarks](docs/workflows/fastq.md#raw-length-inference-runtime-check).
+
 See [how each workflow works](workflow.md) for source-traced diagrams, processing
 steps, and evidence outputs for short reads, long reads, and assemblies.
 

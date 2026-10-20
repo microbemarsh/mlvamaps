@@ -91,6 +91,11 @@ def run_unified_fastq_inference(
     recruited_fragments: dict | None = None,
     primer_assignments: list[Assignment] | None = None,
     reference_alignments: list[CandidateAlignment] | None = None,
+    sample_mode: str = "metagenome",
+    insert_mean: float | None = None,
+    insert_sd: float | None = None,
+    mixture_min_fraction: float = 0.2,
+    mixture_min_molecules: int = 2,
 ) -> tuple[list[dict[str, object]], list[CandidateEvidence], dict[tuple[str, str], int | float], dict[str, Path]]:
     """Map observed loci, measure molecules, and optionally retain mappings for typing.
 
@@ -123,6 +128,7 @@ def run_unified_fastq_inference(
         evidence = extract_short_read_evidence(
             alignments, contexts, loci, round_tolerance=round_tolerance,
             recruited_fragments=recruited_fragments,
+            insert_mean=insert_mean, insert_sd=insert_sd,
         )
     else:
         evidence = extract_long_read_evidence(alignments, contexts, loci, technology, round_tolerance=round_tolerance)
@@ -146,15 +152,20 @@ def run_unified_fastq_inference(
                     direct_product_measurement=True, full_repeat_span=True,
                     measured_repeat_count=measurement.called_allele,
                     evidence_tier="primer_recovery",
+                    raw_repeat_count=measurement.raw_repeat_count,
+                    repeat_sigma=(measurement.metadata or {}).get("repeat_sigma"),
                 ))
     thresholds = InferenceThresholds(
         minimum_molecules=minimum_molecules,
         minimum_probability=minimum_probability,
+        mixture_min_fraction=mixture_min_fraction,
+        mixture_min_molecules=mixture_min_molecules,
     )
     calls, molecule_calls = infer_alleles(
         evidence, loci, contexts, sample_id, technology,
         thresholds,
         require_measurement=bool(database_path),
+        sample_mode=sample_mode, round_tolerance=round_tolerance,
     )
     fragment_paths = {}
     diagnostics = []
@@ -165,6 +176,7 @@ def run_unified_fastq_inference(
             calls, evidence, molecule_calls, alignments, contexts, loci,
             recruited_fragments, sample_id, thresholds, round_tolerance,
             require_measurement=bool(database_path),
+            sample_mode=sample_mode,
         )
         fragment_paths["short_read_diagnostics"] = outdir / "short_read_diagnostics.tsv"
         if keep_alignments:
@@ -224,7 +236,7 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
             "locus_id": row["locus"],
             "present": "no" if row["status"] == "not_found" else "yes",
             "repeat_count": repeat,
-            "repeat_count_raw": repeat,
+            "repeat_count_raw": row.get("repeat_count_raw", repeat),
             "product_size_bp": "",
             "read_depth": row.get("presence_support", row["molecule_support"]),
             "primary_read_depth": row["molecule_support"],
@@ -232,7 +244,7 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
             "allele_confidence": row["best_probability"],
             "second_best_repeat_count": "",
             "second_best_probability": row["second_best_probability"],
-            "inference_method": row.get("estimation_method") or "shared_competitive_minimap2_inference",
+            "inference_method": row.get("estimation_method") or row.get("inference_method", "shared_competitive_minimap2_inference"),
             **{field: row.get(field, "") for field in ESTIMATION_FIELDS},
             "dominant_variant_fraction": row["dominant_fraction"],
             "num_candidate_variants": len(str(row["candidate_distribution"]).split(";")) if row["candidate_distribution"] else 0,

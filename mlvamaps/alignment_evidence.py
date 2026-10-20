@@ -59,6 +59,8 @@ class CandidateEvidence:
     cs: str = ""
     evidence_tier: str = "generic_locus_mapping"
     metadata: dict[str, object] = field(default_factory=dict)
+    raw_repeat_count: float | None = None
+    repeat_sigma: float | None = None
 
 
 EVIDENCE_FIELDS = [
@@ -68,6 +70,8 @@ EVIDENCE_FIELDS = [
     "direct_product", "full_repeat_span", "left_boundary", "right_boundary",
     "repeat_indel_delta", "pair_geometry_score", "evidence_tier",
     "inferred_molecule_repeat", "cigar", "cs", "aligned_flank_bases", "spanning_repeat_indel_delta",
+    "raw_repeat_count", "repeat_sigma",
+    "pair_repeat_count", "pair_repeat_sigma",
 ]
 
 
@@ -101,4 +105,8 @@ def evidence_row(
         "cs": evidence.cs,
         "aligned_flank_bases": evidence.metadata.get("aligned_flank_bases", ""),
         "spanning_repeat_indel_delta": evidence.metadata.get("spanning_repeat_indel_delta", ""),
+        "raw_repeat_count": evidence.raw_repeat_count if evidence.raw_repeat_count is not None else "",
+        "repeat_sigma": evidence.repeat_sigma if evidence.repeat_sigma is not None else "",
+        "pair_repeat_count": evidence.metadata.get("pair_repeat_count", ""),
+        "pair_repeat_sigma": evidence.metadata.get("pair_repeat_sigma", ""),
     }

@@ -60,8 +60,22 @@ removes it. Decoded alignments remain available to reference classification.
 
 ## 4. Measure molecules and call repeats
 
-Complete primer products use the same calibrated product-length and rounding
-functions as assemblies. Independently resolved repeat flanks can also measure
+Complete primer products use the same calibrated product-length functions as
+assemblies. Raw lengths and measurement uncertainty are retained through
+inference; assembly rounding is applied to the final allele. Isolate mode fits
+a single-allele likelihood with a broad error component for occasional outliers.
+Metagenome mode uses the existing weighted EM solver to estimate per-locus
+allele fractions. A secondary allele requires sufficient fraction and effective
+molecule support, convergence, and a BIC-penalized likelihood improvement over
+the single-allele model. EM convergence
+and fractions are reported separately from single-allele model support.
+
+Identical observations share likelihood calculations while retaining molecule
+multiplicity. Long-read anchor measurements are cached by locus, sequence and
+quality, including failed measurements, rather than repeated for each reference
+allele. These caches are bounded and local to one inference run.
+
+Independently resolved repeat flanks can also measure
 a repeat interval. Paired reads can contribute a uniquely merged fragment or a
 supported local assembly, as described in the Illumina workflow.
 For concrete DNA anchors in windows of at most 512 bases, an in-process edit-distance
@@ -76,6 +90,9 @@ remain low confidence even when only one catalog allele is available. Reference
 copies and mate records do not multiply molecule support. Estimates are kept
 separate from measured counts used in reference classification.
 Novel and fractional measured alleles remain callable outside the catalog range.
+Optional independently calibrated paired-fragment lengths provide another
+labelled estimate when no direct measurement is available; see the
+[Illumina guide](illumina.md).
 
 `common_locus_calls.tsv` distinguishes `presence_support` from informative
 `molecule_support`. `molecule_candidate_evidence.tsv` retains reference IDs,
@@ -93,6 +110,13 @@ workflow remains available for sequence confirmation and reporting. It retains
 its own recruitment and representative mappings. Consensus is not required for
 a directly measured molecule call, and a nearest-reference allele does not
 overwrite the measured count.
+
+A dominant-cluster consensus with sufficient input support can resolve an
+uncertain call when its allele has molecule model support within fourfold of
+the best allele. The result remains `ESTIMATED`, with method
+`consensus_supported`. Consensus proposes a candidate or resolves ambiguity;
+it never adds independent depth or changes the molecule measurements supplied
+to reference classification. Strong calls and supported mixtures are retained.
 
 Relevant outputs include `local_locus_products.fasta.gz`,
 `local_assembly_concordance.tsv`, mapped-variant tables, and locus SNP evidence.
@@ -146,3 +170,33 @@ mapping. All 28 short-read and 37 long-read output tables matched across version
 in each trial after normalizing output-directory paths and decompressing gzip
 tables. These small synthetic timings measure reduced Sassy process overhead;
 they do not establish throughput or accuracy on real server datasets.
+
+## Raw-length inference runtime check
+
+On 2026-10-20, the previous caller and the raw-length/EM implementation were
+compared on the same machine with two threads and five runs per workflow.
+The benchmark times FASTQ calling and output generation, excluding database
+construction and assembly truth generation.
+
+| Synthetic input | Previous median | Updated median | Time reduction |
+| --- | ---: | ---: | ---: |
+| 4,400 full-product pairs | 0.723 s | 0.722 s | Essentially unchanged |
+| 29,000 shotgun pairs | 3.751 s | 3.507 s | 6.5% |
+| 4,400 long-read products | 14.643 s | 10.196 s | 30.4% |
+
+All resulting fingerprints matched the assembly truth. Inputs use an 11-locus
+panel covering novel, fractional, zero-repeat and primer-indel cases, with
+replicated high-quality reads. These timings establish performance for this
+synthetic isolate workload, not real noisy reads or mixtures.
+
+Reproduce with dev dependencies and minimap2/Sassy on PATH:
+
+```bash
+python scripts/benchmark_fastq_inference.py --repetitions 5 --copies 100
+```
+
+The [benchmark record](../reference/fastq-likelihood-benchmark.json) contains
+individual timings, the baseline commit, environment and input conditions.
+Regression tests additionally cover noisy raw-length aggregation, allele
+mixtures, duplicate-reference invariance, uncertain consensus and calibrated
+paired-fragment estimates.
