@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pysam
@@ -176,7 +177,7 @@ def parse_candidate_alignments(
                 alignment_score=float(alignment.get_tag("AS")) if alignment.has_tag("AS") else float(aligned),
                 mapping_quality=int(alignment.mapping_quality),
                 alignment_identity=identity,
-                query_coverage=aligned / max(alignment.query_length or aligned, 1),
+                query_coverage=aligned / max(alignment.query_length or alignment.infer_query_length() or aligned, 1),
                 reference_coverage=(alignment.reference_end - alignment.reference_start) / max(len(context.sequence), 1),
                 query_start=alignment.query_alignment_start,
                 query_end=alignment.query_alignment_end,
@@ -195,7 +196,14 @@ def parse_candidate_alignments(
                 template_length=alignment.template_length,
                 next_reference_start=alignment.next_reference_start,
             ))
-    return rows
+    # Secondary SAM records may omit SEQ/QUAL. Recover the original orientation
+    # from another record for the same molecule and mate, regardless of order.
+    sequences = {(row.molecule_id, row.mate): (row.query_sequence, row.query_quality)
+                 for row in rows if row.query_sequence}
+    return [replace(row, query_sequence=sequences[(row.molecule_id, row.mate)][0],
+                    query_quality=sequences[(row.molecule_id, row.mate)][1])
+            if not row.query_sequence and (row.molecule_id, row.mate) in sequences else row
+            for row in rows]
 
 
 def map_reads_to_candidates(

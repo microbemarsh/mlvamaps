@@ -158,7 +158,7 @@ def run_unified_fastq_inference(
     )
     fragment_paths = {}
     diagnostics = []
-    if technology == "illumina" and reads2 is not None and recruited_fragments is not None:
+    if technology == "illumina" and recruited_fragments is not None:
         from .short_read_fragments import resolve_fragment_calls
 
         calls, evidence, molecule_calls, diagnostics, products = resolve_fragment_calls(

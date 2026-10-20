@@ -42,3 +42,35 @@ def test_result_tree_does_not_count_aggregate_rows_twice(tmp_path):
         (path / "calls.tsv").write_text(text)
     assert comparison.read_calls(tmp_path) == {("s", "L"): 5}
     assert comparison.read_calls(tmp_path / "batch_summary") == {("s", "L"): 5}
+
+
+def test_audit_separates_estimates_and_reports_sample_mismatches(tmp_path):
+    header = "sample_id\tlocus_id\trepeat_count\tstatus\testimation_method\n"
+    assembly = tmp_path / "assembly.tsv"
+    reads = tmp_path / "reads.tsv"
+    assembly.write_text(header + "s\tL1\t0\tPASS\t\ns\tL2\t5\tPASS\t\ns\tL3\t8\tPASS\t\nonly_assembly\tL1\t3\tPASS\t\n")
+    reads.write_text(header + "s\tL1\t0\tPASS\t\ns\tL2\t3\tESTIMATED\treference_conditioned\ns\tL3\t\tNOT_FOUND\t\nonly_reads\tL1\t3\tPASS\t\n")
+    result = comparison.audit_calls(comparison.read_calls(assembly, with_metadata=True),
+                                    comparison.read_calls(reads, with_metadata=True))
+    assert result["overall"]["n"] == 2
+    assert result["overall"]["mean_signed_error"] == -1
+    assert result["by_read_status"]["PASS"]["overall"]["exact_agreement"] == 1
+    assert result["by_estimation_method"]["reference_conditioned"]["overall"]["mae"] == 2
+    assert result["sample_matching"] == {"shared": ["s"], "assembly_only": ["only_assembly"], "reads_only": ["only_reads"]}
+    assert result["per_sample"]["s"]["missing_short_read"] == 1
+    assert result["disagreements"][0]["locus_id"] == "L2"
+    assert result["disagreements"][0]["signed_error"] == -2
+    assert result["disagreements"][0]["call_file"] == str(reads)
+    assert all(row["locus_id"] != "L1" or row["sample_id"] != "s" for row in result["disagreements"])
+
+
+def test_read_alias_produces_a_long_read_audit(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    calls = tmp_path / "calls.tsv"
+    calls.write_text("sample_id\tlocus_id\trepeat_count\tstatus\ns\tL\t0\tPASS\n")
+    output = subprocess.check_output([sys.executable, comparison.__file__, "compare", "--assembly", str(calls),
+                                      "--reads", str(calls)], text=True)
+    assert json.loads(output)["updated"]["by_read_status"]["PASS"]["overall"]["exact_agreement"] == 1

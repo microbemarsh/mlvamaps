@@ -1,4 +1,4 @@
-"""Paired-read flank recruitment and bounded, evidence-only local assembly."""
+"""Short-read flank recruitment and bounded, evidence-only local assembly."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def _seed_matcher(seeds):
 
 
 class FlankRecruiter:
-    """Scan with the installed native regex engine; retain only relevant pairs."""
+    """Scan with the installed native regex engine; retain relevant molecules."""
 
     def __init__(self, contexts: list[CandidateContext], seed_length: int = 21):
         owners = defaultdict(set)
@@ -74,14 +74,14 @@ class FlankRecruiter:
         self.ambiguous_fragments = 0
 
     def add(self, pair: ReadPair) -> None:
-        if self.matcher is None or pair.read2 is None:
+        if self.matcher is None:
             return
         hits = [
             {location for match in self.matcher.finditer(read.sequence)
              for location in self.seeds[match.group(1)]}
-            for read in (pair.read1, pair.read2)
+            for read in (pair.read1, pair.read2) if read is not None
         ]
-        locations = hits[0] | hits[1]
+        locations = set().union(*hits)
         loci = {locus for locus, _side in locations}
         if len(loci) != 1:
             self.ambiguous_fragments += bool(loci)
@@ -89,7 +89,7 @@ class FlankRecruiter:
         locus = next(iter(loci))
         self.fragments[locus].setdefault(pair.molecule_id, RecruitedFragment(
             pair, (locus, "left") in locations, (locus, "right") in locations,
-            not hits[0] or not hits[1],
+            len(hits) == 2 and (not hits[0] or not hits[1]),
         ))
 
 
@@ -99,8 +99,8 @@ def assemble_fragments(
 ) -> tuple[str, set[str], str]:
     """Return only a unique, covered, acyclic flank-to-flank path.
 
-    Perfect tandem-repeat cycles cannot identify copy number. Neither candidate
-    length nor graph depth is used to choose how often to traverse such a cycle.
+    Increase word length when shorter overlaps collapse a repeat. Neither
+    reference length nor depth chooses how often to traverse a repeat cycle.
     """
     if len(fragments) < max(3, minimum_fragments):
         return "", set(), "insufficient_coverage"
@@ -114,60 +114,72 @@ def assemble_fragments(
     }
     if not anchors or len(anchors) > 8:
         return "", set(), "ambiguous_flanks"
-    sequences = {
-        name: (fragment.pair.read1.sequence, fragment.pair.read2.sequence)
-        for name, fragment in fragments.items() if fragment.pair.read2 is not None
-    }
-    if len(sequences) < max(3, minimum_fragments):
-        return "", set(), "insufficient_coverage"
-    shortest = min(len(read) for reads in sequences.values() for read in reads)
-    k = min(41, shortest - 10, *(len(anchor) + 1 for pair in anchors for anchor in pair))
-    if k < 21:
+    if any(len(anchor) < 21 for pair in anchors for anchor in pair):
         return "", set(), "short_anchors"
-    # Native overlapping extraction; a fragment contributes at most once per
-    # edge, including when both mates cover it or contain repeated copies.
-    kmers = regex.compile(f"(?=([ACGT]{{{k}}}))")
-    counts = Counter()
-    for reads in sequences.values():
-        observed = {word for read in reads for word in kmers.findall(read)}
-        counts.update(observed | {revcomp(word) for word in observed})
-        if len(counts) > 50000:
-            return "", set(), "graph_limit"
-    edges = defaultdict(set)
-    for word, count in counts.items():
-        if count >= 2:
-            edges[word[:-1]].add(word[1:])
-    products = set()
-    failure = "no_path"
-    for left, right in sorted(anchors):
-        node, end = left[:k - 1], right[-(k - 1):]
-        path, visited = [node], set()
-        while node != end:
-            if node in visited:
-                failure = "repeat_cycle"
-                break
-            visited.add(node)
-            successors = edges.get(node, set())
-            if len(successors) != 1:
-                if successors:
-                    failure = "competing_paths"
-                break
-            node = next(iter(successors))
-            path.append(node[-1])
-        else:
-            sequence = "".join(path)
-            if sequence.startswith(left) and sequence.endswith(right):
-                products.add(sequence)
-    if len(products) != 1:
-        return "", set(), "competing_paths" if products else failure
-    sequence = products.pop()
-    support = {
-        name for name, reads in sequences.items()
-        if any(read in sequence or revcomp(read) in sequence for read in reads)
+    # Only the terminal seeds locate a path; the interior flanks are recovered
+    # from reads, so sample SNPs/indels are not replaced by reference sequence.
+    anchors = {(left[:21], right[-21:]) for left, right in anchors}
+    sequences = {
+        name: tuple(read.sequence for read in (fragment.pair.read1, fragment.pair.read2)
+                    if read is not None)
+        for name, fragment in fragments.items()
     }
-    if len(support) < max(3, minimum_fragments):
-        return "", set(), "insufficient_coverage"
-    return sequence, support, "assembled"
+    longest = max(len(read) for reads in sequences.values() for read in reads)
+    # ponytail: at most seven graph sizes, capped at 151 bases. Longer-read
+    # assembly belongs in a native assembler if this bounded fallback grows.
+    maximum_k = min(151, longest - 10)
+    if maximum_k < 22:
+        return "", set(), "short_anchors"
+    failure = "no_path"
+    for k in sorted(set(range(min(41, maximum_k), maximum_k, 20)) | {maximum_k}):
+        # Native overlapping extraction; a molecule contributes once per edge,
+        # including when both mates cover it or contain repeated copies.
+        kmers = regex.compile(f"(?=([ACGT]{{{k}}}))")
+        counts = Counter()
+        for reads in sequences.values():
+            observed = {word for read in reads for word in kmers.findall(read)}
+            counts.update(observed | {revcomp(word) for word in observed})
+            if len(counts) > 50000:
+                return "", set(), "graph_limit"
+        edges = defaultdict(set)
+        starts = defaultdict(set)
+        left_seeds = {left for left, _right in anchors}
+        for word, count in counts.items():
+            if count >= 2:
+                edges[word[:-1]].add(word[1:])
+                if word[:21] in left_seeds:
+                    starts[word[:21]].add(word[:-1])
+        products = set()
+        for left, right in sorted(anchors):
+            for start in sorted(starts[left]):
+                node, path, visited = start, [start], set()
+                while not node.endswith(right):
+                    if node in visited:
+                        if failure != "competing_paths":
+                            failure = "repeat_cycle"
+                        break
+                    visited.add(node)
+                    successors = edges.get(node, set())
+                    if len(successors) != 1:
+                        if successors:
+                            failure = "competing_paths"
+                        break
+                    node = next(iter(successors))
+                    path.append(node[-1])
+                else:
+                    products.add("".join(path))
+        if len(products) > 1:
+            return "", set(), "competing_paths"
+        if products:
+            sequence = products.pop()
+            support = {
+                name for name, reads in sequences.items()
+                if any(read in sequence or revcomp(read) in sequence for read in reads)
+            }
+            if len(support) >= max(3, minimum_fragments):
+                return sequence, support, "assembled"
+            failure = "insufficient_coverage"
+    return "", set(), failure
 
 
 def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts,
@@ -176,7 +188,8 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
     """Try the graph only without a well-supported direct sequence measurement."""
     from .alignment_evidence import CandidateEvidence
     from .allele_inference import infer_alleles
-    from .locus_measurement import measure_locus_product
+    from .assembly_call import legacy_amplicon_bounds, legacy_assembly_call_rows, pcr_rows_to_products
+    from .in_silico_pcr import _record_product_rows
 
     contexts_by_locus = defaultdict(list)
     rows_by_locus = defaultdict(list)
@@ -210,7 +223,9 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
         mapped_mates = defaultdict(set)
         for row in mapped:
             mapped_mates[row.molecule_id].add(row.mate)
-        unmapped = {name for name in pool if not {1, 2} <= mapped_mates[name]}
+        unmapped = {name for name, fragment in pool.items()
+                    if not mapped_mates[name] or (
+                        fragment.pair.read2 is not None and not {1, 2} <= mapped_mates[name])}
         diagnostic = {
             "sample_id": sample_id, "locus_id": locus_id,
             "recruited_fragment_count": len(set(pool) | {row.molecule_id for row in mapped}),
@@ -240,16 +255,28 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
             sequence, support, reason = assemble_fragments(pool, contexts_by_locus[locus_id], thresholds.minimum_molecules)
             diagnostic["microassembly_reason"] = reason
             if sequence:
-                measurement = measure_locus_product(sequence, locus, source="short_read_microassembly", round_tolerance=round_tolerance)
-                if measurement.called_allele is not None and measurement.status == "FULL_PRODUCT":
+                # Apply the actual assembly PCR selection and calibration to
+                # the read-built contig, including primer indels and rounding.
+                pcr_rows = _record_product_rows((
+                    "short_read_microassembly", locus_id, sequence, [locus], 2,
+                    *legacy_amplicon_bounds([locus]), True, False, 1.0,
+                ))
+                pcr_products = pcr_rows_to_products(
+                    pcr_rows, [locus], sample_id, enforce_locus_bounds=False, measure_products=False,
+                )
+                assembly_call = legacy_assembly_call_rows(
+                    [locus], pcr_products, sample_id, round_tolerance=round_tolerance,
+                )[0]
+                if assembly_call["status"] == "PASS":
+                    allele = assembly_call["repeat_count"]
                     # Preserve each input fragment's ID; assembled support is
                     # not reported as independent complete spanning reads.
                     rows = [row for row in rows if row.molecule_id not in support]
                     rows.extend(CandidateEvidence(
-                        locus_id, measurement.called_allele, name,
+                        locus_id, allele, name,
                         locus_confidence=1.0, left_boundary_span=pool[name].left,
                         right_boundary_span=pool[name].right, technology="illumina",
-                        measured_repeat_count=measurement.called_allele,
+                        measured_repeat_count=allele,
                         evidence_tier="microassembly",
                     ) for name in sorted(support))
                     rows = [row if row.measured_repeat_count is not None else replace(

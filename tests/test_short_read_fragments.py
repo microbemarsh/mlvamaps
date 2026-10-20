@@ -120,6 +120,94 @@ def test_competing_paths_are_not_collapsed_to_shortest_allele():
     assert assemble_fragments(fragments, generate_candidate_contexts([locus]))[2] == "competing_paths"
 
 
+@pytest.mark.parametrize("count,read_length", [(5, 100), (8, 150)])
+def test_single_read_overlaps_resolve_repeats_longer_than_fixed_graph_words(count, read_length):
+    locus, product = locus_and_product(count)
+    contexts = generate_candidate_contexts([locus])
+    recruiter = FlankRecruiter(contexts)
+    for start in range(len(product) - read_length + 1):
+        sequence = product[start:start + read_length]
+        for copy in range(3):
+            name = f"{start}_{copy}"
+            recruiter.add(ReadPair(name, ReadRecord(name, sequence, "I" * len(sequence))))
+    sequence, support, reason = assemble_fragments(recruiter.fragments["L"], contexts)
+    assert reason == "assembled"
+    assert sequence == product
+    assert len(support) >= 3
+    assert not any(fragment.rescued for fragment in recruiter.fragments["L"].values())
+
+
+def test_reconstruction_preserves_sample_flank_variants():
+    locus, product = locus_and_product(12, imperfect=True)
+    product = product[:35] + ("A" if product[35] != "A" else "C") + product[36:]
+    sequence, support, reason = assemble_fragments(
+        recruited_tiling(locus, product), generate_candidate_contexts([locus]))
+    assert reason == "assembled"
+    assert sequence == product
+    assert len(support) >= 3
+
+
+@pytest.mark.skipif(not shutil.which("minimap2") or not shutil.which("sassy"), reason="native tools unavailable")
+@pytest.mark.parametrize("layout", ["single", "orphan_r1", "orphan_r2", "paired_flank_snp"])
+def test_reconstructed_short_read_fingerprint_matches_assembly(tmp_path, layout):
+    from mlvamaps.assembly_call import run_assembly_call
+    from mlvamaps.short_reads import run_short_read_call
+
+    count = 12 if layout == "paired_flank_snp" else 5
+    locus, product = locus_and_product(count, imperfect=layout == "paired_flank_snp")
+    if layout == "paired_flank_snp":
+        product = product[:35] + ("A" if product[35] != "A" else "C") + product[36:]
+        fragments = [item.pair for item in recruited_tiling(locus, product).values()]
+    else:
+        fragments = []
+        for start in range(len(product) - 99):
+            for copy in range(3):
+                name = f"{start}_{copy}"
+                fragment = pair(name, product[start:start + 100], "N" * 100)
+                if layout == "orphan_r2":
+                    fragment = pair(name, "N" * 100, revcomp(product[start:start + 100]))
+                    fragment = replace(fragment, read1=replace(fragment.read1, quality="!" * 100))
+                else:
+                    fragment = replace(fragment, read2=replace(fragment.read2, quality="!" * 100))
+                fragments.append(fragment)
+    first, second, panel = (tmp_path / name for name in ("r1.fastq", "r2.fastq", "panel.tsv"))
+    write_fastq((item.read1 for item in fragments), first)
+    write_fastq((item.read2 for item in fragments), second)
+    write_tsv([vars(locus)], panel, list(vars(locus)))
+    database = tmp_path / "database"
+    database.mkdir()
+    # Deliberately different reference length: reconstruction must recover the
+    # sample allele rather than improve agreement by copying a database allele.
+    _, reference = locus_and_product(4)
+    (database / "L.fasta").write_text(f">reference\n{reference}\n")
+    assembly = tmp_path / "assembly.fasta"
+    assembly.write_text(f">contig\n{product}\n")
+    assembled = run_assembly_call(
+        assembly_path=str(assembly), loci_path=str(panel), sample_id="s",
+        outdir=str(tmp_path / "assembly"), threads=2,
+    )
+    paths = run_short_read_call(
+        str(first), None if layout == "single" else str(second), str(panel),
+        str(tmp_path / "short"), "s", database_path=str(database), threads=2,
+        keep_intermediates=True, show_progress=False, sample_mode="isolate",
+        short_min_pair_retention=0,
+    )
+    assert paths["fingerprint"].read_text() == assembled["fingerprint"].read_text()
+    with paths["calls"].open() as handle:
+        call = next(csv.DictReader(handle, delimiter="\t"))
+    assert float(call["repeat_count"]) == count
+    assert call["status"] == "PASS"
+    with paths["short_read_diagnostics"].open() as handle:
+        diagnostic = next(csv.DictReader(handle, delimiter="\t"))
+    assert diagnostic["microassembly_success"] == "yes"
+    assert diagnostic["spanning_fragment_count"] == "0"
+    assert product == "".join(paths["short_read_microassembly"].read_text().splitlines()[1:])
+    if layout.startswith("orphan"):
+        with paths["short_read_qc"].open() as handle:
+            qc = {row["metric"]: row["value"] for row in csv.DictReader(handle, delimiter="\t")}
+        assert int(qc["orphan_reads"]) == len(fragments)
+
+
 @pytest.mark.skipif(not shutil.which("minimap2") or not shutil.which("sassy"), reason="native tools unavailable")
 @pytest.mark.parametrize("count", [5, 8, 12, 16, 20, 24])
 def test_paired_pipeline_recovers_monotonic_counts_through_shared_parser(tmp_path, count):

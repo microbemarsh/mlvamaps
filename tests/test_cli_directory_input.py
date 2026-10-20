@@ -116,6 +116,35 @@ def test_batch_thread_allocation_is_bounded(monkeypatch):
     assert workers * per_sample <= 10
 
 
+@pytest.mark.parametrize("technology,override,expected", [
+    ("ont", None, "map-ont"), ("ont-hq", None, "lr:hq"),
+    ("hifi", None, "map-hifi"), ("accurate-long", None, "map-hifi"),
+    ("auto", None, None), ("ont", "map-hifi", "map-hifi"),
+])
+def test_long_read_technology_reaches_mapping(tmp_path, monkeypatch, technology, override, expected):
+    database = _write_database(tmp_path)
+    reads = tmp_path / "reads.fastq"
+    reads.touch()
+    def capture(**kwargs):
+        assert kwargs["recruitment_preset"] == expected
+        # Stop before report-path printing; this test covers dispatch only.
+        raise RuntimeError("mapping reached")
+    monkeypatch.setattr(cli, "run_call", capture)
+    args = ["call", "--database", str(database), "-i", str(reads), "--read-technology", technology]
+    if override:
+        args += ["--recruitment-preset", override]
+    with pytest.raises(RuntimeError, match="mapping reached"):
+        cli.main(args)
+
+
+@pytest.mark.parametrize("technology", ["ont", "ont-hq", "hifi", "accurate-long"])
+def test_short_read_input_rejects_long_read_technology(tmp_path, technology):
+    database = _write_database(tmp_path)
+    with pytest.raises(SystemExit, match="2"):
+        cli.main(["call", "--database", str(database), "-i", "sr", "--fq1", "reads.fastq",
+                  "--read-technology", technology])
+
+
 def test_call_directory_dispatches_each_file_to_its_sample_outdir(
     tmp_path, monkeypatch
 ):

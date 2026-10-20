@@ -32,9 +32,10 @@ Assembly and FASTQ inputs retain their own evidence-recovery paths:
   candidate amplicons; the assembly caller applies MLVA_finder-compatible
   product selection and size-to-repeat conversion.
 - **Illumina reads:** minimap2 maps molecules directly to observed database
-  loci. Read-based repeat measurements supply the shared allele caller. Paired reads also use flank recruitment with mate
-  rescue and, for uncertain loci, bounded local assembly through the shared
-  product-length parser.
+  loci. Read-based repeat measurements supply the shared allele caller. Flank
+  recruitment retains paired, single-end and surviving orphan reads. Uncertain
+  loci use bounded local assembly with increasing overlap lengths, followed by
+  the assembly workflow's PCR selection and repeat-count calculation.
 - **Long-read or amplicon FASTQ:** Sassy primer recovery supplies complete
   products, followed by mapping to observed database loci and shared molecule
   measurement. Primer-recovered products remain usable when mapping misses them. SPOARS

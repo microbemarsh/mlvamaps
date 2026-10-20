@@ -181,6 +181,8 @@ def test_alignment_estimate_reaches_html_tables_and_fingerprint(tmp_path, monkey
     # Keep genuine native mappings but simulate failure of direct anchor sizing.
     unresolved = lambda *args, **kwargs: SimpleNamespace(called_allele=None, status="PRESENCE_ONLY", confidence=0)
     monkeypatch.setattr("mlvamaps.short_read_evidence.measure_locus_product", unresolved)
+    monkeypatch.setattr("mlvamaps.short_read_fragments.assemble_fragments",
+                        lambda *args, **kwargs: ("", set(), "no_path"))
     monkeypatch.setattr("mlvamaps.long_read_evidence.measure_locus_product", unresolved)
     monkeypatch.setattr("mlvamaps.pipeline.assignments_from_pcr", lambda *args, **kwargs: [])
     reads = tmp_path / "reads.fastq"

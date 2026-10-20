@@ -369,7 +369,7 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         "--read-technology",
         choices=("auto", "illumina", "accurate-long", "ont", "ont-hq", "hifi"),
         default="auto",
-        help="Read evidence model compatibility override (default: %(default)s; -i sr selects Illumina)",
+        help="Read technology for FASTQ mapping; ont/ont-hq/hifi select the corresponding preset (-i sr selects Illumina)",
     )
     call.add_argument(
         "--manifest",
@@ -909,7 +909,10 @@ def _run_single_input(
             sample_mode=args.sample_mode,
             assembly_round_tolerance=args.assembly_round_tolerance,
             max_confidence_depth=args.max_confidence_depth,
-            recruitment_preset=args.recruitment_preset,
+            recruitment_preset=args.recruitment_preset or {
+                "ont": "map-ont", "ont-hq": "lr:hq", "hifi": "map-hifi",
+                "accurate-long": "map-hifi",
+            }.get(args.read_technology),
             recruitment_min_identity=args.recruitment_min_identity,
             recruitment_min_aligned_bp=args.recruitment_min_aligned_bp,
             recruitment_min_locus_margin=args.recruitment_min_locus_margin,
@@ -1335,10 +1338,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("choose exactly one sample source with -i INPUT or -i sr")
         if args.manifest and args.sample_id:
             parser.error("--sample-id cannot be used with --manifest; sample IDs come from the manifest")
-        if args.manifest and args.read_technology == "accurate-long":
-            parser.error("--manifest currently implements the Illumina evidence model only")
-        if args.short_read_mode and args.read_technology == "accurate-long":
-            parser.error("-i sr selects Illumina and cannot use --read-technology accurate-long")
+        if args.short_read_mode and args.read_technology not in {"auto", "illumina"}:
+            parser.error("short-read input selects Illumina and cannot use a long-read --read-technology")
         if not args.short_read_mode and args.read_technology == "illumina":
             parser.error("Illumina input requires -i sr with --fq1 and optional --fq2")
         if args.manifest:

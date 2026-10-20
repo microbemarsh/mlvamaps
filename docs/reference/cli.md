@@ -81,7 +81,7 @@ model and [migration](../workflows/emu-migration.md) for removed options.
 | `--fq1 FASTQ` | None | Mate 1 or single-end Illumina FASTQ. |
 | `--fq2 FASTQ` | None | Mate 2; requires `--fq1`. |
 | `--short-reads` | Off | Treat `-i DIRECTORY` as paired short reads and match exact `PREFIX_1.fastq.gz`/`PREFIX_2.fastq.gz` names. |
-| `--read-technology` | `auto` | Compatibility override; `-i sr` selects Illumina automatically. |
+| `--read-technology` | `auto` | `ont`, `ont-hq`, and `hifi` select long-read mapping presets; `accurate-long` uses HiFi. An explicit `--recruitment-preset` takes precedence. `-i sr` accepts only `auto` or `illumina`. |
 | `--short-min-read-length` | `40` | Minimum post-trim length. |
 | `--short-min-mean-quality` | `15` | Minimum mean Phred quality. |
 | `--short-trim-quality` | `0` | Conservative 3-prime trim threshold; zero disables trimming. |

@@ -3,8 +3,9 @@
 Illumina mode uses the shared FASTQ architecture. Paired reads are recruited by
 unique flank seeds during QC, retaining both mates independently of competitive
 minimap2 mapping. Direct sequence measurements enter shared allele inference;
-uncertain loci can use a bounded local graph. Single-end and long-read paths use the same observed-reference mapping and
-measurement requirement.
+uncertain loci can use a bounded local graph. Single-end reads and QC-surviving
+orphan mates also participate in recruitment, direct measurement and local
+assembly.
 
 ## Command line
 
@@ -67,7 +68,7 @@ Seed uniqueness is checked against configured locus contexts, not every genome
 in a reference cohort. Background homology can therefore still recruit reads;
 sequence measurements or a covered two-flank graph must support sizing.
 
-The same observed-reference mapping is reused for reference classification. In paired
+The same observed-reference mapping is reused for reference classification. In short-read
 allele inference, an exact flank assignment excludes competitors at other loci.
 Mapper-only recovery requires at least 21 aligned bases outside the repeat and
 90% alignment identity. Repeat-only mappings cannot independently identify a
@@ -109,24 +110,32 @@ soft-clipped or unmapped mates.
 
 The in-process de Bruijn graph uses both mates, native overlapping k-mer
 extraction, and a small Python adjacency dictionary. Each fragment contributes
-at most once per edge; edges need two distinct fragments. The k-mer length is
-at most 41 and also bounded by read and flank lengths. Only a single covered,
-acyclic path between the configured outer flank anchors is accepted. Every
+at most once per edge; edges need two distinct fragments. Start with 41-base
+words (shorter if needed), then increase by 20 bases and finally try the read
+length minus ten, capped at 151 bases. Longer words can resolve repeats that
+collapse at shorter word lengths. Stop at the first unique supported product.
+Only a single covered, acyclic path between terminal 21-base reference seeds
+is accepted. Interior flanks can contain sample SNPs or indels. Every
 base in the reconstructed path comes from read-supported edges. No repeat
 sequence or copy number is filled in from a candidate template.
 
 The pool must contain at least three fragments (or the larger configured
 minimum). Limits of 2,000 fragments, 50,000 edges, and eight flank backgrounds
 bound work. Short anchors, gaps, competing branches, repeat cycles, or exceeded
-limits yield no assembled sequence. Supported contigs pass through
-`measure_locus_product` and the existing assembly-equivalent product-length and
-rounding functions. Original fragment IDs supply support; an assembled product
+limits yield no assembled sequence. Supported contigs pass through the assembly
+workflow's Sassy PCR search (two primer edits), `pcr_rows_to_products`, and
+`legacy_assembly_call_rows`, sharing product selection, primer-indel calibration
+and rounding. Original fragment IDs supply support; an assembled product
 is not reported as multiple independently observed full-spanning reads.
 
 If assembly fails and no independent sequence measurement resolves the count,
-the locus remains detected but unresolved. Reference alignment scores, paired
-geometry, and a single available database allele do not justify filling in a
-repeat count. Conflicting measurements of one molecule are also unresolved.
+usable mapping evidence can still supply a low-confidence `ESTIMATED` count.
+This remains distinct from an independently measured product. Loci without
+usable sizing evidence remain unavailable.
+
+Orphan mates contribute through flank recruitment even when their surviving
+mate was originally R2. Their separate FASTQ file is not mapped, so they do not
+add reference-alignment SNP evidence.
 
 The current database schema is still required. Minimap2 output is streamed
 through htslib rather than materialized as text SAM. `--keep-intermediates`
@@ -187,6 +196,33 @@ mate, boundary, clipping, unmapped-mate and unique-fragment counts, plus the cal
 method. `--keep-intermediates` also retains successful products in
 `short_read_microassembly.fasta`. Primary table columns and report layout are
 unchanged.
+
+## Short-read reconstruction regression checks
+
+The new synthetic reconstruction cases compare final short-read fingerprints
+with assembly calls on the identical underlying sequence. The database contains
+allele 4, and none of the input fragments independently measures the complete
+sample repeat interval. Before values use the three short-read inference modules
+from `12fb524`; after values use the revised reconstruction.
+
+| Synthetic case | Assembly allele | Before | After |
+| --- | ---: | --- | --- |
+| Single-end tiling over a perfect repeat | 5 | 5, estimated | 5, reconstructed |
+| Only R1 survives paired-read QC | 5 | Not found | 5, reconstructed |
+| Only R2 survives paired-read QC | 5 | Not found | 5, reconstructed |
+| Paired reads, imperfect repeat and a sample flank SNP | 12 | 4, estimated | 12, reconstructed |
+
+All four reconstructed sequences exactly match their input assembly sequence;
+the final calls are `PASS`. Separate checks retain rejection of unresolved
+repeat cycles, competing haplotypes and inadequate coverage. Run:
+
+```bash
+python -m pytest -q tests/test_short_read_fragments.py tests/test_fastq_assembly_concordance.py
+```
+
+These cases demonstrate specific recovery improvements. They do not measure
+agreement with cgMLST or Parsnp, real-sample accuracy, or whole-genome throughput;
+those require matched data from the server.
 
 ## Historical runtime checks
 

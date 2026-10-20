@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare matched calls, or time two checkouts on identical paired FASTQs."""
+"""Audit matched FASTQ/assembly calls, or time two checkouts on paired FASTQs."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import subprocess
 import sys
 
 
-def read_calls(path):
+def read_calls(path, *, with_metadata=False):
     path = Path(path)
     files = [path] if path.is_file() else sorted(
         file for file in path.rglob("calls.tsv") if "batch_summary" not in file.relative_to(path).parts
@@ -31,7 +31,7 @@ def read_calls(path):
                 count = float(value) if value not in ("", "NA", "N/A") else None
                 if count is not None and not math.isfinite(count):
                     raise ValueError(f"Non-finite count for {key}")
-                calls[key] = count
+                calls[key] = {**row, "repeat_count": count, "call_file": str(file.resolve())} if with_metadata else count
     return calls
 
 
@@ -67,6 +67,7 @@ def metrics(pairs):
         "within_2": sum(error <= 2 for error in errors) / len(errors) if errors else None,
         "mae": statistics.mean(errors) if errors else None,
         "median_absolute_error": statistics.median(errors) if errors else None,
+        "mean_signed_error": statistics.mean(b - a for a, b in pairs) if pairs else None,
         "spearman": correlation,
     }
 
@@ -85,6 +86,60 @@ def compare(assembly, short_reads):
         locus: summarize({key for key in keys if key[1] == locus})
         for locus in sorted({key[1] for key in keys})
     }}
+
+
+def audit_calls(assembly, reads):
+    """Retain uncertainty and sample identity while auditing numeric agreement."""
+    assembly_counts = {key: row["repeat_count"] for key, row in assembly.items()}
+    read_counts = {key: row["repeat_count"] for key, row in reads.items()}
+    keys = set(assembly) | set(reads)
+
+    def subset(selected):
+        return compare({key: assembly_counts.get(key) for key in selected},
+                       {key: read_counts.get(key) for key in selected})
+
+    statuses = sorted({row.get("status") or "UNKNOWN" for row in reads.values()})
+    methods = sorted({row.get("estimation_method") or "unspecified" for row in reads.values()
+                      if row.get("status") == "ESTIMATED"})
+    assembly_samples = {sample for sample, _locus in assembly}
+    read_samples = {sample for sample, _locus in reads}
+    disagreements = []
+    for key in sorted(keys):
+        expected, observed = assembly_counts.get(key), read_counts.get(key)
+        if expected is not None and observed is not None and expected == observed:
+            continue
+        row = reads.get(key, {})
+        disagreements.append({
+            "sample_id": key[0], "locus_id": key[1], "assembly_repeat": expected,
+            "read_repeat": observed, "signed_error": observed - expected
+            if expected is not None and observed is not None else None,
+            "assembly_status": assembly.get(key, {}).get("status", "UNKNOWN"),
+            "read_status": row.get("status", "UNKNOWN"),
+            **{field: row.get(field, "") for field in (
+                "inference_method", "estimation_method", "estimation_reason",
+                "estimate_support", "read_depth", "primary_read_depth", "call_file",
+            )},
+            "comparison": "disagreement" if expected is not None and observed is not None else "missing_call",
+        })
+    disagreements.sort(key=lambda row: (row["signed_error"] is None,
+                       -abs(row["signed_error"] or 0), row["sample_id"], row["locus_id"]))
+    return {
+        **compare(assembly_counts, read_counts),
+        "sample_matching": {"shared": sorted(assembly_samples & read_samples),
+                            "assembly_only": sorted(assembly_samples - read_samples),
+                            "reads_only": sorted(read_samples - assembly_samples)},
+        "by_read_status": {status: subset({key for key, row in reads.items()
+                                           if (row.get("status") or "UNKNOWN") == status})
+                           for status in statuses},
+        "by_estimation_method": {method: subset({key for key, row in reads.items()
+                                  if row.get("status") == "ESTIMATED"
+                                  and (row.get("estimation_method") or "unspecified") == method})
+                                 for method in methods},
+        "per_sample": {sample: subset({key for key in keys if key[0] == sample})["overall"]
+                       for sample in sorted(assembly_samples | read_samples)},
+        "disagreements": disagreements,
+        "interpretation": "Paired locus-call agreement, not a Mantel test. Status strata retain missingness; estimates remain in the all-call result. Positive signed error means FASTQ overcalls repeats. Assembly is a comparator, not guaranteed truth.",
+    }
 
 
 def worker(args):
@@ -143,7 +198,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     comparison = commands.add_parser("compare")
     comparison.add_argument("--assembly", required=True)
-    comparison.add_argument("--short-reads", required=True)
+    comparison.add_argument("--reads", "--short-reads", dest="short_reads", required=True,
+                            help="Short- or long-read calls.tsv or result directory")
     comparison.add_argument("--baseline")
     for name in ("benchmark", "worker"):
         command = commands.add_parser(name)
@@ -168,10 +224,10 @@ def main():
             parser.error("--trials must be positive")
         result = benchmark(args)
     else:
-        assembly = read_calls(args.assembly)
-        result = {"updated": compare(assembly, read_calls(args.short_reads))}
+        assembly = read_calls(args.assembly, with_metadata=True)
+        result = {"updated": audit_calls(assembly, read_calls(args.short_reads, with_metadata=True))}
         if args.baseline:
-            result["baseline"] = compare(assembly, read_calls(args.baseline))
+            result["baseline"] = audit_calls(assembly, read_calls(args.baseline, with_metadata=True))
     print(json.dumps(result, indent=2, allow_nan=False))
 
 

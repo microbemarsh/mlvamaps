@@ -73,19 +73,16 @@ def run_mapping_short_read_call(
     filtered2 = output / "filtered_reads_2.fastq.gz"
     orphans = output / "filtered_orphan_reads.fastq.gz"
     counters: dict[str, int] = defaultdict(int)
-    contexts = None
-    recruiter = None
-    if reads2_path:
-        from .candidate_contexts import generate_candidate_contexts
-        from .short_read_fragments import FlankRecruiter
+    from .candidate_contexts import generate_candidate_contexts
+    from .short_read_fragments import FlankRecruiter
 
-        if database_path:
-            from .mapping_classification import observed_reference_contexts
+    if database_path:
+        from .mapping_classification import observed_reference_contexts
 
-            _root, contexts, _members = observed_reference_contexts(database_path, loci, assembly_round_tolerance)
-        else:
-            contexts = generate_candidate_contexts(loci, maximum=short_max_candidate_repeat_count)
-        recruiter = FlankRecruiter(contexts)
+        _root, contexts, _members = observed_reference_contexts(database_path, loci, assembly_round_tolerance)
+    else:
+        contexts = generate_candidate_contexts(loci, maximum=short_max_candidate_repeat_count)
+    recruiter = FlankRecruiter(contexts)
 
     if show_progress:
         print(f"[{sample_id}] Filtering and validating Illumina read pairs")
@@ -100,8 +97,7 @@ def run_mapping_short_read_call(
             for key, value in metrics.items():
                 counters[key] += int(value)
             for pair in retained:
-                if recruiter is not None:
-                    recruiter.add(pair)
+                recruiter.add(pair)
                 if pair.read2 is None:
                     target = orphan_handle if reads2_path else first_handle
                     quality = pair.read1.quality or "I" * len(pair.read1.sequence)
@@ -140,7 +136,7 @@ def run_mapping_short_read_call(
         keep_alignments=keep_intermediates,
         round_tolerance=assembly_round_tolerance,
         contexts=contexts,
-        recruited_fragments=recruiter.fragments if recruiter is not None else None,
+        recruited_fragments=recruiter.fragments,
         reference_alignments=reference_alignments,
     )
     calls = common_calls_to_compatibility(common_calls)

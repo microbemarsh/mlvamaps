@@ -62,7 +62,7 @@ Both FASTQ paths call `run_unified_fastq_inference`:
 3. Group evidence by locus and molecule. Multiple reference alignments and two
    mates do not become independent molecule votes. Conflicting measurements
    within a molecule remain unresolved.
-4. Infer alleles from measured molecule support. Short-read pairs can additionally
+4. Infer alleles from measured molecule support. Short reads can additionally
    enter the local assembly fallback described below.
 5. For unresolved calls, report a low-confidence `ESTIMATED` count when evidence
    permits: use the best ambiguous measured allele, conflicting direct
@@ -99,14 +99,15 @@ CLI default is `metagenome`.
 flowchart TD
     Input[R1 and optional R2] --> QC[Validate pairs, trim if requested, filter]
     QC --> Files[Filtered FASTQ]
-    QC -->|Complete pairs| Seeds[Unique flank seeds and mate rescue]
+    QC -->|Pairs, single reads and orphans| Seeds[Unique flank seeds and mate rescue]
     Files --> Map[Competitive observed-reference minimap2 mapping]
     Map --> Measure[Measure individual reads and usable merged pairs]
     Seeds --> Measure
     Measure --> Strong{Strong agreeing direct measurements?}
     Strong -->|Yes| Infer[Shared allele inference]
-    Strong -->|No, recruited pairs available| Graph[Bounded local assembly]
-    Graph -->|Measurable supported product| Infer
+    Strong -->|No, recruited reads available| Graph[Bounded assembly with increasing k-mer lengths]
+    Graph -->|Supported product| PCR[Assembly PCR selection and repeat calibration]
+    PCR --> Infer
     Graph -->|Unresolved| Existing[Retain existing evidence]
     Existing --> Infer
     Infer --> Output[Calls, diagnostics, fingerprint and report]
@@ -120,10 +121,11 @@ flowchart TD
    reads with at least 40 bases and mean Q15; 3-prime trimming is off unless
    requested. Filtered paired reads are written to `filtered_reads_1.fastq.gz`
    and `filtered_reads_2.fastq.gz`.
-2. **Recruit pairs during QC.** `FlankRecruiter` builds a lookup of 21-base flank
+2. **Recruit molecules during QC.** `FlankRecruiter` builds a lookup of 21-base flank
    seeds from observed references, excluding seeds shared across loci or found
    inside configured repeats. A pair whose seed hits identify exactly one locus
-   retains both mates, including a mate with no seed hit. This pool supplements
+   retains both mates, including a mate with no seed hit. Single-end reads and
+   surviving orphan mates use the same locus assignment. This pool supplements
    mapping; it does not filter the FASTQ sent to minimap2.
 3. **Map and measure.** The shared caller uses the Illumina preset. It measures
    individual reads and merged pairs, rejecting ambiguous or repeat-only
@@ -131,32 +133,36 @@ flowchart TD
    success. Separate unmerged mates spanning opposite boundaries do not by
    themselves measure the intervening repeat length.
 4. **Try local assembly where needed.** If direct measurements lack strong,
-   agreeing support and recruited pairs exist, construct a bounded k-mer graph.
-   Accept only a unique, covered, acyclic flank-to-flank product that passes the
-   shared product measurement. Graph limits are 2,000 fragments and 50,000
-   distinct k-mer edges. Branches and repeat cycles remain unresolved; reference
-   length or coverage is not used to guess a traversal count.
+   agreeing support and recruited reads exist, construct a bounded k-mer graph.
+   Start at 41 bases (or shorter for short reads), increasing by 20 bases up to
+   the read-length limit, capped at 151, when needed to resolve collapsed repeats.
+   Terminal 21-base reference seeds locate the path; interior flank sequence
+   comes from reads, preserving sample variants. Accept only a unique, covered,
+   acyclic product. Run the assembly workflow's Sassy PCR (two primer edits),
+   product selection and repeat calibration on that contig.
+   Graph limits are 2,000 fragments and 50,000 distinct k-mer edges per attempt.
+   Branches and repeat cycles that survive all attempted sizes remain unresolved;
+   reference length or coverage is not used to guess a traversal count.
 5. **Call, classify, and export.** Shared inference supplies repeat calls.
    Classification reuses the original mapping and measured molecule counts.
    Outputs also include short-read QC, recruitment and assembly diagnostics,
    sample summaries, and MYOGA-compatible metadata.
 
-Single-end reads use mapping and direct measurement without paired flank
-recruitment or the paired graph fallback. One current implementation limitation
-is that QC can save surviving orphan mates to `filtered_orphan_reads.fastq.gz`,
-but paired-mode inference does not map that file and the flank recruiter skips
-orphans. They therefore do not contribute downstream calls in this path.
+Single-end reads and QC-surviving orphan mates participate in flank recruitment,
+direct measurement and local assembly. Paired-mode inference still does not map
+the separate `filtered_orphan_reads.fastq.gz` file: orphans contribute through
+recruitment, but do not supply reference-alignment SNP evidence.
 
 | Inspect | What it explains |
 | --- | --- |
 | `short_read_qc_summary.tsv` | Filtering and pair retention |
 | `short_read_recruitment_summary.tsv` | Per-locus recruitment summary |
-| `short_read_diagnostics.tsv` | Paired recovery, mate rescue, graph attempts and failure reasons |
+| `short_read_diagnostics.tsv` | Molecule recovery, mate rescue, graph attempts and failure reasons |
 | `molecule_candidate_evidence.tsv` | Mapping and measured repeat evidence per molecule |
 | `common_locus_calls.tsv` | Shared calls, informative support, ambiguity and mixtures |
 
 With `--keep-intermediates`, retain filtered FASTQ files, the candidate BAM, and
-paired microassembly FASTA. Filtered paired and orphan FASTQ files are removed
+short-read microassembly FASTA. Filtered paired and orphan FASTQ files are removed
 at normal completion otherwise. See the [Illumina guide](docs/workflows/illumina.md)
 for batch input and the full output schema.
 
@@ -204,10 +210,12 @@ flowchart TD
 3. **Map and infer.** Send all QC-retained reads, including those without a
    complete primer product, to observed-reference mapping. Accepted primer
    products can contribute direct measurements even when mapping misses a read.
-   The shared caller controls final repeat-state selection. Without an explicit
-   recruitment preset, this mapping uses HiFi settings; the implementation also
-   recognizes ONT and ONT-HQ preset selections. Preset availability alone does
-   not establish accuracy on noisy long reads.
+   The shared caller controls final repeat-state selection. `--read-technology
+   ont`, `ont-hq`, or `hifi` selects the corresponding mapping preset, while
+   `auto` and `accurate-long` use HiFi settings. An explicit
+   `--recruitment-preset` takes precedence. The resolved preset applies to both
+   observed-reference mapping and locus recruitment. Preset availability alone
+   does not establish accuracy on noisy long reads.
 4. **Build confirmation evidence.** A separate locus-product recruitment pass
    combines mapped assignments with primer recovery. Extract repeat features,
    form mapped variant groups, estimate variant fractions, and construct dominant
@@ -332,7 +340,7 @@ and [output reference](docs/reference/outputs.md) for complete file descriptions
 | --- | --- |
 | CLI routing and database validation | [cli.py](mlvamaps/cli.py): `_resolve_call_args`, `_run_short_input`, `_run_single_input` |
 | Short-read orchestration and QC | [short_reads.py](mlvamaps/short_reads.py): `run_short_read_call`, `qc_read_pairs`; [short_read_mapping.py](mlvamaps/short_read_mapping.py): `run_mapping_short_read_call` |
-| Paired recruitment and local assembly | [short_read_fragments.py](mlvamaps/short_read_fragments.py): `FlankRecruiter`, `assemble_fragments`, `resolve_fragment_calls` |
+| Short-read recruitment and local assembly | [short_read_fragments.py](mlvamaps/short_read_fragments.py): `FlankRecruiter`, `assemble_fragments`, `resolve_fragment_calls` |
 | Long-read orchestration | [pipeline.py](mlvamaps/pipeline.py): `run_call` |
 | Shared FASTQ inference | [unified_fastq.py](mlvamaps/unified_fastq.py): `run_unified_fastq_inference`; [allele_inference.py](mlvamaps/allele_inference.py): `infer_alleles` |
 | Product measurement and rounding | [locus_measurement.py](mlvamaps/locus_measurement.py): `measure_locus_product`, `find_anchor`; [calling.py](mlvamaps/calling.py): `assembly_equivalent_product_allele`, `legacy_round_repeat_count` |
@@ -352,7 +360,7 @@ on `PATH`:
 
 ```bash
 python -m pytest -q tests/test_fastq_assembly_concordance.py \
-  tests/test_sassy_cli.py tests/test_short_read_runtime.py
+  tests/test_short_read_fragments.py tests/test_sassy_cli.py tests/test_short_read_runtime.py
 ```
 
 Native-dependent tests skip when their tools are unavailable. These tests and
