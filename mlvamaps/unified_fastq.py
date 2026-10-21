@@ -20,55 +20,15 @@ from .models import Assignment, Locus
 from .short_read_evidence import extract_short_read_evidence
 
 
-def taxonomic_query_sequences(
-    calls: list[dict[str, object]],
-    evidence: list[CandidateEvidence],
-    molecule_calls: dict[tuple[str, str], int | float],
-    contexts: list[CandidateContext],
-) -> dict[str, str]:
-    """Choose the best-supported reference-guided marker for each FASTQ call."""
-    context_by_id = {context.candidate_id: context for context in contexts}
-    eligible = {
-        str(call["locus"]): call["repeat_count"]
+def taxonomic_query_sequences(calls, products):
+    """Export only reconstructed sample products consistent with the final call."""
+    return {
+        str(call["locus"]): products[str(call["locus"])][0]
         for call in calls
-        if call.get("status") in {"called", "low_coverage", "mixed"}
-        and call.get("repeat_count", "") != ""
+        if call["status"] in {"called", "low_coverage"}
+        and str(call["locus"]) in products
+        and call["repeat_count"] == products[str(call["locus"])][1]
     }
-    scores: dict[str, dict[str, tuple[set[str], float]]] = {}
-    for row in evidence:
-        repeat_count = eligible.get(row.locus_id)
-        if (
-            repeat_count is None
-            or molecule_calls.get((row.locus_id, row.molecule_id)) != repeat_count
-            or row.candidate_id not in context_by_id
-            or (
-                row.technology == "illumina"
-                and float(row.metadata.get("background_alignment_margin", 0)) <= 0
-            )
-        ):
-            continue
-        candidates = scores.setdefault(row.locus_id, {})
-        molecules, score = candidates.setdefault(row.candidate_id, (set(), 0.0))
-        molecules.add(row.molecule_id)
-        candidates[row.candidate_id] = (molecules, score + row.alignment_score)
-
-    sequences: dict[str, str] = {}
-    for locus_id, candidates in scores.items():
-        if candidates:
-            ranked = sorted(
-                candidates,
-                key=lambda item: (
-                    -len(candidates[item][0]), -candidates[item][1], item
-                ),
-            )
-            candidate_id = ranked[0]
-            if (
-                len(ranked) > 1
-                and len(candidates[ranked[0]][0]) == len(candidates[ranked[1]][0])
-            ):
-                continue
-            sequences[locus_id] = context_by_id[candidate_id].sequence
-    return sequences
 
 
 def run_unified_fastq_inference(
@@ -105,28 +65,36 @@ def run_unified_fastq_inference(
     outdir = Path(outdir)
     work = outdir / "candidate_mapping"
     work.mkdir(parents=True, exist_ok=True)
-    if database_path:
-        from .mapping_classification import observed_reference_contexts
+    if contexts is None:
+        if database_path:
+            from .mapping_classification import observed_reference_contexts
 
-        _root, contexts, _members = observed_reference_contexts(database_path, loci, round_tolerance)
-    else:
-        contexts = contexts if contexts is not None else generate_candidate_contexts(
-            loci, maximum=maximum_candidate_repeat_count
-        )
+            _root, contexts, _members = observed_reference_contexts(database_path, loci, round_tolerance)
+        else:
+            contexts = generate_candidate_contexts(loci, maximum=maximum_candidate_repeat_count)
     paths = write_candidate_contexts(contexts, work)
     bam = work / "candidate_alignments.bam"
+    unmapped_mates = {}
     alignments = map_reads_to_candidates_bam(
         paths["fasta"], reads1, reads2, contexts, bam, threads, technology,
         executable=minimap2_bin,
         max_secondary=max(100, len(contexts)),
         include_unknown_repeats=bool(database_path),
         retain_all_competitors=bool(database_path),
+        unmapped_mates=unmapped_mates if technology == "illumina" else None,
     )
     if database_path and reference_alignments is not None:
         reference_alignments.extend(alignments)
+    from .mapped_reconstruction import recruit_mapping_fragments, resolve_query_products
+
     if technology == "illumina":
+        recruited_fragments = recruit_mapping_fragments(
+            alignments, contexts, recruited_fragments, unmapped_mates,
+        )
+        owners = {name: locus for locus, pool in recruited_fragments.items() for name in pool}
+        inference_alignments = [row for row in alignments if owners.get(row.molecule_id) == row.locus_id]
         evidence = extract_short_read_evidence(
-            alignments, contexts, loci, round_tolerance=round_tolerance,
+            inference_alignments, contexts, loci, round_tolerance=round_tolerance,
             recruited_fragments=recruited_fragments,
             insert_mean=insert_mean, insert_sd=insert_sd,
         )
@@ -152,6 +120,7 @@ def run_unified_fastq_inference(
                     direct_product_measurement=True, full_repeat_span=True,
                     measured_repeat_count=measurement.called_allele,
                     evidence_tier="primer_recovery",
+                    metadata={"product_sequence": measurement.product_sequence},
                     raw_repeat_count=measurement.raw_repeat_count,
                     repeat_sigma=(measurement.metadata or {}).get("repeat_sigma"),
                 ))
@@ -169,6 +138,7 @@ def run_unified_fastq_inference(
     )
     fragment_paths = {}
     diagnostics = []
+    products = []
     if technology == "illumina" and recruited_fragments is not None:
         from .short_read_fragments import resolve_fragment_calls
 
@@ -182,6 +152,15 @@ def run_unified_fastq_inference(
         if keep_alignments:
             fragment_paths["short_read_microassembly"] = outdir / "short_read_microassembly.fasta"
             write_fasta(products, fragment_paths["short_read_microassembly"])
+    query_products, reconstruction, evidence, changed = resolve_query_products(
+        calls, evidence, loci, products, sample_id, thresholds, round_tolerance,
+    )
+    if changed:
+        calls, molecule_calls = infer_alleles(
+            evidence, loci, contexts, sample_id, technology, thresholds,
+            require_measurement=bool(database_path), sample_mode=sample_mode,
+            round_tolerance=round_tolerance,
+        )
     estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature)
     if "short_read_diagnostics" in fragment_paths:
         for diagnostic, call in zip(diagnostics, calls):
@@ -197,15 +176,24 @@ def run_unified_fastq_inference(
         evidence_path,
         EVIDENCE_FIELDS,
     )
+    query_sequences = taxonomic_query_sequences(calls, query_products)
+    query_path = outdir / "query_loci.fasta"
+    write_fasta(query_sequences.items(), query_path)
+    reconstruction_path = outdir / "query_locus_reconstruction.tsv"
+    for row in reconstruction:
+        row["exported"] = "yes" if row["locus_id"] in query_sequences else "no"
+        if row["status"] == "RECONSTRUCTED" and row["exported"] == "no":
+            row["status"] = "FINAL_CALL_DISAGREES_OR_UNRESOLVED"
+    write_tsv(reconstruction, reconstruction_path, list(reconstruction[0]) if reconstruction else [])
+    # Compatibility filename now contains sample sequence only. Rewrite even
+    # when empty so an earlier reference proxy cannot survive a rerun.
     taxonomic_queries = outdir / "taxonomic_query_sequences.fasta"
-    if database_path:
-        write_fasta(
-            taxonomic_query_sequences(calls, evidence, molecule_calls, contexts).items(),
-            taxonomic_queries,
-        )
+    write_fasta(query_sequences.items(), taxonomic_queries)
     if not keep_alignments:
         bam.unlink(missing_ok=True)
     return calls, evidence, molecule_calls, {
+        "query_loci": query_path,
+        "query_locus_reconstruction": reconstruction_path,
         "common_locus_calls": common_calls,
         "molecule_evidence": evidence_path,
         "candidate_contexts": paths["fasta"],

@@ -179,7 +179,7 @@ def test_alignment_estimate_reaches_html_tables_and_fingerprint(tmp_path, monkey
                      + locus.right_flank_sequence + revcomp(locus.reverse_primer))
         (database / f"{locus.locus_id}.fasta").write_text(f">R1\n{reference}\n")
     # Keep genuine native mappings but simulate failure of direct anchor sizing.
-    unresolved = lambda *args, **kwargs: SimpleNamespace(called_allele=None, status="PRESENCE_ONLY", confidence=0)
+    unresolved = lambda *args, **kwargs: SimpleNamespace(called_allele=None, status="PRESENCE_ONLY", confidence=0, product_sequence="")
     monkeypatch.setattr("mlvamaps.short_read_evidence.measure_locus_product", unresolved)
     monkeypatch.setattr("mlvamaps.short_read_fragments.assemble_fragments",
                         lambda *args, **kwargs: ("", set(), "no_path"))

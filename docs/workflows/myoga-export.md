@@ -13,8 +13,11 @@ shared exact repeat call nor a shared recovered SNP sequence. Exact repeat calls
 remain usable when retained sequences are unavailable. Supply the rich locus panel with `--loci` when retained amplicons
 must be masked because precomputed masked query sequences are unavailable. For
 current results, the exporter reads `classification/query_amplicons.fasta` for
-assemblies and `taxonomic_query_sequences.fasta` for FASTQ inputs; partial successful calls
+assemblies and reconstructed `query_loci.fasta` for FASTQ inputs; partial successful calls
 (`run_status=success_partial`) are valid export inputs and are not discarded.
+Historical `taxonomic_query_sequences.fasta` files may contain database reference
+proxies and are no longer accepted as sample SNP evidence. Rerun FASTQ calling to
+produce reconstructed queries; retained sample local assemblies remain usable.
 The export also writes an all-sample `alignment_likelihood_distance_matrix.tsv`
 from each sample's fitted reference-component profile. It uses Hellinger
 distance, so the matrix is symmetric even though raw alignment likelihoods are

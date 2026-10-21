@@ -139,7 +139,9 @@ def _retained_sample_sequences(
             assembly_sequences = dict(_read_fasta(path))
             break
     candidates: dict[str, list[tuple[int, str, str]]] = {}
-    for name in ("classification/query_amplicons.fasta", "taxonomic_query_sequences.fasta"):
+    # Historical taxonomic_query_sequences.fasta files may contain database
+    # proxies. Only the explicit reconstructed-query output is sample evidence.
+    for name in ("classification/query_amplicons.fasta", "query_loci.fasta"):
         query_amplicons = sample_dir / name
         if query_amplicons.is_file():
             for locus_id, sequence in _read_fasta(query_amplicons):
@@ -201,6 +203,8 @@ def recover_masked_sequences(
         sample_id = str(getattr(sample, "sample_id"))
         sample_dir = Path(getattr(sample, "path")).parent
         assembly_sequences, retained_candidates = _retained_sample_sequences(sample_dir)
+        reconstruction = {row["locus_id"]: row for row in _read_delimited(
+            sample_dir / "query_locus_reconstruction.tsv")}
         rows_by_locus = {
             str(row.get("locus_id", "")): row for row in getattr(sample, "rows")
         }
@@ -242,12 +246,21 @@ def recover_masked_sequences(
             for priority, source, candidate in candidates:
                 if accepted_priority is not None and priority > accepted_priority:
                     break
+                validated_query = False
+                if source.endswith("/query_loci.fasta") and locus_id in reconstruction:
+                    audit = reconstruction[locus_id]
+                    expected_repeat = _finite_repeat(call.get("repeat_count"))
+                    if (audit.get("exported") != "yes" or
+                            (expected_repeat is not None and expected_repeat != _finite_repeat(audit.get("repeat_count")))):
+                        continue
+                    validated_query = True
                 components = _masked_candidate(locus, candidate)
                 if components.masking_method.startswith("unmasked"):
                     unmasked += 1
                     continue
                 if (
                     source != "assembly_amplicons:evidence"
+                    and not validated_query
                     and expected_size is not None
                     and not math.isclose(
                         expected_size, len(components.oriented_sequence), abs_tol=0.5

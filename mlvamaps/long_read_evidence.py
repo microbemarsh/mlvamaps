@@ -34,7 +34,7 @@ def extract_long_read_evidence(
         observation = max(observations, key=lambda item: (item.status == "FULL_PRODUCT", item.status == "REPEAT_INFORMATIVE", item.confidence or 0))
         if observation.called_allele is not None and observation.status in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:
             return (observation.called_allele, observation.status, observation.raw_repeat_count,
-                    (observation.metadata or {}).get("repeat_sigma"))
+                    (observation.metadata or {}).get("repeat_sigma"), observation.product_sequence)
         return None
 
     best_by_molecule = {}
@@ -63,7 +63,8 @@ def extract_long_read_evidence(
             "direct_product" if direct and direct[1] == "FULL_PRODUCT" else
             "complete_vntr_span" if full or direct else "repeat_boundary" if left or right else
             "repeat_indel" if indel_delta else "generic_locus_mapping",
-            {"repeat_indel_observed_delta": indel_delta,
+            {"product_sequence": direct[4] if direct and direct[1] == "FULL_PRODUCT" else "",
+             "repeat_indel_observed_delta": indel_delta,
              "spanning_repeat_indel_delta": indel_delta if left and right else None,
              "aligned_flank_bases": max(
                  0, min(best.reference_end, context.repeat_start) - best.reference_start,

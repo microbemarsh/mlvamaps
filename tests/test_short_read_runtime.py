@@ -71,7 +71,7 @@ def test_measurements_are_reused_without_collapsing_molecules_or_quality(monkeyp
         return SimpleNamespace(
             called_allele=allele if quality.startswith("H") else None,
             status="FULL_PRODUCT" if quality.startswith("H") else "PRESENCE_ONLY",
-            confidence=.9,
+            confidence=.9, product_sequence=sequence,
         )
 
     monkeypatch.setattr("mlvamaps.short_read_evidence.measure_locus_product", measure)

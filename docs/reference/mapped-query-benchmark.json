@@ -1,0 +1,80 @@
+{
+  "baseline_commit": "52d01654ea8f47ba745eaea16b4260560e8e395d",
+  "copies": 100,
+  "trials": 3,
+  "threads": 2,
+  "sample_mode": "isolate",
+  "fingerprints_match_assembly": true,
+  "method": "Alternating serial fresh interpreters; 11-locus high-quality synthetic fixtures. Timing covers FASTQ calling only. /usr/bin/time peak RSS covers the whole fixture process, not summed simultaneous parent/child memory. No real-data accuracy claim.",
+  "workflows": {
+    "paired": {
+      "seconds": {
+        "baseline": [
+          0.9890479170717299,
+          0.9669043329777196,
+          0.7722307500662282
+        ],
+        "updated": [
+          0.837655209004879,
+          0.9898163750767708,
+          0.8078592499950901
+        ]
+      },
+      "median_seconds": {
+        "baseline": 0.9669043329777196,
+        "updated": 0.837655209004879
+      },
+      "change_percent": -13.367312521477647
+    },
+    "shotgun": {
+      "seconds": {
+        "baseline": [
+          4.56945304106921,
+          4.4043211250100285,
+          4.136780375032686
+        ],
+        "updated": [
+          4.32818099996075,
+          4.48899845906999,
+          4.306013458990492
+        ]
+      },
+      "median_seconds": {
+        "baseline": 4.4043211250100285,
+        "updated": 4.32818099996075
+      },
+      "change_percent": -1.728759617842457
+    },
+    "long": {
+      "seconds": {
+        "baseline": [
+          9.90123879199382,
+          9.845457458053716,
+          9.80341962503735
+        ],
+        "updated": [
+          10.174064249964431,
+          10.115686167031527,
+          10.094202375039458
+        ]
+      },
+      "median_seconds": {
+        "baseline": 9.845457458053716,
+        "updated": 10.115686167031527
+      },
+      "change_percent": 2.744704450038138
+    }
+  },
+  "peak_resident_bytes": {
+    "baseline": [
+      671350784,
+      664911872,
+      672366592
+    ],
+    "updated": [
+      665976832,
+      678920192,
+      666615808
+    ]
+  }
+}

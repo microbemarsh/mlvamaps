@@ -910,7 +910,8 @@ def test_combined_marker_matrix_falls_back_to_repeat_calls_when_sequences_are_un
     assert pair["combined_marker_distance"] != ""
 
 
-def test_combined_marker_export_uses_current_alignment_query_amplicons(tmp_path):
+@pytest.mark.parametrize("query_file", ["classification/query_amplicons.fasta", "query_loci.fasta"])
+def test_combined_marker_export_uses_current_alignment_query_amplicons(tmp_path, query_file):
     results = tmp_path / "results"
     metadata = tmp_path / "metadata.tsv"
     metadata.write_text(
@@ -918,9 +919,12 @@ def test_combined_marker_export_uses_current_alignment_query_amplicons(tmp_path)
     )
     for sample_id, sequence in (("S1", "AAAGGATATCCGGG"), ("S2", "AAAGGATATCTGGG")):
         path = _write_calls(results, sample_id, {"L1": None})
-        classification = path.parent / "classification"
-        classification.mkdir()
-        (classification / "query_amplicons.fasta").write_text(f">L1\n{sequence}\n")
+        query = path.parent / query_file
+        query.parent.mkdir(exist_ok=True)
+        query.write_text(f">L1\n{sequence}\n")
+        # The old output can disagree: it must never supply reference bases.
+        (path.parent / "taxonomic_query_sequences.fasta").write_text(
+            ">L1\nAAAGGATATCCGGG\n")
     panel = tmp_path / "panel.tsv"
     panel.write_text(
         "locus_id\tforward_primer\treverse_primer\tleft_flank_sequence\t"
@@ -941,7 +945,13 @@ def test_combined_marker_export_uses_current_alignment_query_amplicons(tmp_path)
     assert [row["sample_id"] for row in matrix] == ["S1", "S2"]
     assert matrix[0]["S2"] != ""
     statuses = _read_tsv(tmp_path / "export" / "combined_marker_sequence_status.tsv")
-    assert all("classification/query_amplicons.fasta" in row["source"] for row in statuses)
+    assert all(query_file in row["source"] for row in statuses)
+
+
+def test_combined_export_ignores_historical_reference_proxy(tmp_path):
+    from mlvamaps.combined_marker_export import _retained_sample_sequences
+    (tmp_path / "taxonomic_query_sequences.fasta").write_text(">L1\nAAAGGATATCCGGG\n")
+    assert _retained_sample_sequences(tmp_path) == ({}, {})
 
 
 def test_retained_assembly_evidence_is_masked_with_rich_panel(tmp_path):
@@ -980,3 +990,22 @@ def test_neighbor_joining_preserves_quoted_sample_ids_exactly():
     )
     parsed_labels, _matrix = _tip_patristic_distance_matrix(_parse_newick(tree))
     assert set(parsed_labels) == set(labels)
+
+
+@pytest.mark.parametrize("final_repeat,expected_status", [(2, "RECOVERED"), (3, "SEQUENCE_UNAVAILABLE")])
+def test_reconstructed_query_uses_pcr_audit_and_must_match_final_allele(tmp_path, final_repeat, expected_status):
+    calls_path = _write_calls(tmp_path / "results", "S1", {"L1": final_repeat})
+    rows = _read_tsv(calls_path)
+    # Calibrated PCR size can differ from observed sequence length after a
+    # primer indel. The validated allele is the consistency check here.
+    rows[0]["product_size_bp"] = "13"
+    (calls_path.parent / "query_loci.fasta").write_text(">L1\nAAAGGATATCCGGG\n")
+    (calls_path.parent / "query_locus_reconstruction.tsv").write_text(
+        "locus_id\texported\trepeat_count\nL1\tyes\t2\n")
+    locus = Locus("L1", forward_primer="AAA", reverse_primer="CCC",
+                  left_flank_sequence="GG", right_flank_sequence="CC",
+                  repeat_motif="AT", repeat_unit_length_bp=2)
+    recovered, statuses = recover_masked_sequences(
+        [SampleCalls("S1", calls_path, rows, ["L1"])], ["L1"], {"L1": locus})
+    assert statuses[0]["status"] == expected_status
+    assert bool(recovered) == (expected_status == "RECOVERED")

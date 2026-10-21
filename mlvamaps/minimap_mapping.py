@@ -12,6 +12,7 @@ import pysam
 from .alignment_evidence import CandidateAlignment
 from .candidate_contexts import CandidateContext
 from .io import normalize_read_id
+from .models import ReadRecord
 
 
 PRESETS: dict[str, tuple[str, ...]] = {
@@ -147,11 +148,23 @@ def parse_candidate_alignments(
     sam_path: str | Path,
     contexts: list[CandidateContext],
     include_unknown_repeats: bool = False,
+    unmapped_mates: dict | None = None,
 ) -> list[CandidateAlignment]:
     context_by_id = {context.candidate_id: context for context in contexts}
     rows: list[CandidateAlignment] = []
     with pysam.AlignmentFile(str(sam_path), "r") as sam:
         for alignment in sam.fetch(until_eof=True):
+            if (unmapped_mates is not None and alignment.is_unmapped and alignment.is_paired
+                    and not alignment.mate_is_unmapped and alignment.query_sequence
+                    and alignment.next_reference_id >= 0
+                    and sam.get_reference_name(alignment.next_reference_id) in context_by_id):
+                molecule, named_mate = normalize_read_id(alignment.query_name)
+                mate = 1 if alignment.is_read1 else 2 if alignment.is_read2 else named_mate
+                qualities = alignment.get_forward_qualities()
+                unmapped_mates[(molecule, mate)] = ReadRecord(
+                    alignment.query_name, alignment.get_forward_sequence(),
+                    "".join(chr(value + 33) for value in qualities) if qualities is not None else None,
+                )
             if alignment.is_unmapped or alignment.is_supplementary:
                 continue
             reference_name = sam.get_reference_name(alignment.reference_id)
@@ -239,6 +252,7 @@ def map_reads_to_candidates_bam(
     max_secondary: int = 100,
     include_unknown_repeats: bool = False,
     retain_all_competitors: bool = False,
+    unmapped_mates: dict | None = None,
 ) -> list[CandidateAlignment]:
     """Map without materializing text SAM; pysam/htslib decodes CIGAR and tags."""
     resolved = shutil.which(executable) or (executable if Path(executable).is_file() else None)
@@ -251,4 +265,4 @@ def map_reads_to_candidates_bam(
         position = command.index("-t")
         command[position:position] = ["-p", "0"]
     run_minimap2_competitive_bam(command, bam_path)
-    return parse_candidate_alignments(bam_path, contexts, include_unknown_repeats)
+    return parse_candidate_alignments(bam_path, contexts, include_unknown_repeats, unmapped_mates)

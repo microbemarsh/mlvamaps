@@ -420,14 +420,14 @@ def _record_product_rows(
 def _record_batch_product_rows(tasks):
     searcher = _new_searcher()
     if hasattr(searcher, "prime_many"):
-        loci, max_errors, search_rc = tasks[0][3], tasks[0][4], tasks[0][7]
+        max_errors = max(task[4] for task in tasks)
         patterns = {
-            concrete.encode("ascii") for locus in loci
+            concrete.encode("ascii") for task in tasks for locus in task[3]
             for primer in (locus.forward_primer, _reverse_complement(locus.reverse_primer))
             for concrete in _expand_degenerate(primer)
         }
         texts = [sequence.upper().encode("ascii") for task in tasks
-                 for sequence in ((task[2], _reverse_complement(task[2])) if search_rc else (task[2],))]
+                 for sequence in ((task[2], _reverse_complement(task[2])) if task[7] else (task[2],))]
         searcher.prime_many(patterns, texts, max_errors)
     return [row for task in tasks for row in _record_product_rows(task, searcher)]
 

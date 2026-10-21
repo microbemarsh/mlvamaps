@@ -148,13 +148,18 @@ def test_reconstruction_preserves_sample_flank_variants():
 
 
 @pytest.mark.skipif(not shutil.which("minimap2") or not shutil.which("sassy"), reason="native tools unavailable")
-@pytest.mark.parametrize("layout", ["single", "orphan_r1", "orphan_r2", "paired_flank_snp"])
-def test_reconstructed_short_read_fingerprint_matches_assembly(tmp_path, layout):
+@pytest.mark.parametrize("layout", ["single", "orphan_r1", "orphan_r2", "paired_flank_snp", "mapping_only"])
+def test_reconstructed_short_read_fingerprint_matches_assembly(tmp_path, layout, monkeypatch):
     from mlvamaps.assembly_call import run_assembly_call
     from mlvamaps.short_reads import run_short_read_call
 
     count = 12 if layout == "paired_flank_snp" else 5
     locus, product = locus_and_product(count, imperfect=layout == "paired_flank_snp")
+    if layout == "mapping_only":
+        # A sample primer SNP changes the graph's terminal seed. Mapping must
+        # locate the observed end without supplying the reference nucleotide.
+        product = product[:10] + ("A" if product[10] != "A" else "C") + product[11:]
+        monkeypatch.setattr(FlankRecruiter, "add", lambda *args: None)
     if layout == "paired_flank_snp":
         product = product[:35] + ("A" if product[35] != "A" else "C") + product[36:]
         fragments = [item.pair for item in recruited_tiling(locus, product).values()]
@@ -187,7 +192,7 @@ def test_reconstructed_short_read_fingerprint_matches_assembly(tmp_path, layout)
         outdir=str(tmp_path / "assembly"), threads=2,
     )
     paths = run_short_read_call(
-        str(first), None if layout == "single" else str(second), str(panel),
+        str(first), None if layout in {"single", "mapping_only"} else str(second), str(panel),
         str(tmp_path / "short"), "s", database_path=str(database), threads=2,
         keep_intermediates=True, show_progress=False, sample_mode="isolate",
         short_min_pair_retention=0,
@@ -202,6 +207,10 @@ def test_reconstructed_short_read_fingerprint_matches_assembly(tmp_path, layout)
     assert diagnostic["microassembly_success"] == "yes"
     assert diagnostic["spanning_fragment_count"] == "0"
     assert product == "".join(paths["short_read_microassembly"].read_text().splitlines()[1:])
+    assert product == "".join(paths["query_loci"].read_text().splitlines()[1:])
+    if layout == "mapping_only":
+        assert int(diagnostic["mapping_recruited_fragment_count"]) > 0
+        assert diagnostic["flank_recruited_fragment_count"] == "0"
     if layout.startswith("orphan"):
         with paths["short_read_qc"].open() as handle:
             qc = {row["metric"]: row["value"] for row in csv.DictReader(handle, delimiter="\t")}
@@ -226,7 +235,8 @@ def test_paired_pipeline_recovers_monotonic_counts_through_shared_parser(tmp_pat
     assert float(call["repeat_count"]) == assembly_equivalent_product_allele(locus, len(product))[1] == count
     with paths["short_read_diagnostics"].open() as handle:
         diagnostic = next(csv.DictReader(handle, delimiter="\t"))
-    assert diagnostic["microassembly_attempted"] == ("no" if count == 5 else "yes")
+    # Flank-only measurements no longer bypass full-product reconstruction.
+    assert diagnostic["microassembly_attempted"] == "yes"
 
 
 def test_repeat_only_competitors_cannot_override_an_anchored_fragment():

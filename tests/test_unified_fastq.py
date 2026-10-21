@@ -24,37 +24,13 @@ def _locus() -> Locus:
     )
 
 
-def test_taxonomic_query_uses_the_background_supported_by_most_molecules():
-    contexts = [
-        CandidateContext("c1", "L1", "AAAATATACCCC", 3, 2, 4, 10, "AAAA", "CCCC"),
-        CandidateContext("c2", "L1", "GGGGTATATTTT", 3, 2, 4, 10, "GGGG", "TTTT"),
-    ]
-    evidence = [
-        CandidateEvidence("L1", 3, "m1", 40, candidate_id="c1"),
-        CandidateEvidence("L1", 3, "m2", 42, candidate_id="c1"),
-        CandidateEvidence("L1", 3, "m3", 80, candidate_id="c2"),
-    ]
-
-    assert taxonomic_query_sequences(
-        [{"locus": "L1", "repeat_count": 3, "status": "called"}],
-        evidence,
-        {("L1", molecule): 3 for molecule in ("m1", "m2", "m3")},
-        contexts,
-    ) == {"L1": "AAAATATACCCC"}
-    assert taxonomic_query_sequences(
-        [{"locus": "L1", "repeat_count": 3, "status": "called"}],
-        evidence[::2],
-        {("L1", "m1"): 3, ("L1", "m3"): 3},
-        contexts,
-    ) == {}
-    tied = CandidateEvidence(
-        "L1", 3, "m1", 40, technology="illumina", candidate_id="c1",
-        metadata={"background_alignment_margin": 0},
-    )
-    assert taxonomic_query_sequences(
-        [{"locus": "L1", "repeat_count": 3, "status": "called"}],
-        [tied], {("L1", "m1"): 3}, contexts,
-    ) == {}
+def test_taxonomic_query_requires_a_reconstructed_product_matching_the_final_call():
+    calls = [{"locus": "L1", "repeat_count": 3, "status": "called"}]
+    assert taxonomic_query_sequences(calls, {}) == {}
+    assert taxonomic_query_sequences(calls, {"L1": ("ACGT", 3)}) == {"L1": "ACGT"}
+    assert taxonomic_query_sequences(calls, {"L1": ("ACGT", 4)}) == {}
+    calls[0]["status"] = "mixed"
+    assert taxonomic_query_sequences(calls, {"L1": ("ACGT", 3)}) == {}
 
 
 def test_candidate_generation_is_bounded_and_structured():

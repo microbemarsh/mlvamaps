@@ -93,11 +93,11 @@ def extract_short_read_evidence(
                 oriented, locus_by_id[locus_id], qualities, source="illumina_molecule", round_tolerance=round_tolerance,
             ))
         if not measurements:
-            return None, "PRESENCE_ONLY", 0, None, None
+            return None, "PRESENCE_ONLY", 0, None, None, ""
         best = max(measurements, key=lambda item: (item.status == "FULL_PRODUCT", item.status == "REPEAT_INFORMATIVE", item.confidence or 0))
         return (best.called_allele, best.status, best.confidence or 0,
                 getattr(best, "raw_repeat_count", None),
-                (getattr(best, "metadata", None) or {}).get("repeat_sigma"))
+                (getattr(best, "metadata", None) or {}).get("repeat_sigma"), best.product_sequence)
 
     grouped: dict[tuple[str, str, int | float], list[CandidateAlignment]] = defaultdict(list)
     for alignment in alignments:
@@ -121,6 +121,8 @@ def extract_short_read_evidence(
                         method = "merged_fragment"
             if complete and len({item[0] for item in complete}) == 1:
                 best = max(complete, key=lambda item: (item[1] == "FULL_PRODUCT", item[2]))
+                if len({item[5] for item in complete if item[1] == "FULL_PRODUCT"}) > 1:
+                    best = (*best[:5], "")
                 direct_by_molecule[(molecule, locus_id)] = best
                 fragment_methods[(molecule, locus_id)] = method
     for (molecule, locus_id, _repeat), rows in grouped.items():
@@ -219,6 +221,7 @@ def extract_short_read_evidence(
                     best.reference_end - max(best.reference_start, context.repeat_end),
                 ),
                 "background_alignment_margin": background_margin,
+                "product_sequence": measured[5] if measured and measured[1] == "FULL_PRODUCT" else "",
                 **pair_estimate,
             },
             raw_repeat_count=measured[3] if measured else None,
@@ -239,7 +242,8 @@ def extract_short_read_evidence(
                 technology="illumina", measured_repeat_count=measured[0] if measured else None,
                 evidence_tier=fragment_methods.get((molecule, locus_id), "flank_recruitment"),
                 metadata={"left_anchor": fragment.left, "right_anchor": fragment.right,
-                          "mate_rescue": fragment.rescued},
+                          "mate_rescue": fragment.rescued,
+                          "product_sequence": measured[5] if measured and measured[1] == "FULL_PRODUCT" else ""},
                 raw_repeat_count=measured[3] if measured else None,
                 repeat_sigma=measured[4] if measured else None,
             ))

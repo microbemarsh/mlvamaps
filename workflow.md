@@ -78,6 +78,15 @@ Both FASTQ paths call `run_unified_fastq_inference`:
 6. Write `common_locus_calls.tsv` and `molecule_candidate_evidence.tsv`, then
    project the calls into the workflow's public output tables.
 
+Supported complete sample products are checked in one batched assembly PCR pass.
+Their original molecule measurements are recalibrated if the shared PCR selection
+changes the allele. `query_loci.fasta` contains only products agreeing with the final
+resolved call; mixed loci and unsupported sequences are omitted. The accompanying
+`query_locus_reconstruction.tsv` records the reconstruction method, complete-molecule
+support, PCR result and whether the sequence was exported. Complete-product selection
+requires a dominant observed sequence; noisy long-read products can still use the
+existing SPOARS reconstruction described below. Reference bases never fill gaps.
+
 `presence_support` counts detected molecules; `molecule_support` counts informative
 molecules. `repeat_count_raw` preserves the selected unrounded length.
 `allele_fractions` describes the mixture fit; `best_probability` remains
@@ -108,9 +117,10 @@ flowchart TD
     QC --> Files[Filtered FASTQ]
     QC -->|Pairs, single reads and orphans| Seeds[Unique flank seeds and mate rescue]
     Files --> Map[Competitive observed-reference minimap2 mapping]
-    Map --> Measure[Measure individual reads and usable merged pairs]
+    Map --> Pool[Competitive locus assignment and mapped mate recovery]
+    Pool --> Measure[Measure individual reads and usable merged pairs]
     Seeds --> Measure
-    Measure --> Strong{Strong agreeing direct measurements?}
+    Measure --> Strong{Strong agreeing complete products?}
     Strong -->|Yes| Infer[Shared allele inference]
     Strong -->|No, recruited reads available| Graph[Bounded assembly with increasing k-mer lengths]
     Graph -->|Supported product| PCR[Assembly PCR selection and repeat calibration]
@@ -118,6 +128,7 @@ flowchart TD
     Graph -->|Unresolved| Existing[Retain existing evidence]
     Existing --> Infer
     Infer --> Output[Calls, diagnostics, fingerprint and report]
+    Infer --> Queries[Supported sample query loci and PCR audit]
     Map -->|Reuse alignments| Classify[Reference classification]
     Infer -->|Measured molecule counts| Classify
     Classify --> Output
@@ -136,21 +147,29 @@ flowchart TD
    mapping; it does not filter the FASTQ sent to minimap2.
 3. **Map and measure.** The shared caller uses the Illumina preset. It measures
    individual reads and merged pairs, rejecting ambiguous or repeat-only
-   overlaps. Recruited pairs can supply measurements independently of mapper
+   overlaps. Mappings recruit molecules even without exact flank seeds, requiring
+   at least 21 aligned flank bases, 90% alignment identity and a ten-score margin
+   over competing loci. Equal reference alleles within a locus remain eligible;
+   cross-locus ties and conflicting anchored mates are excluded. Unmapped mates
+   of mapped targets are recovered during BAM parsing, without rereading FASTQ.
+   Recruited pairs can supply measurements independently of mapper
    success. Separate unmerged mates spanning opposite boundaries do not by
    themselves measure the intervening repeat length. Supplying both
    `--short-insert-mean` and `--short-insert-sd` from independent library
    calibration enables an `ESTIMATED` length from inward-facing, opposite-flank
    pairs when there are no direct measurements. These estimates add no measured
    molecule counts to classification.
-4. **Try local assembly where needed.** If direct measurements lack strong,
+4. **Try local assembly where needed.** If complete primer products lack strong,
    agreeing support and recruited reads exist, construct a bounded k-mer graph.
+   Flank-only measurements do not bypass reconstruction. Both mapping and seed
+   recruitment supply the graph.
    Start at 41 bases (or shorter for short reads), increasing by 20 bases up to
    the read-length limit, capped at 151, when needed to resolve collapsed repeats.
-   Terminal 21-base reference seeds locate the path; interior flank sequence
-   comes from reads, preserving sample variants. Accept only a unique, covered,
+   Supported mappings reaching reference ends supply observed terminal seeds,
+   preserving sample primer variants; reference terminal seeds are the fallback.
+   Interior flank sequence comes from reads. Accept only a unique, covered,
    acyclic product. Run the assembly workflow's Sassy PCR (two primer edits),
-   product selection and repeat calibration on that contig.
+   product selection and repeat calibration in a batch across recovered contigs.
    Graph limits are 2,000 fragments and 50,000 distinct k-mer edges per attempt.
    Branches and repeat cycles that survive all attempted sizes remain unresolved;
    reference length or coverage is not used to guess a traversal count.
@@ -171,6 +190,8 @@ recruitment, but do not supply reference-alignment SNP evidence.
 | `short_read_diagnostics.tsv` | Molecule recovery, mate rescue, graph attempts and failure reasons |
 | `molecule_candidate_evidence.tsv` | Mapping and measured repeat evidence per molecule |
 | `common_locus_calls.tsv` | Shared calls, informative support, ambiguity and mixtures |
+| `query_loci.fasta` | Supported sample products for combined-marker export |
+| `query_locus_reconstruction.tsv` | Reconstruction support, PCR validation and export eligibility |
 
 With `--keep-intermediates`, retain filtered FASTQ files, the candidate BAM, and
 short-read microassembly FASTA. Filtered paired and orphan FASTQ files are removed

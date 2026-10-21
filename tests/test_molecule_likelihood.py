@@ -189,7 +189,7 @@ def test_long_read_measurement_cost_does_not_scale_with_reference_copies(monkeyp
     def measure(sequence, locus, quality, **kwargs):
         measured.append((sequence, quality))
         return SimpleNamespace(called_allele=5, status="FULL_PRODUCT", confidence=.99,
-                               raw_repeat_count=5, metadata={"repeat_sigma": .1})
+                               raw_repeat_count=5, metadata={"repeat_sigma": .1}, product_sequence=sequence)
 
     monkeypatch.setattr("mlvamaps.long_read_evidence.measure_locus_product", measure)
     context, prototype, _ = pair_alignments()

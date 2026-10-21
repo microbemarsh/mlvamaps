@@ -19,6 +19,7 @@ class RecruitedFragment:
     left: bool
     right: bool
     rescued: bool
+    source: str = "flank_seed"
 
 
 def _seed_matcher(seeds):
@@ -96,6 +97,7 @@ class FlankRecruiter:
 def assemble_fragments(
     fragments: dict[str, RecruitedFragment], contexts: list[CandidateContext],
     minimum_fragments: int = 3,
+    mapped_alignments=None,
 ) -> tuple[str, set[str], str]:
     """Return only a unique, covered, acyclic flank-to-flank path.
 
@@ -112,13 +114,33 @@ def assemble_fragments(
         (context.sequence[:context.repeat_start], context.sequence[context.repeat_end:])
         for context in contexts
     }
-    if not anchors or len(anchors) > 8:
-        return "", set(), "ambiguous_flanks"
-    if any(len(anchor) < 21 for pair in anchors for anchor in pair):
+    if not anchors or any(len(anchor) < 21 for pair in anchors for anchor in pair):
         return "", set(), "short_anchors"
     # Only the terminal seeds locate a path; the interior flanks are recovered
     # from reads, so sample SNPs/indels are not replaced by reference sequence.
     anchors = {(left[:21], right[-21:]) for left, right in anchors}
+    # Mappings reaching the reference ends can locate sample-derived terminal
+    # seeds, including variants absent from every database flank.
+    lengths = {context.candidate_id: len(context.sequence) for context in contexts}
+    observed_left, observed_right = defaultdict(set), defaultdict(set)
+    for row in mapped_alignments or ():
+        if row.molecule_id not in fragments or row.candidate_id not in lengths or row.alignment_identity < .9:
+            continue
+        sequence = revcomp(row.query_sequence) if row.reverse else row.query_sequence
+        if row.query_end - row.query_start < 21:
+            continue
+        if row.reference_start == 0:
+            observed_left[sequence[row.query_start:row.query_start + 21]].add(row.molecule_id)
+        if row.reference_end == lengths[row.candidate_id]:
+            observed_right[sequence[row.query_end - 21:row.query_end]].add(row.molecule_id)
+    left_seeds = {seed for seed, names in observed_left.items() if len(seed) == 21 and len(names) >= minimum_fragments}
+    right_seeds = {seed for seed, names in observed_right.items() if len(seed) == 21 and len(names) >= minimum_fragments}
+    if left_seeds and right_seeds:
+        if len(left_seeds) * len(right_seeds) > 8:
+            return "", set(), "ambiguous_flanks"
+        anchors = {(left, right) for left in left_seeds for right in right_seeds}
+    if len(anchors) > 8:
+        return "", set(), "ambiguous_flanks"
     sequences = {
         name: tuple(read.sequence for read in (fragment.pair.read1, fragment.pair.read2)
                     if read is not None)
@@ -188,8 +210,7 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
     """Try the graph only without a well-supported direct sequence measurement."""
     from .alignment_evidence import CandidateEvidence
     from .allele_inference import infer_alleles
-    from .assembly_call import legacy_amplicon_bounds, legacy_assembly_call_rows, pcr_rows_to_products
-    from .in_silico_pcr import _record_product_rows
+    from .mapped_reconstruction import call_query_products
 
     contexts_by_locus = defaultdict(list)
     rows_by_locus = defaultdict(list)
@@ -201,7 +222,7 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
     for alignment in alignments:
         alignments_by_locus[alignment.locus_id].append(alignment)
     calls_by_locus = {row["locus"]: row for row in calls}
-    diagnostics, products = [], []
+    diagnostics, products, pending = [], [], {}
     changed = not require_measurement
     for locus in loci:
         locus_id = locus.locus_id
@@ -211,9 +232,11 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
         accepted = set(pool) | {row.molecule_id for row in rows}
         mapped = [row for row in alignments_by_locus[locus_id] if row.molecule_id in accepted]
         measured = {row.molecule_id: row.measured_repeat_count for row in rows if row.measured_repeat_count is not None}
+        complete = {row.molecule_id for row in rows
+                    if row.direct_product_measurement and row.metadata.get("product_sequence")}
         distribution = Counter(measured.values())
         dominant = distribution.most_common(1)
-        strong = bool(dominant and dominant[0][1] >= thresholds.minimum_molecules
+        strong = bool(dominant and len(complete) >= thresholds.minimum_molecules
                       and dominant[0][1] / len(measured) >= thresholds.minimum_probability
                       and len(distribution) == 1)
         method = "direct_spanning" if measured else "candidate_likelihood" if call["repeat_count"] != "" else "existing_fallback"
@@ -230,7 +253,8 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
         diagnostic = {
             "sample_id": sample_id, "locus_id": locus_id,
             "recruited_fragment_count": len(set(pool) | {row.molecule_id for row in mapped}),
-            "flank_recruited_fragment_count": len(pool),
+            "flank_recruited_fragment_count": sum(item.source == "flank_seed" for item in pool.values()),
+            "mapping_recruited_fragment_count": sum(item.source == "mapping" for item in pool.values()),
             "mate_rescued_fragment_count": sum(item.rescued for item in pool.values()),
             "existing_mapper_only_count": len({row.molecule_id for row in mapped} - set(pool)),
             "spanning_fragment_count": len(measured),
@@ -253,50 +277,50 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
             ) for row in rows]
         elif pool:
             diagnostic["microassembly_attempted"] = "yes"
-            sequence, support, reason = assemble_fragments(pool, contexts_by_locus[locus_id], thresholds.minimum_molecules)
+            sequence, support, reason = assemble_fragments(
+                pool, contexts_by_locus[locus_id], thresholds.minimum_molecules, mapped,
+            )
             diagnostic["microassembly_reason"] = reason
             if sequence:
-                # Apply the actual assembly PCR selection and calibration to
-                # the read-built contig, including primer indels and rounding.
-                pcr_rows = _record_product_rows((
-                    "short_read_microassembly", locus_id, sequence, [locus], 2,
-                    *legacy_amplicon_bounds([locus]), True, False, 1.0,
-                ))
-                pcr_products = pcr_rows_to_products(
-                    pcr_rows, [locus], sample_id, enforce_locus_bounds=False, measure_products=False,
-                )
-                assembly_call = legacy_assembly_call_rows(
-                    [locus], pcr_products, sample_id, round_tolerance=round_tolerance,
-                )[0]
-                if assembly_call["status"] == "PASS":
-                    changed = True
-                    allele = assembly_call["repeat_count"]
-                    # Preserve each input fragment's ID; assembled support is
-                    # not reported as independent complete spanning reads.
-                    rows = [row for row in rows if row.molecule_id not in support]
-                    rows.extend(CandidateEvidence(
-                        locus_id, allele, name,
-                        locus_confidence=1.0, left_boundary_span=pool[name].left,
-                        right_boundary_span=pool[name].right, technology="illumina",
-                        measured_repeat_count=allele,
-                        evidence_tier="microassembly",
-                        raw_repeat_count=float(assembly_call["repeat_count_raw"]),
-                        repeat_sigma=0.08,
-                    ) for name in sorted(support))
-                    rows = [row if row.measured_repeat_count is not None else replace(
-                        row, full_repeat_span=False, left_boundary_span=False,
-                        right_boundary_span=False, repeat_indel_support=0, pair_geometry_support=0,
-                    ) for row in rows]
-                    diagnostic.update(microassembly_success="yes", microassembly_sequence_length=len(sequence))
-                    products.append((locus_id, sequence))
-                    method = "microassembly"
-                else:
-                    diagnostic["microassembly_reason"] = "product_not_measurable"
+                pending[locus_id] = (locus, sequence, support)
             # An inconclusive graph does not erase the existing candidate
             # estimate. Retain its likelihoods and label the approximation below.
         rows_by_locus[locus_id] = rows
         diagnostic["call_method"] = method
         diagnostics.append(diagnostic)
+    # One native PCR batch for all reconstructed loci, rather than a subprocess
+    # pair per locus. The same assembly rules select the measured product.
+    pcr_results = call_query_products([(locus, sequence) for locus, sequence, support in pending.values()],
+                                      sample_id, round_tolerance)
+    for diagnostic in diagnostics:
+        locus_id = diagnostic["locus_id"]
+        if locus_id not in pcr_results:
+            continue
+        assembly_call, product = pcr_results[locus_id]
+        if assembly_call["status"] != "PASS":
+            diagnostic["microassembly_reason"] = "product_not_measurable"
+            continue
+        changed = True
+        locus, sequence, support = pending[locus_id]
+        pool = fragments[locus_id]
+        allele = assembly_call["repeat_count"]
+        # Preserve original molecule IDs: assembled support is not a new set
+        # of independent complete spanning reads.
+        rows = [row for row in rows_by_locus[locus_id] if row.molecule_id not in support]
+        rows.extend(CandidateEvidence(
+            locus_id, allele, name, locus_confidence=1.0,
+            left_boundary_span=pool[name].left, right_boundary_span=pool[name].right,
+            technology="illumina", measured_repeat_count=allele,
+            evidence_tier="microassembly", raw_repeat_count=float(assembly_call["repeat_count_raw"]),
+            repeat_sigma=0.08,
+        ) for name in sorted(support))
+        rows_by_locus[locus_id] = [row if row.measured_repeat_count is not None else replace(
+            row, full_repeat_span=False, left_boundary_span=False, right_boundary_span=False,
+            repeat_indel_support=0, pair_geometry_support=0,
+        ) for row in rows]
+        diagnostic.update(microassembly_success="yes", microassembly_sequence_length=len(sequence),
+                          call_method="microassembly")
+        products.append((locus_id, product))
     evidence = [row for locus in loci for row in rows_by_locus[locus.locus_id]]
     if changed:
         calls, molecule_calls = infer_alleles(
