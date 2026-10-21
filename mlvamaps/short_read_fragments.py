@@ -275,7 +275,7 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
                 row, full_repeat_span=False, left_boundary_span=False,
                 right_boundary_span=False, repeat_indel_support=0, pair_geometry_support=0,
             ) for row in rows]
-        elif pool:
+        elif pool and not (require_measurement and call["status"] == "mixed"):
             diagnostic["microassembly_attempted"] = "yes"
             sequence, support, reason = assemble_fragments(
                 pool, contexts_by_locus[locus_id], thresholds.minimum_molecules, mapped,

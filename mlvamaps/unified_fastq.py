@@ -50,6 +50,8 @@ def run_unified_fastq_inference(
     contexts: list[CandidateContext] | None = None,
     recruited_fragments: dict | None = None,
     primer_assignments: list[Assignment] | None = None,
+    rescue_reads: list | None = None,
+    max_primer_mismatches: int = 2,
     reference_alignments: list[CandidateAlignment] | None = None,
     sample_mode: str = "metagenome",
     insert_mean: float | None = None,
@@ -85,7 +87,7 @@ def run_unified_fastq_inference(
     )
     if database_path and reference_alignments is not None:
         reference_alignments.extend(alignments)
-    from .mapped_reconstruction import recruit_mapping_fragments, resolve_query_products
+    from .mapped_reconstruction import apply_reconstructed_calls, recruit_mapping_fragments, resolve_query_products
 
     if technology == "illumina":
         recruited_fragments = recruit_mapping_fragments(
@@ -99,7 +101,25 @@ def run_unified_fastq_inference(
             insert_mean=insert_mean, insert_sd=insert_sd,
         )
     else:
-        evidence = extract_long_read_evidence(alignments, contexts, loci, technology, round_tolerance=round_tolerance)
+        pools = recruit_mapping_fragments(alignments, contexts)
+        owners = {name: locus for locus, pool in pools.items() for name in pool}
+        inference_alignments = [row for row in alignments if owners.get(row.molecule_id) == row.locus_id]
+        evidence = extract_long_read_evidence(inference_alignments, contexts, loci, technology, round_tolerance=round_tolerance)
+        if rescue_reads is not None:
+            from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
+            from .locus_assignment import assignments_from_pcr
+
+            complete = {row.molecule_id for row in evidence if row.direct_product_measurement}
+            unresolved = [read for read in rescue_reads if normalize_read_id(read.read_id)[0] not in complete]
+            if unresolved:
+                rescue_fasta = outdir / "primer_rescue.fasta.gz"
+                write_fasta(((read.read_id, read.sequence) for read in unresolved), rescue_fasta)
+                pcr = run_in_silico_pcr_loci(rescue_fasta, loci, outdir / "in_silico_pcr",
+                                            max_errors=max_primer_mismatches, threads=threads)
+                rescued = assignments_from_pcr(unresolved, loci, read_pcr_results(pcr["stats"], pcr["products"]), sample_id)
+                if primer_assignments is None:
+                    primer_assignments = []
+                primer_assignments.extend(rescued)
     if primer_assignments:
         from .locus_measurement import measure_locus_product
 
@@ -153,7 +173,7 @@ def run_unified_fastq_inference(
             fragment_paths["short_read_microassembly"] = outdir / "short_read_microassembly.fasta"
             write_fasta(products, fragment_paths["short_read_microassembly"])
     query_products, reconstruction, evidence, changed = resolve_query_products(
-        calls, evidence, loci, products, sample_id, thresholds, round_tolerance,
+        calls, evidence, loci, products, sample_id, thresholds, round_tolerance, max_primer_mismatches,
     )
     if changed:
         calls, molecule_calls = infer_alleles(
@@ -162,6 +182,7 @@ def run_unified_fastq_inference(
             round_tolerance=round_tolerance,
         )
     estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature)
+    apply_reconstructed_calls(calls, reconstruction, thresholds)
     if "short_read_diagnostics" in fragment_paths:
         for diagnostic, call in zip(diagnostics, calls):
             diagnostic["final_repeat_count"] = call["repeat_count"]

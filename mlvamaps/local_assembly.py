@@ -45,17 +45,20 @@ def _dominant_variants(mixture_rows: list[dict]) -> dict[str, str]:
 
 
 def _poa_consensus(features: list[RepeatFeature]) -> str:
+    return sequence_consensus(feature.amplicon_sequence for feature in sorted(
+        features, key=lambda item: (-item.mean_qscore, item.read_id)))
+
+
+def sequence_consensus(sequences) -> str:
+    """Correct observed, consistently oriented sequences with the native POA."""
     graph = spoars.Poa(
         alignment_type="global",
         scoring=spoars.Scoring.default(),
     )
     # POA construction can be order-sensitive. Start with the highest-quality
     # observations and retain a deterministic read-ID tie break.
-    for feature in sorted(
-        features,
-        key=lambda item: (-item.mean_qscore, item.read_id),
-    ):
-        graph.add(feature.amplicon_sequence.upper())
+    for sequence in sequences:
+        graph.add(sequence.upper())
     return str(graph.consensus()).upper()
 
 

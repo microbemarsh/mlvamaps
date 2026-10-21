@@ -6,9 +6,7 @@ from pathlib import Path
 from .bayesian_caller import call_loci
 from .allele_inference import ESTIMATION_FIELDS
 from .concurrency import DEFAULT_THREADS, resolve_threads
-from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
 from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
-from .locus_assignment import assignments_from_pcr
 from .local_assembly import (
     LOCAL_ASSEMBLY_FIELDS,
     assemble_dominant_locus_products,
@@ -475,26 +473,7 @@ def run_call(
     write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
     write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
 
-    if filtered_reads:
-        progress.step("Assigning reads with MLVA_finder-compatible Sassy primer matching")
-        assignment_fasta = outdir_path / "filtered_reads.fasta.gz"
-        write_fasta(((read.read_id, read.sequence) for read in filtered_reads), assignment_fasta)
-        pcr_paths = run_in_silico_pcr_loci(
-            assignment_fasta,
-            loci,
-            outdir_path / "in_silico_pcr",
-            max_errors=max_primer_mismatches,
-            threads=threads,
-        )
-        primer_assignments = assignments_from_pcr(
-            filtered_reads,
-            loci,
-            read_pcr_results(pcr_paths["stats"], pcr_paths["products"]),
-            sample_id,
-            progress=progress,
-        )
-    else:
-        primer_assignments = []
+    primer_assignments = []
     # Primer recovery can supply measurements even when a read fails to map.
     # Observed-reference alignments are shared with reference classification.
     reference_alignments = []
@@ -522,9 +501,11 @@ def run_call(
                 threads=thread_count,
                 minimum_molecules=min_depth,
                 minimum_probability=min_posterior,
-                keep_alignments=debug_disagreements,
+                keep_alignments=True,
                 round_tolerance=assembly_round_tolerance,
                 primer_assignments=primer_assignments,
+                rescue_reads=filtered_reads,
+                max_primer_mismatches=max_primer_mismatches,
                 reference_alignments=reference_alignments,
                 sample_mode=sample_mode,
                 mixture_min_fraction=min_mixture_fraction,
@@ -545,7 +526,7 @@ def run_call(
     }
     recruited_assignments = []
     recruited_rows: list[dict] = []
-    progress.step("Recruiting reads competitively to locus product references")
+    progress.step("Reusing competitive mappings for locus recruitment")
     (
         recruited_rows,
         _presence_rows,
@@ -564,6 +545,7 @@ def run_call(
         min_alignment_identity=recruitment_min_identity,
         min_aligned_bp=recruitment_min_aligned_bp,
         min_locus_score_margin=recruitment_min_locus_margin,
+        mapped_paths=unified_paths if filtered_reads else None,
     )
 
     recruited_by_read = {
@@ -713,38 +695,6 @@ def run_call(
         local_assembly_path,
         LOCAL_ASSEMBLY_FIELDS,
     )
-    if unified_calls and primary_product_measurements:
-        from .allele_inference import COMMON_LOCUS_CALL_FIELDS, InferenceThresholds, infer_alleles
-
-        for row in unified_calls:
-            measurement = primary_product_measurements.get(row["locus"], {})
-            if measurement.get("supporting_reads", 0) >= min_depth:
-                row["consensus_status"] = (
-                    "agrees" if measurement.get("called_repeat_count") == row["best_candidate_repeat"]
-                    else "disagrees"
-                )
-        # Reuse the existing POA products only for uncertain loci. Consensus
-        # proposes an allele; the original molecules still supply all depth.
-        uncertain = {row["locus"] for row in unified_calls
-                     if row["status"] in {"ambiguous", "estimated", "detected_unresolved"}
-                     and row["locus"] in primary_product_measurements}
-        if uncertain:
-            resolved, _ = infer_alleles(
-                [row for row in _candidate_evidence if row.locus_id in uncertain],
-                [locus for locus in loci if locus.locus_id in uncertain], [],
-                sample_id, preset, InferenceThresholds(minimum_molecules=min_depth,
-                                                      minimum_probability=min_posterior,
-                                                      mixture_min_fraction=min_mixture_fraction,
-                                                      mixture_min_molecules=min_secondary_reads),
-                require_measurement=True, sample_mode=sample_mode,
-                round_tolerance=assembly_round_tolerance,
-                consensus_measurements=primary_product_measurements,
-            )
-            replacements = {row["locus"]: row for row in resolved
-                            if row["consensus_status"] == "resolved_ambiguity"}
-            unified_calls = [replacements.get(row["locus"], row) for row in unified_calls]
-        write_tsv(unified_calls, unified_paths["common_locus_calls"], COMMON_LOCUS_CALL_FIELDS)
-
     mapping_rows: list[dict] = []
     snp_rows: list[dict] = []
     if locus_mapping:

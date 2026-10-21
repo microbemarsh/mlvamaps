@@ -116,8 +116,17 @@ def test_short_read_fingerprint_matches_assembly(tmp_path, layout, tolerance, mo
         pytest.fail("Reference classification must reuse the allele caller's observed alignments")
 
     monkeypatch.setattr("mlvamaps.mapping_classification.map_reads_to_candidates_bam", redundant_mapping)
+    if layout.startswith("long"):
+        monkeypatch.setattr("mlvamaps.recruitment.run_minimap2_command", redundant_mapping)
     if layout == "long_unmapped":
-        monkeypatch.setattr("mlvamaps.unified_fastq.map_reads_to_candidates_bam", lambda *args, **kwargs: [])
+        def unmapped(reference, reads1, reads2, contexts, bam, *args, **kwargs):
+            import pysam
+            with pysam.AlignmentFile(str(bam), "wb", header={
+                "HD": {"VN": "1.6"}, "SQ": [{"SN": c.candidate_id, "LN": len(c.sequence)} for c in contexts],
+            }):
+                pass
+            return []
+        monkeypatch.setattr("mlvamaps.unified_fastq.map_reads_to_candidates_bam", unmapped)
     first, second = [], []
     for locus, product in records:
         if layout == "shotgun":
@@ -184,7 +193,9 @@ def test_alignment_estimate_reaches_html_tables_and_fingerprint(tmp_path, monkey
     monkeypatch.setattr("mlvamaps.short_read_fragments.assemble_fragments",
                         lambda *args, **kwargs: ("", set(), "no_path"))
     monkeypatch.setattr("mlvamaps.long_read_evidence.measure_locus_product", unresolved)
-    monkeypatch.setattr("mlvamaps.pipeline.assignments_from_pcr", lambda *args, **kwargs: [])
+    monkeypatch.setattr("mlvamaps.locus_assignment.assignments_from_pcr", lambda *args, **kwargs: [])
+    # Exercise the estimate fallback only when reconstruction also fails.
+    monkeypatch.setattr("mlvamaps.mapped_reconstruction.call_query_products", lambda *args, **kwargs: {})
     reads = tmp_path / "reads.fastq"
     product = records[0][1]
     reads.write_text("".join(f"@m{i}\n{product}\n+\n{'I' * len(product)}\n" for i in range(4)))

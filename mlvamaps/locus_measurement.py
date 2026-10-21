@@ -4,6 +4,7 @@ import math
 import re
 import regex
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Sequence
 
 from .calling import allele_grid, estimate_repeat_count_from_spanning_read, gaussian_allele_probabilities, legacy_round_repeat_count, repeat_unit_length
@@ -139,6 +140,68 @@ def reference_interval_to_query_interval(alignment, ref_start: int, ref_end: int
         return None
     start, end = sorted((first, last))
     return start, end + 1
+
+
+def mapped_locus_window(row, context, *, refine=True):
+    """Locate observed locus sequence using CIGAR and locally verified flanks.
+
+    Coordinates refer to the reference-oriented original read. CIGAR only
+    locates search windows; it never supplies repeat length or missing bases.
+    """
+    return _mapped_window(row.query_sequence, row.query_quality, row.reverse,
+                          row.reference_start, row.reference_end, row.query_start, row.query_end,
+                          row.cigar, context.sequence, context.repeat_start, context.repeat_end, refine)
+
+
+@lru_cache(maxsize=512)
+def _mapped_window(original_sequence, original_quality, reverse, reference_start, reference_end,
+                   query_start, query_end, cigar, reference_sequence, repeat_start, repeat_end, refine):
+    # All sequence/quality/coordinate inputs participate in this bounded cache;
+    # identical reads reuse alignment work while retaining distinct molecule IDs.
+    sequence = revcomp(original_sequence) if reverse else original_sequence
+    quality = original_quality[::-1] if reverse and original_quality else original_quality
+    padding = 24
+    start = max(0, query_start - reference_start - padding)
+    end = min(len(sequence), query_end + len(reference_sequence) - reference_end + padding)
+    if not refine:
+        return sequence[start:end], quality[start:end] if quality else None, start, False
+    # Project boundaries in O(CIGAR operations), without allocating aligned pairs.
+    reference, query = reference_start, 0
+    positions = {}
+    for size, operation in re.findall(r"(\d+)([MIDNSHP=X])", cigar):
+        size = int(size)
+        if operation in "M=X":
+            for boundary in (repeat_start, repeat_end):
+                if reference <= boundary <= reference + size:
+                    positions.setdefault(boundary, query + boundary - reference)
+        if operation in "MIS=X":
+            query += size
+        if operation in "MDN=X":
+            reference += size
+    anchors = []
+    for left, boundary in ((True, repeat_start), (False, repeat_end)):
+        position = positions.get(boundary)
+        flank = reference_sequence[:boundary] if left else reference_sequence[boundary:]
+        anchor = None
+        if position is not None and len(flank) >= 21:
+            # ponytail: three bounded native searches, up to 75 flank bases.
+            # Wider genomic context would require an extended database schema.
+            for length in sorted({min(len(flank), size) for size in (75, 35, 21)}, reverse=True):
+                pattern = flank[-length:] if left else flank[:length]
+                anchor = find_anchor(pattern, sequence, max(3, length // 10),
+                                     max(start, position - (length if left else 0) - padding),
+                                     min(end, position + (0 if left else length) + padding))
+                if anchor:
+                    break
+        anchors.append(anchor)
+    left, right = anchors
+    spanning = False
+    if left and right and left.end <= right.start:
+        product_start = left.start - (repeat_start - (left.end - left.start))
+        product_end = right.end + len(reference_sequence) - repeat_end - (right.end - right.start)
+        spanning = product_start >= 0 and product_end <= len(sequence) and "H" not in cigar
+        start, end = max(start, product_start - padding), min(end, product_end + padding)
+    return sequence[start:end], quality[start:end] if quality else None, start, spanning
 
 
 def original_read_in_locus_orientation(alignment, sequence: str, quality: str | Sequence[int] | None = None) -> tuple[str, str | list[int] | None]:

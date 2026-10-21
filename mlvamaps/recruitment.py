@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import math
+import csv
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
+from types import SimpleNamespace
 
 import pysam
 
@@ -17,6 +19,7 @@ from .calling import (
 from .io import read_fasta, write_fasta, write_fastq, write_tsv
 from .locus_measurement import (
     measure_locus_product,
+    mapped_locus_window,
     original_read_in_locus_orientation,
     reference_interval_to_query_interval,
 )
@@ -266,6 +269,12 @@ def parse_recruitment_sam(
     reference_by_name = {row["reference_name"]: row for row in references}
     locus_by_id = {locus.locus_id: locus for locus in loci}
     read_by_id = {read.read_id: read for read in reads}
+    contexts = {}
+    for reference in references:
+        bounds = _repeat_bounds(locus_by_id[reference["locus_id"]], reference["sequence"])
+        if bounds:
+            contexts[reference["reference_name"]] = SimpleNamespace(
+                sequence=reference["sequence"], repeat_start=bounds[0], repeat_end=bounds[1])
     rows = []
     assignments = []
     candidates_by_read: dict[str, list[dict]] = defaultdict(list)
@@ -355,6 +364,14 @@ def parse_recruitment_sam(
             alignment, read.sequence, read.quality
         )
         locus = locus_by_id[reference["locus_id"]]
+        context = contexts.get(reference["reference_name"])
+        window_start = 0
+        if context:
+            oriented_sequence, oriented_quality, window_start, _ = mapped_locus_window(SimpleNamespace(
+                query_sequence=read.sequence, query_quality=read.quality, reverse=alignment.is_reverse,
+                reference_start=reference_start, reference_end=reference_end,
+                query_start=alignment.query_alignment_start, query_end=alignment.query_alignment_end,
+                cigar=alignment.cigarstring or ""), context)
         measurement = measure_locus_product(
             oriented_sequence,
             locus,
@@ -368,6 +385,9 @@ def parse_recruitment_sam(
         full_product = measurement.status == "FULL_PRODUCT"
         genotype_informative = measurement.status in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}
         evidence_class = measurement.status
+        def query_position(value):
+            return window_start + value if value is not None else ""
+
         row = {
             "read_id": query_name,
             "locus_id": reference["locus_id"],
@@ -396,18 +416,18 @@ def parse_recruitment_sam(
             "query_alignment_start": alignment.query_alignment_start,
             "query_alignment_end": alignment.query_alignment_end,
             "softclip_left": alignment.query_alignment_start,
-            "softclip_right": len(oriented_sequence) - int(alignment.query_alignment_end or 0),
-            "extracted_query_start": measurement.product_start if measurement.product_start is not None else (projected[0] if projected else ""),
-            "extracted_query_end": measurement.product_end if measurement.product_end is not None else (projected[1] if projected else ""),
+            "softclip_right": len(read.sequence) - int(alignment.query_alignment_end or 0),
+            "extracted_query_start": query_position(measurement.product_start) if measurement.product_start is not None else (projected[0] if projected else ""),
+            "extracted_query_end": query_position(measurement.product_end) if measurement.product_end is not None else (projected[1] if projected else ""),
             "extracted_product_length": len(measurement.product_sequence),
-            "forward_anchor_start": measurement.forward_anchor_start if measurement.forward_anchor_start is not None else "",
-            "forward_anchor_end": measurement.forward_anchor_end if measurement.forward_anchor_end is not None else "",
+            "forward_anchor_start": query_position(measurement.forward_anchor_start),
+            "forward_anchor_end": query_position(measurement.forward_anchor_end),
             "forward_anchor_identity": measurement.forward_anchor_identity if measurement.forward_anchor_identity is not None else "",
-            "reverse_anchor_start": measurement.reverse_anchor_start if measurement.reverse_anchor_start is not None else "",
-            "reverse_anchor_end": measurement.reverse_anchor_end if measurement.reverse_anchor_end is not None else "",
+            "reverse_anchor_start": query_position(measurement.reverse_anchor_start),
+            "reverse_anchor_end": query_position(measurement.reverse_anchor_end),
             "reverse_anchor_identity": measurement.reverse_anchor_identity if measurement.reverse_anchor_identity is not None else "",
-            "repeat_start": measurement.repeat_start if measurement.repeat_start is not None else "",
-            "repeat_end": measurement.repeat_end if measurement.repeat_end is not None else "",
+            "repeat_start": query_position(measurement.repeat_start),
+            "repeat_end": query_position(measurement.repeat_end),
             "repeat_length_bp": measurement.repeat_length_bp if measurement.repeat_length_bp is not None else "",
             "raw_repeat_count": measurement.raw_repeat_count if measurement.raw_repeat_count is not None else "",
             "top_allele_probability": measurement.confidence if measurement.confidence is not None else "",
@@ -730,6 +750,7 @@ def run_read_recruitment(
     min_alignment_identity: float = 0.9,
     min_aligned_bp: int = 100,
     min_locus_score_margin: int = 10,
+    mapped_paths: dict | None = None,
 ) -> tuple[list[dict], list[dict], list[Assignment], dict[str, Path]]:
     outdir = Path(outdir)
     root = outdir / "recruitment"
@@ -740,34 +761,34 @@ def run_read_recruitment(
     read_rows_path = outdir / "locus_recruited_reads.tsv"
     summary_path = outdir / "locus_presence.tsv"
     local_products_path = outdir / "local_locus_products.fasta.gz"
-    references = build_recruitment_references(loci, database_path)
-    write_fasta(
-        (
-            (
-                f"{row['reference_name']} locus={row['locus_id']} "
-                f"allele={row['candidate_allele']} source={row['reference_source']}",
-                row["sequence"],
-            )
-            for row in references
-        ),
-        references_path,
-    )
-    write_fastq(reads, reads_path)
+    if mapped_paths:
+        references_path = mapped_paths["candidate_contexts"]
+        sam_path = mapped_paths["candidate_alignments"]
+        sequences = dict(read_fasta(references_path))
+        with Path(mapped_paths["candidate_metadata"]).open() as handle:
+            references = [dict(reference_name=row["candidate_id"], locus_id=row["locus_id"],
+                               candidate_allele=row["repeat_count"], reference_source=row["source"],
+                               sequence=sequences[row["candidate_id"]])
+                          for row in csv.DictReader(handle, delimiter="\t")]
+    else:
+        references = build_recruitment_references(loci, database_path)
+    if not mapped_paths:
+        write_fastq(reads, reads_path)
+        write_fasta(
+            ((f"{row['reference_name']} locus={row['locus_id']} "
+              f"allele={row['candidate_allele']} source={row['reference_source']}", row["sequence"])
+             for row in references), references_path,
+        )
     read_rows: list[dict] = []
     assignments: list[Assignment] = []
     if references and reads:
-        executable_path = check_minimap2(executable)
-        run_minimap2_command(
-            build_minimap2_map_command(
-                references_path,
-                reads_path,
-                threads,
-                executable=executable_path,
-                preset=preset,
-            ),
-            "competitive locus recruitment",
-            stdout_path=sam_path,
-        )
+        if not mapped_paths:
+            executable_path = check_minimap2(executable)
+            run_minimap2_command(
+                build_minimap2_map_command(references_path, reads_path, threads,
+                                          executable=executable_path, preset=preset),
+                "competitive locus recruitment", stdout_path=sam_path,
+            )
         read_rows, assignments = parse_recruitment_sam(
             sam_path,
             references,
@@ -778,7 +799,7 @@ def run_read_recruitment(
             min_aligned_bp=min_aligned_bp,
             min_locus_score_margin=min_locus_score_margin,
         )
-    else:
+    elif not mapped_paths:
         sam_path.write_text("")
     for assignment_index, assignment in enumerate(assignments):
         assignments[assignment_index] = Assignment(

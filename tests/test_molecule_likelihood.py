@@ -198,7 +198,7 @@ def test_long_read_measurement_cost_does_not_scale_with_reference_copies(monkeyp
                           repeat_count=c.repeat_count, query_quality=("I" if i % 2 else "H") * 40)
                   for c in contexts for i in range(20)]
     evidence = extract_long_read_evidence(alignments, contexts, [LOCUS], "hifi")
-    assert len(measured) == 4  # Two qualities, two orientations; one locus.
+    assert len(measured) == 2  # Two qualities; mapping supplies the orientation.
     assert len(evidence) == 200
     result, molecules = call(evidence, sample_mode="isolate")
     assert result[0]["molecule_support"] == len(molecules) == 20

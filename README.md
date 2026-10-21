@@ -37,11 +37,16 @@ Assembly and FASTQ inputs retain their own evidence-recovery paths:
   orphan reads. Complete products supply a fast path; flank-only or uncertain
   loci use bounded local assembly. Sample-derived products pass through the
   assembly workflow's PCR selection and repeat-count calculation.
-- **Long-read or amplicon FASTQ:** Sassy primer recovery supplies complete
-  products, followed by mapping to observed database loci and shared molecule
-  measurement. Primer-recovered products remain usable when mapping misses them. SPOARS
-  remains available for representative sequence correction and confirmation;
-  it is not required before a repeat-count call.
+- **Long-read or amplicon FASTQ:** competitive mapping locates each locus;
+  bounded flank refinement extracts sample sequence in the mapped orientation.
+  Supported products or SPOARS consensus pass through the assembly PCR caller.
+  Whole-read primer searches rescue unresolved reads. Recruitment and reference
+  typing reuse the same mapping.
+
+Both read workflows refine mapped locus windows and reuse assembly PCR calibration.
+A supported consensus conflicting with a confident molecule call is explicitly
+unresolved. Consensus retains original molecule identities and never fills gaps
+with reference bases.
 
 Locus detection does not by itself imply a confident repeat-count call.
 Unresolved and missing calls remain explicit and are never converted to zero.
@@ -50,8 +55,8 @@ FASTQ inference retains raw molecule lengths and measurement uncertainty until
 the final assembly-compatible rounding step. Isolate mode fits one allele;
 metagenome mode fits per-locus allele fractions with EM. Bounded measurement
 caches and weighted groups of identical observations avoid repeated work.
-Supported consensus and independently calibrated paired-fragment lengths can
-resolve uncertain loci as explicitly labelled estimates. See
+Supported reconstructed products can resolve uncertain loci through assembly PCR;
+independently calibrated paired-fragment lengths remain explicitly labelled estimates. See
 [workflow.md](workflow.md) for the evidence rules and
 [FASTQ benchmarks](docs/workflows/fastq.md#raw-length-inference-runtime-check).
 

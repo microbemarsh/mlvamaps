@@ -1,0 +1,52 @@
+{
+  "baseline_commit": "ceffbcb22ddaa2b5a0fc21299b411ff7312446e5",
+  "method": "Three alternating serial trials, fresh interpreter per trial; 100 fixture copies, 11 loci, 2 threads, isolate mode. Each trial runs paired, shotgun, then long. Only FASTQ calling is timed; each workflow asserts agreement with assembly.",
+  "limitations": "Small synthetic fixtures; no claim of real-data accuracy improvement or production speedup.",
+  "workflows": {
+    "paired": {
+      "baseline": [
+        1.0200852500274777,
+        0.8441817499697208,
+        0.9341652910225093
+      ],
+      "updated": [
+        1.0164783749496564,
+        0.8359227919718251,
+        0.8187063749646768
+      ],
+      "baseline_median_seconds": 0.9341652910225093,
+      "updated_median_seconds": 0.8359227919718251,
+      "change_percent": -10.51660771330425
+    },
+    "shotgun": {
+      "baseline": [
+        4.503431166056544,
+        4.39218104199972,
+        4.602179166045971
+      ],
+      "updated": [
+        4.409181458991952,
+        4.384593500057235,
+        4.479324624990113
+      ],
+      "baseline_median_seconds": 4.503431166056544,
+      "updated_median_seconds": 4.409181458991952,
+      "change_percent": -2.0928421816452825
+    },
+    "long": {
+      "baseline": [
+        10.080945540918037,
+        10.39376100001391,
+        10.274998209089972
+      ],
+      "updated": [
+        8.924819500069134,
+        8.871663582976907,
+        9.147196999983862
+      ],
+      "baseline_median_seconds": 10.274998209089972,
+      "updated_median_seconds": 8.924819500069134,
+      "change_percent": -13.1404276822781
+    }
+  }
+}

@@ -12,7 +12,7 @@ import regex
 from .alignment_evidence import CandidateAlignment, CandidateEvidence
 from .candidate_contexts import CandidateContext
 from .calling import assembly_equivalent_product_allele
-from .locus_measurement import measure_locus_product
+from .locus_measurement import mapped_locus_window, measure_locus_product
 from .models import Locus, ReadPair, ReadRecord
 from .sequence import revcomp
 from .short_reads import _merge_overlap_is_repeat_only, merge_read_pair
@@ -77,12 +77,13 @@ def extract_short_read_evidence(
         )]
 
     @lru_cache(maxsize=512)
-    def measure_sequence(locus_id: str, sequence: str, quality: str | None):
+    def measure_sequence(locus_id: str, sequence: str, quality: str | None, oriented=False):
         # Cache only the compact outcome, including failed measurements.
         # The cache is bounded and local to this sample/rounding setting;
         # quality and locus remain part of the key, and molecules stay distinct.
         measurements = []
-        for oriented, qualities in ((sequence, quality), (revcomp(sequence), quality[::-1] if quality else None)):
+        orientations = [(sequence, quality)] if oriented else [(sequence, quality), (revcomp(sequence), quality[::-1] if quality else None)]
+        for oriented, qualities in orientations:
             patterns = span_patterns.get(locus_id)
             if patterns and all(pattern is not None for pattern in patterns) and not (
                 (patterns[0].search(oriented) and patterns[1].search(oriented))
@@ -100,17 +101,49 @@ def extract_short_read_evidence(
                 (getattr(best, "metadata", None) or {}).get("repeat_sigma"), best.product_sequence)
 
     grouped: dict[tuple[str, str, int | float], list[CandidateAlignment]] = defaultdict(list)
+    best_mates = {}
     for alignment in alignments:
         grouped[(alignment.molecule_id, alignment.locus_id, alignment.repeat_count)].append(alignment)
+        key = (alignment.molecule_id, alignment.locus_id, alignment.mate or 1)
+        if key not in best_mates or alignment.alignment_score > best_mates[key].alignment_score:
+            best_mates[key] = alignment
     evidence = []
     direct_by_molecule: dict[tuple[str, str], tuple[int | float, str]] = {}
+    guided_segments = {}
     fragment_methods = {}
     for locus_id, fragments in (recruited_fragments or {}).items():
         for molecule, fragment in fragments.items():
             pair = fragment.pair
             reads = [pair.read1, pair.read2]
-            measured = [measure_sequence(locus_id, read.sequence, read.quality) for read in reads if read]
+            measured = []
+            segments = []
+            for mate, read in enumerate(reads, 1):
+                if read is None:
+                    continue
+                mapped = best_mates.get((molecule, locus_id, mate))
+                if mapped and mapped.query_sequence == read.sequence:
+                    context = context_by_id[mapped.candidate_id]
+                    # Partial mates need a local measurement window, not full
+                    # product boundary realignment; the fragment graph joins them.
+                    can_span = (mapped.query_start >= mapped.reference_start - 8
+                                and len(read.sequence) - mapped.query_end >= len(context.sequence) - mapped.reference_end - 8)
+                    sequence, quality, _, _ = mapped_locus_window(mapped, context, refine=False)
+                    measurement = measure_sequence(locus_id, sequence, quality, True)
+                    # Complete local primer products already verify the endpoints.
+                    # Refine only unresolved products before consensus recovery.
+                    if can_span and measurement[1] != "FULL_PRODUCT":
+                        sequence, quality, _, spanning = mapped_locus_window(mapped, context)
+                        if spanning:
+                            segments.append((sequence, quality))
+                        measurement = measure_sequence(locus_id, sequence, quality, True)
+                    measured.append(measurement)
+                else:
+                    measured.append(measure_sequence(locus_id, read.sequence, read.quality))
             complete = [item for item in measured if item[0] is not None and item[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}]
+            if segments and len({item[0] for item in complete}) <= 1:
+                sequence, quality = max(segments, key=lambda item: (
+                    sum(map(ord, item[1] or "")) / max(1, len(item[1] or "")), len(item[0])))
+                guided_segments[(molecule, locus_id)] = {"locus_sequence": sequence, "locus_quality": quality}
             method = "direct_spanning"
             if not complete:
                 merged = merge_read_pair(pair, require_unique=True)
@@ -222,6 +255,7 @@ def extract_short_read_evidence(
                 ),
                 "background_alignment_margin": background_margin,
                 "product_sequence": measured[5] if measured and measured[1] == "FULL_PRODUCT" else "",
+                **guided_segments.get((molecule, locus_id), {}),
                 **pair_estimate,
             },
             raw_repeat_count=measured[3] if measured else None,
@@ -243,6 +277,7 @@ def extract_short_read_evidence(
                 evidence_tier=fragment_methods.get((molecule, locus_id), "flank_recruitment"),
                 metadata={"left_anchor": fragment.left, "right_anchor": fragment.right,
                           "mate_rescue": fragment.rescued,
+                          **guided_segments.get((molecule, locus_id), {}),
                           "product_sequence": measured[5] if measured and measured[1] == "FULL_PRODUCT" else ""},
                 raw_repeat_count=measured[3] if measured else None,
                 repeat_sigma=measured[4] if measured else None,

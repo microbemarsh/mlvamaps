@@ -7,9 +7,8 @@ from functools import lru_cache
 
 from .alignment_evidence import CandidateAlignment, CandidateEvidence
 from .candidate_contexts import CandidateContext
-from .locus_measurement import measure_locus_product
+from .locus_measurement import mapped_locus_window, measure_locus_product
 from .models import Locus
-from .sequence import revcomp
 from .short_read_evidence import _repeat_indel_delta
 
 
@@ -27,11 +26,8 @@ def extract_long_read_evidence(
         grouped[(alignment.molecule_id, alignment.locus_id, alignment.repeat_count)].append(alignment)
     @lru_cache(maxsize=512)
     def measure(locus_id, sequence, quality):
-        observations = (
-            measure_locus_product(sequence, locus_by_id[locus_id], quality, source="long_read_molecule", round_tolerance=round_tolerance),
-            measure_locus_product(revcomp(sequence), locus_by_id[locus_id], quality[::-1] if quality else None, source="long_read_molecule", round_tolerance=round_tolerance),
-        )
-        observation = max(observations, key=lambda item: (item.status == "FULL_PRODUCT", item.status == "REPEAT_INFORMATIVE", item.confidence or 0))
+        observation = measure_locus_product(sequence, locus_by_id[locus_id], quality,
+                                           source="long_read_molecule", round_tolerance=round_tolerance)
         if observation.called_allele is not None and observation.status in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:
             return (observation.called_allele, observation.status, observation.raw_repeat_count,
                     (observation.metadata or {}).get("repeat_sigma"), observation.product_sequence)
@@ -42,8 +38,9 @@ def extract_long_read_evidence(
         key = (row.molecule_id, row.locus_id)
         if key not in best_by_molecule or row.alignment_score > best_by_molecule[key].alignment_score:
             best_by_molecule[key] = row
-    measured = {key: measure(key[1], row.query_sequence, row.query_quality)
-                for key, row in best_by_molecule.items()}
+    windows = {key: mapped_locus_window(row, context_by_id[row.candidate_id])
+               for key, row in best_by_molecule.items()}
+    measured = {key: measure(key[1], window[0], window[1]) for key, window in windows.items()}
     evidence = []
     for (molecule, locus_id, repeat), rows in grouped.items():
         best = max(rows, key=lambda row: (row.alignment_score, row.alignment_identity))
@@ -52,6 +49,7 @@ def extract_long_read_evidence(
         right = best.reference_start < context.repeat_end < best.reference_end
         full = best.reference_start <= context.repeat_start and best.reference_end >= context.repeat_end
         direct = measured.get((molecule, locus_id))
+        window = windows[(molecule, locus_id)]
         indel_delta = _repeat_indel_delta(best, context)
         evidence.append(CandidateEvidence(
             locus_id, repeat, molecule, best.alignment_score, best.alignment_identity,
@@ -64,6 +62,8 @@ def extract_long_read_evidence(
             "complete_vntr_span" if full or direct else "repeat_boundary" if left or right else
             "repeat_indel" if indel_delta else "generic_locus_mapping",
             {"product_sequence": direct[4] if direct and direct[1] == "FULL_PRODUCT" else "",
+             "locus_sequence": window[0] if window[3] else "",
+             "locus_quality": window[1] if window[3] else None,
              "repeat_indel_observed_delta": indel_delta,
              "spanning_repeat_indel_delta": indel_delta if left and right else None,
              "aligned_flank_bases": max(

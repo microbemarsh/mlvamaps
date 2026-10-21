@@ -72,7 +72,7 @@ sequence measurements or a covered two-flank graph must support sizing.
 The same observed-reference mapping is reused for reference classification. In short-read
 allele inference, an exact flank assignment excludes competitors at other loci.
 Mapper-only recovery requires at least 21 aligned bases outside the repeat and
-90% alignment identity. Repeat-only mappings cannot independently identify a
+90% alignment identity after excluding repeat-region length indels. Repeat-only mappings cannot independently identify a
 locus. Fragment IDs also remain the unit of support in shared inference.
 
 ## Direct reference-locus mapping
@@ -89,6 +89,19 @@ they do not determine the sample's repeat count. Reference classification reuses
 these alignments and the measured fragment counts without another FASTQ mapping.
 
 ## Direct VNTR inference
+
+Mapped mates now use the same locus-window refinement as long reads. Mapping
+supplies orientation and local search coordinates. Complete primer products take
+the fast path; unresolved near-complete products receive bounded flank realignment.
+Partial mates retain local measurement windows and the fragment graph, avoiding
+unnecessary full-product realignment.
+
+When supported complete segments have sequencing errors in their primers, the
+shared SPOARS correction step can recover the product before assembly PCR.
+Different measured repeat alleles are clustered separately. A consensus that
+conflicts with a confident molecule call remains unresolved; it does not add
+independent molecule votes. `query_locus_reconstruction.tsv` records the support
+and whether the final product was exported.
 
 Direct measurements use both original mates, regardless of which candidates
 retained their alignments. Overlapping pairs use the existing merger, with a

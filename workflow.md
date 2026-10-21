@@ -84,13 +84,26 @@ changes the allele. `query_loci.fasta` contains only products agreeing with the 
 resolved call; mixed loci and unsupported sequences are omitted. The accompanying
 `query_locus_reconstruction.tsv` records the reconstruction method, complete-molecule
 support, PCR result and whether the sequence was exported. Complete-product selection
-requires a dominant observed sequence; noisy long-read products can still use the
-existing SPOARS reconstruction described below. Reference bases never fill gaps.
+uses a dominant observed sequence when available. Otherwise, sufficiently supported
+mapped segments are clustered by measured allele (or observed length if unmeasured)
+and corrected with SPOARS before PCR. POA uses at most 100 quality-ranked independent
+reads. Short reads retain the bounded fragment graph when no complete product is
+available. Reference bases never fill gaps.
+
+Both read workflows project mapping coordinates to local query windows, refine
+available flanks with up to three native searches (75, 35, then 21 bases), and
+measure in the mapped orientation. Searches use 24-base padding. A bounded cache
+reuses identical sequence/quality/coordinate inputs without combining molecule IDs.
+A supported consensus can supply the primary assembly-PCR measurement; a conflict
+with a confident molecule call remains `AMBIGUOUS`, with `consensus_status=disagrees`.
+Mixtures are not pooled into a single exported consensus.
 
 `presence_support` counts detected molecules; `molecule_support` counts informative
 molecules. `repeat_count_raw` preserves the selected unrounded length.
 `allele_fractions` describes the mixture fit; `best_probability` remains
 single-allele model support, not a mixture fraction or calibrated accuracy.
+For `mapped_consensus_assembly_pcr`, `probability_kind` instead identifies the
+observed reconstruction-support fraction; it is not a calibrated probability.
 Novel or fractional measured alleles can be called outside the
 reference catalog. Estimates carry `estimation_method`, `estimation_reason`, and
 `estimate_support`; their model support is not a calibrated probability of
@@ -149,7 +162,9 @@ flowchart TD
    individual reads and merged pairs, rejecting ambiguous or repeat-only
    overlaps. Mappings recruit molecules even without exact flank seeds, requiring
    at least 21 aligned flank bases, 90% alignment identity and a ten-score margin
-   over competing loci. Equal reference alleles within a locus remain eligible;
+   over competing loci. Recruitment identity excludes indels inside the repeat
+   so genuine length changes are not treated as poor mapping. Equal reference
+   alleles within a locus remain eligible;
    cross-locus ties and conflicting anchored mates are excluded. Unmapped mates
    of mapped targets are recovered during BAM parsing, without rereading FASTQ.
    Recruited pairs can supply measurements independently of mapper
@@ -209,22 +224,20 @@ mlvamaps call --database references -i sample.fastq.gz \
 flowchart TD
     Input[Long-read FASTQ] --> Screen[Optional Deacon target screen]
     Screen --> QC[Length and mean-quality filtering]
-    QC --> PCR[Batched Sassy primer recovery]
     QC --> Map[Competitive observed-reference minimap2 mapping]
-    PCR --> Shared[Shared molecule measurement and inference]
-    Map --> Shared
-    QC --> Recruit[Separate locus-product recruitment]
-    PCR --> Combine[Combine primer and recruitment assignments]
-    Recruit --> Combine
-    Combine --> Features[Repeat features and mapped variant groups]
-    Features --> POA[Variant fractions and dominant SPOARS consensus]
-    POA --> Confirm[Consensus PCR and optional representative mapping / SNPs]
+    Map --> Refine[Refine flanks in mapped query windows]
+    Refine --> Product[Observed products or supported SPOARS consensus]
+    Product --> PCR[Assembly PCR and repeat calibration]
+    Refine -->|Unresolved reads| Rescue[Whole-read primer rescue]
+    Rescue --> Shared[Shared molecule inference and reconstruction checks]
+    PCR --> Shared
     Shared --> Calls[Final repeat calls]
-    Confirm --> Report[Evidence tables and report]
-    Confirm -->|Resolve supported ambiguity| Calls
-    Calls --> Report
+    Map -->|Reuse BAM| Recruit[Recruitment and variant evidence tables]
+    Recruit --> Confirm[Representative products and optional SNP mapping]
+    Calls --> Report[Evidence tables and report]
+    Confirm --> Report
     Map -->|Reuse alignments| Classify[Reference classification]
-    Shared -->|Measured molecule counts| Classify
+    Shared -->|Original molecule measurements| Classify
     Classify --> Report
 ```
 
@@ -233,36 +246,26 @@ flowchart TD
    Current long-read code loads the resulting reads into memory before QC.
    Default QC keeps 50–100,000-base reads with mean Q15 or better and writes
    `filtered_reads.fastq.gz` and `qc_summary.tsv`.
-2. **Recover primer products.** Project filtered sequences to FASTA while
-   retaining the original FASTQ qualities. Sassy finds primer matches; the PCR
-   wrapper applies IUPAC expansion, orientation, pairing, and length rules.
-   Ties between loci or product sizes do not become accepted primer assignments.
-   Searches batch up to 64 records or 65,536 input bases per native launch;
-   an oversized record occupies its own batch. Record identities and coordinates
-   stay separate.
-3. **Map and infer.** Send all QC-retained reads, including those without a
-   complete primer product, to observed-reference mapping. Accepted primer
-   products can contribute direct measurements even when mapping misses a read.
-   The shared caller controls final repeat-state selection. `--read-technology
-   ont`, `ont-hq`, or `hifi` selects the corresponding mapping preset, while
-   `auto` and `accurate-long` use HiFi settings. An explicit
-   `--recruitment-preset` takes precedence. The resolved preset applies to both
-   observed-reference mapping and locus recruitment. Preset availability alone
-   does not establish accuracy on noisy long reads.
-4. **Build confirmation evidence.** A separate locus-product recruitment pass
-   combines mapped assignments with primer recovery. Extract repeat features,
-   form mapped variant groups, estimate variant fractions, and construct dominant
-   per-locus SPOARS partial-order consensus products. Re-examine those products
-   with PCR. Representative mapping and SNP extraction run unless disabled with
-   `--no-locus-mapping`. For uncertain calls, a consensus with sufficient input
-   support can resolve competing lengths if the original molecule likelihoods
-   support its allele within fourfold of the best allele. Such calls remain
-   low-confidence `ESTIMATED` with method `consensus_supported`. Consensus adds
-   no independent molecule votes and does not override decisive or mixed calls.
-5. **Classify and export.** Reuse the initial observed-reference alignments and
-   measured molecule counts for classification. This removes a second mapping
-   for classification, but the recruitment and representative mappings in the
-   confirmation path still exist.
+2. **Map and refine.** Map QC reads to the observed database loci once. Competitive
+   unique-flank support assigns molecules to loci; CIGAR coordinates constrain the
+   flank searches. Observed complete products are measured directly. Supported
+   segments with unresolved primers can enter consensus correction before PCR.
+   `--read-technology ont`, `ont-hq`, or `hifi` selects the mapping preset;
+   `auto` and `accurate-long` use HiFi settings. `--recruitment-preset` takes precedence.
+3. **Rescue unresolved reads.** Only reads without a measured complete product
+   enter whole-read Sassy PCR. `primer_rescue.fasta.gz` retains original sequence;
+   the original FASTQ qualities remain attached. Tied loci or product sizes do
+   not become accepted assignments. These searches remain batched.
+4. **Call and retain evidence.** The shared caller checks observed products or
+   supported consensus using assembly PCR and calibration. Reconstruction support
+   uses original molecule IDs. Conflicting confident calls remain unresolved;
+   mixed loci are not collapsed. Recruitment reuses `candidate_alignments.bam`;
+   mapped-variant tables, local products, and optional representative SNP mapping
+   remain available. `--no-locus-mapping` disables representative mapping.
+5. **Classify and export.** Reuse observed-reference alignments and original
+   measured molecule counts for classification. Export only sample products that
+   agree with the final resolved call in `query_loci.fasta`. The reconstruction
+   audit records support, PCR result, and export status.
 
 | Inspect | What it explains |
 | --- | --- |

@@ -25,22 +25,23 @@ database recruitment index is used automatically. Reads then pass the configured
 length and mean-quality filters; original qualities remain attached.
 The outputs include `qc_summary.tsv` and `filtered_reads.fastq.gz`.
 
-## 2. Recover primer-bounded long-read products
+## 2. Recover mapped locus segments and rescue unresolved reads
 
-Retained long reads are projected losslessly to FASTA and searched with the
-existing Sassy-backed in silico PCR engine. Primer orientation, pairing,
-IUPAC handling, and product-length constraints remain in use. Tied assignments
-to different loci or product sizes do not become accepted primer assignments.
-PCR searches share a Sassy process across batches of up to 64 records or 65,536
-input bases; a larger record occupies its own batch. Each record and orientation
-remains a separate search target, preserving molecule identities and coordinates.
+The boundary-refinement approach is informed by
+[mahi-mahi](https://github.com/nanoporetech/mahi-mahi), implemented with the existing
+mapping, Sassy and SPOARS components. Mahi-mahi is not a runtime dependency;
+MLVA product selection and repeat calibration remain assembly-compatible.
 
-Recovered products contribute direct molecule measurements even if minimap2
-misses the read. This scan is not a gate that discards reads without both
-primers: partial reads continue to observed-reference mapping.
+Mapping runs first. Both read workflows use CIGAR coordinates to constrain local
+flank refinement and measure the original sequence in its mapped orientation.
+Available reference flanks are searched in bounded windows, trying up to 75, 35,
+and 21 bases with 24-base padding. Reference sequence locates the interval but
+never supplies missing sample bases or determines its repeat count.
 
-Outputs include `filtered_reads.fasta.gz`, the `in_silico_pcr/` files, and
-`read_locus_assignments.tsv` from the subsequent combined assignment stage.
+Long reads without a measured complete product enter the Sassy whole-read PCR
+rescue step. Primer orientation, pairing, IUPAC handling, and product-length rules
+remain unchanged. Tied loci or product sizes do not become accepted assignments.
+Rescue outputs include `primer_rescue.fasta.gz` and `in_silico_pcr/` when needed.
 
 ## 3. Map to observed reference loci
 
@@ -55,8 +56,9 @@ The observed target FASTA, metadata, and provenance are recorded under
 `candidate_mapping/`; minimap2 builds its target index in memory.
 
 SAM is streamed through htslib to temporary BAM. The applicable intermediate or
-debug flag retains `candidate_mapping/candidate_alignments.bam`; normal operation
-removes it. Decoded alignments remain available to reference classification.
+debug flag retains `candidate_mapping/candidate_alignments.bam` for short reads.
+Long reads retain this BAM for recruitment, replacing the separate recruitment
+mapping. Decoded alignments remain available to reference classification.
 
 ## 4. Measure molecules and call repeats
 
@@ -105,18 +107,23 @@ every locus in an always-visible table; missing values are never converted to ze
 
 ## 5. Confirm representative sequences
 
-The existing long-read recruitment, mapped-variant, SPOARS consensus, and SNP
-workflow remains available for sequence confirmation and reporting. It retains
-its own recruitment and representative mappings. Consensus is not required for
-a directly measured molecule call, and a nearest-reference allele does not
-overwrite the measured count.
+A dominant observed product takes the fast path through assembly PCR. Otherwise,
+supported mapped segments are clustered by measured allele, or by observed length
+when unmeasured, and corrected with the installed SPOARS POA. Correction uses at
+most 100 quality-ranked independent reads. It can recover primer sites before
+requiring successful PCR on individual reads. Short reads also retain their
+bounded fragment graph for products not spanned by an individual read or pair.
 
-A dominant-cluster consensus with sufficient input support can resolve an
-uncertain call when its allele has molecule model support within fourfold of
-the best allele. The result remains `ESTIMATED`, with method
-`consensus_supported`. Consensus proposes a candidate or resolves ambiguity;
-it never adds independent depth or changes the molecule measurements supplied
-to reference classification. Strong calls and supported mixtures are retained.
+A supported consensus supplies an assembly-PCR measurement without adding votes
+or replacing original measurements used for reference classification. A conflict
+with a confident molecule call produces `AMBIGUOUS` and `consensus_status=disagrees`.
+Mixtures remain separate. Consensus-derived calls use
+`probability_kind=reconstruction_support_fraction`; this is observed support,
+not calibrated accuracy. Only products agreeing with final resolved calls enter
+`query_loci.fasta`; `query_locus_reconstruction.tsv` records the decision.
+
+Recruitment reuses the observed-reference BAM. Optional representative SNP
+mapping and the historical evidence tables remain available.
 
 Relevant outputs include `local_locus_products.fasta.gz`,
 `local_assembly_concordance.tsv`, mapped-variant tables, and locus SNP evidence.
@@ -200,3 +207,26 @@ individual timings, the baseline commit, environment and input conditions.
 Regression tests additionally cover noisy raw-length aggregation, allele
 mixtures, duplicate-reference invariance, uncertain consensus and calibrated
 paired-fragment estimates.
+
+## Mapping-guided recovery runtime check
+
+The shared boundary-refinement update was compared with the preceding commit
+using three alternating serial trials, each in a fresh interpreter, with 100
+copies of the 11-locus concordance fixture, two threads and isolate mode.
+Database construction and assembly truth generation were excluded from timing.
+
+| Workflow | Previous median | Updated median | Reduction |
+| --- | ---: | ---: | ---: |
+| Paired short reads | 0.934 s | 0.836 s | 10.5% |
+| Shotgun short reads | 4.503 s | 4.409 s | 2.1% |
+| Long reads | 10.275 s | 8.925 s | 13.1% |
+
+All fingerprints matched assembly truth. Short-read differences are small and
+vary between runs; these replicated high-quality fixtures do not establish
+real-data accuracy or production speedups. End-to-end regression tests separately
+cover primer-error consensus recovery in both read workflows, novel repeat
+lengths, reverse orientation, and conflicting evidence.
+
+The [benchmark record](../reference/mapping-guided-benchmark.json) includes the
+baseline commit and individual timings. Use the existing benchmark command above
+on each checkout in fresh interpreters to repeat the comparison.
