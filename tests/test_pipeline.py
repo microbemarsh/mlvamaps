@@ -276,6 +276,10 @@ def test_dropout_is_reported(tmp_path):
     assert statuses == {"VNTR_01": "LOCUS_DROPOUT", "VNTR_02": "LOCUS_DROPOUT"}
     easy_calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
     assert easy_calls["VNTR_01"]["present"] == "no"
+    for row in easy_calls.values():
+        assert float(row["repeat_count"]) >= 0 and row["prior_only"] == "True"
+        assert row["genotype_status"] == "PRIOR_ONLY" and float(row["data_evidence_confidence"]) == 0
+    assert result["myoga_loci"].exists()
 
 
 def test_primer_export_and_expected_bounds(tmp_path):

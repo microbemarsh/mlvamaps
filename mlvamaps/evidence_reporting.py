@@ -6,6 +6,7 @@ import json
 from .io import write_tsv
 from .locus_measurement import measure_locus_product
 from .sequence import repeat_motif_statistics
+from .allele_inference import CONFIDENCE_FIELDS
 
 
 GENOTYPE_FIELDS = ["sample", "locus", "genotype_status", "repeat_count", "repeat_lower_bound",
@@ -13,6 +14,8 @@ GENOTYPE_FIELDS = ["sample", "locus", "genotype_status", "repeat_count", "repeat
     "left_anchor_support", "right_anchor_support", "ambiguous_locus_support", "forward_support",
     "reverse_support", "inference_tier", "candidate_distribution", "log_likelihood_gap",
     "computational_fallback", "reason", "error_model"]
+GENOTYPE_FIELDS += [field for field in CONFIDENCE_FIELDS + ["repeat_count_raw", "second_best_repeat_count"]
+                    if field not in GENOTYPE_FIELDS]
 SEQUENCE_FIELDS = ["sample", "locus", "sequence_id", "independent_support", "repeat_count",
     "raw_repeat_count", "repeat_sequence", "repeat_pattern", "partial_terminal_bases",
     "motif_mismatches", "product_sequence"]
@@ -39,6 +42,10 @@ def write_evidence_reports(calls, evidence, loci, outdir, thresholds):
             status, reason = "UNRESOLVED", fallback
         elif not call["molecule_support"] and ambiguous:
             status, reason = "AMBIGUOUS_LOCUS", "Competing locus assignments; these molecules do not vote for an allele."
+        elif call.get("prior_only"):
+            status, reason = "PRIOR_ONLY", call["estimation_reason"]
+        elif call.get("repeat_lower_bound") and call.get("estimate_source") == "partial_repeat_likelihood":
+            status, reason = "LOWER_BOUND", "Anchored terminal repeat supplies a lower bound; the point estimate depends on the locus prior."
         elif call["repeat_count"] == "" and call.get("repeat_lower_bound"):
             status, reason = "LOWER_BOUND", "Anchored terminal repeat sequence; the opposite boundary is unobserved."
         elif call["repeat_count"] == "":
@@ -53,11 +60,12 @@ def write_evidence_reports(calls, evidence, loci, outdir, thresholds):
             status = "ESTIMATED"
             reason = reason or "Coverage, measurement uncertainty, or reconstruction does not meet EXACT criteria."
         call["genotype_status"] = status
+        call["confidence_reason"] = reason + " Model support is not calibrated accuracy."
         call["inference_tier"] = max([call.get("inference_tier", 0)] + [row.metadata.get("inference_tier", 0) for row in rows])
         summaries.append(dict(sample=call["sample"], locus=call["locus"], genotype_status=status,
             repeat_count=call["repeat_count"], repeat_lower_bound=call.get("repeat_lower_bound", ""),
             repeat_interval_low=call.get("repeat_interval_low", ""), repeat_interval_high=call.get("repeat_interval_high", ""),
-            independent_support=call["molecule_support"], full_span_support=call["full_span_support"],
+            full_span_support=call["full_span_support"],
             left_anchor_support=support(lambda row: row.left_boundary_span or row.metadata.get("left_anchor")),
             right_anchor_support=support(lambda row: row.right_boundary_span or row.metadata.get("right_anchor")),
             ambiguous_locus_support=ambiguous,
@@ -66,7 +74,11 @@ def write_evidence_reports(calls, evidence, loci, outdir, thresholds):
             inference_tier=max([call.get("inference_tier", 0)] + [row.metadata.get("inference_tier", 0) for row in rows]),
             candidate_distribution=call["candidate_distribution"], log_likelihood_gap=call.get("log_likelihood_gap", ""),
             computational_fallback=fallback, reason=reason,
-            error_model=json.dumps(next((row.metadata["error_model"] for row in rows if "error_model" in row.metadata), {}), sort_keys=True)))
+            error_model=json.dumps(next((row.metadata["error_model"] for row in rows if "error_model" in row.metadata), {}), sort_keys=True),
+            **{field: call.get(field, "") for field in CONFIDENCE_FIELDS
+               if field not in {"genotype_status", "repeat_interval_low", "repeat_interval_high", "computational_fallback", "independent_support"}},
+            independent_support=call.get("independent_support", call["molecule_support"]),
+            repeat_count_raw=call.get("repeat_count_raw", ""), second_best_repeat_count=call.get("second_best_repeat_count", "")))
         products = defaultdict(set)
         ambiguous_molecules = {row.molecule_id for row in rows if "ambiguous_locus" in row.quality_flags}
         for row in measured:

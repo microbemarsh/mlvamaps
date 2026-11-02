@@ -20,13 +20,14 @@ def test_spooled_qc_uses_one_stream_and_preserves_quality_and_random_access():
     assert spool.handle.closed
 
 
-def test_resource_limit_retains_evidence_without_a_false_point_estimate():
+def test_resource_limit_retains_a_labelled_bounded_estimate():
     evidence = [CandidateEvidence("L", 4, f"m{i}", measured_repeat_count=4,
                                   raw_repeat_count=4, repeat_sigma=100) for i in range(3)]
     calls, molecules = infer_alleles(evidence, [Locus("L", repeat_unit_length_bp=4)], [], "s", "ont",
                                    InferenceThresholds(maximum_candidates=20), require_measurement=True)
     estimate_unresolved_calls(calls, evidence, [])
-    assert calls[0]["repeat_count"] == "" and len(molecules) == 3
+    assert calls[0]["repeat_count"] == 4 and len(molecules) == 3
+    assert calls[0]["inference_method"] == "bounded_measurement_likelihood"
     assert calls[0]["computational_fallback"] == "candidate_limit"
     assert calls[0]["repeat_interval_high"] >= 304
 

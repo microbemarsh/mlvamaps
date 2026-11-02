@@ -11,7 +11,9 @@ from .allele_inference import (
     COMMON_LOCUS_CALL_FIELDS,
     InferenceThresholds,
     ESTIMATION_FIELDS,
+    CONFIDENCE_FIELDS,
     estimate_unresolved_calls,
+    finalize_repeat_count_calls,
     infer_alleles,
 )
 from .candidate_contexts import CandidateContext, generate_candidate_contexts, write_candidate_contexts
@@ -231,6 +233,7 @@ def run_unified_fastq_inference(
         )
     estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature)
     apply_reconstructed_calls(calls, reconstruction, thresholds)
+    finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds)
     inferred_at = perf_counter()
     if "short_read_diagnostics" in fragment_paths:
         for diagnostic, call in zip(diagnostics, calls):
@@ -326,6 +329,7 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
             "second_best_probability": row["second_best_probability"],
             "inference_method": row.get("estimation_method") or row.get("inference_method", "shared_competitive_minimap2_inference"),
             **{field: row.get(field, "") for field in ESTIMATION_FIELDS},
+            **{field: row.get(field, "") for field in CONFIDENCE_FIELDS + ["second_best_repeat_count"]},
             "dominant_variant_fraction": row["dominant_fraction"],
             "num_candidate_variants": len(str(row["candidate_distribution"]).split(";")) if row["candidate_distribution"] else 0,
             "num_confirmed_secondary_variants": 1 if row["status"] == "mixed" else 0,

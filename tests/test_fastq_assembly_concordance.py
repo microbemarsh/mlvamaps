@@ -212,7 +212,8 @@ def test_alignment_estimate_reaches_html_tables_and_fingerprint(tmp_path, monkey
     assert calls[0]["repeat_count"] == "5" and calls[0]["status"] == "ESTIMATED"
     assert calls[0]["estimation_method"] == "alignment_repeat_span"
     assert calls[0]["estimate_support"] == "4"
-    assert calls[1]["repeat_count"] == ""
+    assert calls[1]["repeat_count"] == "4" and calls[1]["prior_only"] == "True"
+    assert float(calls[1]["data_evidence_confidence"]) == 0
     assert rows(paths["repeat_counts"])[0]["repeat_count"] == "5"
     assert _fingerprint(paths["fingerprint"])[loci[0].locus_id] == "5"
     report = paths["report"].read_text()

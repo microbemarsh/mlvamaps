@@ -280,8 +280,11 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
         measured_support = len(observations)
         # Library geometry is an optional fallback, never a replacement for
         # directly measured products and never classification ground truth.
-        if not observations:
+        if not observations and not any(row.measured_repeat_count is not None
+                                        for rows in molecules.values() for row in rows):
             for molecule, rows in molecules.items():
+                if any("ambiguous_locus" in row.quality_flags for row in rows):
+                    continue
                 pairs = [row for row in rows if "pair_repeat_count" in row.metadata]
                 if not pairs:
                     continue
@@ -345,6 +348,36 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
                 limited = "likelihood_cell_limit"
             if limited:
                 states = []
+                # Retain a bounded set of observed modes plus the Gaussian
+                # sufficient-statistic estimate; score one column at a time.
+                budget = max(1, min(thresholds.maximum_candidates,
+                                    thresholds.maximum_likelihood_cells // len(counts)))
+                centers = Counter()
+                for (value, uncertainty), number in counts.items():
+                    centers[max(0, value)] += number
+                precision = sum(number / sigma**2 for (_, sigma), number in counts.items())
+                mean = max(0, sum(number * value / sigma**2 for (value, sigma), number in counts.items()) / precision)
+                candidates = [value for value, _ in sorted(centers.items(), key=lambda item: (-item[1], item[0]))]
+                candidates.insert(min(1, len(candidates)), mean)
+                states = list(dict.fromkeys(candidates))[:budget]
+                scores = {}
+                raw = np.asarray([item[0] for item in counts])
+                sigma = np.asarray([item[1] for item in counts])
+                multiplicities = np.asarray(list(counts.values()), dtype=float)
+                for state in states:
+                    delta = np.abs(raw - state)
+                    core = -.5 * (delta / sigma)**2 - np.log(sigma * math.sqrt(2 * math.pi))
+                    scale = np.maximum(1., sigma * 4)
+                    tail = -delta / scale - np.log(2 * scale)
+                    scores[state] = float(multiplicities @ np.logaddexp(math.log(.99) + core, math.log(.01) + tail))
+                posterior = _softmax(scores)
+                raw_best = max(posterior, key=lambda state: (posterior[state], -state))
+                best_count = legacy_round_repeat_count(raw_best, round_tolerance)
+                grouped_support = defaultdict(float)
+                for state, probability in posterior.items():
+                    grouped_support[legacy_round_repeat_count(state, round_tolerance)] += probability
+                ranked = sorted(grouped_support.items(), key=lambda item: (-item[1], item[0]))
+                status = "estimated"
         if counts and not limited:
             raw = np.asarray([item[0] for item in counts])[:, None]
             sigma = np.asarray([item[1] for item in counts])[:, None]
@@ -472,7 +505,8 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
             "dominant_fraction": round(fractions[0][1], 8) if fractions else "",
             "secondary_fraction": round(fractions[1][1], 8) if len(fractions) > 1 else "",
             "allele_fractions": ";".join(f"{state}:{fraction:.8f}" for state, fraction in fractions),
-            "inference_method": "molecule_likelihood_em" if sample_mode == "metagenome" else "molecule_likelihood",
+            "inference_method": ("bounded_measurement_likelihood" if limited else
+                                 "molecule_likelihood_em" if sample_mode == "metagenome" else "molecule_likelihood"),
             "probability_kind": "single_allele_model_support",
             "em_iterations": iterations, "em_converged": converged,
             "consensus_status": consensus_status,
@@ -573,14 +607,116 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0):
                 candidate_distribution=";".join(f"{count}:{probability:.8f}" for count, probability in ranked),
             )
         call.update(estimation_method=method, estimation_reason=reason, estimate_support=support)
-        if method in {"reference_conditioned", "conflicting_measurements"}:
-            # Partial reference matches do not test longer unobserved arrays;
-            # conflicting observations do not identify a unique molecule size.
-            call.update(status="detected_unresolved", confidence="unresolved")
-        else:
-            call.update(repeat_count=call["best_candidate_repeat"], status="estimated", confidence="low")
+        call.update(repeat_count=call["best_candidate_repeat"],
+                    repeat_count_raw=call["best_candidate_repeat"],
+                    status="estimated", confidence="low")
 
 
+def locus_repeat_prior(locus, contexts, maximum_candidates=2048):
+    """Equal mass on distinct observed alleles, then calibrated nominal/range.
+
+    Database multiplicity is deliberately ignored. The default 0..100 search
+    range is not a biological prior. Large ranges use a bounded uniform grid.
+    """
+    states = sorted({context.repeat_count for context in contexts
+                     if context.locus_id == locus.locus_id
+                     and context.observed_or_synthetic == "observed"
+                     and context.repeat_count is not None
+                     and math.isfinite(context.repeat_count) and context.repeat_count >= 0})
+    source = "observed_reference_prior"
+    if not states and locus.expected_product_size_bp > 0 and repeat_unit_length(locus) > 0:
+        if math.isfinite(locus.nominal_repeat_units) and locus.nominal_repeat_units >= 0:
+            states = [locus.nominal_repeat_units]
+            source = "calibrated_panel_prior"
+    low, high = locus.expected_min_repeats, locus.expected_max_repeats
+    limited = ""
+    if not states and (low, high) != (0, 100) and 0 <= low <= high:
+        size = high - low + 1
+        count = min(size, maximum_candidates)
+        states = sorted({low + round(i * (high - low) / max(1, count - 1)) for i in range(count)})
+        source = "panel_range_prior"
+        limited = "prior_grid_limit" if size > count else ""
+    if not states:
+        return {}, "", ""
+    if len(states) > maximum_candidates:
+        states = [states[round(i * (len(states) - 1) / max(1, maximum_candidates - 1))]
+                  for i in range(maximum_candidates)]
+        limited = "prior_grid_limit"
+    return {state: 1 / len(states) for state in states}, source, limited
+
+
+def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None):
+    """Complete FASTQ predictions after reconstruction, without creating reads."""
+    thresholds = thresholds or InferenceThresholds()
+    by_locus = defaultdict(list)
+    contexts_by_locus = defaultdict(list)
+    for row in evidence:
+        by_locus[row.locus_id].append(row)
+    for context in contexts:
+        contexts_by_locus[context.locus_id].append(context)
+    locus_by_id = {locus.locus_id: locus for locus in loci}
+    if len(locus_by_id) != len(loci) or Counter(call["locus"] for call in calls) != Counter(locus_by_id.keys()):
+        raise ValueError("FASTQ completion requires exactly one call per unique configured locus")
+    for call in calls:
+        locus = locus_by_id[call["locus"]]
+        rows = by_locus[locus.locus_id]
+        ambiguous = {row.molecule_id for row in rows if "ambiguous_locus" in row.quality_flags}
+        usable = [row for row in rows if row.molecule_id not in ambiguous]
+        source = call.get("estimation_method") or (
+            "joint_measurement_likelihood" if any(row.measured_repeat_count is not None for row in usable)
+            else "reconstructed_product" if call.get("inference_method") == "mapped_consensus_assembly_pcr"
+            else "reference_conditioned")
+        prior_only = bool(call.get("prior_only", False))
+        if call["repeat_count"] in ("", None):
+            prior, source, limited = locus_repeat_prior(locus, contexts_by_locus[locus.locus_id], thresholds.maximum_candidates)
+            if not prior:
+                raise ValueError(f"Locus {locus.locus_id}: no informative repeat evidence or eligible locus-specific prior; "
+                                 "provide observed reference alleles, calibrated nominal units, or an explicit non-default repeat range")
+            best = min(prior, key=lambda state: (-prior[state], state))
+            call.update(repeat_count=best, repeat_count_raw=best, best_candidate_repeat=best,
+                        best_probability=prior[best], second_best_probability=sorted(prior.values(), reverse=True)[1] if len(prior) > 1 else 0.,
+                        candidate_distribution=";".join(f"{state}:{prob:.8f}" for state, prob in prior.items()),
+                        repeat_interval_low=min(prior), repeat_interval_high=max(prior),
+                        computational_fallback=call.get("computational_fallback") or limited,
+                        confidence="unresolved", estimation_method=source,
+                        estimation_reason="Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
+                        estimate_support=0)
+            prior_only = True
+        value = call["repeat_count"]
+        if not math.isfinite(float(value)) or float(value) < 0:
+            raise ValueError(f"Locus {locus.locus_id}: invalid final repeat count {value!r}")
+        if call.get("repeat_count_raw") in (None, ""):
+            call["repeat_count_raw"] = value
+        distribution = [(float(state), float(probability)) for state, probability in
+                        (entry.split(":") for entry in call.get("candidate_distribution", "").split(";") if entry)]
+        alternative = sorted(((state, probability) for state, probability in distribution if state != float(value)),
+                             key=lambda item: (-item[1], item[0]))
+        support = 0 if prior_only else int(call.get("estimate_support") or call["molecule_support"])
+        model_support = float(call.get("best_probability", 0))
+        # ponytail: an uncalibrated evidence-strength score, not accuracy.
+        # Replace with empirical reliability calibration when truth data exist.
+        weight = {"joint_measurement_likelihood": 1., "reconstructed_product": .5,
+                  "conflicting_measurements": .25, "paired_fragment_length": .35,
+                  "alignment_repeat_span": .4, "reference_conditioned": .1}.get(source, .25)
+        sigma = max((row.repeat_sigma or .08 for row in usable if row.measured_repeat_count is not None), default=.08)
+        confidence = model_support * support / (support + thresholds.minimum_molecules) * weight / max(1., sigma)
+        if call["status"] in {"ambiguous", "mixed"} or call.get("computational_fallback"):
+            confidence *= .25
+        if call.get("repeat_interval_low") in (None, ""):
+            call["repeat_interval_low"] = min((state for state, _ in distribution), default=value)
+        if call.get("repeat_interval_high") in (None, ""):
+            call["repeat_interval_high"] = max((state for state, _ in distribution), default=value)
+        call.update(estimate_source=source, prior_only=prior_only, independent_support=support,
+                    model_support=model_support, data_evidence_confidence=round(confidence, 8),
+                    second_best_repeat_count=alternative[0][0] if alternative else "",
+                    second_best_support=alternative[0][1] if alternative else 0.,
+                    confidence_reason=call.get("estimation_reason") or
+                    "Sample molecule likelihood; model support and evidence confidence are uncalibrated.")
+
+
+CONFIDENCE_FIELDS = ["estimate_source", "genotype_status", "model_support", "data_evidence_confidence",
+                     "second_best_support", "repeat_interval_low", "repeat_interval_high",
+                     "independent_support", "prior_only", "computational_fallback", "confidence_reason"]
 ESTIMATION_FIELDS = ["estimation_method", "estimation_reason", "estimate_support"]
 
 
@@ -599,3 +735,5 @@ COMMON_LOCUS_CALL_FIELDS += [
     "derived_molecule_support", "repeat_lower_bound",
     "genotype_status",
 ]
+COMMON_LOCUS_CALL_FIELDS += [field for field in CONFIDENCE_FIELDS + ["second_best_repeat_count"]
+                            if field not in COMMON_LOCUS_CALL_FIELDS]

@@ -3,6 +3,17 @@ from __future__ import annotations
 import math
 
 import numpy as np
+from .allele_inference import CONFIDENCE_FIELDS
+
+
+def repeat_is_comparable(row):
+    """Prior predictions never become observations; legacy/assembly rows remain usable."""
+    return str(row.get("prior_only", "")).lower() not in {"true", "yes", "1"}
+
+
+def _comparison_fingerprint(fingerprint, allele_rows):
+    excluded = {str(row["locus_id"]) for row in allele_rows or [] if not repeat_is_comparable(row)}
+    return {locus: value for locus, value in fingerprint.items() if locus not in excluded}
 
 
 RESERVED_PROFILE_COLUMNS = {"profile_id", "strain_id", "metadata"}
@@ -36,6 +47,7 @@ def build_fingerprint(sample_id: str, allele_rows: list[dict], loci: list) -> tu
                 "locus_id": locus.locus_id,
                 "repeat_count": value,
                 "posterior_probability": call.get("posterior_probability", 0.0),
+                **{field: call[field] for field in CONFIDENCE_FIELDS if field in call},
             }
         )
     return [fingerprint], probabilistic
@@ -60,6 +72,7 @@ def match_profiles(
 ) -> list[dict]:
     if not profiles:
         return []
+    fingerprint = _comparison_fingerprint(fingerprint, allele_rows)
     probability_by_locus = {
         str(row["locus_id"]): _allele_probability_map(row)
         for row in allele_rows or []
@@ -231,6 +244,7 @@ def profile_match_locus_rows(
     allele_rows: list[dict] | None = None,
 ) -> list[dict]:
     """Expand ranked profile comparisons to one machine-readable row per locus."""
+    fingerprint = _comparison_fingerprint(fingerprint, allele_rows)
     profile_by_id = {
         str(profile.get("profile_id", "")): profile for profile in profiles
     }

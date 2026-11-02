@@ -179,7 +179,7 @@ def run_mapping_short_read_call(
             "boundary_2_support": common["junction_support"],
             "both_boundary_support": common["full_span_support"],
             "repeat_count_min": "", "repeat_count_max": "",
-            "repeat_count_interval_reason": "", "confidence_reason": call["evidence"],
+            "repeat_count_interval_reason": "",
             "short_read_warning": "" if common["status"] == "called" else call["evidence"],
             "recruited_read_pairs": common["presence_support"],
             "failure_reason": "" if common["status"] in {"called", "low_coverage"} else call["evidence"],
@@ -205,17 +205,18 @@ def run_mapping_short_read_call(
         "best_reference_contexts", "reference_context_taxa",
         "reference_context_provenance", "mlva_method",
     ]
-    call_fields = SHORT_CALL_FIELDS + [field for field in mapping_fields if field not in SHORT_CALL_FIELDS]
+    from .allele_inference import CONFIDENCE_FIELDS
+    call_fields = list(dict.fromkeys(SHORT_CALL_FIELDS + mapping_fields + CONFIDENCE_FIELDS))
     calls_path = output / "calls.tsv"
     write_tsv(calls, calls_path, call_fields)
     write_tsv(calls, output / "locus_repeat_counts.tsv",
-              REPEAT_COUNT_FIELDS + [field for field in SHORT_CALL_EXTRA_FIELDS + mapping_fields if field not in REPEAT_COUNT_FIELDS])
+              list(dict.fromkeys(REPEAT_COUNT_FIELDS + SHORT_CALL_EXTRA_FIELDS + mapping_fields + CONFIDENCE_FIELDS)))
     allele_rows = _allele_rows(calls)
     write_tsv(allele_distribution_rows(sample_id, calls), output / "allele_probability_distribution.tsv", ALLELE_DISTRIBUTION_FIELDS)
     fingerprint, probabilistic = build_fingerprint(sample_id, allele_rows, loci)
     write_tsv(fingerprint, output / "mlva_fingerprint.tsv", ["sample_id"] + [locus.locus_id for locus in loci])
     write_tsv(probabilistic, output / "mlva_fingerprint_probabilistic.tsv",
-              ["sample_id", "locus_id", "repeat_count", "posterior_probability"])
+              ["sample_id", "locus_id", "repeat_count", "posterior_probability"] + CONFIDENCE_FIELDS)
     matches = match_profiles(sample_id, fingerprint[0], profiles, allele_rows=allele_rows)
     write_tsv(profile_match_locus_rows(sample_id, fingerprint[0], profiles, matches, allele_rows),
               output / "profile_match_loci.tsv", PROFILE_MATCH_LOCUS_FIELDS)
@@ -311,10 +312,11 @@ def run_mapping_short_read_call(
               output / "myoga_samples.csv", MYOGA_SAMPLE_FIELDS)
     write_csv([{"genome_id": sample_id, "sample_id": sample_id, "locus_id": row["locus_id"],
                 "repeat_count": row["repeat_count"], "repeat_count_min": "", "repeat_count_max": "",
-                "evidence_class": row["mapping_state"], "confidence": row["allele_confidence"]}
+                "evidence_class": row["mapping_state"], "confidence": row["allele_confidence"],
+                **{field: row.get(field, "") for field in CONFIDENCE_FIELDS}}
                for row in calls], output / "myoga_loci.csv",
               ["genome_id", "sample_id", "locus_id", "repeat_count", "repeat_count_min",
-               "repeat_count_max", "evidence_class", "confidence"])
+               "repeat_count_max", "evidence_class", "confidence"] + CONFIDENCE_FIELDS)
     from .minimap_mapping import minimap2_version
     metadata_path = output / "short_read_run_metadata.json"
     metadata_path.write_text(json.dumps({

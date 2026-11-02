@@ -11,6 +11,7 @@ import regex
 from .concurrency import DEFAULT_THREADS
 from .models import Locus, ReadPair, ReadRecord
 from .pipeline import SIMPLE_CALL_FIELDS
+from .allele_inference import CONFIDENCE_FIELDS
 from .sequence import mean_qscore, revcomp
 
 
@@ -162,6 +163,7 @@ def _allele_rows(call_rows: list[dict]) -> list[dict]:
         "estimation_method": row.get("estimation_method", ""),
         "estimation_reason": row.get("estimation_reason", ""),
         "estimate_support": row.get("estimate_support", ""),
+        **{field: row.get(field, "") for field in CONFIDENCE_FIELDS},
     } for row in call_rows]
 
 

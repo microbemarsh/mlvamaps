@@ -16,6 +16,7 @@ from .combined_marker_export import COMBINED_OUTPUT_NAMES, export_combined_marke
 from .io import open_text, write_tsv
 from .primers import read_loci_or_primers
 from .profile_tree import neighbor_joining_tree_from_matrix
+from .profile_matching import repeat_is_comparable
 from .sample_metadata import METADATA_ALIASES
 
 
@@ -467,7 +468,7 @@ def build_call_matrix(
         rows_by_locus = {row["locus_id"]: row for row in sample.rows}
         rows_by_sample[sample.sample_id] = rows_by_locus
         for locus, row in rows_by_locus.items():
-            value = _numeric_repeat(row.get("repeat_count"))
+            value = _numeric_repeat(row.get("repeat_count")) if repeat_is_comparable(row) else None
             if value is not None:
                 matrix[sample_index, locus_index[locus]] = value
     return matrix, rows_by_sample
@@ -931,8 +932,8 @@ def export_myoga(
             {
                 "sample_id": sample.sample_id,
                 **{
-                    locus: _format_allele(matrix[source_index, locus_index])
-                    for locus_index, locus in enumerate(locus_order)
+                    locus: by_locus.get(locus, {}).get("repeat_count", "")
+                    for locus in locus_order
                 },
             }
         )

@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .bayesian_caller import call_loci
-from .allele_inference import ESTIMATION_FIELDS
+from .allele_inference import ESTIMATION_FIELDS, CONFIDENCE_FIELDS
 from .concurrency import DEFAULT_THREADS, resolve_threads
 from .io import ReadSpool, read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
 from .local_assembly import (
@@ -346,6 +346,7 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
                 "evidence": evidence + (f"; low-confidence estimate: {row['estimation_reason']}"
                                         if row.get("estimation_reason") else ""),
                 **{field: row.get(field, "") for field in ESTIMATION_FIELDS},
+                **{field: row[field] for field in CONFIDENCE_FIELDS if field in row},
             }
         )
     return rows
@@ -511,10 +512,16 @@ def run_call(
             )
 
         else:
-            from .allele_inference import COMMON_LOCUS_CALL_FIELDS, InferenceThresholds, infer_alleles
+            from .allele_inference import COMMON_LOCUS_CALL_FIELDS, InferenceThresholds, infer_alleles, finalize_repeat_count_calls
             from .evidence_reporting import write_evidence_reports
+            from .mapping_classification import observed_reference_contexts
+            from .candidate_contexts import generate_candidate_contexts
             limits = inference_limits or InferenceThresholds()
-            unified_calls, _molecule_calls = infer_alleles([], loci, [], sample_id, "hifi", limits, require_measurement=True)
+            database = database_path or recruitment_database_path
+            contexts = (observed_reference_contexts(database, loci, assembly_round_tolerance)[1]
+                        if database else generate_candidate_contexts(loci))
+            unified_calls, _molecule_calls = infer_alleles([], loci, contexts, sample_id, "hifi", limits, require_measurement=True)
+            finalize_repeat_count_calls(unified_calls, [], loci, contexts, limits)
             unified_paths.update(write_evidence_reports(unified_calls, [], loci, outdir_path, limits))
             unified_paths["common_locus_calls"] = outdir_path / "common_locus_calls.tsv"
             write_tsv(unified_calls, unified_paths["common_locus_calls"], COMMON_LOCUS_CALL_FIELDS)
@@ -797,6 +804,7 @@ def run_call(
             "primary_measurement_source": shared.get("estimation_method") or shared.get("inference_method") or (
                 "observed_reference_molecule_measurement" if database_path else "shared_competitive_minimap2_inference"),
             **{field: shared.get(field, "") for field in ESTIMATION_FIELDS},
+            **{field: shared.get(field, "") for field in CONFIDENCE_FIELDS},
             "evidence_status": str(shared["status"]).upper(),
             "full_product_reads": shared["direct_product_support"],
             "repeat_informative_reads": shared["full_span_support"],
@@ -804,7 +812,7 @@ def run_call(
         if shared["status"] == "estimated":
             # Consensus sizing is separate evidence, not the source of this estimate.
             row.update(primary_product_size_bp="")
-    write_tsv(allele_rows, outdir_path / "allele_calls.tsv", ALLELE_FIELDS)
+    write_tsv(allele_rows, outdir_path / "allele_calls.tsv", ALLELE_FIELDS + CONFIDENCE_FIELDS)
     allele_distribution_path = outdir_path / "allele_probability_distribution.tsv"
     write_tsv(
         allele_distribution_rows(sample_id, allele_rows),
@@ -849,8 +857,11 @@ def run_call(
                 "calls_agree": "" if combined == "" or consensus == "" else ("yes" if str(combined) == str(consensus) else "no"),
             })
         write_tsv(summary_rows, disagreement_summary_path, DISAGREEMENT_SUMMARY_FIELDS)
-    write_tsv(simple_call_rows, outdir_path / "calls.tsv", SIMPLE_CALL_FIELDS)
-    write_tsv(simple_call_rows, outdir_path / "locus_repeat_counts.tsv", REPEAT_COUNT_FIELDS)
+    write_tsv(simple_call_rows, outdir_path / "calls.tsv", SIMPLE_CALL_FIELDS + CONFIDENCE_FIELDS)
+    write_tsv(simple_call_rows, outdir_path / "locus_repeat_counts.tsv", REPEAT_COUNT_FIELDS + CONFIDENCE_FIELDS)
+    from .sample_metadata import write_csv
+    write_csv([{"genome_id": sample_id, **row} for row in simple_call_rows], outdir_path / "myoga_loci.csv",
+              ["genome_id"] + SIMPLE_CALL_FIELDS + CONFIDENCE_FIELDS)
 
     fingerprint_rows, probabilistic_rows = build_fingerprint(sample_id, allele_rows, loci)
     fingerprint_fields = ["sample_id"] + [locus.locus_id for locus in loci]
@@ -858,7 +869,7 @@ def run_call(
     write_tsv(
         probabilistic_rows,
         outdir_path / "mlva_fingerprint_probabilistic.tsv",
-        ["sample_id", "locus_id", "repeat_count", "posterior_probability"],
+        ["sample_id", "locus_id", "repeat_count", "posterior_probability"] + CONFIDENCE_FIELDS,
     )
 
     match_rows = match_profiles(
@@ -937,6 +948,7 @@ def run_call(
         "calls": outdir_path / "calls.tsv",
         "allele_calls": outdir_path / "allele_calls.tsv",
         "repeat_counts": outdir_path / "locus_repeat_counts.tsv",
+        "myoga_loci": outdir_path / "myoga_loci.csv",
         "allele_distribution": allele_distribution_path,
         "mapped_variant_table": mapped_variant_path,
         "mapped_read_memberships": mapped_membership_path,
