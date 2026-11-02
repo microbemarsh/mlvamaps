@@ -167,7 +167,7 @@ def test_guided_consensus_corrects_primers_before_pcr_without_creating_molecules
     assert len(molecules) == 10
     calls[0].update(status="called", repeat_count=6)
     apply_reconstructed_calls(calls, audit, thresholds)
-    assert calls[0]["status"] == "ambiguous" and calls[0]["repeat_count"] == ""
+    assert calls[0]["status"] == "ambiguous" and calls[0]["repeat_count"] == 6
     calls[0].update(status="mixed", repeat_count=6)
     apply_reconstructed_calls(calls, audit, thresholds)
     assert calls[0]["status"] == "mixed" and calls[0]["repeat_count"] == 6

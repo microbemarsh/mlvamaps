@@ -254,7 +254,7 @@ def apply_reconstructed_calls(calls, audit, thresholds):
             continue
         allele = row["repeat_count"]
         if call["status"] in {"called", "low_coverage"} and call["repeat_count"] != allele:
-            call.update(status="ambiguous", repeat_count="", confidence="unresolved",
+            call.update(status="ambiguous", confidence="unresolved",
                         consensus_status="disagrees", estimation_method="",
                         estimation_reason="Supported PCR product conflicts with molecule measurements.")
             continue

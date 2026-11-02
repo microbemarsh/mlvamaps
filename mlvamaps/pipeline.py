@@ -298,7 +298,7 @@ def simple_call_rows_from_alleles(sample_id: str, allele_rows: list[dict]) -> li
     for row in allele_rows:
         read_depth = int(row.get("read_depth") or 0)
         present = read_depth > 0
-        repeat_count = row.get("called_repeat_count", "") if present else ""
+        repeat_count = row.get("called_repeat_count", "")
         dominant_fraction = float(row.get("dominant_variant_fraction") or 0)
         if present:
             dominant = row.get("dominant_vntr_asv", "")
@@ -803,7 +803,7 @@ def run_call(
         })
         if shared["status"] == "estimated":
             # Consensus sizing is separate evidence, not the source of this estimate.
-            row.update(primary_product_size_bp="", primary_repeat_count_raw="")
+            row.update(primary_product_size_bp="")
     write_tsv(allele_rows, outdir_path / "allele_calls.tsv", ALLELE_FIELDS)
     allele_distribution_path = outdir_path / "allele_probability_distribution.tsv"
     write_tsv(

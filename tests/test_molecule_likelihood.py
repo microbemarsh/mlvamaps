@@ -93,7 +93,7 @@ def test_unconverged_mixture_is_not_promoted_to_a_confident_single_allele(monkey
     )
     result, _ = call(rows([3] * 12 + [7] * 8, sigma=.12))
     assert not result[0]["em_converged"]
-    assert result[0]["status"] == "ambiguous" and result[0]["repeat_count"] == ""
+    assert result[0]["status"] == "ambiguous" and result[0]["repeat_count"] == 3
 
 
 def test_isolate_model_tolerates_an_indel_outlier():
@@ -128,7 +128,7 @@ def test_consensus_can_resolve_ambiguity_but_never_adds_molecule_depth():
     consensus["L"]["raw_repeat_count"] = 12
     rejected, _ = call(evidence, sample_mode="isolate", thresholds=thresholds,
                        consensus_measurements=consensus)
-    assert rejected[0]["repeat_count"] == ""
+    assert rejected[0]["repeat_count"] == before[0]["repeat_count"]
     assert rejected[0]["consensus_status"] == "disagrees"
     empty, _ = call([], consensus_measurements=consensus)
     assert empty[0]["repeat_count"] == ""

@@ -206,7 +206,7 @@ def infer_alleles(
         calls.append({
             "sample": sample_id,
             "locus": locus.locus_id,
-            "repeat_count": best[0] if status in {"called", "low_coverage", "mixed"} else "",
+            "repeat_count": best[0],
             "status": status,
             "confidence": (
                 "high" if status == "called" and best[1] >= 0.95
@@ -451,7 +451,7 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
         rows = [row for items in molecules.values() for row in items]
         calls.append({
             "sample": sample_id, "locus": locus.locus_id,
-            "repeat_count": best_count if status in {"called", "low_coverage", "mixed", "estimated"} else "",
+            "repeat_count": best_count,
             "repeat_count_raw": raw_best,
             "status": status,
             "confidence": ("high" if status == "called" and best_probability >= .95

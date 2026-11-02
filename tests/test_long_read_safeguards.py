@@ -38,7 +38,7 @@ def test_isolate_bimodality_is_retained_without_calling_an_unobserved_middle():
     calls, _ = infer_alleles(evidence, [Locus("L", repeat_unit_length_bp=4)], [], "s", "ont",
                            require_measurement=True, sample_mode="isolate")
     estimate_unresolved_calls(calls, evidence, [])
-    assert calls[0]["repeat_count"] == "" and calls[0]["possible_secondary"]
+    assert calls[0]["repeat_count"] == 3 and calls[0]["possible_secondary"]
     assert calls[0]["secondary_repeat"] == 9
 
 
