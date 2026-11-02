@@ -67,6 +67,8 @@ def _molecule_distribution(
     rows: list[CandidateEvidence], states: list[int | float], temperature: float,
     require_measurement: bool = False,
 ) -> tuple[dict[int | float, float], int | float | None, float]:
+    if any("ambiguous_locus" in row.quality_flags for row in rows):
+        return {}, None, 0.0
     direct = [row.measured_repeat_count for row in rows if row.measured_repeat_count is not None]
     if len(set(direct)) > 1 or (require_measurement and not direct):
         # An observed reference is a recruitment target, not a measured allele.
@@ -142,6 +144,18 @@ def infer_alleles(
             if locus_id == locus.locus_id
         }
         states = states_by_locus[locus.locus_id]
+        envelope = (min(states), max(states)) if states else ("", "")
+        budget = max(1, min(thresholds.maximum_candidates,
+                            thresholds.maximum_likelihood_cells // max(1, len(locus_items))))
+        limited = len(states) > budget
+        if limited:
+            votes = Counter(value for rows in locus_items.values()
+                            for value in {row.measured_repeat_count for row in rows if row.measured_repeat_count is not None})
+            scores = defaultdict(float)
+            for rows in locus_items.values():
+                for row in rows:
+                    scores[row.repeat_count] = max(scores[row.repeat_count], row.alignment_score)
+            states = sorted(states, key=lambda state: (-votes[state], -scores[state], state))[:budget]
         informative: list[tuple[dict[int | float, float], int | float, float, list[CandidateEvidence]]] = []
         for molecule, rows in locus_items.items():
             distribution, winner, weight = _molecule_distribution(
@@ -183,6 +197,8 @@ def infer_alleles(
                 status = "low_coverage"
             else:
                 status = "called"
+            if limited and status == "called":
+                status = "estimated"
 
         best = ranked[0] if ranked else ("", 0.0)
         second = ranked[1] if len(ranked) > 1 else ("", 0.0)
@@ -207,6 +223,8 @@ def infer_alleles(
             "sample": sample_id,
             "locus": locus.locus_id,
             "repeat_count": best[0],
+            "computational_fallback": "candidate_grid_limit" if limited else "",
+            "repeat_interval_low": envelope[0], "repeat_interval_high": envelope[1],
             "status": status,
             "confidence": (
                 "high" if status == "called" and best[1] >= 0.95
@@ -527,20 +545,21 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
     return calls, molecule_calls
 
 
-def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0):
+def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresholds=None):
     """Fill unresolved calls with labelled estimates, without creating measurements.
 
     Prefer conflicting direct observations, then repeat-spanning CIGAR projections,
-    then reference-conditioned alignment support. Average per-molecule support so
+    then reference-conditioned alignment support. Combine molecule likelihoods so
     duplicate mappings cannot multiply votes or manufacture depth confidence.
     """
+    thresholds = thresholds or InferenceThresholds()
     known = {context.candidate_id: context for context in contexts}
     by_locus = defaultdict(list)
     for row in evidence:
         by_locus[row.locus_id].append(row)
     for call in calls:
         if (call["repeat_count"] != "" or call["status"] == "not_found" or call.get("computational_fallback")
-                or call.get("possible_secondary") or call.get("repeat_lower_bound")):
+                or call.get("possible_secondary")):
             continue
         ambiguous_molecules = {row.molecule_id for row in by_locus[call["locus"]] if "ambiguous_locus" in row.quality_flags}
         rows = [row for row in by_locus[call["locus"]] if row.molecule_id not in ambiguous_molecules]
@@ -562,6 +581,8 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0):
                           len(known[row.candidate_id].sequence) - known[row.candidate_id].repeat_end,
                       )))]
             spanning = [row for row in mapped if row.metadata.get("spanning_repeat_indel_delta") is not None]
+            if call.get("repeat_lower_bound") and not measured and not spanning:
+                continue  # The finalizer conditions the locus prior on this bound.
             selected = measured or spanning or mapped
             if not selected:
                 continue
@@ -573,6 +594,7 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0):
                 ("reference_conditioned", "Partial mappings support a reference allele; repeat length is not directly resolved and alternatives outside the catalog are untested.")
             )
             molecule_scores, weights = defaultdict(dict), {}
+            alternatives = defaultdict(set)
             for row in selected:
                 count = row.measured_repeat_count if measured else row.repeat_count
                 if spanning and not measured:
@@ -583,20 +605,42 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0):
                 score = 0.0 if measured else row.alignment_score / max(temperature, 1e-6)
                 scores = molecule_scores[row.molecule_id]
                 scores[count] = max(scores.get(count, -math.inf), score)
+                if measured:
+                    raw = row.raw_repeat_count if row.raw_repeat_count is not None else count
+                    sigma = row.repeat_sigma if row.repeat_sigma is not None else .08
+                    if not math.isfinite(raw) or raw < 0 or not math.isfinite(sigma) or sigma <= 0:
+                        raise ValueError("Invalid conflicting molecule measurement or uncertainty")
+                    alternatives[row.molecule_id].add((raw, sigma))
                 weight = 1.0 if measured else max(0.01, min(1.0, row.alignment_identity * row.query_coverage))
                 weights[row.molecule_id] = max(weights.get(row.molecule_id, 0), weight)
             if not molecule_scores:
                 continue
-            totals = defaultdict(float)
+            states = sorted({state for scores in molecule_scores.values() for state in scores})
+            work = sum(len(values) for values in (alternatives or molecule_scores).values())
+            budget = max(1, min(thresholds.maximum_candidates, thresholds.maximum_likelihood_cells // max(1, work)))
+            if len(states) > budget:
+                votes = Counter(state for scores in molecule_scores.values() for state in scores)
+                states = sorted(states, key=lambda state: (-votes[state], state))[:budget]
+                call["computational_fallback"] = "fallback_likelihood_grid_limit"
+                reason += " Bounded candidate grid; omitted alleles remain in the evidence table."
+            totals = dict.fromkeys(states, 0.)
             for molecule, scores in molecule_scores.items():
-                for count, probability in _softmax(scores).items():
-                    totals[count] += weights[molecule] * probability
-            total_weight = sum(weights.values())
-            ranked = sorted(((count, value / total_weight) for count, value in totals.items()),
-                            key=lambda item: (-item[1], item[0]))
+                for state in states:
+                    if measured:
+                        values = sorted(alternatives[molecule])
+                        likelihoods = [-.5 * ((state - raw) / sigma)**2 - math.log(sigma)
+                                       for raw, sigma in values]
+                        score = float(np.logaddexp.reduce(likelihoods)) - math.log(len(values))
+                    else:
+                        score = scores.get(state, min(scores.values()) - 20.) - max(scores.values())
+                    totals[state] += weights[molecule] * score
+            ranked = sorted(_softmax(totals).items(), key=lambda item: (-item[1], item[0]))
             best = ranked[0]
             second = ranked[1][1] if len(ranked) > 1 else 0.0
             support = len(molecule_scores)
+            if alternatives:
+                call["repeat_interval_low"] = max(0, min(raw - 3 * sigma for values in alternatives.values() for raw, sigma in values))
+                call["repeat_interval_high"] = max(raw + 3 * sigma for values in alternatives.values() for raw, sigma in values)
             if len(ranked) == 1:
                 reason += " Only one allele is supported by the available evidence; model support does not establish accuracy."
             elif math.isclose(best[1], second):
@@ -662,26 +706,52 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
         rows = by_locus[locus.locus_id]
         ambiguous = {row.molecule_id for row in rows if "ambiguous_locus" in row.quality_flags}
         usable = [row for row in rows if row.molecule_id not in ambiguous]
+        refinements = sorted({str(row.metadata["refinement_fallback"]) for row in usable
+                              if row.metadata.get("refinement_fallback")})
+        if refinements and not call.get("computational_fallback"):
+            call["computational_fallback"] = "motif_refinement:" + ";".join(refinements)
         source = call.get("estimation_method") or (
-            "joint_measurement_likelihood" if any(row.measured_repeat_count is not None for row in usable)
-            else "reconstructed_product" if call.get("inference_method") == "mapped_consensus_assembly_pcr"
+            "reconstructed_product" if call.get("inference_method") == "mapped_consensus_assembly_pcr" or call.get("derived_molecule_support")
+            else "joint_measurement_likelihood" if any(row.measured_repeat_count is not None for row in usable)
             else "reference_conditioned")
         prior_only = bool(call.get("prior_only", False))
         if call["repeat_count"] in ("", None):
             prior, source, limited = locus_repeat_prior(locus, contexts_by_locus[locus.locus_id], thresholds.maximum_candidates)
-            if not prior:
+            bounds = {}
+            for row in usable:
+                bound = row.metadata.get("repeat_lower_bound")
+                if bound is not None and math.isfinite(bound) and bound >= 0:
+                    bounds[row.molecule_id] = max(bound, bounds.get(row.molecule_id, 0))
+            if not prior and not bounds:
                 raise ValueError(f"Locus {locus.locus_id}: no informative repeat evidence or eligible locus-specific prior; "
                                  "provide observed reference alleles, calibrated nominal units, or an explicit non-default repeat range")
+            reason = "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately."
+            if bounds:
+                lower = max(bounds.values())
+                scale = max(1., max(prior, default=lower) - min(prior, default=lower))
+                # ponytail: an exponential continuation allows novel expansions
+                # beyond a finite catalog. Its tail is a sensitivity assumption,
+                # not a validated biological maximum or a calibrated interval.
+                states = sorted({max(lower, state) for state in prior} |
+                                {lower + scale * i for i in range(min(32, thresholds.maximum_candidates))})
+                if len(states) > thresholds.maximum_candidates:
+                    states = states[:thresholds.maximum_candidates]
+                    limited = "partial_likelihood_grid_limit"
+                prior = _softmax({state: -min((abs(state - center) for center in prior), default=state - lower) / scale
+                                  for state in states})
+                source = "partial_repeat_likelihood"
+                reason = ("Joint anchored lower-bound constraints condition the locus prior with an exponential expansion tail. "
+                          "No upper repeat boundary was measured; the reported interval is a bounded candidate envelope.")
+                call.update(status="estimated", repeat_lower_bound=lower)
             best = min(prior, key=lambda state: (-prior[state], state))
             call.update(repeat_count=best, repeat_count_raw=best, best_candidate_repeat=best,
                         best_probability=prior[best], second_best_probability=sorted(prior.values(), reverse=True)[1] if len(prior) > 1 else 0.,
                         candidate_distribution=";".join(f"{state}:{prob:.8f}" for state, prob in prior.items()),
                         repeat_interval_low=min(prior), repeat_interval_high=max(prior),
                         computational_fallback=call.get("computational_fallback") or limited,
-                        confidence="unresolved", estimation_method=source,
-                        estimation_reason="Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
-                        estimate_support=0)
-            prior_only = True
+                        confidence="low" if bounds else "unresolved", estimation_method=source,
+                        estimation_reason=reason, estimate_support=len(bounds))
+            prior_only = not bounds
         value = call["repeat_count"]
         if not math.isfinite(float(value)) or float(value) < 0:
             raise ValueError(f"Locus {locus.locus_id}: invalid final repeat count {value!r}")
@@ -697,7 +767,8 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
         # Replace with empirical reliability calibration when truth data exist.
         weight = {"joint_measurement_likelihood": 1., "reconstructed_product": .5,
                   "conflicting_measurements": .25, "paired_fragment_length": .35,
-                  "alignment_repeat_span": .4, "reference_conditioned": .1}.get(source, .25)
+                  "alignment_repeat_span": .4, "reference_conditioned": .1,
+                  "partial_repeat_likelihood": .1}.get(source, .25)
         sigma = max((row.repeat_sigma or .08 for row in usable if row.measured_repeat_count is not None), default=.08)
         confidence = model_support * support / (support + thresholds.minimum_molecules) * weight / max(1., sigma)
         if call["status"] in {"ambiguous", "mixed"} or call.get("computational_fallback"):

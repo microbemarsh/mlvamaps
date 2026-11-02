@@ -231,7 +231,7 @@ def run_unified_fastq_inference(
             require_measurement=bool(database_path), sample_mode=sample_mode,
             round_tolerance=round_tolerance,
         )
-    estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature)
+    estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature, thresholds)
     apply_reconstructed_calls(calls, reconstruction, thresholds)
     finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds)
     inferred_at = perf_counter()

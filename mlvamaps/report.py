@@ -423,12 +423,17 @@ def _repeat_count_table(rows: list[dict], loci: list[Locus], assembly: bool = Fa
         row = by_locus.get(locus_id, {})
         count = _called_count(row.get("repeat_count" if assembly else "called_repeat_count"))
         status = row.get("status" if assembly else "call_status", "NOT_FOUND")
-        value = "Unavailable" if count is None else ("≈" if status == "ESTIMATED" else "") + str(count)
+        prior_only = str(row.get("prior_only", "")).lower() in {"true", "yes", "1"}
+        if prior_only:
+            status = "PRIOR_ONLY"
+        value = "Unavailable" if count is None else ("≈" if status in {"ESTIMATED", "PRIOR_ONLY"} else "") + str(count)
         reason = row.get("estimation_reason") or row.get("evidence") or row.get("primary_measurement_source", "")
         if count is None:
             reason = reason or "No usable repeat-size evidence; a count cannot be estimated."
         support = row.get("estimate_support") if status == "ESTIMATED" else row.get("primary_read_depth", row.get("read_depth", ""))
         confidence = row.get("allele_confidence" if assembly else "posterior_probability", "")
+        if prior_only:
+            confidence = f"No sample repeat evidence; model support {confidence}"
         table_rows.append(
             f"<tr><td>{_safe(locus_id)}</td><td><strong>{_safe(value)}</strong></td>"
             f"<td>{_safe(status)}</td><td>{_safe('' if support is None else support)}</td>"

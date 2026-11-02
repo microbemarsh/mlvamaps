@@ -71,7 +71,8 @@ def partial_repeat_lower_bound(sequence, locus):
     if len(suffix) < len(motif) or any(base != motif[i % len(motif)] for i, base in enumerate(suffix)):
         return None
     unit = locus.repeat_unit_length_bp or len(motif)
-    nonrepeat = len(locus.forward_primer) + len(flank) + len(locus.right_flank_sequence) + len(locus.reverse_primer)
+    nonrepeat = (len(locus.forward_primer) + len(locus.left_flank_sequence)
+                 + len(locus.right_flank_sequence) + len(locus.reverse_primer))
     offset = (locus.nominal_repeat_units - (locus.expected_product_size_bp - nonrepeat) / unit
               if locus.expected_product_size_bp and locus.nominal_repeat_units else 0)
     return max(0, len(suffix) / unit + offset)
