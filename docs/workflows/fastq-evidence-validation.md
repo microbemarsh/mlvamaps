@@ -1,5 +1,13 @@
 # FASTQ evidence changes and validation, 2026-11-02
 
+The historical audit below describes commit `6851a68` and its predecessor.
+Its numerical-suppression behavior is superseded by the
+[mandatory-count implementation and benchmark](fastq-complete-count-validation.md).
+Current FASTQ output always retains a best numerical estimate for valid configured
+loci with eligible priors. Confidence still reflects uncertainty; prior-only
+counts have zero sample-evidence confidence and are excluded from biological
+comparisons. The earlier measurements below remain unchanged as a historical record.
+
 This change hardens the existing caller against duplicate evidence, ambiguous
 recruitment, unsupported reference-count estimates, and excessive computation.
 It adds observed sequence alleles and explicit uncertainty outputs. It does

@@ -10,6 +10,7 @@ path, intermediate stage, output, and interpretation boundary.
 - [Architecture and resource flow](workflows/architecture.md)
 - [Accurate long-read and amplicon FASTQ](workflows/fastq.md)
 - [Paired/single-end Illumina sequencing](workflows/illumina.md)
+- [Mandatory FASTQ counts, confidence and validation](workflows/fastq-complete-count-validation.md)
 - [Genome assemblies and optional read support](workflows/assembly.md)
 - [Reference building](workflows/reference-building.md)
 - [Dataset aggregation and MYOGA export](workflows/myoga-export.md)

@@ -9,7 +9,7 @@ Add `--combined-markers` to restore the retrospective repeat-masked SNP plus
 repeat-distance workflow. It uses eight threads by default (`-t/--threads`),
 retains every discovered valid sample in the combined distance matrix and
 metadata, and leaves a distance blank only when two samples have neither a
-shared exact repeat call nor a shared recovered SNP sequence. Exact repeat calls
+shared non-prior-only repeat prediction nor a shared recovered SNP sequence. These repeat values
 remain usable when retained sequences are unavailable. Supply the rich locus panel with `--loci` when retained amplicons
 must be masked because precomputed masked query sequences are unavailable. For
 current results, the exporter reads `classification/query_amplicons.fasta` for
@@ -50,14 +50,16 @@ malformed results are recorded in `samples_excluded.tsv` rather than stopping
 Directories containing recognizable `mlvamaps` outputs but no
 `calls.tsv` are reported as `MISSING_CALLS_FILE`.
 
-A locus is callable only when its final `repeat_count` in `calls.tsv` is a
-finite numeric value. `present=yes`, a repeat interval, partial repeat evidence,
-or presence-only evidence does not create an exact allele. Missing calls remain
-empty in `mlva_profiles.tsv`; they are never converted to zero.
+A locus contributes to a repeat distance only when its final `repeat_count` is
+finite and `prior_only` is false. New FASTQ runs provide complete numerical
+predictions; `mlva_profiles.tsv` preserves these numbers while distance matrices
+and callability filters exclude prior-only values. Join `mlva_calls_long.tsv` for
+evidence classes; a finite value is not necessarily an exact measured genotype.
+Legacy/assembly missing calls remain empty and are never converted to zero.
 
-By default, the exporter retains any sample with at least one finite numeric
+By default, the exporter retains any sample with at least one finite, non-prior-only
 VNTR `repeat_count`; this is equivalent to `--min-callable-fraction 0` and
-`--min-callable-loci 0`. Samples with no exact VNTR calls are still excluded
+`--min-callable-loci 0`. Samples with no eligible VNTR predictions are still excluded
 because no repeat-count distance can be calculated for them.
 
 Use a positive `--min-callable-fraction` when a completeness filter is desired.
@@ -77,8 +79,9 @@ observations.
 
 ## Pairwise MLVA distances
 
-For samples `i` and `j`, `Cij` is the set of loci with finite exact repeat
-counts in both samples. The export reports both:
+For samples `i` and `j`, `Cij` is the set of loci with finite repeat predictions
+and `prior_only` false in both samples. The exporter does not require `EXACT`;
+consumers can apply stricter filters using `genotype_status`. The export reports both:
 
 ```text
 categorical_differences = count(repeat_i != repeat_j over Cij)

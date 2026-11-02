@@ -68,12 +68,15 @@ Both FASTQ paths call `run_unified_fastq_inference`:
    fractions with EM. Identical observations share weighted likelihood rows,
    preserving molecule counts while avoiding repeated calculations. Short reads
    can additionally enter the local assembly fallback described below.
-5. Preserve unresolved measured conflicts and partial reference matches as
-   candidate distributions without a numeric count. Spanning CIGAR estimates
+5. Preserve measured conflicts and partial reference matches as
+   numerical estimates with candidate distributions. Spanning CIGAR estimates
    require meaningful aligned support from both flanks. Paired length estimates
    require a usable library distribution. Exact terminal motif runs with a unique
    flank can provide a lower bound. Duplicate reference alignments do not multiply
    support, and derived estimates do not become measured classification evidence.
+   After reconstruction, `finalize_repeat_count_calls` completes all configured
+   FASTQ loci from the best evidence or an explicit locus prior. Prior-only counts
+   carry zero sample-evidence confidence and are excluded from biological distances.
 6. Write `common_locus_calls.tsv`, `molecule_candidate_evidence.tsv`,
    `genotype_evidence.tsv`, and `sequence_alleles.tsv`, then project conventional
    counts into the workflow's public tables. Legacy `PASS` does not mean `EXACT`.
@@ -107,10 +110,10 @@ observed reconstruction-support fraction; it is not a calibrated probability.
 Novel or fractional measured alleles can be called outside the
 reference catalog. Estimates carry `estimation_method`, `estimation_reason`, and
 `estimate_support`; their model support is not a calibrated probability of
-correctness. When neither measurement nor estimation is possible, detected loci
-remain `PRESENT_COUNT_UNKNOWN`. Every panel locus appears in the report's visible
-count table, with `Unavailable` when there is no usable sizing evidence. Missing
-is never converted to zero.
+correctness. Presence statuses remain independent of the mandatory numerical
+prediction. Every valid configured FASTQ locus receives a count when its panel
+or observed references define a prior. A missing prior and absent informative
+evidence produce a configuration error; missingness is never converted to zero.
 
 ## Short-read FASTQ
 

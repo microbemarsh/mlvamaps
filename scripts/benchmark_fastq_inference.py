@@ -91,6 +91,38 @@ def challenge_metrics(output, truth):
     called = {locus: value for locus, value in values.items() if value is not None and locus in present}
     errors = [min(abs(value - allele) for allele in present[locus]["alleles"]) for locus, value in called.items()]
     absent = [locus for locus, row in truth.items() if row["repeat_count"] is None]
+    evidence_path = Path(output) / "genotype_evidence.tsv"
+    evidence = {}
+    if evidence_path.exists():
+        with evidence_path.open() as handle:
+            evidence = {row["locus"]: row for row in csv.DictReader(handle, delimiter="\t")}
+    evidence_classes, calibration = {}, {}
+    for name, expected in present.items():
+        row = evidence.get(name, {})
+        group = row.get("genotype_status", "UNREPORTED")
+        bucket = evidence_classes.setdefault(group, dict(total=0, numeric=0, correct=0, absolute_errors=[]))
+        bucket["total"] += 1
+        if name in called:
+            error = min(abs(called[name] - allele) for allele in expected["alleles"])
+            bucket["numeric"] += 1
+            bucket["correct"] += error == 0
+            bucket["absolute_errors"].append(error)
+    for bucket in evidence_classes.values():
+        bucket["accuracy_all_loci"] = bucket["correct"] / bucket["total"]
+        bucket["mae_among_numeric"] = statistics.mean(bucket["absolute_errors"]) if bucket["absolute_errors"] else None
+    for field in ("model_support", "data_evidence_confidence"):
+        points = [(float(evidence.get(name, {}).get(field) or row.get(field) or
+                         (row.get("allele_confidence") if field == "model_support" else 0) or 0),
+                   int(called[name] in present[name]["alleles"]))
+                  for (_, name), row in calls.items() if name in called
+                  and (field == "model_support" or field in row or field in evidence.get(name, {}))]
+        bins = []
+        for lower, upper in ((0, .25), (.25, .5), (.5, .75), (.75, 1.000001)):
+            selected = [(support, correct) for support, correct in points if lower <= support < upper]
+            bins.append(dict(lower=lower, upper=min(1, upper), n=len(selected),
+                mean_support=statistics.mean(support for support, _ in selected) if selected else None,
+                observed_accuracy=statistics.mean(correct for _, correct in selected) if selected else None))
+        calibration[field] = dict(bins=bins, brier=statistics.mean((support - correct)**2 for support, correct in points) if points else None)
     strata = {}
     for field in ("coverage", "motif_length", "repeat_bases", "error_rate"):
         strata[field] = {}
@@ -123,13 +155,21 @@ def challenge_metrics(output, truth):
         curve.append({"model_support_threshold": threshold, "call_rate": len(selected) / max(1, len(present)),
             "accuracy": sum(row["repeat_count"] in present[row["locus_id"]]["alleles"] for row in selected) / len(selected) if selected else None})
     return {"call_rate": len(called) / max(1, len(present)),
+        "configured_loci": len(truth), "truth_known_loci": len(present),
+        "numerical_completion_rate": sum(values.get(name) is not None for name in truth) / max(1, len(truth)),
+        "exact_accuracy_all_truth_known": sum(error == 0 for error in errors) / max(1, len(present)),
+        "missing_truth_known": len(present) - len(called),
+        "mae_all_truth_known": statistics.mean(errors) if len(called) == len(present) and errors else None,
+        "evidence_classes": evidence_classes, "calibration": calibration,
         "accuracy_among_calls": sum(error == 0 for error in errors) / len(errors) if errors else None,
         "mae": statistics.mean(errors) if errors else None,
-        "false_positive_genotype_rate": sum(values.get(name) is not None for name in absent) / max(1, len(absent)),
+        "absent_numeric_prediction_rate": sum(values.get(name) is not None for name in absent) / max(1, len(absent)),
+        "false_positive_genotype_rate": sum(row.get("present") == "yes" for (_, name), row in calls.items() if name in absent) / max(1, len(absent)),
         "sequence_accuracy_among_reported": sequence_accuracy, "strata": strata,
         "locus_assignment_accuracy": assignment_accuracy, "locus_assignment_rate": assignment_rate,
         "accuracy_call_rate_curve": curve,
-        "note": "Mixture counts are scored against either known allele. Missing calls remain in call-rate denominators."}
+        "note": "Mixture counts are scored against either known allele. Missing calls fail all-locus exact accuracy; their absolute error is undefined. "
+                "Absent loci have no truth allele: numerical completion is separate from observed presence. Calibration is descriptive on this small synthetic set, not validation."}
 
 
 def compare_versions(args, fixture):
@@ -154,6 +194,10 @@ def compare_versions(args, fixture):
         arguments = list(argv)
         arguments[arguments.index("-o") + 1] = str(target / "calls")
         arguments.extend(["--keep-intermediates", "--debug-disagreements"])
+        if args.max_candidates:
+            arguments.extend(["--fastq-max-candidates", str(args.max_candidates)])
+        if args.max_likelihood_cells:
+            arguments.extend(["--fastq-max-likelihood-cells", str(args.max_likelihood_cells)])
         spec, measurement = target / "arguments.json", target / "measurement.json"
         spec.write_text(json.dumps(arguments))
         environment = dict(os.environ, PYTHONPATH=source)
@@ -193,6 +237,7 @@ def compare_versions(args, fixture):
         if layout.startswith("challenge_"):
             from fastq_challenge_fixture import prepare_challenge
             argv, paths, synthetic_truth = prepare_challenge(prepared, layout.removeprefix("challenge_"), args.copies)
+            argv[argv.index("--sample-mode") + 1] = args.sample_mode
             truth = {("sample", name): {"repeat_count": row["repeat_count"], "status": "KNOWN_SYNTHETIC_TRUTH"}
                      for name, row in synthetic_truth.items()}
         else:
@@ -261,6 +306,8 @@ def main():
     parser.add_argument("--layouts", nargs="+", choices=("paired", "shotgun", "long"),
                         default=["paired", "shotgun", "long"])
     parser.add_argument("--sample-mode", choices=("isolate", "metagenome"), default="isolate")
+    parser.add_argument("--max-candidates", type=int, help="Apply the same candidate budget to both sources")
+    parser.add_argument("--max-likelihood-cells", type=int, help="Apply the same likelihood cell budget to both sources")
     args = parser.parse_args()
     if args.repetitions < 1 or args.copies < 1:
         parser.error("repetitions and copies must be positive")

@@ -34,7 +34,7 @@ become measured molecule evidence for reference classification.
 
 Independent molecules contribute to the locus posterior. Duplicate reference
 contexts and two mates from one fragment do not multiply support. Conflicting
-measurements of one molecule remain unresolved. The shared primary results are
+measurements of one molecule retain competing likelihoods without extra votes. The shared primary results are
 recorded in `common_locus_calls.tsv` and projected into `allele_calls.tsv`,
 `calls.tsv`, and fingerprints. SPOARS and read-level predictions remain
 confirmation outputs; they do not replace the shared primary call.
@@ -59,9 +59,11 @@ Partial-mapping estimates are limited to supported catalog alleles. Duplicate
 reference matches do not multiply support, and repeat-only cross-mappings do
 not qualify for an alignment estimate.
 
-`PRESENT_COUNT_UNKNOWN` retains presence with an empty count when neither direct
-sizing nor estimation is possible. Missing data are
-never zero-filled. `presence_support` records detected molecules and
+`PRESENT_COUNT_UNKNOWN` retains the presence classification when sample sizing
+is unidentifiable. A shared finalizer still supplies an explicit prior prediction
+for every valid configured FASTQ locus with an eligible prior. Prior-only counts
+have zero sample-evidence confidence and are excluded from biological comparisons.
+Missing data are never zero-filled. `presence_support` records detected molecules and
 `molecule_support` records informative molecules in the common table. The
 probabilities describe model support, not a calibrated probability of correctness.
 
@@ -70,7 +72,7 @@ probabilities describe model support, not a calibrated probability of correctnes
 `mlva_fingerprint.tsv` contains one row with one column per panel locus.
 `mlva_fingerprint_probabilistic.tsv` contains long-form repeat counts and
 posterior values.
-Estimated counts are included; consult the call status and estimation fields
+Estimated and prior-only counts are included; consult the call status and estimation fields
 before treating a fingerprint value as measured. The HTML report presents every
 panel locus in an always-visible count table, marking estimates with `≈`.
 

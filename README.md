@@ -48,8 +48,11 @@ A supported consensus conflicting with a confident molecule call is explicitly
 unresolved. Consensus retains original molecule identities and never fills gaps
 with reference bases.
 
-Locus detection does not by itself imply a confident repeat-count call.
-Unresolved and missing calls remain explicit and are never converted to zero.
+Every valid configured FASTQ locus receives a finite, nonnegative numerical
+estimate when the panel or observed reference alleles define an eligible prior.
+Confidence and presence remain separate from that prediction. No-data loci use
+explicit `prior_only` predictions with zero sample-evidence confidence; missing
+evidence is never replaced with an arbitrary zero. Assembly behavior is unchanged.
 
 FASTQ inference retains raw molecule lengths and measurement uncertainty until
 the final assembly-compatible rounding step. Isolate mode fits one allele;
@@ -68,9 +71,10 @@ actual observed database amplicons. Measured products, resolved repeat flanks,
 or supported local assemblies supply direct counts. If direct sizing is
 unresolved, flank-supported spanning alignment indels or calibrated paired
 lengths can supply an `ESTIMATED` count. Partial reference matches and conflicting
-measurements retain uncertainty without filling in a reference repeat count.
+measurements retain a best estimate together with their uncertainty.
 The report lists every locus with its count, status, support, and uncertainty.
-Loci without usable sizing evidence remain explicitly unavailable. Novel measured alleles remain callable.
+Loci without usable sample sizing evidence receive a labelled locus-specific prior prediction.
+Novel measured alleles remain callable.
 The same alignments and molecule-level repeat measurements inform reference
 classification, preserving equivalent references and unresolved evidence.
 
@@ -204,8 +208,8 @@ Start with:
 | `calls.tsv` | Tidy per-locus calls and statuses. |
 | `locus_repeat_counts.tsv` | Compact individual-locus repeat counts. |
 
-Failed or unresolved loci are reported explicitly rather than silently changed
-to zero. See the complete [output reference](docs/reference/outputs.md) for all
+FASTQ fingerprints include measured, estimated, and prior-only counts. Biological
+comparisons exclude prior-only predictions. See the [output reference](docs/reference/outputs.md) for all
 evidence and diagnostic files.
 
 Single-input calls write directly to the requested output directory. Directory

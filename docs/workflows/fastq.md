@@ -2,8 +2,9 @@
 
 FASTQ calling requires a completed `--database`. Short and long reads map
 directly to its observed reference loci and share molecule-level repeat
-inference and reference classification. Directly measured counts take precedence;
-unresolved sizing can fall back to an explicitly labelled low-confidence estimate.
+inference and reference classification. Every valid configured locus receives a
+numerical prediction when an eligible prior exists. Direct measurements take
+precedence; uncertainty changes confidence rather than suppressing the count.
 
 ```bash
 mlvamaps call --database reference_build -i sample.fastq.gz -o results
@@ -11,7 +12,7 @@ mlvamaps call --database reference_build -i sample.fastq.gz -o results
 
 For paired reads, see the [Illumina workflow](illumina.md).
 For current uncertainty rules, limits, and same-input old/new comparisons, see
-the [evidence validation report](fastq-evidence-validation.md). The historical
+the [mandatory-count validation report](fastq-complete-count-validation.md). The historical
 runtime tables below describe earlier implementations.
 
 ## 1. Load the database panel and filter reads
@@ -90,7 +91,7 @@ approximate matches still use Sassy's coordinates and traceback.
 Measured evidence supplies direct alleles. If direct sizing remains unresolved,
 repeat-spanning CIGAR projections with meaningful aligned support at both flanks
 can provide `ESTIMATED` counts. Conflicting measurements and partial reference
-matches retain candidate distributions without numeric calls. Reference copies
+matches retain best estimates with candidate distributions. Reference copies
 and mate records do not multiply molecule support. Estimates are kept separate
 from measured counts used in reference classification.
 Novel and fractional measured alleles remain callable outside the catalog range.
@@ -107,13 +108,16 @@ ambiguous-locus, and possible-mixture evidence. Its interval is an observation
 envelope, not a calibrated confidence interval. `sequence_alleles.tsv` reports
 identical complete products observed in at least three independent molecules;
 it does not manufacture a polished sequence from uncertain bases. Isolate
-bimodality can leave the primary count unresolved with possible secondary
+bimodality retains the best primary count with possible secondary
 evidence. Neither that label nor legacy mixture support confirms strain mixtures.
 
 Low-depth calls, mixtures, ambiguous measurements, detected-but-unresolved loci,
-and missing loci retain distinct statuses. `PRESENT_COUNT_UNKNOWN` has no numeric
-repeat count when neither sizing nor estimation is possible. The report shows
-every locus in an always-visible table; missing values are never converted to zero.
+and missing loci retain distinct statuses. The finalizer uses a locus-specific
+prior when sample repeat evidence is absent, including when every read fails QC.
+These predictions carry `prior_only=True` and zero data-evidence confidence.
+Missing evidence is never converted to an arbitrary zero. A locus with neither
+informative evidence nor an eligible prior fails with a configuration error.
+See [prior and confidence definitions](../reference/outputs.md#complete-fastq-predictions-and-confidence).
 
 ## 5. Confirm representative sequences
 
@@ -160,8 +164,8 @@ by itself establish a reference identity.
 ## 7. Export results
 
 Start with `report.html`, `calls.tsv`, `mlva_fingerprint.tsv`, and
-`locus_repeat_counts.tsv`. Profile matching and reporting use the measured locus
-calls. Use the same panel calibration and `--assembly-round-tolerance` when
+`locus_repeat_counts.tsv`. Fingerprints contain all predictions; biological
+comparisons exclude prior-only values. Use the same panel calibration and `--assembly-round-tolerance` when
 comparing FASTQ and assembly fingerprints.
 
 Synthetic regression coverage includes single-end, paired, overlapping,

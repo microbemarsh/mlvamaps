@@ -170,7 +170,8 @@ is not reported as multiple independently observed full-spanning reads.
 If assembly fails and no independent sequence measurement resolves the count,
 usable mapping evidence can still supply a low-confidence `ESTIMATED` count.
 This remains distinct from an independently measured product. Loci without
-usable sizing evidence remain unavailable.
+usable sizing evidence receive explicit prior-only predictions with zero
+sample-evidence confidence, provided a locus-specific prior is available.
 
 Orphan mates contribute through flank recruitment even when their surviving
 mate was originally R2. Their separate FASTQ file is not mapped, so they do not
@@ -352,16 +353,17 @@ anchors and assembly-calibrated repeat convention. Direct counts require an
 independent product or flank measurement. Both boundaries on separate unmerged
 mates do not establish a measured repeat interval. Adequately flank-supported
 spanning CIGAR evidence or calibrated paired lengths can provide an `ESTIMATED`
-count. Conflicting observations and partial reference matches retain uncertainty
-without a numeric fallback. Exact terminal motif runs with a unique flank can
-provide a lower bound. These distinctions appear in `genotype_evidence.tsv`.
+count. Conflicting observations and partial reference matches retain a best
+numeric estimate with uncertainty. Exact terminal motif runs with a unique flank
+condition a locus prior on a lower bound. These distinctions appear in `genotype_evidence.tsv`.
 
 `common_locus_calls.tsv` separates all detected molecules (`presence_support`)
 from informative molecules (`molecule_support`). The compact call table uses
-`PRESENT_COUNT_UNKNOWN` for detected loci without either a measurement or an
-estimate and retains an empty `repeat_count`. Interval fields remain empty when
-no interval has been measured. The report's visible per-locus table includes
-all counts and estimates, with `Unavailable` for loci lacking sizing evidence.
+`PRESENT_COUNT_UNKNOWN` for detected loci without identifiable sample sizing.
+Every valid configured locus still receives a numerical prediction when an
+eligible prior exists. Prior-only predictions have zero sample-evidence confidence;
+presence is never inferred from a nonempty count. Reported intervals may describe
+bounded candidate envelopes rather than measured spans.
 
 ## Mixtures and confidence
 

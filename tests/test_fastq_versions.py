@@ -41,6 +41,11 @@ def test_challenge_metrics_keep_missing_calls_in_denominator(tmp_path):
     assert result["call_rate"] == 2 / 3
     assert result["accuracy_among_calls"] == .5
     assert result["mae"] == 2.5
+    assert result["exact_accuracy_all_truth_known"] == 1 / 3
+    assert result["numerical_completion_rate"] == .5
+    assert result["missing_truth_known"] == 1 and result["mae_all_truth_known"] is None
+    assert result["evidence_classes"]["UNREPORTED"]["total"] == 3
+    assert result["calibration"]["model_support"]["bins"][-1]["n"] == 1
     assert result["false_positive_genotype_rate"] == 0
     assert result["locus_assignment_accuracy"] == .5
     assert result["locus_assignment_rate"] == 2 / 3
