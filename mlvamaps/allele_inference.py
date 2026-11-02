@@ -573,6 +573,13 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresh
             continue
         else:
             measured = [row for row in rows if row.measured_repeat_count is not None]
+            paired = [row for row in rows if "pair_repeat_count" in row.metadata
+                      and "pair_repeat_sigma" in row.metadata]
+            best_pair_scores = {}
+            for row in paired:
+                best_pair_scores[row.molecule_id] = max(best_pair_scores.get(row.molecule_id, -math.inf),
+                                                       row.metadata.get("pair_alignment_score", 0))
+            paired = [row for row in paired if row.metadata.get("pair_alignment_score", 0) == best_pair_scores[row.molecule_id]]
             mapped = [row for row in rows if row.candidate_id in known
                       and row.repeat_count is not None and row.alignment_identity > 0
                       and math.isfinite(row.alignment_score)
@@ -581,14 +588,16 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresh
                           len(known[row.candidate_id].sequence) - known[row.candidate_id].repeat_end,
                       )))]
             spanning = [row for row in mapped if row.metadata.get("spanning_repeat_indel_delta") is not None]
-            if call.get("repeat_lower_bound") and not measured and not spanning:
+            if call.get("repeat_lower_bound") and not measured and not paired and not spanning:
                 continue  # The finalizer conditions the locus prior on this bound.
-            selected = measured or spanning or mapped
+            selected = measured or paired or spanning or mapped
             if not selected:
                 continue
             method, reason = (
                 ("conflicting_measurements", "Conflicting measurements within molecules; no unique direct count.")
                 if measured else
+                ("paired_fragment_length", "Competing calibrated paired-fragment lengths; alternatives within a molecule share one likelihood and do not establish a direct measurement.")
+                if paired else
                 ("alignment_repeat_span", "Reference repeat count adjusted by repeat-region CIGAR indels; no direct product measurement.")
                 if spanning else
                 ("reference_conditioned", "Partial mappings support a reference allele; repeat length is not directly resolved and alternatives outside the catalog are untested.")
@@ -596,22 +605,22 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresh
             molecule_scores, weights = defaultdict(dict), {}
             alternatives = defaultdict(set)
             for row in selected:
-                count = row.measured_repeat_count if measured else row.repeat_count
-                if spanning and not measured:
+                count = row.measured_repeat_count if measured else max(0, row.metadata["pair_repeat_count"]) if paired else row.repeat_count
+                if spanning and not measured and not paired:
                     count += float(row.metadata["spanning_repeat_indel_delta"])
                 if not math.isfinite(count) or count < 0:
                     continue
                 count = int(count) if float(count).is_integer() else count
-                score = 0.0 if measured else row.alignment_score / max(temperature, 1e-6)
+                score = 0.0 if measured or paired else row.alignment_score / max(temperature, 1e-6)
                 scores = molecule_scores[row.molecule_id]
                 scores[count] = max(scores.get(count, -math.inf), score)
-                if measured:
-                    raw = row.raw_repeat_count if row.raw_repeat_count is not None else count
-                    sigma = row.repeat_sigma if row.repeat_sigma is not None else .08
-                    if not math.isfinite(raw) or raw < 0 or not math.isfinite(sigma) or sigma <= 0:
+                if measured or paired:
+                    raw = (row.raw_repeat_count if row.raw_repeat_count is not None else count) if measured else row.metadata["pair_repeat_count"]
+                    sigma = (row.repeat_sigma if row.repeat_sigma is not None else .08) if measured else row.metadata["pair_repeat_sigma"]
+                    if not math.isfinite(raw) or (measured and raw < 0) or not math.isfinite(sigma) or sigma <= 0:
                         raise ValueError("Invalid conflicting molecule measurement or uncertainty")
                     alternatives[row.molecule_id].add((raw, sigma))
-                weight = 1.0 if measured else max(0.01, min(1.0, row.alignment_identity * row.query_coverage))
+                weight = 1.0 if measured or paired else max(0.01, min(1.0, row.alignment_identity * row.query_coverage))
                 weights[row.molecule_id] = max(weights.get(row.molecule_id, 0), weight)
             if not molecule_scores:
                 continue
@@ -626,7 +635,7 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresh
             totals = dict.fromkeys(states, 0.)
             for molecule, scores in molecule_scores.items():
                 for state in states:
-                    if measured:
+                    if measured or paired:
                         values = sorted(alternatives[molecule])
                         likelihoods = [-.5 * ((state - raw) / sigma)**2 - math.log(sigma)
                                        for raw, sigma in values]
@@ -669,7 +678,9 @@ def locus_repeat_prior(locus, contexts, maximum_candidates=2048):
                      and math.isfinite(context.repeat_count) and context.repeat_count >= 0})
     source = "observed_reference_prior"
     if not states and locus.expected_product_size_bp > 0 and repeat_unit_length(locus) > 0:
-        if math.isfinite(locus.nominal_repeat_units) and locus.nominal_repeat_units >= 0:
+        # Zero is also the legacy missing nominal default; require an observed
+        # zero allele or an explicit zero range to make it an eligible prior.
+        if math.isfinite(locus.nominal_repeat_units) and locus.nominal_repeat_units > 0:
             states = [locus.nominal_repeat_units]
             source = "calibrated_panel_prior"
     low, high = locus.expected_min_repeats, locus.expected_max_repeats
@@ -720,7 +731,7 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
             bounds = {}
             for row in usable:
                 bound = row.metadata.get("repeat_lower_bound")
-                if bound is not None and math.isfinite(bound) and bound >= 0:
+                if bound is not None and math.isfinite(bound) and bound > 0:
                     bounds[row.molecule_id] = max(bound, bounds.get(row.molecule_id, 0))
             if not prior and not bounds:
                 raise ValueError(f"Locus {locus.locus_id}: no informative repeat evidence or eligible locus-specific prior; "
@@ -752,6 +763,14 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
                         confidence="low" if bounds else "unresolved", estimation_method=source,
                         estimation_reason=reason, estimate_support=len(bounds))
             prior_only = not bounds
+            if prior_only and limited:
+                if source == "panel_range_prior":
+                    call.update(repeat_interval_low=locus.expected_min_repeats, repeat_interval_high=locus.expected_max_repeats)
+                elif source == "observed_reference_prior":
+                    observed = [context.repeat_count for context in contexts_by_locus[locus.locus_id]
+                                if context.observed_or_synthetic == "observed" and context.repeat_count is not None
+                                and math.isfinite(context.repeat_count) and context.repeat_count >= 0]
+                    call.update(repeat_interval_low=min(observed), repeat_interval_high=max(observed))
         value = call["repeat_count"]
         if not math.isfinite(float(value)) or float(value) < 0:
             raise ValueError(f"Locus {locus.locus_id}: invalid final repeat count {value!r}")
@@ -770,7 +789,9 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
                   "alignment_repeat_span": .4, "reference_conditioned": .1,
                   "partial_repeat_likelihood": .1}.get(source, .25)
         sigma = max((row.repeat_sigma or .08 for row in usable if row.measured_repeat_count is not None), default=.08)
-        confidence = model_support * support / (support + thresholds.minimum_molecules) * weight / max(1., sigma)
+        confidence = model_support * support / (support + max(1, thresholds.minimum_molecules)) * weight / (1. + sigma)
+        if any(row.quality_flags for row in usable if row.measured_repeat_count is not None):
+            confidence *= .5
         if call["status"] in {"ambiguous", "mixed"} or call.get("computational_fallback"):
             confidence *= .25
         if call.get("repeat_interval_low") in (None, ""):

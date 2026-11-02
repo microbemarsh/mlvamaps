@@ -44,7 +44,13 @@ def test_prior_is_explicit_and_reference_copy_invariant():
     assert row["second_best_repeat_count"] == 8
     with pytest.raises(ValueError, match="eligible locus-specific prior"):
         complete(locus=locus)
+    with pytest.raises(ValueError, match="eligible locus-specific prior"):
+        complete(locus=replace(locus, expected_product_size_bp=200, repeat_unit_length_bp=4))
     assert complete(locus=replace(locus, expected_min_repeats=2, expected_max_repeats=8))[0]["repeat_count"] == 2
+    zero = complete(locus=replace(locus, expected_max_repeats=0))[0]
+    assert zero["repeat_count"] == 0 and zero["prior_only"]
+    bounded = complete(locus=replace(locus, expected_max_repeats=1000000), limits=InferenceThresholds(maximum_candidates=1))[0]
+    assert bounded["repeat_interval_high"] == 1000000 and bounded["computational_fallback"]
 
 
 @pytest.mark.parametrize("mode", ["isolate", "metagenome"])
@@ -111,6 +117,16 @@ def test_conflicting_candidates_use_joint_likelihood_and_never_reference_copy_vo
     assert limited["repeat_count"] == 8 and limited["computational_fallback"]
 
 
+def test_competing_pair_lengths_precede_partial_or_prior_predictions():
+    rows = [CandidateEvidence("L", None, molecule, metadata={"pair_repeat_count": value,
+                "pair_repeat_sigma": .2, "pair_alignment_score": 100, "repeat_lower_bound": 2})
+            for molecule, values in (("a", (4, 8)), ("b", (6, 8))) for value in values]
+    call, molecules = complete(rows)
+    assert call["repeat_count"] == 8 and call["estimate_source"] == "paired_fragment_length"
+    assert call["independent_support"] == 2 and not molecules and call["molecule_support"] == 0
+    assert complete(rows + [rows[0]] * 100)[0] == call
+
+
 def test_partial_bound_uses_full_flank_for_product_calibration():
     from mlvamaps.short_read_evidence import partial_repeat_lower_bound
     locus = Locus("L", forward_primer="A" * 20, reverse_primer="T" * 20,
@@ -126,6 +142,9 @@ def test_direct_sizing_takes_priority_over_partial_and_reference_evidence():
               raw_repeat_count=400, repeat_sigma=.08, direct_product_measurement=True) for i in range(3)]
     partial = CandidateEvidence("L", 4, "other", metadata={"repeat_lower_bound": 12})
     assert complete(direct + [partial])[0]["repeat_count"] == 400
+    noisy = [replace(row, repeat_sigma=.8) for row in direct]
+    assert complete(noisy)[0]["data_evidence_confidence"] < complete(direct)[0]["data_evidence_confidence"]
+    assert complete(noisy)[0]["repeat_interval_high"] > complete(direct)[0]["repeat_interval_high"]
 
 
 @pytest.mark.parametrize("layout", ["paired", "long"])

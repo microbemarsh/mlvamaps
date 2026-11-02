@@ -459,6 +459,8 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
         count = _called_count(row.get(value_key))
         raw = row.get(raw_key, "")
         status = str(row.get("status" if assembly else "call_status", ""))
+        if str(row.get("prior_only", "")).lower() in {"true", "yes", "1"}:
+            status = "PRIOR_ONLY"
         normalized.append((str(row.get("locus_id", "")), count, raw, status, row.get("posterior_probability", "")))
     max_count = max((count for _locus, count, _raw, _status, _support in normalized if count is not None), default=1)
     has_estimates = any(status == "ESTIMATED" for _locus, _count, _raw, status, _support in normalized)
@@ -532,6 +534,8 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
         )
         radius = min(12.0, 4.5 + math.log10(depth + 1) * 2.2)
         status = str(row.get("call_status") or "")
+        if str(row.get("prior_only", "")).lower() in {"true", "yes", "1"}:
+            status = "PRIOR_ONLY"
         color = _STATUS_COLORS.get(status, "#bdcbd6")
         x = plot_left + (posterior * plot_width)
         support_label = _confidence_label(f"{posterior:.3f}", status) if status == "ESTIMATED" else f"posterior {posterior:.3f}"
@@ -551,7 +555,7 @@ def _locus_confidence_svg(allele_rows: list[dict]) -> str:
     {"".join(ticks)}
     {"".join(marks)}
   </svg>
-  <figcaption>{"Farther right means greater model support among tested candidates. ESTIMATED calls remain low confidence even at high model support." if has_estimates else "Farther right is more confident."} Point size scales with dominant-cluster read depth; status is also printed beside each point.</figcaption>
+  <figcaption>{"Farther right means greater model support among tested candidates. Model support is not calibrated accuracy; prior-only predictions have zero sample-evidence confidence." if has_estimates or any("model_support" in row for row in rows) else "Farther right is more confident."} Point size scales with dominant-cluster read depth; status is also printed beside each point.</figcaption>
 </figure>
 """
 

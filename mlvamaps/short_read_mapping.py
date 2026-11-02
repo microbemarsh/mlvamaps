@@ -237,7 +237,8 @@ def run_mapping_short_read_call(
             sample_mode=sample_mode,
             threads=thread_count, minimap2_bin=minimap2_bin,
             locus_quality={str(row["locus"]): {"depth": row["molecule_support"], "status": row["status"]} for row in common_calls},
-            query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in calls if row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},
+            query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in calls
+                                 if not row.get("prior_only") and row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},
             reference_metadata_path=reference_metadata_path,
             taxon_identification=taxon_identification, minimum_loci=taxon_min_loci or 2,
             repeat_scale=classification_repeat_scale,

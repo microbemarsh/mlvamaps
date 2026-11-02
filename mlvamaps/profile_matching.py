@@ -75,7 +75,7 @@ def match_profiles(
     fingerprint = _comparison_fingerprint(fingerprint, allele_rows)
     probability_by_locus = {
         str(row["locus_id"]): _allele_probability_map(row)
-        for row in allele_rows or []
+        for row in allele_rows or [] if repeat_is_comparable(row)
     }
     locus_columns = [col for col in profiles[0] if col not in RESERVED_PROFILE_COLUMNS]
     # Numeric profile distance is the dominant path.  Compute the complete
@@ -250,7 +250,7 @@ def profile_match_locus_rows(
     }
     probability_by_locus = {
         str(row["locus_id"]): _allele_probability_map(row)
-        for row in allele_rows or []
+        for row in allele_rows or [] if repeat_is_comparable(row)
     }
     rows = []
     for match in match_rows:

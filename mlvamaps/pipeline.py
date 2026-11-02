@@ -25,6 +25,7 @@ from .profile_matching import (
     match_profiles,
     profile_match_locus_rows,
     sequence_reference_match_rows,
+    repeat_is_comparable,
 )
 from .mapping_classification import MISSING_LOCUS_FIELDS
 from .progress import ProgressReporter
@@ -907,7 +908,8 @@ def run_call(
             sample_mode=sample_mode,
             threads=thread_count, minimap2_bin=minimap2_bin,
             locus_quality={str(row["locus"]): {"depth": row["molecule_support"], "status": row["status"]} for row in unified_calls},
-            query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in simple_call_rows if row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},
+            query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in simple_call_rows
+                                 if repeat_is_comparable(row) and row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},
             reference_metadata_path=reference_metadata_path,
             taxon_identification=taxon_identification, minimum_loci=taxon_min_loci or 2,
             repeat_scale=classification_repeat_scale,
