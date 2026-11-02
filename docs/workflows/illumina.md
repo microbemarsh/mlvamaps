@@ -126,10 +126,18 @@ opposite unique flanks. Mean and standard deviation describe the full library
 fragment length, including both reads. Estimates use Gaussian insert-length
 likelihoods and remain low-confidence `ESTIMATED`, with method
 `paired_fragment_length`. They cannot replace direct measurements or create
-measured support for classification. Calibration is not inferred from
-overlapping pairs or locus-only template lengths, which can be length-biased.
+measured support for classification. Without explicit settings, automatic
+calibration requires at least 100 independent inward primary pairs wholly
+within unique nonrepeat flanks, MAPQ at least 20, near-complete high-identity
+alignments, nonzero trimmed dispersion, and sufficient distance from target
+edges. Short amplicon catalogs commonly provide no eligible calibration.
 The Gaussian fallback does not correct for target-selection bias; targeted or
 amplicon libraries may violate its fragment-sampling assumptions.
+
+`library_insert_distribution.tsv` records the effective calibration and its
+source. The legacy QC and run-metadata insert fields still describe only
+user-supplied settings. See [evidence validation](fastq-evidence-validation.md)
+for current status definitions, limits, retained errors, and measured tradeoffs.
 
 ## Conditional micro-assembly
 
@@ -342,10 +350,11 @@ explicit. See [mapping classification](../concepts/mapping-classification.md).
 Each assembled product, merged pair, and original read uses the same panel
 anchors and assembly-calibrated repeat convention. Direct counts require an
 independent product or flank measurement. Both boundaries on separate unmerged
-mates do not establish a measured repeat interval. Unresolved calls can instead
-carry an `ESTIMATED` count based on conflicting observations, repeat-spanning
-CIGAR evidence, or reference-conditioned alignment support. These remain low
-confidence and include their estimation method, support, and uncertainty reason.
+mates do not establish a measured repeat interval. Adequately flank-supported
+spanning CIGAR evidence or calibrated paired lengths can provide an `ESTIMATED`
+count. Conflicting observations and partial reference matches retain uncertainty
+without a numeric fallback. Exact terminal motif runs with a unique flank can
+provide a lower bound. These distinctions appear in `genotype_evidence.tsv`.
 
 `common_locus_calls.tsv` separates all detected molecules (`presence_support`)
 from informative molecules (`molecule_support`). The compact call table uses

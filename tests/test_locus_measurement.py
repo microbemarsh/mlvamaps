@@ -101,6 +101,15 @@ def test_incomplete_anchor_never_becomes_full_product():
     assert measurement.called_allele == 5
 
 
+def test_true_zero_repeat_uses_anchor_quality_instead_of_an_empty_quality_slice():
+    from dataclasses import replace
+    locus = replace(_locus(), expected_min_repeats=0)
+    product = _product(0)
+    measurement = measure_locus_product(product, locus, "I" * len(product), source="fastq_read")
+    assert measurement.called_allele == 0
+    assert measurement.metadata["repeat_sigma"] < .2
+
+
 def test_iupac_primer_anchor_is_supported():
     locus = Locus(**{**_locus().__dict__, "forward_primer": "AAAACCCN"})
     measurement = measure_locus_product(_product(5), locus, source="fastq_read")

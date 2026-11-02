@@ -3,6 +3,39 @@
 Scripts in this directory are narrow maintenance and validation utilities rather than part
 of the public `mlvamaps` command-line interface.
 
+## `benchmark_fastq_inference.py`
+
+Run both source versions in fresh processes on exactly the same retained FASTQs:
+
+```bash
+python scripts/benchmark_fastq_inference.py \
+  --baseline-source /path/to/baseline-checkout \
+  --workdir /path/to/empty-comparison-directory \
+  --repetitions 3 --copies 2 --challenge \
+  --ablations no_error_model no_motif_refinement no_partial_bounds
+```
+
+Use the same Python environment with the development dependencies, minimap2,
+and Sassy on `PATH`. Preparation is excluded from timing. The harness alternates
+baseline/updated order and runs workers serially. It refuses to overwrite a
+nonempty work directory and retains FASTQs, SHA-256 hashes, source hashes,
+arguments, outputs, BAMs, logs, measurements, truth comparisons, and every
+numeric/status disagreement in `comparison.json`. A failed worker makes the
+benchmark fail. Output hashes check repeatability across trials.
+
+The clean fixture exercises three layouts and 11 known alleles. With
+`--challenge`, `fastq_challenge_fixture.py` adds fixed-seed paired and long-read
+fixtures with expansions, contractions, errors, long arrays, ambiguous loci,
+mixtures, and missing/low coverage. Their truth is specified before calling;
+neither version defines truth. `--copies` changes coverage by copying reads with
+new IDs; these are not independent sequencing-error replicates. All loci stay in
+the summaries. Stratified metrics and accuracy/call-rate curves retain missing
+calls; model-support thresholds are not calibrated probabilities.
+
+The original timing-only invocation remains available. See the
+[validation report](../docs/workflows/fastq-evidence-validation.md) for measured
+results, limitations, profile reproduction, and the retained disagreements.
+
 ## `convert_geonome_metadata.py`
 
 Converts a Geonome metadata table, reference directory, or manifest into the

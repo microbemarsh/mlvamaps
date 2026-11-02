@@ -6,7 +6,7 @@ from pathlib import Path
 from .bayesian_caller import call_loci
 from .allele_inference import ESTIMATION_FIELDS
 from .concurrency import DEFAULT_THREADS, resolve_threads
-from .io import read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
+from .io import ReadSpool, read_fastq, read_profiles, write_fasta, write_fastq, write_tsv
 from .local_assembly import (
     LOCAL_ASSEMBLY_FIELDS,
     assemble_dominant_locus_products,
@@ -397,6 +397,7 @@ def run_call(
     missing_locus_min_fraction: float = 0.8,
     missing_locus_penalty: float = 8.0,
     classification_repeat_scale: float = 1.0,
+    inference_limits=None,
 ) -> dict[str, Path]:
     outdir_path = Path(outdir)
     outdir_path.mkdir(parents=True, exist_ok=True)
@@ -439,114 +440,119 @@ def run_call(
             "taxon_screen_summary": taxon_screen_summary_path,
         }
 
-    progress.step(f"Reading reads from {downstream_reads_path}")
-    reads = []
-    for idx, read in enumerate(read_fastq(downstream_reads_path), start=1):
-        reads.append(read)
-        progress.count("Read FASTQ records", idx)
-    progress.count("Read FASTQ records", len(reads), force=True)
-
-    progress.step("Filtering reads")
-    filtered_reads, qc_rows = filter_reads(reads, min_read_length, max_read_length, min_qscore, progress)
-    if screen_summary:
-        qc_rows.extend(
-            [
-                {
-                    "metric": "taxon_screen_input_reads",
-                    "value": int(screen_summary.get("seqs_in", 0)),
-                },
-                {
-                    "metric": "taxon_screen_retained_reads",
-                    "value": int(screen_summary.get("seqs_out", 0)),
-                },
-                {
-                    "metric": "taxon_screen_rejected_reads",
-                    "value": int(screen_summary.get("seqs_removed", 0)),
-                },
-                {
-                    "metric": "taxon_screen_retained_bp",
-                    "value": int(screen_summary.get("bp_out", 0)),
-                },
-            ]
-        )
-    progress.step(f"Kept {len(filtered_reads):,}/{len(reads):,} reads after QC")
-    write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
-    write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
-
-    primer_assignments = []
-    # Primer recovery can supply measurements even when a read fails to map.
-    # Observed-reference alignments are shared with reference classification.
-    reference_alignments = []
-    _molecule_calls = {}
-    unified_calls: list[dict] = []
-    unified_paths: dict[str, Path] = {}
-    if filtered_reads:
-        from .unified_fastq import run_unified_fastq_inference
-
-        preset = {
-            "map-ont": "ont", "ont": "ont", "lr:hq": "ont-hq",
-            "map-hifi": "hifi", "hifi": "hifi",
-        }.get(str(recruitment_preset or "").lower(), "hifi")
-        progress.step("Mapping reads directly to observed reference loci")
-        unified_calls, _candidate_evidence, _molecule_calls, unified_paths = (
-            run_unified_fastq_inference(
-                reads1=outdir_path / "filtered_reads.fastq.gz",
-                reads2=None,
-                loci=loci,
-                database_path=database_path or recruitment_database_path,
-                outdir=outdir_path,
-                sample_id=sample_id,
-                technology=preset,
-                minimap2_bin=minimap2_bin,
-                threads=thread_count,
-                minimum_molecules=min_depth,
-                minimum_probability=min_posterior,
-                keep_alignments=True,
-                round_tolerance=assembly_round_tolerance,
-                primer_assignments=primer_assignments,
-                rescue_reads=filtered_reads,
-                max_primer_mismatches=max_primer_mismatches,
-                reference_alignments=reference_alignments,
-                sample_mode=sample_mode,
-                mixture_min_fraction=min_mixture_fraction,
-                mixture_min_molecules=min_secondary_reads,
+    with ReadSpool() as filtered_reads:
+        progress.step("Filtering reads")
+        filtered_reads, qc_rows = filter_reads(read_fastq(downstream_reads_path), min_read_length,
+                                              max_read_length, min_qscore, progress, retained=filtered_reads)
+        if screen_summary:
+            qc_rows.extend(
+                [
+                    {
+                        "metric": "taxon_screen_input_reads",
+                        "value": int(screen_summary.get("seqs_in", 0)),
+                    },
+                    {
+                        "metric": "taxon_screen_retained_reads",
+                        "value": int(screen_summary.get("seqs_out", 0)),
+                    },
+                    {
+                        "metric": "taxon_screen_rejected_reads",
+                        "value": int(screen_summary.get("seqs_removed", 0)),
+                    },
+                    {
+                        "metric": "taxon_screen_retained_bp",
+                        "value": int(screen_summary.get("bp_out", 0)),
+                    },
+                ]
             )
-        )
+        progress.step(f"Kept {len(filtered_reads):,}/{qc_rows[0]['value']:,} reads after QC")
+        write_tsv(qc_rows, outdir_path / "qc_summary.tsv", ["metric", "value"])
+        write_fastq(filtered_reads, outdir_path / "filtered_reads.fastq.gz")
 
-    recruitment_paths = {
-        "recruited_reads": outdir_path / "locus_recruited_reads.tsv",
-        "locus_presence": outdir_path / "locus_presence.tsv",
-        "local_products": outdir_path / "local_locus_products.fasta.gz",
-        "recruitment_references": (
-            outdir_path / "recruitment" / "locus_recruitment_references.fasta.gz"
-        ),
-        "recruitment_alignments": (
-            outdir_path / "recruitment" / "read_recruitment.sam"
-        ),
-    }
-    recruited_assignments = []
-    recruited_rows: list[dict] = []
-    progress.step("Reusing competitive mappings for locus recruitment")
-    (
-        recruited_rows,
-        _presence_rows,
-        recruited_assignments,
-        recruitment_paths,
-    ) = run_read_recruitment(
-        filtered_reads,
-        loci,
-        outdir_path,
-        sample_id,
-        recruitment_database_path or database_path,
-        thread_count,
-        executable=minimap2_bin,
-        preset=recruitment_preset,
-        min_mapping_quality=min_mapping_quality,
-        min_alignment_identity=recruitment_min_identity,
-        min_aligned_bp=recruitment_min_aligned_bp,
-        min_locus_score_margin=recruitment_min_locus_margin,
-        mapped_paths=unified_paths if filtered_reads else None,
-    )
+        primer_assignments = []
+        # Primer recovery can supply measurements even when a read fails to map.
+        # Observed-reference alignments are shared with reference classification.
+        reference_alignments = []
+        _molecule_calls = {}
+        unified_calls: list[dict] = []
+        unified_paths: dict[str, Path] = {}
+        if filtered_reads:
+            from .unified_fastq import run_unified_fastq_inference
+
+            preset = {
+                "map-ont": "ont", "ont": "ont", "lr:hq": "ont-hq",
+                "map-hifi": "hifi", "hifi": "hifi",
+            }.get(str(recruitment_preset or "").lower(), "hifi")
+            progress.step("Mapping reads directly to observed reference loci")
+            unified_calls, _candidate_evidence, _molecule_calls, unified_paths = (
+                run_unified_fastq_inference(
+                    reads1=outdir_path / "filtered_reads.fastq.gz",
+                    reads2=None,
+                    loci=loci,
+                    database_path=database_path or recruitment_database_path,
+                    outdir=outdir_path,
+                    sample_id=sample_id,
+                    technology=preset,
+                    minimap2_bin=minimap2_bin,
+                    threads=thread_count,
+                    minimum_molecules=min_depth,
+                    minimum_probability=min_posterior,
+                    keep_alignments=True,
+                    round_tolerance=assembly_round_tolerance,
+                    primer_assignments=primer_assignments,
+                    rescue_reads=filtered_reads,
+                    max_primer_mismatches=max_primer_mismatches,
+                    reference_alignments=reference_alignments,
+                    sample_mode=sample_mode,
+                    mixture_min_fraction=min_mixture_fraction,
+                    mixture_min_molecules=min_secondary_reads,
+                    inference_limits=inference_limits,
+                )
+            )
+
+        else:
+            from .allele_inference import COMMON_LOCUS_CALL_FIELDS, InferenceThresholds, infer_alleles
+            from .evidence_reporting import write_evidence_reports
+            limits = inference_limits or InferenceThresholds()
+            unified_calls, _molecule_calls = infer_alleles([], loci, [], sample_id, "hifi", limits, require_measurement=True)
+            unified_paths.update(write_evidence_reports(unified_calls, [], loci, outdir_path, limits))
+            unified_paths["common_locus_calls"] = outdir_path / "common_locus_calls.tsv"
+            write_tsv(unified_calls, unified_paths["common_locus_calls"], COMMON_LOCUS_CALL_FIELDS)
+
+        recruitment_paths = {
+            "recruited_reads": outdir_path / "locus_recruited_reads.tsv",
+            "locus_presence": outdir_path / "locus_presence.tsv",
+            "local_products": outdir_path / "local_locus_products.fasta.gz",
+            "recruitment_references": (
+                outdir_path / "recruitment" / "locus_recruitment_references.fasta.gz"
+            ),
+            "recruitment_alignments": (
+                outdir_path / "recruitment" / "read_recruitment.sam"
+            ),
+        }
+        recruited_assignments = []
+        recruited_rows: list[dict] = []
+        progress.step("Reusing competitive mappings for locus recruitment")
+        (
+            recruited_rows,
+            _presence_rows,
+            recruited_assignments,
+            recruitment_paths,
+        ) = run_read_recruitment(
+            filtered_reads,
+            loci,
+            outdir_path,
+            sample_id,
+            recruitment_database_path or database_path,
+            thread_count,
+            executable=minimap2_bin,
+            preset=recruitment_preset,
+            min_mapping_quality=min_mapping_quality,
+            min_alignment_identity=recruitment_min_identity,
+            min_aligned_bp=recruitment_min_aligned_bp,
+            min_locus_score_margin=recruitment_min_locus_margin,
+            mapped_paths=unified_paths if filtered_reads else None,
+        )
 
     recruited_by_read = {
         assignment.read_id: assignment for assignment in recruited_assignments
@@ -623,12 +629,16 @@ def run_call(
     progress.step(
         "Grouping locus reads by competitive mapping evidence"
     )
+    refinement_skips = []
     asv_rows, fasta_records, asv_memberships = mapped_read_variant_groups(
         features,
         recruited_rows,
         sample_id,
         threads=thread_count,
+        limits=inference_limits, skipped=refinement_skips,
     )
+    unified_paths["variant_refinement_skips"] = outdir_path / "variant_refinement_skips.tsv"
+    write_tsv(refinement_skips, unified_paths["variant_refinement_skips"], ["locus_id", "read_id", "reason"])
     fallback_asvs, fallback_predictions = recruitment_fallback_evidence(
         recruited_rows,
         loci,
@@ -665,6 +675,7 @@ def run_call(
         asv_rows,
         min_fraction=min_mixture_fraction,
         min_secondary_reads=min_secondary_reads,
+        limits=inference_limits,
     )
     write_tsv(
         mixture_rows,
@@ -687,6 +698,7 @@ def run_call(
         max_primer_mismatches,
         assembly_round_tolerance,
         thread_count,
+        limits=inference_limits,
     )
     write_fasta(local_products, recruitment_paths["local_products"])
     local_assembly_path = outdir_path / "local_assembly_concordance.tsv"

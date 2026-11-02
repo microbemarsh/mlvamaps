@@ -44,16 +44,19 @@ remain part of the database format and its compatibility checks; their indexes
 are not used for the observed mapping. Minimap2 builds its observed target index
 in memory. No reference build migration is required for current-schema databases.
 
-Long reads undergo Sassy primer recovery before observed mapping. Paired short
+Long reads undergo observed mapping before Sassy primer rescue. Paired short
 reads undergo flank recruitment and mate rescue during QC. Both paths measure
 molecules with the shared product parser. A reference alignment without a
 measurement establishes presence. A separate fallback can report a low-confidence
-`ESTIMATED` count from competing measurements, repeat-spanning CIGAR evidence,
-or reference-conditioned partial mappings with flank support. Estimates remain
+`ESTIMATED` count from adequately flank-supported spanning CIGAR evidence or
+calibrated paired lengths. Conflicting measurements and reference-conditioned
+partial mappings retain distributions without a numeric count. Estimates remain
 separate from measured molecule evidence; loci without either remain unavailable.
 Primer-recovered long-read products can contribute even when mapping misses them.
 
-The observed alignments are retained in memory for reference classification,
+Long-read QC uses an indexed temporary disk spool; original FASTQ sequence is
+not held as one input list. The observed alignments, with local locus sequences,
+are retained in memory for reference classification,
 avoiding a second FASTQ mapping. Measured molecule repeat counts also contribute
 to reference likelihoods, once per molecule even when both mates align. Sequence
 mismatches and ambiguous reference memberships remain available to classification.
@@ -66,6 +69,9 @@ The long-read representative-consensus and SNP workflow still runs as a separate
 confirmation stage. Its recruitment and representative mappings remain; this
 change removes the repeated mapping for reference classification, not every
 alignment operation in the long-read pipeline.
+
+See [evidence validation](fastq-evidence-validation.md) for the new status and
+sequence tables, bounded refinement, memory limits, and measured tradeoffs.
 
 ## Global thread budget
 

@@ -66,12 +66,21 @@ steps, and evidence outputs for short reads, long reads, and assemblies.
 FASTQ genotyping and reference typing share one competitive mapping to the
 actual observed database amplicons. Measured products, resolved repeat flanks,
 or supported local assemblies supply direct counts. If direct sizing is
-unresolved, the caller reports its best supported approximation as `ESTIMATED`,
-using repeat-spanning alignment indels or reference-conditioned alignment support.
+unresolved, flank-supported spanning alignment indels or calibrated paired
+lengths can supply an `ESTIMATED` count. Partial reference matches and conflicting
+measurements retain uncertainty without filling in a reference repeat count.
 The report lists every locus with its count, status, support, and uncertainty.
 Loci without usable sizing evidence remain explicitly unavailable. Novel measured alleles remain callable.
 The same alignments and molecule-level repeat measurements inform reference
 classification, preserving equivalent references and unresolved evidence.
+
+FASTQ runs also write `genotype_evidence.tsv` with explicit `EXACT`, `ESTIMATED`,
+`LOWER_BOUND`, `UNRESOLVED`, `AMBIGUOUS_LOCUS`, and `POSSIBLE_MIXTURE` statuses,
+plus independently supported observed products in `sequence_alleles.tsv`.
+Legacy `PASS` is not equivalent to `EXACT`. Scores and reported observation
+envelopes are uncalibrated. See the [implementation and validation report](docs/workflows/fastq-evidence-validation.md)
+for staged tests, same-input version comparisons, retained failures, resource
+limits, and remaining real-data validation requirements.
 
 FASTQ runs retain supported sample products in `query_loci.fasta`, with provenance
 and unresolved reasons in `query_locus_reconstruction.tsv`. Combined-marker export

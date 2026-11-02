@@ -28,9 +28,10 @@ def aligned_flanks(row, context):
 def recruitment_identity(row, context):
     """Do not penalize locus recruitment for an observed repeat-length change."""
     position, deletions, repeat_gaps = row.reference_start, 0, 0
+    phase_padding = max(0, context.repeat_unit_length - 1)
     for size, operation in _CIGAR.findall(row.cigar):
         size = int(size)
-        if operation == "I" and context.repeat_start <= position <= context.repeat_end:
+        if operation == "I" and context.repeat_start - phase_padding <= position <= context.repeat_end + phase_padding:
             repeat_gaps += size
         if operation == "D":
             deletions += size
@@ -42,7 +43,7 @@ def recruitment_identity(row, context):
 
 
 def recruit_mapping_fragments(alignments, contexts, fragments=None, unmapped_mates=None,
-                              *, minimum_identity=.9, minimum_margin=10):
+                              *, minimum_identity=.9, minimum_margin=10, ambiguous_assignments=None):
     """Resolve locus identity across references, retaining each molecule once.
 
     Reference alleles within one locus remain competitors. Repeat-only matches
@@ -84,6 +85,8 @@ def recruit_mapping_fragments(alignments, contexts, fragments=None, unmapped_mat
             anchored = {locus: values[mate][0] for locus, values in anchors.items() if mate in values}
             if anchored and winner not in {locus for locus, score in anchored.items() if score == max(anchored.values())}:
                 ambiguous = True
+        if ambiguous_assignments is not None and (ambiguous or (seed_locus and seed_locus != winner)):
+            ambiguous_assignments[molecule] = tuple(sorted(set(anchors) | ({seed_locus} if seed_locus else set())))
         if seed_locus and (ambiguous or seed_locus != winner):
             pools[seed_locus].pop(molecule, None)
             continue
@@ -139,7 +142,10 @@ def resolve_query_products(calls, evidence, loci, assembled, sample_id, threshol
     """
     by_locus = defaultdict(lambda: defaultdict(set))
     spanning = defaultdict(dict)
+    ambiguous = {row.molecule_id for row in evidence if "ambiguous_locus" in row.quality_flags}
     for row in evidence:
+        if row.molecule_id in ambiguous:
+            continue
         sequence = row.metadata.get("product_sequence")
         if sequence and row.direct_product_measurement:
             by_locus[row.locus_id][row.molecule_id].add(sequence)
@@ -183,9 +189,14 @@ def resolve_query_products(calls, evidence, loci, assembled, sample_id, threshol
                 # ponytail: bound POA to 100 independent reads. All original
                 # molecules remain in inference; deeper correction needs benchmarking.
                 selected = sorted(support, key=lambda name: (
-                    -sum(map(ord, observed[name][1])) / max(1, len(observed[name][1])), name))[:100]
-                sequence = sequence_consensus(observed[name][0] for name in selected)
-                method = "mapped_flank_consensus"
+                    -sum(map(ord, observed[name][1])) / max(1, len(observed[name][1])), name))[:thresholds.maximum_refinement_reads]
+                maximum_length = max(len(observed[name][0]) for name in selected)
+                if (maximum_length <= thresholds.maximum_sequence_length
+                        and maximum_length * sum(len(observed[name][0]) for name in selected) <= thresholds.maximum_alignment_cells):
+                    sequence = sequence_consensus((observed[name][0] for name in selected), limits=thresholds)
+                    method = "mapped_flank_consensus"
+                else:
+                    method = "consensus_resource_limit"
             else:
                 support = set()
         if not sequence and locus.locus_id in assembled:
@@ -237,7 +248,7 @@ def apply_reconstructed_calls(calls, audit, thresholds):
     reconstructed = {row["locus_id"]: row for row in audit if row["status"] == "RECONSTRUCTED"}
     for call in calls:
         row = reconstructed.get(call["locus"])
-        if not row or call["status"] == "mixed":
+        if not row or call["status"] == "mixed" or call.get("possible_secondary") or call.get("computational_fallback"):
             continue
         if row["method"] != "mapped_flank_consensus":
             continue

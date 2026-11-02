@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .models import Assignment, Locus, ReadRecord
 from .progress import ProgressReporter
 from .sequence import revcomp
@@ -12,11 +14,12 @@ def assignments_from_pcr(
     sample_id: str,
     min_assignment_score: float = 0.55,
     progress: ProgressReporter | None = None,
+    retain_unassigned_sequence: bool = True,
 ) -> list[Assignment]:
     """Build read assignments from native paired-primer products."""
     progress = progress or ProgressReporter(enabled=False)
     locus_by_id = {locus.locus_id: locus for locus in loci}
-    read_by_id = {read.read_id: read for read in reads}
+    read_by_id = reads if hasattr(reads, "get") else {read.read_id: read for read in reads}
     candidates_by_read: dict[str, list] = {}
     for row in rows:
         read_id = str(row.get("reference_id", "")).split()[0]
@@ -58,14 +61,15 @@ def assignments_from_pcr(
     results = []
     total = len(reads)
     for idx, read in enumerate(reads, start=1):
-        results.append(
-            _assignment_from_candidates(
+        assignment = _assignment_from_candidates(
                 read,
                 sample_id,
                 candidates_by_read.get(read.read_id, []),
                 min_assignment_score,
             )
-        )
+        if not retain_unassigned_sequence and not assignment.passes_assignment_qc:
+            assignment = replace(assignment, oriented_sequence="", oriented_quality=None)
+        results.append(assignment)
         progress.count("Assigned reads", idx, total)
     progress.count("Assigned reads", total, total, force=True)
     return results

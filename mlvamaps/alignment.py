@@ -8,7 +8,9 @@ _DNA_MATRIX = parasail.matrix_create("ACGTN", 0, -1)
 
 def alignment_metrics(query: str, target: str) -> dict[str, int | str]:
     """Return exact edit metrics from a SIMD Parasail global traceback."""
-    if not query or not target:
+    if query == target:
+        aligned_query, aligned_target, matches = query, target, len(query)
+    elif not query or not target:
         aligned_query = query or ("-" * len(target))
         aligned_target = target or ("-" * len(query))
         matches = 0

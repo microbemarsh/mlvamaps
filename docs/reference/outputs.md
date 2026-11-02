@@ -47,13 +47,18 @@ reserved and cannot be used as a sample ID in a batch.
 | `profile_matches.tsv` | Complete machine-readable match table corresponding to the HTML results. Rows are labeled `mlva_profile` for direct repeat-profile comparisons and `mapping_reference` for alignment-based references. Includes every ranked match, metadata, distances, comparison counts, and source-specific support fields. Header-only only when neither `--profiles` nor `--database` supplies reference matches. |
 | `profile_match_loci.tsv` | Long-form profile comparison with one row per profile and locus, including query/profile alleles, absolute difference, match status, and profile-allele probability. |
 | `report.html` | Self-contained interpretation report with sample findings, locus-quality flags, FASTQ SPOARS/assembly-PCR concordance, gel evidence, profile matches, closest reference genomes, and technical tables. |
-| `locus_repeat_counts.tsv` | Exact individual-locus repeat counts in a compact long-form table. |
+| `locus_repeat_counts.tsv` | Conventional individual-locus repeat counts in a compact long-form table; numeric counts can include estimates. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
 | `common_locus_calls.tsv` | Technology-neutral FASTQ calls with probability, margin, informative molecule support, total presence support, and explicit called/low-coverage/unresolved/ambiguous/mixed/not-found status. |
 | `molecule_candidate_evidence.tsv` | Optional detailed competitive-alignment and VNTR evidence for each molecule/candidate state; intended for validation rather than the default report. |
 | `candidate_mapping/candidate_alignments.bam` | Optional (`--keep-intermediates`) compressed competitive candidate alignments streamed from minimap2 through htslib. It is removed during normal operation; no text candidate SAM is produced. |
 | `short_read_diagnostics.tsv` | Paired-end calls only: unique recruited and rescued fragments, direct count, original candidate estimate, graph attempt/outcome/length, final count and call method. Dedicated audit output; primary call columns are unchanged. |
 | `short_read_microassembly.fasta` | Paired-end calls with `--keep-intermediates`: successful read-supported local products, including an empty file when none were recovered. |
+| `genotype_evidence.tsv` | FASTQ uncertainty status, independent support, anchors, strands, candidate support, observation envelope, error-model source, and computational fallback. |
+| `sequence_alleles.tsv` | FASTQ complete products identically observed in at least three independent molecules, with SHA-256 identifiers, repeat sequence, pattern, interruptions, and partial terminal bases. |
+| `library_insert_distribution.tsv` | Illumina effective insert mean/SD and calibration source (`mapped_unique_flanks`, `user_supplied`, or `unavailable`), support, and selection-bias limitation. |
+| `fastq_performance.tsv` | FASTQ mapping, recruitment/extraction, and inference/reconstruction timings, mapped-molecule throughput, and inference-tier fractions. |
+| `variant_refinement_skips.tsv` | Long-read diagnostic variant alignments skipped because refinement would exceed resource limits. |
 
 ## Dataset-level MYOGA export outputs
 
@@ -138,8 +143,9 @@ data are supplied.
 
 Database-backed FASTQ calls retain direct measurements and also report
 low-confidence `ESTIMATED` counts when direct sizing is unresolved. The fallback
-uses competing measured observations, flank-supported repeat-spanning CIGAR
-indels, or reference-conditioned alignment support, in that order. Estimates
+uses repeat-spanning CIGAR indels with sufficient aligned support at both flanks,
+or calibrated opposite-flank pairs. Conflicting measurements and partial
+reference matches preserve distributions without numeric fallback counts. Estimates
 are included in calls and fingerprints, but not promoted to measured molecule
 evidence for reference classification. Model support compares available alleles;
 it is not a calibrated probability of correctness.
@@ -161,7 +167,7 @@ The model supports have not been calibrated against real-sample error rates.
 `molecule_candidate_evidence.tsv` preserves `raw_repeat_count` and `repeat_sigma`
 in repeat units, plus optional `pair_repeat_count` and `pair_repeat_sigma`.
 Methods `paired_fragment_length` and `consensus_supported` identify estimates
-from external library calibration and supported long-read consensus,
+from external or conservatively estimated library calibration and supported long-read consensus,
 respectively. Neither adds independently measured classification evidence.
 
 `report.html` includes an always-visible table for every panel locus, with the
@@ -175,10 +181,10 @@ usable basis for a numeric estimate; they are never filled with zero.
 
 | File | Meaning |
 | --- | --- |
-| `short_read_qc_summary.tsv` | Input/retained reads and pairs, orphans, and empirical insert-size values when estimable. |
+| `short_read_qc_summary.tsv` | Input/retained reads and pairs, orphans, and legacy user-supplied insert-size settings. Use `library_insert_distribution.tsv` for the effective calibration. |
 | `short_read_recruitment_summary.tsv` | Unique, ambiguous, discordant, and orphan pair counts per locus. |
 | `short_read_mapping_evidence.tsv` | Per-locus state, candidate scores, molecule support, boundary evidence, MAPQ, and context provenance. |
-| `short_read_run_metadata.json` | minimap2 and mlvamaps versions, resolved parameters, database source, and insert-size estimate. |
+| `short_read_run_metadata.json` | minimap2 and mlvamaps versions, configured parameters, database source, and legacy external insert-size settings. Automatic calibration is recorded in `library_insert_distribution.tsv`. |
 | `filtered_reads_1.fastq.gz`, `filtered_reads_2.fastq.gz` | Quality-filtered mates, written with fast gzip compression for downstream native recruitment. |
 | `filtered_orphan_reads.fastq.gz` | Retained single mates whose partner failed QC; empty when no orphans are present. |
 | `sample_summary.tsv` | One normalized sample row for batch aggregation. |
@@ -264,6 +270,34 @@ It combines all per-assembly `legacy_mlva_analysis.csv` rows in deterministic
 filename order and assigns the historical zero-padded `key` values.
 
 ## FASTQ call statuses
+
+The compatible tables below retain legacy statuses. **`PASS` does not mean
+`EXACT`.** Consult `genotype_status` in `common_locus_calls.tsv` or the
+supplementary `genotype_evidence.tsv`:
+
+| Evidence status | Meaning |
+| --- | --- |
+| `EXACT` | A resolved call with at least `max(3, minimum_molecules)` independent complete products, agreeing conventional counts, measurement sigma at most 0.25 repeats, no quality flags or ambiguous bases, and no derived consensus votes. These are evidence criteria, not a calibrated error guarantee. |
+| `ESTIMATED` | A numeric count failing the exact-evidence criteria, including low coverage, uncertain measurements, reconstruction, and paired-length estimates. |
+| `LOWER_BOUND` | No numeric call; a uniquely anchored exact terminal motif run supplies `repeat_lower_bound`. |
+| `UNRESOLVED` | Insufficient identifiable evidence or a computation limit; a missing locus also has this evidence status, with a separate reason. |
+| `AMBIGUOUS_LOCUS` | Only competing locus assignments support the locus; those molecules do not vote for a repeat count. |
+| `POSSIBLE_MIXTURE` | Supported secondary-allele evidence; this does not confirm a strain mixture. |
+
+`repeat_interval_low`/`high` enclose the measured observations plus/minus three
+measurement sigmas; they are **not calibrated confidence intervals**.
+`log_likelihood_gap` compares the leading raw allele states. Legacy fields named
+`probability` describe model support, not validated probabilities of correctness.
+Inference tiers describe direct collapsed evidence (1), targeted motif refinement
+(2), and joint heterogeneous/paired inference (3); zero means no usable sizing
+observations. The highest applicable tier is reported.
+
+Sequence allele IDs hash the observed complete product, including flanks.
+Distinct products can have the same repeat count. These supplementary products
+are not automatically added to combined-marker distances; the existing exporter
+continues to mask repeat regions in its SNP component. TSV replacement is atomic
+per file; the output directory is not a transactional snapshot of an entire run.
+See the [validation and compatibility report](../workflows/fastq-evidence-validation.md).
 
 | Status | Meaning |
 | --- | --- |

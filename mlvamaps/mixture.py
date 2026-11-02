@@ -25,6 +25,7 @@ MIXTURE_FIELDS = [
     "estimated_error_rate",
     "em_iterations",
     "em_converged",
+    "computational_fallback",
 ]
 
 
@@ -46,9 +47,16 @@ def _estimated_error_rate(rows: list[dict]) -> float:
     return min(0.15, max(1e-5, rate))
 
 
-def _log_likelihood_matrix(rows: list[dict], error_rate: float) -> np.ndarray:
+def _log_likelihood_matrix(rows: list[dict], error_rate: float, limits=None) -> np.ndarray | None:
+    from .allele_inference import InferenceThresholds
+    limits = limits or InferenceThresholds()
     sequences = [str(row.get("representative_sequence") or "") for row in rows]
     size = len(sequences)
+    if size > min(64, limits.maximum_candidates) or size * size > limits.maximum_likelihood_cells:
+        return None
+    if any(first != second and (max(len(first), len(second)) > limits.maximum_sequence_length
+           or len(first) * len(second) > limits.maximum_alignment_cells) for first in sequences for second in sequences):
+        return None
     matrix = np.zeros((size, size), dtype=np.float64)
     edit_log_odds = np.log(error_rate / (3.0 * (1.0 - error_rate)))
     for observed_index, observed in enumerate(sequences):
@@ -117,6 +125,7 @@ def estimate_variant_mixtures(
     min_secondary_reads: int = 2,
     tolerance: float = 1e-7,
     max_iterations: int = 200,
+    limits=None,
 ) -> list[dict]:
     """Estimate per-locus variant abundance with an Emu-style count EM model.
 
@@ -153,36 +162,19 @@ def estimate_variant_mixtures(
         observed_fractions = counts / total_reads
         error_rate = _estimated_error_rate(rows)
         adaptive_floor = _adaptive_em_floor(total_reads)
+        resource_limited = False
         if len(rows) == 1:
             frequencies = np.asarray([1.0], dtype=np.float64)
             iterations = 0
             converged = True
         else:
-            log_likelihoods = _log_likelihood_matrix(rows, error_rate)
-            initial = (counts + 0.5) / (total_reads + (0.5 * len(rows)))
-            active = np.ones(len(rows), dtype=bool)
-            frequencies, iterations, converged = _run_em(
-                counts,
-                log_likelihoods,
-                initial,
-                active,
-                tolerance,
-                max_iterations,
-            )
-            retained = frequencies >= adaptive_floor
-            if not np.any(retained):
-                retained[int(np.argmax(frequencies))] = True
-            if not np.all(retained):
-                frequencies, extra_iterations, reconverged = _run_em(
-                    counts,
-                    log_likelihoods,
-                    frequencies,
-                    retained,
-                    tolerance,
-                    max_iterations,
-                )
-                iterations += extra_iterations
-                converged = converged and reconverged
+            log_likelihoods = _log_likelihood_matrix(rows, error_rate, limits)
+            if log_likelihoods is None:
+                resource_limited = True
+                frequencies, iterations, converged = observed_fractions, 0, False
+            else:
+                frequencies, iterations, converged = _fit_variant_fractions(counts, total_reads, rows,
+                    log_likelihoods, tolerance, max_iterations, adaptive_floor)
 
         fraction_supported = frequencies >= max(min_fraction, adaptive_floor)
         ranking = np.argsort(-frequencies, kind="stable")
@@ -209,6 +201,8 @@ def estimate_variant_mixtures(
                 evidence_class = "CANDIDATE"
                 is_meaningful = False
             row = rows[index]
+            if resource_limited:
+                evidence_class, is_meaningful = "UNRESOLVED_RESOURCE_LIMIT", False
             output.append(
                 {
                     "sample_id": row.get("sample_id", ""),
@@ -230,6 +224,22 @@ def estimate_variant_mixtures(
                     "estimated_error_rate": round(error_rate, 8),
                     "em_iterations": iterations,
                     "em_converged": "yes" if converged else "no",
+                    "computational_fallback": "observed_counts_only" if resource_limited else "",
                 }
             )
     return output
+
+
+def _fit_variant_fractions(counts, total_reads, rows, log_likelihoods, tolerance, max_iterations, adaptive_floor):
+    initial = (counts + 0.5) / (total_reads + (0.5 * len(rows)))
+    active = np.ones(len(rows), dtype=bool)
+    frequencies, iterations, converged = _run_em(counts, log_likelihoods, initial, active, tolerance, max_iterations)
+    retained = frequencies >= adaptive_floor
+    if not np.any(retained):
+        retained[int(np.argmax(frequencies))] = True
+    if not np.all(retained):
+        frequencies, extra_iterations, reconverged = _run_em(
+            counts, log_likelihoods, frequencies, retained, tolerance, max_iterations)
+        iterations += extra_iterations
+        converged = converged and reconverged
+    return frequencies, iterations, converged

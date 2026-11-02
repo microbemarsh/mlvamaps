@@ -268,7 +268,7 @@ def parse_recruitment_sam(
         raise ValueError("minimum locus score margin must be non-negative")
     reference_by_name = {row["reference_name"]: row for row in references}
     locus_by_id = {locus.locus_id: locus for locus in loci}
-    read_by_id = {read.read_id: read for read in reads}
+    read_by_id = reads if hasattr(reads, "get") else {read.read_id: read for read in reads}
     contexts = {}
     for reference in references:
         bounds = _repeat_bounds(locus_by_id[reference["locus_id"]], reference["sequence"])

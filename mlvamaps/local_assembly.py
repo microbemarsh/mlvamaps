@@ -44,13 +44,24 @@ def _dominant_variants(mixture_rows: list[dict]) -> dict[str, str]:
     return dominant
 
 
-def _poa_consensus(features: list[RepeatFeature]) -> str:
-    return sequence_consensus(feature.amplicon_sequence for feature in sorted(
-        features, key=lambda item: (-item.mean_qscore, item.read_id)))
+def _poa_consensus(features: list[RepeatFeature], limits=None) -> str:
+    return sequence_consensus((feature.amplicon_sequence for feature in sorted(
+        features, key=lambda item: (-item.mean_qscore, item.read_id))), limits=limits)
 
 
-def sequence_consensus(sequences) -> str:
+def sequence_consensus(sequences, limits=None) -> str:
     """Correct observed, consistently oriented sequences with the native POA."""
+    from itertools import islice
+    from .allele_inference import InferenceThresholds
+    limits = limits or InferenceThresholds()
+    sequences = list(islice(sequences, limits.maximum_refinement_reads))
+    if not sequences:
+        return ""
+    if len(set(sequences)) == 1:
+        return sequences[0].upper()
+    longest = max(map(len, sequences))
+    if longest > limits.maximum_sequence_length or longest * sum(map(len, sequences)) > limits.maximum_alignment_cells:
+        return ""
     graph = spoars.Poa(
         alignment_type="global",
         scoring=spoars.Scoring.default(),
@@ -65,8 +76,8 @@ def sequence_consensus(sequences) -> str:
 def _assemble_locus_item(
     item: tuple[str, list[RepeatFeature]],
 ) -> tuple[str, list[RepeatFeature], str]:
-    locus_id, features = item
-    return locus_id, features, _poa_consensus(features)
+    locus_id, features, *limits = item
+    return locus_id, features, _poa_consensus(features, limits[0] if limits else None)
 
 
 def assemble_dominant_locus_products(
@@ -79,6 +90,7 @@ def assemble_dominant_locus_products(
     max_primer_mismatches: int,
     round_tolerance: float,
     threads: int,
+    limits=None,
 ) -> tuple[list[tuple[str, str]], dict[str, dict], list[dict], dict[str, Path]]:
     """Assemble dominant locus clusters and call them through assembly logic."""
     outdir = Path(outdir)
@@ -120,7 +132,7 @@ def assemble_dominant_locus_products(
         for locus in loci
     }
     contig_locus: dict[str, str] = {}
-    locus_items = sorted(by_locus.items())
+    locus_items = [(locus_id, features, limits) for locus_id, features in sorted(by_locus.items())]
     thread_count = min(resolve_threads(threads), max(len(locus_items), 1))
     if thread_count > 1:
         with ThreadPoolExecutor(max_workers=thread_count) as executor:
@@ -131,6 +143,7 @@ def assemble_dominant_locus_products(
         assembled_loci
     ):
         if not consensus:
+            audit_by_locus[locus_id]["pcr_status"] = "RESOURCE_LIMIT"
             continue
         contig_id = f"local_poa_{index:06d}"
         contig_locus[contig_id] = locus_id

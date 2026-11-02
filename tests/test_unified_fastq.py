@@ -240,7 +240,8 @@ def test_reference_estimates_use_alignment_support_without_reference_copy_votes(
     estimate_unresolved_calls(calls, rows, contexts)
     estimate_unresolved_calls(other, duplicates, contexts)
     assert calls == other
-    assert calls[0]["repeat_count"] == contexts[1].repeat_count
+    assert calls[0]["repeat_count"] == ""
+    assert calls[0]["best_candidate_repeat"] == contexts[1].repeat_count
     assert calls[0]["estimation_method"] == "reference_conditioned"
     assert calls[0]["estimate_support"] == 1
     assert "outside the catalog" in calls[0]["estimation_reason"]
@@ -261,7 +262,7 @@ def test_estimation_preserves_measured_zero_and_reports_conflicting_counts():
     conflicting = [replace(row, measured_repeat_count=8)] * 20 + [replace(row, measured_repeat_count=9)]
     calls, molecules = infer_alleles(conflicting, [locus], contexts, "s", "hifi", require_measurement=True)
     estimate_unresolved_calls(calls, conflicting, contexts)
-    assert calls[0]["repeat_count"] == 8 and calls[0]["best_probability"] == .5
+    assert calls[0]["repeat_count"] == "" and calls[0]["best_probability"] == .5
     assert calls[0]["estimation_method"] == "conflicting_measurements"
     assert calls[0]["estimate_support"] == 1 and molecules == {}
 

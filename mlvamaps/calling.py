@@ -65,16 +65,21 @@ def gaussian_allele_probabilities(
     sigma: float,
 ) -> list[float]:
     """Evaluate and normalize a Gaussian measurement model on an allele grid."""
-    if sigma <= 0:
+    if not math.isfinite(sigma) or sigma <= 0:
         raise ValueError("allele measurement sigma must be positive")
+    if not candidates:
+        return []
+    if not math.isfinite(value) or any(not math.isfinite(candidate) for candidate in candidates):
+        raise ValueError("allele measurements and candidates must be finite")
+    distances = [abs(float(value) - float(candidate)) / sigma for candidate in candidates]
+    nearest = min(distances)
+    # Subtract the best log likelihood before exponentiating. Equally distant
+    # candidates stay tied even when their unnormalized likelihoods underflow.
     weights = [
-        math.exp(-((float(value) - float(candidate)) ** 2) / (2 * sigma * sigma))
-        for candidate in candidates
+        1.0 if distance == nearest else math.exp(-min(745.0, (distance - nearest) * (distance + nearest) / 2))
+        for distance in distances
     ]
     total = sum(weights)
-    if total <= 0:
-        nearest = min(range(len(candidates)), key=lambda index: abs(float(candidates[index]) - value))
-        return [1.0 if index == nearest else 0.0 for index in range(len(candidates))]
     return [weight / total for weight in weights]
 
 

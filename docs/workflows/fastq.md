@@ -10,6 +10,9 @@ mlvamaps call --database reference_build -i sample.fastq.gz -o results
 ```
 
 For paired reads, see the [Illumina workflow](illumina.md).
+For current uncertainty rules, limits, and same-input old/new comparisons, see
+the [evidence validation report](fastq-evidence-validation.md). The historical
+runtime tables below describe earlier implementations.
 
 ## 1. Load the database panel and filter reads
 
@@ -85,20 +88,27 @@ existence check rejects impossible matches before launching Sassy. Accepted
 approximate matches still use Sassy's coordinates and traceback.
 
 Measured evidence supplies direct alleles. If direct sizing remains unresolved,
-report the best supported approximation as `ESTIMATED`: prefer competing measured
-observations, then repeat-spanning CIGAR projections, then reference-conditioned
-partial-alignment support. Alignment estimates require locus-flank support and
-remain low confidence even when only one catalog allele is available. Reference
-copies and mate records do not multiply molecule support. Estimates are kept
-separate from measured counts used in reference classification.
+repeat-spanning CIGAR projections with meaningful aligned support at both flanks
+can provide `ESTIMATED` counts. Conflicting measurements and partial reference
+matches retain candidate distributions without numeric calls. Reference copies
+and mate records do not multiply molecule support. Estimates are kept separate
+from measured counts used in reference classification.
 Novel and fractional measured alleles remain callable outside the catalog range.
-Optional independently calibrated paired-fragment lengths provide another
+User-supplied or conservatively flank-calibrated paired-fragment lengths provide another
 labelled estimate when no direct measurement is available; see the
 [Illumina guide](illumina.md).
 
 `common_locus_calls.tsv` distinguishes `presence_support` from informative
 `molecule_support`. `molecule_candidate_evidence.tsv` retains reference IDs,
 alignment diagnostics, evidence types, and inferred molecule counts.
+
+`genotype_evidence.tsv` distinguishes exact, estimated, bounded, unresolved,
+ambiguous-locus, and possible-mixture evidence. Its interval is an observation
+envelope, not a calibrated confidence interval. `sequence_alleles.tsv` reports
+identical complete products observed in at least three independent molecules;
+it does not manufacture a polished sequence from uncertain bases. Isolate
+bimodality can leave the primary count unresolved with possible secondary
+evidence. Neither that label nor legacy mixture support confirms strain mixtures.
 
 Low-depth calls, mixtures, ambiguous measurements, detected-but-unresolved loci,
 and missing loci retain distinct statuses. `PRESENT_COUNT_UNKNOWN` has no numeric

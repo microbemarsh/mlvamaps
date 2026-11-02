@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import re
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 
 import pysam
@@ -13,6 +15,7 @@ from .alignment_evidence import CandidateAlignment
 from .candidate_contexts import CandidateContext
 from .io import normalize_read_id
 from .models import ReadRecord
+from .sequence import revcomp
 
 
 PRESETS: dict[str, tuple[str, ...]] = {
@@ -149,9 +152,17 @@ def parse_candidate_alignments(
     contexts: list[CandidateContext],
     include_unknown_repeats: bool = False,
     unmapped_mates: dict | None = None,
+    query_reads=None,
 ) -> list[CandidateAlignment]:
     context_by_id = {context.candidate_id: context for context in contexts}
     rows: list[CandidateAlignment] = []
+    @lru_cache(maxsize=8)
+    def original_read(name, reverse):
+        read = query_reads.get(name)
+        if read is None:
+            raise ValueError(f"Mapped read {name!r} is missing from the input spool")
+        return ((revcomp(read.sequence), read.quality[::-1] if read.quality else None)
+                if reverse else (read.sequence, read.quality))
     with pysam.AlignmentFile(str(sam_path), "r") as sam:
         for alignment in sam.fetch(until_eof=True):
             if (unmapped_mates is not None and alignment.is_unmapped and alignment.is_paired
@@ -165,7 +176,7 @@ def parse_candidate_alignments(
                     alignment.query_name, alignment.get_forward_sequence(),
                     "".join(chr(value + 33) for value in qualities) if qualities is not None else None,
                 )
-            if alignment.is_unmapped or alignment.is_supplementary:
+            if alignment.is_unmapped:
                 continue
             reference_name = sam.get_reference_name(alignment.reference_id)
             context = context_by_id.get(reference_name)
@@ -198,25 +209,70 @@ def parse_candidate_alignments(
                 reference_end=alignment.reference_end,
                 cigar=alignment.cigarstring or "",
                 cs=str(alignment.get_tag("cs")) if alignment.has_tag("cs") else "",
-                primary=not alignment.is_secondary,
+                primary=not (alignment.is_secondary or alignment.is_supplementary),
                 secondary=alignment.is_secondary,
                 reverse=alignment.is_reverse,
-                query_sequence=alignment.get_forward_sequence() or "",
+                query_sequence=(alignment.get_forward_sequence() or "") if query_reads is None else "",
                 query_quality=(
                     "".join(chr(value + 33) for value in alignment.get_forward_qualities())
-                    if alignment.query_qualities is not None else None
+                    if query_reads is None and alignment.query_qualities is not None else None
                 ),
                 template_length=alignment.template_length,
                 next_reference_start=alignment.next_reference_start,
+                supplementary=alignment.is_supplementary,
             ))
+            if query_reads is not None:
+                row = rows[-1]
+                sequence, quality = original_read(row.read_id, row.reverse)
+                operations = [(int(n), op) for n, op in re.findall(r"(\d+)([MIDNSHP=X])", row.cigar)]
+                hard_left = operations[0][0] if operations and operations[0][1] == "H" else 0
+                first, last = row.query_start + hard_left, row.query_end + hard_left
+                start = max(0, first - row.reference_start - 24)
+                end = min(len(sequence), last + len(context.sequence) - row.reference_end + 24)
+                if not 0 <= start <= first <= last <= end <= len(sequence):
+                    raise ValueError(f"Invalid mapped query interval for {row.read_id!r}")
+                # Preserve aligned operations; truncate only external clips.
+                query, cigar = 0, []
+                for length, operation in operations:
+                    operation = "S" if operation == "H" else operation
+                    retained = max(0, min(query + length, end) - max(query, start)) if operation == "S" else length
+                    if retained:
+                        cigar.append(f"{retained}{operation}")
+                    if operation in "MIS=X":
+                        query += length
+                local = sequence[start:end]
+                local_quality = quality[start:end] if quality else None
+                rows[-1] = replace(row, query_sequence=revcomp(local) if row.reverse else local,
+                    query_quality=local_quality[::-1] if row.reverse and local_quality else local_quality,
+                    query_start=first - start, query_end=last - start, cigar="".join(cigar), query_offset=start)
+    if query_reads is not None:
+        return rows
     # Secondary SAM records may omit SEQ/QUAL. Recover the original orientation
     # from another record for the same molecule and mate, regardless of order.
-    sequences = {(row.molecule_id, row.mate): (row.query_sequence, row.query_quality)
-                 for row in rows if row.query_sequence}
-    return [replace(row, query_sequence=sequences[(row.molecule_id, row.mate)][0],
-                    query_quality=sequences[(row.molecule_id, row.mate)][1])
-            if not row.query_sequence and (row.molecule_id, row.mate) in sequences else row
-            for row in rows]
+    sequences = {}
+    for row in rows:
+        key = (row.molecule_id, row.mate)
+        current = sequences.get(key)
+        if row.query_sequence and (current is None or
+                (len(row.query_sequence), row.primary, row.query_sequence) >
+                (len(current.query_sequence), current.primary, current.query_sequence)):
+            sequences[key] = row
+    recovered = []
+    for row in rows:
+        original = sequences.get((row.molecule_id, row.mate))
+        if original is not None:
+            # Hard-clipped supplementary records use local query coordinates.
+            # Restore full-read coordinates only when the complete SEQ exists.
+            operations = re.findall(r"(\d+)([MIDNSHP=X])", row.cigar)
+            full_length = sum(int(n) for n, op in operations if op in "MISH=X")
+            if "H" in row.cigar and full_length == len(original.query_sequence):
+                offset = int(operations[0][0]) if operations[0][1] == "H" else 0
+                row = replace(row, query_start=row.query_start + offset,
+                              query_end=row.query_end + offset, cigar=row.cigar.replace("H", "S"))
+            if "H" not in row.cigar:
+                row = replace(row, query_sequence=original.query_sequence, query_quality=original.query_quality)
+        recovered.append(row)
+    return recovered
 
 
 def map_reads_to_candidates(
@@ -253,6 +309,7 @@ def map_reads_to_candidates_bam(
     include_unknown_repeats: bool = False,
     retain_all_competitors: bool = False,
     unmapped_mates: dict | None = None,
+    query_reads=None,
 ) -> list[CandidateAlignment]:
     """Map without materializing text SAM; pysam/htslib decodes CIGAR and tags."""
     resolved = shutil.which(executable) or (executable if Path(executable).is_file() else None)
@@ -265,4 +322,4 @@ def map_reads_to_candidates_bam(
         position = command.index("-t")
         command[position:position] = ["-p", "0"]
     run_minimap2_competitive_bam(command, bam_path)
-    return parse_candidate_alignments(bam_path, contexts, include_unknown_repeats, unmapped_mates)
+    return parse_candidate_alignments(bam_path, contexts, include_unknown_repeats, unmapped_mates, query_reads)

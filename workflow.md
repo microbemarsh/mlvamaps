@@ -68,15 +68,15 @@ Both FASTQ paths call `run_unified_fastq_inference`:
    fractions with EM. Identical observations share weighted likelihood rows,
    preserving molecule counts while avoiding repeated calculations. Short reads
    can additionally enter the local assembly fallback described below.
-5. For unresolved calls, report a low-confidence `ESTIMATED` count when evidence
-   permits: use the best ambiguous measured allele, conflicting direct
-   observations, repeat-spanning CIGAR projections, or finally a reference-based
-   approximation from partial mappings. Mapping estimates require flank support;
-   repeat-only cross-mappings cannot establish the estimate. Average support
-   over molecules without multiplying duplicate reference alignments. Keep these
-   estimates separate from measured molecule counts used for classification.
-6. Write `common_locus_calls.tsv` and `molecule_candidate_evidence.tsv`, then
-   project the calls into the workflow's public output tables.
+5. Preserve unresolved measured conflicts and partial reference matches as
+   candidate distributions without a numeric count. Spanning CIGAR estimates
+   require meaningful aligned support from both flanks. Paired length estimates
+   require a usable library distribution. Exact terminal motif runs with a unique
+   flank can provide a lower bound. Duplicate reference alignments do not multiply
+   support, and derived estimates do not become measured classification evidence.
+6. Write `common_locus_calls.tsv`, `molecule_candidate_evidence.tsv`,
+   `genotype_evidence.tsv`, and `sequence_alleles.tsv`, then project conventional
+   counts into the workflow's public tables. Legacy `PASS` does not mean `EXACT`.
 
 Supported complete sample products are checked in one batched assembly PCR pass.
 Their original molecule measurements are recalibrated if the shared PCR selection
@@ -243,7 +243,10 @@ flowchart TD
 
 1. **Screen and filter.** An explicit Deacon screen can precede QC; metagenome
    mode automatically uses the database's recruitment index when present.
-   Current long-read code loads the resulting reads into memory before QC.
+   QC streams the input into an indexed temporary disk spool. Read IDs and
+   offsets remain in memory; original sequence and quality can be fetched for
+   rescue without decompressing the input again. Mapped evidence retains local
+   locus windows, with offsets into the original oriented reads.
    Default QC keeps 50–100,000-base reads with mean Q15 or better and writes
    `filtered_reads.fastq.gz` and `qc_summary.tsv`.
 2. **Map and refine.** Map QC reads to the observed database loci once. Competitive
@@ -281,6 +284,12 @@ tables. Primer-only recovery supports sizing, but does not establish a reference
 identity without reference alignment evidence. See the
 [FASTQ guide](docs/workflows/fastq.md) for further stage details and the synthetic
 runtime measurements.
+
+The [2026-11 evidence validation report](docs/workflows/fastq-evidence-validation.md)
+documents bounded motif refinement, shared ONT uncertainty, ambiguity handling,
+sequence alleles, resource limits, and repeated comparisons with the original
+implementation. Mapped evidence still grows with target depth; the spool is not
+a constant-memory claim for the complete pipeline.
 
 ## Assembly FASTA
 

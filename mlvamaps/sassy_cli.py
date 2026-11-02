@@ -135,6 +135,11 @@ class Searcher:
                 previous = self._cache.get((pattern, text))
                 if previous is None or previous[0] < k:
                     self._cache[(pattern, text)] = (k, matches_by_target[f"p{index}", name])
+        # ponytail: bound the shared per-thread cache across samples. Large PCR
+        # batches may re-search evicted pairs; a byte-budgeted native cache is
+        # the upgrade path if profiling shows that this ceiling is restrictive.
+        while len(self._cache) > 4096:
+            self._cache.pop(next(iter(self._cache)))
 
     def _command(self, patterns_path: Path, texts_path: Path, k: int) -> list[str]:
         command = [

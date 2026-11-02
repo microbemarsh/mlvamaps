@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CandidateAlignment:
     molecule_id: str
     read_id: str
@@ -32,12 +32,14 @@ class CandidateAlignment:
     query_quality: str | None = None
     template_length: int = 0
     next_reference_start: int = -1
+    supplementary: bool = False
+    query_offset: int = 0  # Local sequence origin in reference-oriented original read.
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CandidateEvidence:
     locus_id: str
-    repeat_count: int | float
+    repeat_count: int | float | None
     molecule_id: str
     alignment_score: float = 0.0
     alignment_identity: float = 0.0
@@ -61,6 +63,9 @@ class CandidateEvidence:
     metadata: dict[str, object] = field(default_factory=dict)
     raw_repeat_count: float | None = None
     repeat_sigma: float | None = None
+    orientation: str = ""
+    candidate_loci: tuple[str, ...] = ()
+    quality_flags: tuple[str, ...] = ()
 
 
 EVIDENCE_FIELDS = [
@@ -72,6 +77,8 @@ EVIDENCE_FIELDS = [
     "inferred_molecule_repeat", "cigar", "cs", "aligned_flank_bases", "spanning_repeat_indel_delta",
     "raw_repeat_count", "repeat_sigma",
     "pair_repeat_count", "pair_repeat_sigma",
+    "orientation", "candidate_loci", "quality_flags", "evidence_categories",
+    "query_offset", "repeat_alignment_scores", "refinement_fallback",
 ]
 
 
@@ -109,4 +116,19 @@ def evidence_row(
         "repeat_sigma": evidence.repeat_sigma if evidence.repeat_sigma is not None else "",
         "pair_repeat_count": evidence.metadata.get("pair_repeat_count", ""),
         "pair_repeat_sigma": evidence.metadata.get("pair_repeat_sigma", ""),
+        "orientation": evidence.orientation,
+        "candidate_loci": ";".join(evidence.candidate_loci or (evidence.locus_id,)),
+        "quality_flags": ";".join(evidence.quality_flags),
+        "query_offset": evidence.metadata.get("query_offset", ""),
+        "repeat_alignment_scores": ";".join(f"{count}:{score}" for count, score in sorted(evidence.metadata.get("repeat_alignment_scores", {}).items())),
+        "refinement_fallback": evidence.metadata.get("refinement_fallback", ""),
+        "evidence_categories": ";".join(name for name, present in (
+            ("full_spanning", evidence.measured_repeat_count is not None),
+            ("left_anchored", evidence.left_boundary_span or evidence.metadata.get("left_anchor")),
+            ("right_anchored", evidence.right_boundary_span or evidence.metadata.get("right_anchor")),
+            ("both_flanks", (evidence.left_boundary_span and evidence.right_boundary_span)
+             or (evidence.metadata.get("left_anchor") and evidence.metadata.get("right_anchor"))),
+            ("repeat_internal", evidence.metadata.get("repeat_internal")),
+            ("ambiguous", "ambiguous_locus" in evidence.quality_flags),
+        ) if present),
     }

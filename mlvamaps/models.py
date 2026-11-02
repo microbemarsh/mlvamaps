@@ -82,6 +82,7 @@ class AnchorMeasurement:
     insertions: int
     deletions: int
     complete: bool = True
+    ambiguous: bool = False
 
 
 @dataclass(frozen=True)

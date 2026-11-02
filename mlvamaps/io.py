@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import gzip
 import shutil
+import tempfile
 from pathlib import Path
 from itertools import zip_longest
 from typing import Iterable, Iterator, Optional
@@ -10,6 +11,46 @@ from typing import Iterable, Iterator, Optional
 import pysam
 
 from .models import Locus, ReadPair, ReadRecord
+
+
+class ReadSpool:
+    """Temporary indexed FASTQ: only read IDs and offsets remain in memory."""
+    def __init__(self):
+        self.handle = tempfile.TemporaryFile(mode="w+b")
+        self.offsets = {}
+
+    def append(self, read):
+        if read.read_id in self.offsets:
+            raise ValueError(f"Duplicate FASTQ read ID {read.read_id!r}; independent molecules require distinct IDs")
+        self.handle.seek(0, 2)
+        self.offsets[read.read_id] = self.handle.tell()
+        self.handle.write(f"@{read.read_id}\n{read.sequence}\n+\n{read.quality or ''}\n".encode("ascii"))
+
+    def get(self, name, default=None):
+        if name not in self.offsets:
+            return default
+        self.handle.seek(self.offsets[name])
+        self.handle.readline()
+        sequence = self.handle.readline().decode("ascii").rstrip("\n")
+        self.handle.readline()
+        quality = self.handle.readline().decode("ascii").rstrip("\n")
+        return ReadRecord(name, sequence, quality or None)
+
+    def __iter__(self):
+        for name in self.offsets:
+            yield self.get(name)
+
+    def __len__(self):
+        return len(self.offsets)
+
+    def close(self):
+        self.handle.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
 
 def open_text(path: str | Path, mode: str = "rt"):
@@ -25,12 +66,16 @@ def read_fastq(path: str | Path) -> Iterator[ReadRecord]:
     try:
         with pysam.FastxFile(str(path), persist=False) as handle:
             for record in handle:
+                if not record.name or not record.sequence:
+                    raise ValueError("FASTQ record has an empty read ID or sequence")
                 if record.quality is None:
                     raise ValueError(f"Expected FASTQ qualities for record {record.name!r}")
                 if len(record.sequence) != len(record.quality):
                     raise ValueError(
                         f"FASTQ sequence and quality lengths differ for {record.name!r}"
                     )
+                if any(ord(value) < 33 or ord(value) > 126 for value in record.quality):
+                    raise ValueError(f"FASTQ quality outside Phred+33 range for {record.name!r}")
                 yield ReadRecord(record.name, record.sequence.upper(), record.quality)
     except (OSError, ValueError) as exc:
         raise ValueError(f"Malformed FASTQ {str(path)!r}: {exc}") from exc
@@ -61,9 +106,13 @@ def read_fastq_pairs(
     reads2_path: str | Path | None = None,
 ) -> Iterator[ReadPair]:
     """Stream separate paired FASTQ files with strict name/count validation."""
+    seen = set()
     if reads2_path is None:
         for read in read_fastq(reads1_path):
             molecule_id, mate = normalize_read_id(read.read_id)
+            if molecule_id in seen:
+                raise ValueError(f"Duplicate FASTQ molecule ID {molecule_id!r}")
+            seen.add(molecule_id)
             if mate == 2:
                 raise ValueError(
                     f"Single-end FASTQ record {read.read_id!r} is labelled as mate 2"
@@ -87,6 +136,9 @@ def read_fastq_pairs(
                 f"Paired FASTQ IDs differ at pair {record_number}: "
                 f"{read1.read_id!r} versus {read2.read_id!r}"
             )
+        if id1 in seen:
+            raise ValueError(f"Duplicate FASTQ molecule ID {id1!r}")
+        seen.add(id1)
         if mate1 not in (None, 1) or mate2 not in (None, 2):
             raise ValueError(
                 f"Invalid mate labels at pair {record_number}: "
@@ -189,12 +241,19 @@ def read_profiles(path: str | Path | None) -> list[dict[str, str]]:
 
 
 def write_tsv(rows: Iterable[dict], path: str | Path, fieldnames: list[str]) -> None:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open_text(path, "wt") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t", extrasaction="ignore")
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, suffix=path.suffix, delete=False) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        with open_text(temporary_path, "wt") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter="\t", extrasaction="ignore")
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def write_fasta(records: Iterable[tuple[str, str]], path: str | Path) -> None:

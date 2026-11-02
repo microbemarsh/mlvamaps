@@ -52,6 +52,7 @@ def run_mapping_short_read_call(
     assembly_round_tolerance: float = 0.25,
     short_insert_mean: float | None = None,
     short_insert_sd: float | None = None,
+    inference_limits=None,
     min_mixture_fraction: float = 0.2,
     min_secondary_reads: int = 2,
 ) -> dict[str, Path]:
@@ -145,6 +146,7 @@ def run_mapping_short_read_call(
         sample_mode=sample_mode,
         insert_mean=short_insert_mean, insert_sd=short_insert_sd,
         mixture_min_fraction=min_mixture_fraction, mixture_min_molecules=min_secondary_reads,
+        inference_limits=inference_limits,
     )
     calls = common_calls_to_compatibility(common_calls)
     if database_path:

@@ -447,6 +447,14 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     call.add_argument("--short-insert-sd", type=_positive_float, metavar="BP",
                       help="Library fragment-length standard deviation; enables labelled pair-length estimates")
     call.add_argument("--short-max-candidate-repeat-count", type=_positive_int, default=100)
+    call.add_argument("--fastq-max-candidates", type=_positive_int, default=2048,
+                      help="Maximum statistical allele states per locus (default: %(default)s)")
+    call.add_argument("--fastq-max-likelihood-cells", type=_positive_int, default=262144,
+                      help="Bound observation-by-allele inference arrays (default: %(default)s)")
+    call.add_argument("--fastq-max-refinement-reads", type=_positive_int, default=100,
+                      help="Maximum independent reads used for consensus correction (default: %(default)s)")
+    call.add_argument("--fastq-max-alignment-bases", type=_positive_int, default=10000,
+                      help="Maximum sequence length for expensive refinement; cell limits also apply")
     call.add_argument(
         "--no-short-secondary-alignments", action="store_true",
         help="Ignore secondary candidate alignments (not recommended for homologous contexts)",
@@ -871,6 +879,14 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     return parser
 
 
+def _fastq_limits(args):
+    from .allele_inference import InferenceThresholds
+    return InferenceThresholds(maximum_candidates=args.fastq_max_candidates,
+        maximum_likelihood_cells=args.fastq_max_likelihood_cells,
+        maximum_refinement_reads=args.fastq_max_refinement_reads,
+        maximum_sequence_length=args.fastq_max_alignment_bases)
+
+
 def _run_single_input(
     args: argparse.Namespace,
     input_path: Path,
@@ -896,6 +912,7 @@ def _run_single_input(
             repeat_range_tolerance=args.repeat_range_tolerance,
             min_mixture_fraction=args.min_mixture_fraction,
             min_secondary_reads=args.min_secondary_reads,
+            inference_limits=_fastq_limits(args),
             minimap2_bin=args.minimap2_bin,
             missing_locus_min_depth=args.missing_locus_min_depth,
             missing_locus_min_fraction=args.missing_locus_min_fraction,
@@ -1024,6 +1041,7 @@ def _run_short_input(
         short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
         short_consider_secondary=not args.no_short_secondary_alignments,
         short_insert_mean=args.short_insert_mean, short_insert_sd=args.short_insert_sd,
+        inference_limits=_fastq_limits(args),
         min_mixture_fraction=args.min_mixture_fraction, min_secondary_reads=args.min_secondary_reads,
         assembly_round_tolerance=args.assembly_round_tolerance,
         missing_locus_min_depth=args.missing_locus_min_depth,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+import statistics
 from collections import defaultdict
 from functools import lru_cache
 
@@ -19,6 +20,61 @@ from .short_reads import _merge_overlap_is_repeat_only, merge_read_pair
 
 
 _CIGAR = re.compile(r"(\d+)([MIDNSHP=X])")
+
+
+def estimate_insert_distribution(alignments, contexts, minimum_fragments=100):
+    """Calibrate only uniquely mapped inward pairs wholly outside the VNTR."""
+    known = {row.candidate_id: row for row in contexts}
+    grouped = defaultdict(list)
+    for row in alignments:
+        grouped[row.molecule_id].append(row)
+    lengths = []
+    margins = []
+    for rows in grouped.values():
+        eligible = [row for row in rows if row.primary and not row.supplementary and row.mate in (1, 2)
+                    and row.mapping_quality >= 20 and row.alignment_identity >= .99 and row.query_coverage >= .99]
+        if len(eligible) != 2 or {row.mate for row in eligible} != {1, 2}:
+            continue
+        first, second = sorted(eligible, key=lambda row: row.reference_start)
+        if first.candidate_id != second.candidate_id or first.reverse or not second.reverse:
+            continue
+        context = known[first.candidate_id]
+        if not (second.reference_end <= context.repeat_start or first.reference_start >= context.repeat_end):
+            continue
+        lengths.append(second.reference_end - first.reference_start)
+        margins.append(min(first.reference_start, len(context.sequence) - second.reference_end))
+    if len(lengths) < minimum_fragments:
+        return None
+    median = statistics.median(lengths)
+    mad = statistics.median(abs(length - median) for length in lengths)
+    retained = [length for length in lengths if abs(length - median) <= max(1, 4.5 * mad)]
+    if len(retained) < minimum_fragments:
+        return None
+    deviation = statistics.stdev(retained)
+    # Catalog ends censor longer fragments. Do not fit a narrow library from
+    # short targets, or infer a distribution from a single observed size.
+    if deviation <= 0 or min(margins) < 3 * deviation:
+        return None
+    return statistics.fmean(retained), deviation, len(retained)
+
+
+def partial_repeat_lower_bound(sequence, locus):
+    """Exact uniquely anchored terminal motif runs provide a conservative bound."""
+    motif, flank = locus.repeat_motif, locus.left_flank_sequence
+    if not motif or len(flank) < 12 or set(motif + flank) - set("ACGT"):
+        return None
+    flank = flank[-21:]
+    position = sequence.find(flank)
+    if position < 0 or sequence.find(flank, position + 1) >= 0:
+        return None
+    suffix = sequence[position + len(flank):]
+    if len(suffix) < len(motif) or any(base != motif[i % len(motif)] for i, base in enumerate(suffix)):
+        return None
+    unit = locus.repeat_unit_length_bp or len(motif)
+    nonrepeat = len(locus.forward_primer) + len(flank) + len(locus.right_flank_sequence) + len(locus.reverse_primer)
+    offset = (locus.nominal_repeat_units - (locus.expected_product_size_bp - nonrepeat) / unit
+              if locus.expected_product_size_bp and locus.nominal_repeat_units else 0)
+    return max(0, len(suffix) / unit + offset)
 
 
 def _repeat_indel_delta(alignment: CandidateAlignment, context: CandidateContext) -> float:
@@ -94,11 +150,12 @@ def extract_short_read_evidence(
                 oriented, locus_by_id[locus_id], qualities, source="illumina_molecule", round_tolerance=round_tolerance,
             ))
         if not measurements:
-            return None, "PRESENCE_ONLY", 0, None, None, ""
+            return None, "PRESENCE_ONLY", 0, None, None, "", {}
         best = max(measurements, key=lambda item: (item.status == "FULL_PRODUCT", item.status == "REPEAT_INFORMATIVE", item.confidence or 0))
         return (best.called_allele, best.status, best.confidence or 0,
                 getattr(best, "raw_repeat_count", None),
-                (getattr(best, "metadata", None) or {}).get("repeat_sigma"), best.product_sequence)
+                (getattr(best, "metadata", None) or {}).get("repeat_sigma"), best.product_sequence,
+                getattr(best, "metadata", None) or {})
 
     grouped: dict[tuple[str, str, int | float], list[CandidateAlignment]] = defaultdict(list)
     best_mates = {}
@@ -155,7 +212,7 @@ def extract_short_read_evidence(
             if complete and len({item[0] for item in complete}) == 1:
                 best = max(complete, key=lambda item: (item[1] == "FULL_PRODUCT", item[2]))
                 if len({item[5] for item in complete if item[1] == "FULL_PRODUCT"}) > 1:
-                    best = (*best[:5], "")
+                    best = (*best[:5], "", best[6])
                 direct_by_molecule[(molecule, locus_id)] = best
                 fragment_methods[(molecule, locus_id)] = method
     for (molecule, locus_id, _repeat), rows in grouped.items():
@@ -175,8 +232,10 @@ def extract_short_read_evidence(
             if merged is not None and not _merge_overlap_is_repeat_only(pair, merged, locus_by_id[locus_id]):
                 sequences.append(merged)
         sequences.extend(ReadRecord(row.read_id, row.query_sequence, row.query_quality) for row in rows)
-        measurements = (measure_sequence(locus_id, read.sequence, read.quality) for read in sequences)
-        measured = max(measurements, key=lambda item: (item[1] == "FULL_PRODUCT", item[1] == "REPEAT_INFORMATIVE", item[2]), default=None)
+        measurements = [measure_sequence(locus_id, read.sequence, read.quality) for read in sequences]
+        usable = [item for item in measurements if item[0] is not None and item[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}]
+        measured = (max(usable, key=lambda item: (item[1] == "FULL_PRODUCT", item[2]))
+                    if usable and len({(item[0], item[3]) for item in usable}) == 1 else None)
         if measured and measured[0] is not None and measured[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:
             direct_by_molecule[(molecule, locus_id)] = measured
 
@@ -195,12 +254,16 @@ def extract_short_read_evidence(
             best.alignment_score - max(alternatives) if alternatives else math.inf
         )
         context = context_by_id[best.candidate_id]
-        left = any(row.reference_start < context.repeat_start < row.reference_end for row in rows)
-        right = any(row.reference_start < context.repeat_end < row.reference_end for row in rows)
-        full = any(row.reference_start <= context.repeat_start and row.reference_end >= context.repeat_end for row in rows)
+        from .mapped_reconstruction import aligned_flanks
+        anchor_sizes = [(row, aligned_flanks(row, context_by_id[row.candidate_id])) for row in rows]
+        minimum_left = max(1, min(21, context.repeat_start))
+        minimum_right = max(1, min(21, len(context.sequence) - context.repeat_end))
+        left = any(sizes[0] >= minimum_left and row.reference_end > context.repeat_start for row, sizes in anchor_sizes)
+        right = any(sizes[1] >= minimum_right and row.reference_start < context.repeat_end for row, sizes in anchor_sizes)
+        full = any(sizes[0] >= minimum_left and sizes[1] >= minimum_right for row, sizes in anchor_sizes)
         indel_delta = _repeat_indel_delta(best, context)
-        spanning = [row for row in rows if row.candidate_id == best.candidate_id
-                    and row.reference_start < context.repeat_start and row.reference_end > context.repeat_end]
+        spanning = [row for row, sizes in anchor_sizes if row.candidate_id == best.candidate_id
+                    and sizes[0] >= minimum_left and sizes[1] >= minimum_right]
         spanning_best = max(spanning, key=lambda row: row.alignment_score) if spanning else None
         measured = direct_by_molecule.get((molecule, locus_id))
         # Paired geometry is candidate-relative: deviation from the aligned
@@ -255,11 +318,17 @@ def extract_short_read_evidence(
                 ),
                 "background_alignment_margin": background_margin,
                 "product_sequence": measured[5] if measured and measured[1] == "FULL_PRODUCT" else "",
+                **(measured[6] if measured else {}),
                 **guided_segments.get((molecule, locus_id), {}),
                 **pair_estimate,
             },
             raw_repeat_count=measured[3] if measured else None,
             repeat_sigma=measured[4] if measured else None,
+            orientation=";".join(sorted({"reverse" if row.reverse else "forward" for row in rows})),
+            quality_flags=tuple(flag for flag, present in (
+                ("supplementary", any(row.supplementary for row in rows)),
+                ("boundary_ambiguous", measured and measured[6].get("boundary_ambiguous")),
+            ) if present),
         ))
     # Candidate-independent evidence also covers mates absent from every
     # competitive alignment. Shared inference groups by the original molecule
@@ -267,8 +336,11 @@ def extract_short_read_evidence(
     for locus_id, fragments in (recruited_fragments or {}).items():
         for molecule, fragment in fragments.items():
             measured = direct_by_molecule.get((molecule, locus_id))
+            bounds = [bound for read in (fragment.pair.read1, fragment.pair.read2) if read is not None
+                      for sequence in (read.sequence, revcomp(read.sequence))
+                      if (bound := partial_repeat_lower_bound(sequence, locus_by_id[locus_id])) is not None]
             evidence.append(CandidateEvidence(
-                locus_id, measured[0] if measured else 0, molecule,
+                locus_id, measured[0] if measured else None, molecule,
                 locus_confidence=1.0,
                 direct_product_measurement=bool(measured and measured[1] == "FULL_PRODUCT"),
                 full_repeat_span=measured is not None,
@@ -277,9 +349,12 @@ def extract_short_read_evidence(
                 evidence_tier=fragment_methods.get((molecule, locus_id), "flank_recruitment"),
                 metadata={"left_anchor": fragment.left, "right_anchor": fragment.right,
                           "mate_rescue": fragment.rescued,
+                          "repeat_lower_bound": max(bounds) if bounds and measured is None else None,
+                          **(measured[6] if measured else {}),
                           **guided_segments.get((molecule, locus_id), {}),
                           "product_sequence": measured[5] if measured and measured[1] == "FULL_PRODUCT" else ""},
                 raw_repeat_count=measured[3] if measured else None,
                 repeat_sigma=measured[4] if measured else None,
+                quality_flags=("boundary_ambiguous",) if measured and measured[6].get("boundary_ambiguous") else (),
             ))
     return evidence

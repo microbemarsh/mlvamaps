@@ -28,6 +28,8 @@ def mapped_read_variant_groups(
     recruitment_rows: list[dict],
     sample_id: str,
     threads: int = DEFAULT_THREADS,
+    limits=None,
+    skipped=None,
 ) -> tuple[list[dict], list[tuple[str, str]], list[dict]]:
     """Build locus/allele evidence groups from competitive read mappings.
 
@@ -35,6 +37,8 @@ def mapped_read_variant_groups(
     confidence and mixture callers can consume mapping evidence without a
     sequence-clustering step.
     """
+    from .allele_inference import InferenceThresholds
+    limits = limits or InferenceThresholds()
     recruitment_by_read = {
         str(row["read_id"]): row
         for row in recruitment_rows
@@ -90,6 +94,16 @@ def mapped_read_variant_groups(
                 )
                 variant_id = f"{locus_id}_MAP{group_number}"
                 representative_sequence = representative.repeat_sequence
+                retained = []
+                for feature in group_features:
+                    if (feature.repeat_sequence == representative_sequence or
+                            (max(len(feature.repeat_sequence), len(representative_sequence)) <= limits.maximum_sequence_length
+                             and len(feature.repeat_sequence) * len(representative_sequence) <= limits.maximum_alignment_cells)):
+                        retained.append(feature)
+                    elif skipped is not None:
+                        skipped.append(dict(locus_id=locus_id, read_id=feature.read_id,
+                                            reason="variant_alignment_resource_limit"))
+                group_features = retained
                 unique_sequences = sorted(
                     {feature.repeat_sequence for feature in group_features}
                 )

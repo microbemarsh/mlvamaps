@@ -188,6 +188,7 @@ def run_short_read_call(
     assembly_round_tolerance: float = 0.25,
     short_insert_mean: float | None = None,
     short_insert_sd: float | None = None,
+    inference_limits=None,
     min_mixture_fraction: float = 0.2,
     min_secondary_reads: int = 2,
 ) -> dict[str, Path]:
@@ -214,6 +215,7 @@ def run_short_read_call(
         classification_repeat_scale=classification_repeat_scale,
         assembly_round_tolerance=assembly_round_tolerance,
         short_insert_mean=short_insert_mean, short_insert_sd=short_insert_sd,
+        inference_limits=inference_limits,
         min_mixture_fraction=min_mixture_fraction, min_secondary_reads=min_secondary_reads,
         reference_metadata_path=reference_metadata_path,
         taxon_min_loci=taxon_min_loci,

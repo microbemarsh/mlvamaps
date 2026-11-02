@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Sequence
 
-from .calling import allele_grid, estimate_repeat_count_from_spanning_read, gaussian_allele_probabilities, legacy_round_repeat_count, repeat_unit_length
+from .calling import estimate_repeat_count_from_spanning_read, gaussian_allele_probabilities, legacy_round_repeat_count, repeat_unit_length
 from .models import AnchorMeasurement, Locus, LocusMeasurement
 from .sequence import _sassy_searcher, mean_qscore, repeat_motif_statistics, revcomp
 
@@ -61,7 +61,8 @@ def find_anchor(pattern: str, sequence: str, max_edits: int = 3, search_start: i
     concrete = set(pattern) <= set("ACGT")
     exact_start = sequence.find(pattern, max(0, search_start), search_end) if concrete else -1
     if exact_start >= 0:
-        return AnchorMeasurement(exact_start, exact_start + len(pattern), 1.0, 0, 0, 0, 0, True)
+        return AnchorMeasurement(exact_start, exact_start + len(pattern), 1.0, 0, 0, 0, 0, True,
+                                 sequence.find(pattern, exact_start + 1, search_end) >= 0)
     # Short flanks cannot tolerate the same absolute error count as a 20--25 bp
     # primer without becoming non-specific.
     max_edits = min(max_edits, max(1, len(pattern) // 5))
@@ -86,9 +87,12 @@ def find_anchor(pattern: str, sequence: str, max_edits: int = 3, search_start: i
     ):
         return None
     searcher = _sassy_searcher("iupac")
+    # Small products share one native-search cache entry across the ordered
+    # primer/flank subwindows. Filter boundaries after the search.
+    search_text, search_offset = (sequence, 0) if len(sequence) <= 512 else (window, offset)
     matches = searcher.search(
         pattern.encode("ascii"),
-        window.encode("ascii"),
+        search_text.encode("ascii"),
         k=max_edits,
     )
     candidates = []
@@ -102,15 +106,17 @@ def find_anchor(pattern: str, sequence: str, max_edits: int = 3, search_start: i
         relative_end = int(match.text_end)
         if relative_start < 0 or relative_end <= relative_start:
             continue
-        observed = window[relative_start:relative_end]
+        if search_offset + relative_start < offset or search_offset + relative_end > search_end:
+            continue
+        observed = search_text[relative_start:relative_end]
         # The previous measurement engine treated ambiguity in the configured
         # anchor as IUPAC but did not treat N in a read/assembly as a wildcard.
         if any(base not in "ACGT" for base in observed):
             continue
         distance = int(match.cost)
         identity = (len(pattern) - distance) / max(len(pattern), len(observed))
-        start = offset + relative_start
-        end = offset + relative_end
+        start = search_offset + relative_start
+        end = search_offset + relative_end
         candidates.append(
             (
                 distance,
@@ -126,20 +132,31 @@ def find_anchor(pattern: str, sequence: str, max_edits: int = 3, search_start: i
     distance, _identity, start, _delta, end, cigar = min(candidates)
     mm, ins, dels = _sassy_edit_counts(cigar)
     identity = max(0.0, 1.0 - distance / max(len(pattern), end - start, 1))
-    return AnchorMeasurement(start, end, round(identity, 6), distance, mm, ins, dels, True)
+    ambiguous = any(candidate[0] == distance and (candidate[2], candidate[4]) != (start, end)
+                    for candidate in candidates)
+    return AnchorMeasurement(start, end, round(identity, 6), distance, mm, ins, dels, True, ambiguous)
 
 
 def reference_interval_to_query_interval(alignment, ref_start: int, ref_end: int) -> tuple[int, int] | None:
     """Project a half-open reference interval through CIGAR-aligned pairs."""
     if ref_start < 0 or ref_end <= ref_start:
         return None
-    by_reference = {int(r): int(q) for q, r in alignment.get_aligned_pairs(matches_only=False) if q is not None and r is not None}
-    first = by_reference.get(ref_start)
-    last = by_reference.get(ref_end - 1)
+    reference, query = alignment.reference_start, 0
+    endpoints = {}
+    for operation, length in alignment.cigartuples or ():
+        if operation in (0, 7, 8):
+            for boundary in (ref_start, ref_end - 1):
+                if reference <= boundary < reference + length:
+                    endpoints[boundary] = query + boundary - reference
+        if operation in (0, 1, 4, 7, 8):
+            query += length
+        if operation in (0, 2, 3, 7, 8):
+            reference += length
+    first = endpoints.get(ref_start)
+    last = endpoints.get(ref_end - 1)
     if first is None or last is None:
         return None
-    start, end = sorted((first, last))
-    return start, end + 1
+    return (first, last + 1) if first <= last else None
 
 
 def mapped_locus_window(row, context, *, refine=True):
@@ -229,6 +246,8 @@ def extract_reference_interval_from_original_read(
     )
     start = max(0, projected[0] - max(0, padding))
     end = min(len(oriented_sequence), projected[1] + max(0, padding))
+    if start >= end or projected[1] > len(oriented_sequence):
+        return None
     extracted_quality = (
         oriented_quality[start:end] if oriented_quality is not None else None
     )
@@ -263,6 +282,23 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
     """Measure a locus from independently verified anchors in a sequence."""
     sequence = sequence.upper()
     quality = _quality_text(qualities)
+    if quality is not None and len(quality) != len(sequence):
+        raise ValueError("Locus sequence and quality lengths differ")
+    if len(sequence) <= 512:
+        # Batch only plausible non-exact anchors; exact products launch no
+        # subprocess. This reuses the existing Sassy batch/cache implementation.
+        pending = {}
+        for pattern in (locus_model.forward_primer, revcomp(locus_model.reverse_primer),
+                        locus_model.left_flank_sequence, locus_model.right_flank_sequence):
+            edits = min(max_anchor_edits, max(1, len(pattern) // 5))
+            if (pattern and set(pattern) <= set("ACGT") and pattern not in sequence
+                    and regex.search(f"(?:{pattern}){{e<={edits}}}", sequence)):
+                pending.setdefault(edits, []).append(pattern.encode("ascii"))
+        if pending:
+            prime = getattr(_sassy_searcher("iupac"), "prime_many", None)
+            if prime:
+                for edits, patterns in pending.items():
+                    prime(patterns, [sequence.encode("ascii")], edits)
     forward = find_anchor(locus_model.forward_primer, sequence, max_anchor_edits)
     reverse = find_anchor(revcomp(locus_model.reverse_primer), sequence, max_anchor_edits, forward.end) if forward else None
     product_start = forward.start if forward else None
@@ -323,20 +359,24 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
     credible: tuple[int | float, ...] = ()
     second_allele = None
     second_probability = None
+    boundary_ambiguous = any(anchor.ambiguous for anchor in (left, right) if anchor)
     if raw_count is not None:
-        candidates = allele_grid(
-            locus_model,
-            step=0.5,
-            observed_values=[raw_count, called],
-        )
+        # Measurement support is local to the observed sequence. Catalog bounds
+        # must not allocate an unlimited allele grid for a single observation.
+        center = math.floor(raw_count * 2) / 2
+        candidates = sorted({center + delta / 2 for delta in range(-4, 6) if center + delta / 2 >= 0} | {called})
         anchor_indels = sum(anchor.insertions + anchor.deletions for anchor in (forward, reverse, left, right) if anchor is not None)
-        qscore = mean_qscore(quality[repeat_start:repeat_end] if quality is not None and repeat_start is not None and repeat_end is not None else quality)
+        qscore = mean_qscore(quality[repeat_start:repeat_end]
+                            if quality is not None and repeat_start is not None and repeat_end is not None and repeat_end > repeat_start
+                            else quality)
         sigma = max(0.08, (0.35 + 0.12 * anchor_indels + max(0.0, 15.0 - qscore) / 30.0) / max(math.sqrt(unit_length or 1), 1.0))
         if quality is not None:
             start, end = (forward.end, reverse.start) if forward and reverse else (repeat_start, repeat_end)
             sizing_quality = mean_qscore(quality[start:end])
             # Longer/noisier products have more opportunities for sizing errors.
             sigma = max(sigma, math.sqrt(max(0, end - start) * 10 ** (-sizing_quality / 10)) / (unit_length or 1))
+        if boundary_ambiguous:
+            sigma = max(sigma, 1.0)
         probabilities = gaussian_allele_probabilities(raw_count, candidates, sigma)
         ranked = sorted(zip(candidates, probabilities), key=lambda item: (-item[1], float(item[0])))
         likelihoods = {allele: round(probability, 8) for allele, probability in ranked}
@@ -355,4 +395,6 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
     product_sequence = sequence[product_start:product_end] if product_start is not None and product_end is not None else ""
     product_quality = quality[product_start:product_end] if quality is not None and product_start is not None and product_end is not None else None
     return LocusMeasurement(locus_model.locus_id, sequence_id, source, product_start, product_end, forward.start if forward else None, forward.end if forward else None, reverse.start if reverse else None, reverse.end if reverse else None, repeat_start, repeat_end, repeat_length, unit_length, raw_count, called, forward.identity if forward else None, reverse.identity if reverse else None, motif_identity, likelihoods, confidence, status, failure, forward, reverse, credible, second_allele, second_probability, product_sequence, product_quality, repeat_sequence, method,
-                            {"repeat_sigma": sigma} if raw_count is not None else {})
+                            {"repeat_sigma": sigma,
+                             "boundary_ambiguous": boundary_ambiguous,
+                             "flanks_resolved": flanks_resolved} if raw_count is not None else {})

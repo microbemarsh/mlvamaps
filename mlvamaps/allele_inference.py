@@ -22,6 +22,18 @@ class InferenceThresholds:
     mixture_min_molecules: int = 2
     mixture_min_fraction: float = 0.2
     temperature: float = 8.0
+    maximum_candidates: int = 2048
+    maximum_likelihood_cells: int = 262144
+    maximum_iterations: int = 200
+    maximum_refinement_reads: int = 100
+    maximum_sequence_length: int = 10000
+    maximum_alignment_cells: int = 2000000
+
+    def __post_init__(self):
+        for name in ("maximum_candidates", "maximum_likelihood_cells", "maximum_iterations",
+                     "maximum_refinement_reads", "maximum_sequence_length", "maximum_alignment_cells"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be positive")
 
 
 def _softmax(scores: dict[int | float, float]) -> dict[int | float, float]:
@@ -34,6 +46,8 @@ def _softmax(scores: dict[int | float, float]) -> dict[int | float, float]:
 
 
 def _tier_weight(evidence: CandidateEvidence) -> float:
+    if "ambiguous_locus" in evidence.quality_flags:
+        return 0.0
     if evidence.direct_product_measurement:
         return 12.0
     if evidence.full_repeat_span:
@@ -54,7 +68,7 @@ def _molecule_distribution(
     require_measurement: bool = False,
 ) -> tuple[dict[int | float, float], int | float | None, float]:
     direct = [row.measured_repeat_count for row in rows if row.measured_repeat_count is not None]
-    if require_measurement and len(set(direct)) != 1:
+    if len(set(direct)) > 1 or (require_measurement and not direct):
         # An observed reference is a recruitment target, not a measured allele.
         # Conflicting measurements of the same molecule cannot vote by copies.
         return {}, None, 0.0
@@ -234,7 +248,10 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
     for locus in loci:
         molecules = grouped[locus.locus_id]
         observations = {}
+        derived = set()
         for molecule, rows in molecules.items():
+            if any("ambiguous_locus" in row.quality_flags for row in rows):
+                continue
             measured = [row for row in rows if row.measured_repeat_count is not None]
             if not measured or len({row.measured_repeat_count for row in measured}) != 1:
                 continue
@@ -252,9 +269,14 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
             observations[molecule] = (float(raw), float(sigma))
             # Classification receives the original measurement, never a fitted
             # allele assignment or a consensus-derived second observation.
-            molecule_calls[(locus.locus_id, molecule)] = selected[0].measured_repeat_count
+            if all(row.evidence_tier == "microassembly" for row in selected):
+                derived.add(molecule)
+            else:
+                molecule_calls[(locus.locus_id, molecule)] = selected[0].measured_repeat_count
 
-        counts = Counter(observations.values())
+        counts = Counter(value for molecule, value in observations.items() if molecule not in derived)
+        for value in {observations[molecule] for molecule in derived}:
+            counts.setdefault(value, 1)  # One reconstructed product is one likelihood, not N new reads.
         measured_support = len(observations)
         # Library geometry is an optional fallback, never a replacement for
         # directly measured products and never classification ground truth.
@@ -286,20 +308,32 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
         iterations, converged = 0, True
         consensus_status = "not_available"
         status = "not_found" if not molecules else "detected_unresolved"
+        limited, possible_secondary = "", False
+        interval = ("", "")
+        log_gap = ""
         if counts:
+            interval = (max(0, min(raw - 3 * sigma for raw, sigma in counts)),
+                        max(raw + 3 * sigma for raw, sigma in counts))
             unit = max(repeat_unit_length(locus), 1)
             states = set()
-            for raw, sigma in counts:
+            for raw, sigma in sorted(counts):
                 # Local base-pair grids retain novel/fractional alleles without
                 # expanding every allele between distant observed products.
                 # Pair uncertainty can span many repeats; half-unit steps keep
                 # that fallback bounded without pretending to base-pair precision.
                 step = max(1 / unit, .5, 3 * sigma / 200) if pair_only else 1 / unit
-                radius = max(1, math.ceil(3 * sigma / step))
+                width = 3 * sigma / step
+                if not math.isfinite(width) or width > (thresholds.maximum_candidates - 1) // 2:
+                    limited = "candidate_limit"
+                    break
+                radius = max(1, math.ceil(width))
                 center = max(0, raw)
                 states.update(normalize_allele(center + delta * step)
                               for delta in range(-radius, radius + 1)
                               if center + delta * step >= 0)
+                if len(states) > thresholds.maximum_candidates:
+                    limited = "candidate_limit"
+                    break
             consensus = consensus_measurements.get(locus.locus_id, {})
             candidate = (consensus.get("raw_repeat_count")
                          if consensus.get("supporting_reads", 0) >= thresholds.minimum_molecules else None)
@@ -307,6 +341,11 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
                 states.add(normalize_allele(candidate))
                 consensus_status = "candidate_only"
             states = sorted(states)
+            if len(states) * len(counts) > thresholds.maximum_likelihood_cells:
+                limited = "likelihood_cell_limit"
+            if limited:
+                states = []
+        if counts and not limited:
             raw = np.asarray([item[0] for item in counts])[:, None]
             sigma = np.asarray([item[1] for item in counts])[:, None]
             multiplicities = np.asarray(list(counts.values()), dtype=float)
@@ -318,6 +357,8 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
             tail = -delta / np.maximum(1.0, sigma * 4) - np.log(2 * np.maximum(1.0, sigma * 4))
             log_likelihood = np.logaddexp(math.log(.99) + core, math.log(.01) + tail)
             joint = multiplicities @ log_likelihood
+            ordered_joint = sorted(joint, reverse=True)
+            log_gap = float(ordered_joint[0] - ordered_joint[1]) if len(ordered_joint) > 1 else ""
             posterior = _softmax(dict(zip(states, joint)))
             raw_best = max(states, key=lambda state: (posterior[state], -state))
             best_count = legacy_round_repeat_count(raw_best, round_tolerance)
@@ -331,7 +372,7 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
             unresolved_mixture = False
             if sample_mode == "metagenome" and len(counts) > 1 and not pair_only:
                 fitted, history = fit_reference_mixture(
-                    log_likelihood, multiplicities, max_iterations=200, tolerance=1e-6,
+                    log_likelihood, multiplicities, max_iterations=thresholds.maximum_iterations, tolerance=1e-6,
                 )
                 iterations = len(history) - 1
                 responsibilities = np.exp(log_likelihood - log_likelihood.max(axis=1, keepdims=True)) * fitted
@@ -361,11 +402,29 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
                                    key=lambda state: fitted[states.index(state)])
             else:
                 fractions = [(best_count, 1.0)]
+                if sample_mode == "isolate" and not pair_only:
+                    modes = Counter()
+                    uncertainties = defaultdict(list)
+                    for (raw_value, uncertainty), number in counts.items():
+                        allele = legacy_round_repeat_count(raw_value, round_tolerance)
+                        modes[allele] += number
+                        uncertainties[allele].append(uncertainty)
+                    ordered_modes = sorted(modes, key=lambda allele: (-modes[allele], allele))
+                    if len(ordered_modes) > 1:
+                        first, second = ordered_modes[:2]
+                        possible_secondary = (
+                            modes[second] >= thresholds.mixture_min_molecules
+                            and modes[second] / len(observations) >= thresholds.mixture_min_fraction
+                            and abs(first - second) > max(.5, 3 * math.hypot(
+                                max(uncertainties[first]), max(uncertainties[second])))
+                        )
+                        if possible_secondary:
+                            fractions = [(allele, modes[allele] / len(observations)) for allele in (first, second)]
             probability = dict(ranked).get(best_count, 0.0)
             alternative = max((value for state, value in ranked if state != best_count), default=0.0)
             if mixture:
                 status = "mixed"
-            elif unresolved_mixture or probability < thresholds.minimum_probability or probability - alternative < thresholds.minimum_margin:
+            elif possible_secondary or unresolved_mixture or probability < thresholds.minimum_probability or probability - alternative < thresholds.minimum_margin:
                 status = "ambiguous"
             elif len(observations) < thresholds.minimum_molecules:
                 status = "low_coverage"
@@ -417,11 +476,18 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
             "probability_kind": "single_allele_model_support",
             "em_iterations": iterations, "em_converged": converged,
             "consensus_status": consensus_status,
+            "computational_fallback": limited,
+            "possible_secondary": possible_secondary,
+            "repeat_interval_low": interval[0], "repeat_interval_high": interval[1],
+            "log_likelihood_gap": log_gap,
+            "inference_tier": 1 if len(counts) == 1 and not pair_only else 3 if counts else 0,
+            "derived_molecule_support": len(derived),
+            "repeat_lower_bound": max((row.metadata.get("repeat_lower_bound") or 0 for row in rows), default=0) or "",
             **({"estimation_method": "consensus_supported",
                 "estimation_reason": "Supported consensus resolves competing molecule lengths; consensus adds no independent depth.",
                 "estimate_support": len(observations)} if consensus_status == "resolved_ambiguity" else {}),
             **({"estimation_method": "paired_fragment_length",
-                "estimation_reason": "Opposite-flank pairs scored using an independently calibrated insert-size distribution; repeat length is not directly measured.",
+                "estimation_reason": "Opposite-flank pairs scored using a flank-calibrated or user-supplied insert-size distribution; repeat length is not directly measured and mapping selection bias is not calibrated.",
                 "estimate_support": len(observations)} if pair_only else {}),
         })
     return calls, molecule_calls
@@ -439,14 +505,19 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0):
     for row in evidence:
         by_locus[row.locus_id].append(row)
     for call in calls:
-        if call["repeat_count"] != "" or call["status"] == "not_found":
+        if (call["repeat_count"] != "" or call["status"] == "not_found" or call.get("computational_fallback")
+                or call.get("possible_secondary") or call.get("repeat_lower_bound")):
             continue
-        rows = by_locus[call["locus"]]
+        ambiguous_molecules = {row.molecule_id for row in by_locus[call["locus"]] if "ambiguous_locus" in row.quality_flags}
+        rows = [row for row in by_locus[call["locus"]] if row.molecule_id not in ambiguous_molecules]
         support = call["molecule_support"]
         if call["best_candidate_repeat"] != "":
             # The strict caller already ranked measured but ambiguous evidence.
             method = "ambiguous_measurements"
-            reason = "Competing molecule measurements; reporting the highest-support allele."
+            call.update(estimation_method="ambiguous_measurements",
+                        estimation_reason="Competing molecule measurements do not identify a unique count; retain the candidate distribution and interval.",
+                        estimate_support=support)
+            continue
         else:
             measured = [row for row in rows if row.measured_repeat_count is not None]
             mapped = [row for row in rows if row.candidate_id in known
@@ -501,8 +572,13 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0):
                 second_best_probability=round(second, 8), margin=round(best[1] - second, 8),
                 candidate_distribution=";".join(f"{count}:{probability:.8f}" for count, probability in ranked),
             )
-        call.update(repeat_count=call["best_candidate_repeat"], status="estimated", confidence="low",
-                    estimation_method=method, estimation_reason=reason, estimate_support=support)
+        call.update(estimation_method=method, estimation_reason=reason, estimate_support=support)
+        if method in {"reference_conditioned", "conflicting_measurements"}:
+            # Partial reference matches do not test longer unobserved arrays;
+            # conflicting observations do not identify a unique molecule size.
+            call.update(status="detected_unresolved", confidence="unresolved")
+        else:
+            call.update(repeat_count=call["best_candidate_repeat"], status="estimated", confidence="low")
 
 
 ESTIMATION_FIELDS = ["estimation_method", "estimation_reason", "estimate_support"]
@@ -518,4 +594,8 @@ COMMON_LOCUS_CALL_FIELDS = [
 COMMON_LOCUS_CALL_FIELDS += [
     "repeat_count_raw", "inference_method", "probability_kind", "allele_fractions",
     "em_iterations", "em_converged", "consensus_status",
+    "computational_fallback", "possible_secondary", "repeat_interval_low", "repeat_interval_high",
+    "log_likelihood_gap", "inference_tier",
+    "derived_molecule_support", "repeat_lower_bound",
+    "genotype_status",
 ]

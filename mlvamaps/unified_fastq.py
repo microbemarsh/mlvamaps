@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
+from time import perf_counter
 
 from .alignment_evidence import CandidateAlignment, CandidateEvidence, EVIDENCE_FIELDS, evidence_row
 from .allele_inference import (
@@ -13,8 +15,8 @@ from .allele_inference import (
     infer_alleles,
 )
 from .candidate_contexts import CandidateContext, generate_candidate_contexts, write_candidate_contexts
-from .io import normalize_read_id, write_fasta, write_tsv
-from .long_read_evidence import extract_long_read_evidence
+from .io import ReadSpool, normalize_read_id, write_fasta, write_tsv
+from .long_read_evidence import extract_long_read_evidence, flank_error_model, long_read_measurement_metadata
 from .minimap_mapping import map_reads_to_candidates_bam
 from .models import Assignment, Locus
 from .short_read_evidence import extract_short_read_evidence
@@ -58,6 +60,7 @@ def run_unified_fastq_inference(
     insert_sd: float | None = None,
     mixture_min_fraction: float = 0.2,
     mixture_min_molecules: int = 2,
+    inference_limits: InferenceThresholds | None = None,
 ) -> tuple[list[dict[str, object]], list[CandidateEvidence], dict[tuple[str, str], int | float], dict[str, Path]]:
     """Map observed loci, measure molecules, and optionally retain mappings for typing.
 
@@ -65,6 +68,9 @@ def run_unified_fastq_inference(
     observed-reference mapping for classification without mapping FASTQ twice.
     """
     outdir = Path(outdir)
+    thresholds = replace(inference_limits or InferenceThresholds(),
+        minimum_molecules=minimum_molecules, minimum_probability=minimum_probability,
+        mixture_min_fraction=mixture_min_fraction, mixture_min_molecules=mixture_min_molecules)
     work = outdir / "candidate_mapping"
     work.mkdir(parents=True, exist_ok=True)
     if contexts is None:
@@ -77,6 +83,7 @@ def run_unified_fastq_inference(
     paths = write_candidate_contexts(contexts, work)
     bam = work / "candidate_alignments.bam"
     unmapped_mates = {}
+    started = perf_counter()
     alignments = map_reads_to_candidates_bam(
         paths["fasta"], reads1, reads2, contexts, bam, threads, technology,
         executable=minimap2_bin,
@@ -84,39 +91,66 @@ def run_unified_fastq_inference(
         include_unknown_repeats=bool(database_path),
         retain_all_competitors=bool(database_path),
         unmapped_mates=unmapped_mates if technology == "illumina" else None,
+        query_reads=rescue_reads if technology != "illumina" and hasattr(rescue_reads, "get") else None,
     )
+    mapped_at = perf_counter()
     if database_path and reference_alignments is not None:
         reference_alignments.extend(alignments)
     from .mapped_reconstruction import apply_reconstructed_calls, recruit_mapping_fragments, resolve_query_products
 
+    ambiguous_assignments = {}
     if technology == "illumina":
         recruited_fragments = recruit_mapping_fragments(
             alignments, contexts, recruited_fragments, unmapped_mates,
+            ambiguous_assignments=ambiguous_assignments,
         )
         owners = {name: locus for locus, pool in recruited_fragments.items() for name in pool}
         inference_alignments = [row for row in alignments if owners.get(row.molecule_id) == row.locus_id]
+        insert_calibration = None
+        if insert_mean is None and insert_sd is None:
+            from .short_read_evidence import estimate_insert_distribution
+            insert_calibration = estimate_insert_distribution(inference_alignments, contexts)
+            if insert_calibration is not None:
+                insert_mean, insert_sd, _ = insert_calibration
         evidence = extract_short_read_evidence(
             inference_alignments, contexts, loci, round_tolerance=round_tolerance,
             recruited_fragments=recruited_fragments,
             insert_mean=insert_mean, insert_sd=insert_sd,
         )
+        if insert_mean is not None:
+            for row in evidence:
+                if "pair_repeat_count" in row.metadata:
+                    row.metadata["insert_calibration"] = "mapped_unique_flanks" if insert_calibration else "user_supplied"
+                    row.metadata["insert_calibration_fragments"] = insert_calibration[2] if insert_calibration else ""
     else:
-        pools = recruit_mapping_fragments(alignments, contexts)
+        pools = recruit_mapping_fragments(alignments, contexts, ambiguous_assignments=ambiguous_assignments)
         owners = {name: locus for locus, pool in pools.items() for name in pool}
         inference_alignments = [row for row in alignments if owners.get(row.molecule_id) == row.locus_id]
-        evidence = extract_long_read_evidence(inference_alignments, contexts, loci, technology, round_tolerance=round_tolerance)
+        evidence = extract_long_read_evidence(inference_alignments, contexts, loci, technology,
+            round_tolerance=round_tolerance, limits=thresholds)
         if rescue_reads is not None:
             from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
             from .locus_assignment import assignments_from_pcr
 
             complete = {row.molecule_id for row in evidence if row.direct_product_measurement}
-            unresolved = [read for read in rescue_reads if normalize_read_id(read.read_id)[0] not in complete]
-            if unresolved:
-                rescue_fasta = outdir / "primer_rescue.fasta.gz"
-                write_fasta(((read.read_id, read.sequence) for read in unresolved), rescue_fasta)
-                pcr = run_in_silico_pcr_loci(rescue_fasta, loci, outdir / "in_silico_pcr",
-                                            max_errors=max_primer_mismatches, threads=threads)
-                rescued = assignments_from_pcr(unresolved, loci, read_pcr_results(pcr["stats"], pcr["products"]), sample_id)
+            rescue_fasta = outdir / "primer_rescue.fasta.gz"
+            with ReadSpool() as unresolved:
+                def rescue_records():
+                    for read in rescue_reads:
+                        if normalize_read_id(read.read_id)[0] not in complete:
+                            unresolved.append(read)
+                            yield read.read_id, read.sequence
+                write_fasta(rescue_records(), rescue_fasta)
+                if not unresolved:
+                    rescued = []
+                else:
+                    pcr = run_in_silico_pcr_loci(rescue_fasta, loci, outdir / "in_silico_pcr",
+                                                max_errors=max_primer_mismatches, threads=threads)
+                    pcr_rows = read_pcr_results(pcr["stats"], pcr["products"])
+                    # Failed rescue records have no sequence evidence to retain.
+                    # Keep their compact assignments, releasing original bases.
+                    rescued = assignments_from_pcr(unresolved, loci, pcr_rows, sample_id,
+                                                   retain_unassigned_sequence=False)
                 if primer_assignments is None:
                     primer_assignments = []
                 primer_assignments.extend(rescued)
@@ -124,6 +158,10 @@ def run_unified_fastq_inference(
         from .locus_measurement import measure_locus_product
 
         by_locus = {locus.locus_id: locus for locus in loci}
+        error_model = flank_error_model(inference_alignments, contexts) if technology in {"ont", "ont-hq"} else None
+        refined = {locus.locus_id: {row.molecule_id for row in evidence
+                   if row.locus_id == locus.locus_id and row.metadata.get("inference_tier") == 2}
+                   for locus in loci}
         for assignment in primer_assignments:
             if not assignment.passes_assignment_qc or assignment.assigned_locus not in by_locus:
                 continue
@@ -133,23 +171,33 @@ def run_unified_fastq_inference(
                 round_tolerance=round_tolerance,
             )
             if measurement.called_allele is not None and measurement.status == "FULL_PRODUCT":
+                molecule = normalize_read_id(assignment.read_id)[0]
+                locus_id = assignment.assigned_locus
+                metadata = long_read_measurement_metadata(measurement, by_locus[locus_id], error_model,
+                    thresholds, molecule in refined[locus_id] or len(refined[locus_id]) < thresholds.maximum_refinement_reads)
+                if metadata.get("inference_tier") == 2:
+                    refined[locus_id].add(molecule)
                 evidence.append(CandidateEvidence(
                     assignment.assigned_locus, measurement.called_allele,
-                    normalize_read_id(assignment.read_id)[0],
+                    molecule,
                     technology=technology, locus_confidence=1.0,
                     direct_product_measurement=True, full_repeat_span=True,
                     measured_repeat_count=measurement.called_allele,
                     evidence_tier="primer_recovery",
-                    metadata={"product_sequence": measurement.product_sequence},
+                    metadata={"product_sequence": measurement.product_sequence, **metadata},
                     raw_repeat_count=measurement.raw_repeat_count,
-                    repeat_sigma=(measurement.metadata or {}).get("repeat_sigma"),
+                    repeat_sigma=metadata.get("repeat_sigma"),
+                    orientation=assignment.orientation,
+                    quality_flags=tuple(flag for flag, present in (
+                        ("boundary_ambiguous", metadata.get("boundary_ambiguous")),
+                        ("refinement_limited", metadata.get("refinement_fallback")),
+                    ) if present),
                 ))
-    thresholds = InferenceThresholds(
-        minimum_molecules=minimum_molecules,
-        minimum_probability=minimum_probability,
-        mixture_min_fraction=mixture_min_fraction,
-        mixture_min_molecules=mixture_min_molecules,
-    )
+    for molecule, candidates in sorted(ambiguous_assignments.items()):
+        for locus_id in candidates:
+            evidence.append(CandidateEvidence(locus_id, None, molecule, technology=technology,
+                candidate_loci=candidates, quality_flags=("ambiguous_locus",), evidence_tier="ambiguous_locus"))
+    evidence_at = perf_counter()
     calls, molecule_calls = infer_alleles(
         evidence, loci, contexts, sample_id, technology,
         thresholds,
@@ -183,6 +231,7 @@ def run_unified_fastq_inference(
         )
     estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature)
     apply_reconstructed_calls(calls, reconstruction, thresholds)
+    inferred_at = perf_counter()
     if "short_read_diagnostics" in fragment_paths:
         for diagnostic, call in zip(diagnostics, calls):
             diagnostic["final_repeat_count"] = call["repeat_count"]
@@ -191,6 +240,27 @@ def run_unified_fastq_inference(
         write_tsv(diagnostics, fragment_paths["short_read_diagnostics"], list(diagnostics[0]) if diagnostics else [])
     common_calls = outdir / "common_locus_calls.tsv"
     evidence_path = outdir / "molecule_candidate_evidence.tsv"
+    from .evidence_reporting import write_evidence_reports
+    supplemental_paths = write_evidence_reports(calls, evidence, loci, outdir, thresholds)
+    if technology == "illumina":
+        supplemental_paths["library_insert_distribution"] = outdir / "library_insert_distribution.tsv"
+        library = dict(sample=sample_id, source="mapped_unique_flanks" if insert_calibration else "user_supplied" if insert_mean is not None else "unavailable",
+            mean_bp=insert_mean if insert_mean is not None else "", sd_bp=insert_sd if insert_sd is not None else "",
+            independent_fragments=insert_calibration[2] if insert_calibration else "",
+            limitation="Mapping selection bias is not calibrated; paired-length genotypes remain estimates.")
+        write_tsv([library], supplemental_paths["library_insert_distribution"], list(library))
+    supplemental_paths["fastq_performance"] = outdir / "fastq_performance.tsv"
+    performance = [
+        {"metric": "competitive_mapping_seconds", "value": mapped_at - started},
+        {"metric": "recruitment_and_extraction_seconds", "value": evidence_at - mapped_at},
+        {"metric": "inference_and_reconstruction_seconds", "value": inferred_at - evidence_at},
+        {"metric": "mapped_molecules", "value": len({row.molecule_id for row in alignments})},
+        {"metric": "mapped_molecules_per_second", "value": len({row.molecule_id for row in alignments}) / max(1e-9, inferred_at - started)},
+    ]
+    for tier in (1, 2, 3):
+        performance.append({"metric": f"tier_{tier}_locus_fraction", "value": sum(
+            call.get("inference_tier") == tier for call in calls) / max(1, len(calls))})
+    write_tsv(performance, supplemental_paths["fastq_performance"], ["metric", "value"])
     write_tsv(calls, common_calls, COMMON_LOCUS_CALL_FIELDS)
     write_tsv(
         (evidence_row(sample_id, row, molecule_calls.get((row.locus_id, row.molecule_id))) for row in evidence),
@@ -223,6 +293,7 @@ def run_unified_fastq_inference(
         **({"taxonomic_query_sequences": taxonomic_queries} if database_path else {}),
         **({"candidate_alignments": bam} if keep_alignments else {}),
         **fragment_paths,
+        **supplemental_paths,
     }
 
 

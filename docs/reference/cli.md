@@ -157,10 +157,11 @@ are combined into one trace segment in the report.
 
 ## Allele calling
 
-Illumina mode uses transparent evidence classes rather than the long-read
-posterior as its gate. Exact calls require two directly observed repeat
-boundaries. Insert size may narrow an interval but never supplies an interval
-midpoint as an exact call.
+Short and long reads share molecule-level inference. `EXACT` in the supplementary
+evidence table requires at least three independent agreeing complete products,
+sufficient depth, narrow measurement uncertainty, and no quality flags or
+derived consensus votes. Legacy `PASS` and model support are not calibrated
+correctness claims. Paired length estimates never qualify as `EXACT`.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
@@ -169,15 +170,25 @@ midpoint as an exact call.
 | `--repeat-range-tolerance` | `1.0` | Number of repeats allowed beyond either expected locus bound before assigning `OUT_OF_RANGE`. |
 | `--max-confidence-depth` | `25` | Maximum effective dominant-cluster evidence used to sharpen FASTQ allele confidence. |
 | `--debug-disagreements` | Off | Write read-level mapping-versus-anchor-measurement evidence and a locus-level disagreement summary. |
+| `--fastq-max-candidates` | `2048` | Maximum allele states before returning resource-limited uncertainty. |
+| `--fastq-max-likelihood-cells` | `262144` | Maximum unique-observation × allele cells before allocation. |
+| `--fastq-max-refinement-reads` | `100` | Maximum reads used for expensive locus refinement or consensus. |
+| `--fastq-max-alignment-bases` | `10000` | Maximum sequence length for expensive refinement; direct measurements can exceed it. |
+
+All four resource options require positive integers. Internal defaults also cap
+refinement at 200 iterations and estimated alignment work at 2,000,000 cells.
+Limits preserve available evidence and report a fallback; they do not substitute
+a reference count. See [limits and validation](../workflows/fastq-evidence-validation.md).
 
 Primer-spanning reads use the same product-size calibration and rounding as
 assembly products. Read-level probabilities quantify support around that fixed
 assembly-equivalent convention.
 
-The default `--sample-mode metagenome` flags any meaningful secondary allele
+The default `--sample-mode metagenome` flags meaningful secondary allele
 as `MULTIPLE_VARIANTS`; candidates below `--min-secondary-reads` remain visible
-without changing the signature. Use `--sample-mode isolate` for cultured material to
-retain the historical 80% dominance rule. In both modes the dominant allele
+without changing the signature. `--sample-mode isolate` uses a haploid primary
+model; well-separated supported modes can leave the count unresolved with
+`POSSIBLE_MIXTURE` evidence. In both modes a resolved dominant allele
 uses the assembly-equivalent convention, so it can be compared directly with
 a later cultured assembly while posterior probability and dominant fraction
 retain the original detection uncertainty.
