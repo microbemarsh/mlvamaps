@@ -65,7 +65,7 @@ def test_anchor_prefilter_retains_substitutions_insertions_deletions_and_iupac(m
 def test_measurements_are_reused_without_collapsing_molecules_or_quality(monkeypatch):
     calls = []
 
-    def measure(sequence, locus, quality, *, source, round_tolerance):
+    def measure(sequence, locus, quality, *, source, round_tolerance, reference_nonrepeat_bp=None):
         calls.append((sequence, locus.locus_id, quality, round_tolerance))
         allele = (3 if locus.locus_id == "L1" else 4) if round_tolerance == .25 else 3.5
         return SimpleNamespace(

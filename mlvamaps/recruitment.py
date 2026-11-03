@@ -22,6 +22,7 @@ from .locus_measurement import (
     mapped_locus_window,
     original_read_in_locus_orientation,
     reference_interval_to_query_interval,
+    reference_nonrepeat_lengths,
 )
 from .mapping import (
     build_minimap2_map_command,
@@ -258,6 +259,7 @@ def parse_recruitment_sam(
     min_aligned_bp: int = 100,
     min_locus_score_margin: int = 10,
     full_product_edge_tolerance: int = 0,
+    round_tolerance: float = 0.25,
 ) -> tuple[list[dict], list[Assignment]]:
     """Parse competitive mappings into presence evidence and full products."""
     if min_mapping_quality < 0 or min_aligned_bp < 1:
@@ -269,21 +271,22 @@ def parse_recruitment_sam(
     reference_by_name = {row["reference_name"]: row for row in references}
     locus_by_id = {locus.locus_id: locus for locus in loci}
     read_by_id = reads if hasattr(reads, "get") else {read.read_id: read for read in reads}
+    from .candidate_contexts import repeat_interval
+    from .mapped_reconstruction import query_interval_groups, recruitment_identity
     contexts = {}
     for reference in references:
-        bounds = _repeat_bounds(locus_by_id[reference["locus_id"]], reference["sequence"])
-        if bounds:
-            contexts[reference["reference_name"]] = SimpleNamespace(
-                sequence=reference["sequence"], repeat_start=bounds[0], repeat_end=bounds[1])
+        locus = locus_by_id[reference["locus_id"]]
+        bounds = repeat_interval(reference["sequence"], locus)
+        contexts[reference["reference_name"]] = SimpleNamespace(locus_id=locus.locus_id,
+            sequence=reference["sequence"], repeat_start=bounds[0], repeat_end=bounds[1],
+            repeat_unit_length=repeat_unit_length(locus))
+    nonrepeat_lengths = reference_nonrepeat_lengths(loci, contexts.values())
     rows = []
     assignments = []
     candidates_by_read: dict[str, list[dict]] = defaultdict(list)
     with pysam.AlignmentFile(str(sam_path), "r", check_sq=False) as alignments:
         for alignment in alignments.fetch(until_eof=True):
-            if (
-                alignment.is_unmapped
-                or alignment.is_supplementary
-            ):
+            if alignment.is_unmapped:
                 continue
             reference = reference_by_name.get(alignment.reference_name)
             if reference is None:
@@ -293,12 +296,17 @@ def parse_recruitment_sam(
                 edits = int(alignment.get_tag("NM"))
             except KeyError:
                 edits = 0
-            identity = max(0.0, 1 - edits / max(aligned_bp, 1))
+            deletions = sum(length for operation, length in alignment.cigartuples or () if operation == 2)
+            identity = max(0.0, 1 - edits / max(aligned_bp + deletions, 1))
+            corrected_identity = recruitment_identity(SimpleNamespace(
+                reference_start=alignment.reference_start, cigar=alignment.cigarstring or "",
+                query_start=alignment.query_alignment_start, query_end=alignment.query_alignment_end,
+                alignment_identity=identity), contexts[alignment.reference_name])
             reference_length = len(reference["sequence"])
             required_bp = min(min_aligned_bp, max(1, reference_length // 2))
             if (
                 alignment.mapping_quality < min_mapping_quality
-                or identity < min_alignment_identity
+                or max(identity, corrected_identity) < min_alignment_identity
                 or aligned_bp < required_bp
             ):
                 continue
@@ -306,6 +314,18 @@ def parse_recruitment_sam(
                 alignment_score = int(alignment.get_tag("AS"))
             except KeyError:
                 alignment_score = aligned_bp - edits
+            read = read_by_id.get(alignment.query_name)
+            if read is None:
+                continue
+            if alignment.cigartuples and any(operation == 5 for operation, _length in alignment.cigartuples):
+                if alignment.infer_read_length() != len(read.sequence):
+                    continue
+                alignment.query_sequence = revcomp(read.sequence) if alignment.is_reverse else read.sequence
+                alignment.cigartuples = [(4 if operation == 5 else operation, length)
+                                        for operation, length in alignment.cigartuples]
+            start, end = alignment.query_alignment_start, alignment.query_alignment_end
+            if alignment.is_reverse:
+                start, end = len(read.sequence) - end, len(read.sequence) - start
             candidates_by_read[alignment.query_name].append(
                 {
                     "alignment": alignment,
@@ -313,10 +333,16 @@ def parse_recruitment_sam(
                     "aligned_bp": aligned_bp,
                     "identity": identity,
                     "score": alignment_score,
+                    "query_interval": (start, end),
                 }
             )
 
-    for query_name, candidates in candidates_by_read.items():
+    candidate_groups = [group for candidates in candidates_by_read.values()
+                        for group in sorted(query_interval_groups(candidates, lambda row: row["query_interval"]),
+                                            key=lambda group: -max(row["score"] for row in group))]
+    retained_molecules = set()
+    for candidates in candidate_groups:
+        query_name = candidates[0]["alignment"].query_name
         best_by_locus: dict[str, dict] = {}
         for candidate in candidates:
             locus_id = str(candidate["reference"]["locus_id"])
@@ -352,6 +378,10 @@ def parse_recruitment_sam(
             continue
         alignment = selected["alignment"]
         reference = selected["reference"]
+        molecule = (query_name, reference["locus_id"])
+        if molecule in retained_molecules:
+            continue
+        retained_molecules.add(molecule)
         aligned_bp = int(selected["aligned_bp"])
         identity = float(selected["identity"])
         reference_length = len(reference["sequence"])
@@ -378,6 +408,8 @@ def parse_recruitment_sam(
             oriented_quality,
             source="fastq_read",
             sequence_id=query_name,
+            round_tolerance=round_tolerance,
+            reference_nonrepeat_bp=nonrepeat_lengths.get(locus.locus_id),
         )
         projected = reference_interval_to_query_interval(
             alignment, max(reference_start, 0), min(reference_end, reference_length)
@@ -751,6 +783,7 @@ def run_read_recruitment(
     min_aligned_bp: int = 100,
     min_locus_score_margin: int = 10,
     mapped_paths: dict | None = None,
+    round_tolerance: float = 0.25,
 ) -> tuple[list[dict], list[dict], list[Assignment], dict[str, Path]]:
     outdir = Path(outdir)
     root = outdir / "recruitment"
@@ -798,6 +831,7 @@ def run_read_recruitment(
             min_alignment_identity=min_alignment_identity,
             min_aligned_bp=min_aligned_bp,
             min_locus_score_margin=min_locus_score_margin,
+            round_tolerance=round_tolerance,
         )
     elif not mapped_paths:
         sam_path.write_text("")

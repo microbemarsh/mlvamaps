@@ -499,10 +499,10 @@ def _repeat_count_svg(rows: list[dict], assembly: bool = False) -> str:
 <figure class="chart-panel" aria-label="Individual locus repeat counts">
   <svg viewBox="0 0 {1240 if has_estimates else 1080} {height}" role="img">
     <title>Individual locus repeat counts</title>
-    <desc>{"Repeat counts and labelled approximations" if has_estimates else "Exact repeat count"} at every panel locus, shown independently of amplicon SNP bands.</desc>
+    <desc>{"Repeat counts and labelled approximations" if has_estimates else "Repeat counts"} at every panel locus, shown independently of amplicon SNP bands.</desc>
     {"".join(marks)}
   </svg>
-  <figcaption>Bar length represents repeat units, with the {"call" if has_estimates else "exact call"} (and raw assembly estimate when applicable) printed at right. Call status is printed beside each bar as well as indicated by color.{estimate_note}</figcaption>
+  <figcaption>Bar length represents repeat units, with the call (and raw assembly estimate when applicable) printed at right. Call status is printed beside each bar as well as indicated by color.{estimate_note}</figcaption>
 </figure>
 """
 
@@ -741,7 +741,7 @@ def write_report(
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
-    dropout = sum(1 for row in allele_rows if row.get("call_status") == "LOCUS_DROPOUT")
+    dropout = sum(1 for row in allele_rows if row.get("call_status") in {"LOCUS_DROPOUT", "NOT_FOUND"})
     multiple = sum(
         1 for row in allele_rows if row.get("call_status") == "MULTIPLE_VARIANTS"
     )
@@ -750,7 +750,7 @@ def write_report(
     reference_best = reference_rows[0] if reference_rows else {}
     total_loci = len(allele_rows)
     flagged = low_depth + dropout + multiple + sum(
-        row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE", "ESTIMATED"}
+        row.get("call_status") in {"AMBIGUOUS", "OUT_OF_RANGE", "ESTIMATED", "PRESENT_COUNT_UNKNOWN"}
         for row in allele_rows
     )
     summary_cards = [

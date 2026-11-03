@@ -1,6 +1,7 @@
 from dataclasses import replace
 import csv
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -93,6 +94,54 @@ def test_reference_and_measured_alleles_share_rounding(tmp_path, tolerance, expe
         measured_repeats={("L1", "m1"): expected},
     )
     assert scores[("L1", "m1")]["R1"] == 0
+
+
+@pytest.mark.skipif(not shutil.which("sassy"), reason="native PCR required")
+@pytest.mark.parametrize("tolerance", [0, .25, .4])
+def test_reference_primer_indels_use_the_assembly_product_calibration(tmp_path, tolerance):
+    from test_fastq_assembly_concordance import _sample
+    from mlvamaps.assembly_call import run_assembly_call
+    from mlvamaps.io import read_loci
+    from mlvamaps.mapping_classification import observed_reference_contexts
+    from mlvamaps.sequence import revcomp
+
+    records, panel, assembly, _expected = _sample(tmp_path)
+    loci = read_loci(panel)
+    db = tmp_path / "database"
+    db.mkdir()
+    for index, (name, product) in enumerate(records):
+        sequence = revcomp(product) if index % 2 else product
+        (db / f"{name}.fasta").write_text(f">R1\n{sequence}\n")
+    result = run_assembly_call(str(assembly), str(panel), str(tmp_path / "assembly"), "s",
+                              threads=1, assembly_round_tolerance=tolerance)
+    expected = {row["locus_id"]: float(row["repeat_count"]) for row in read_tsv(result["calls"])}
+    _, contexts, members = observed_reference_contexts(db, loci, tolerance)
+    assert {context.locus_id: context.repeat_count for context in contexts} == expected
+    scores, _ = molecule_log_likelihoods([alignment(context, molecule=context.locus_id) for context in contexts],
+        contexts, members, measured_repeats={(name, name): count for name, count in expected.items()})
+    assert all(value["R1"] == 0 for value in scores.values())
+
+
+def test_reference_anchor_correction_preserves_legacy_length_fallback(tmp_path):
+    from mlvamaps.mapping_classification import observed_reference_contexts
+    from mlvamaps.calling import assembly_equivalent_product_allele
+    from mlvamaps.locus_measurement import measure_locus_product, reference_nonrepeat_lengths
+
+    locus = Locus("L", forward_primer="ACGTAC", reverse_primer="CATGCA",
+                  left_flank_sequence="GGC", right_flank_sequence="CC",
+                  repeat_motif="GATA", repeat_unit_length_bp=4)
+    sequence = "ACGTACAAAGGC" + "GATA" * 4 + "CCTTTTGCATG"
+    (tmp_path / "L.fasta").write_text(f">bounded\n{sequence}\n>unbounded\n{'A' * len(sequence)}\n")
+    expected = assembly_equivalent_product_allele(locus, len(sequence))[1]
+    _, contexts, _ = observed_reference_contexts(tmp_path, [locus])
+    # Do not replace minimal-panel product-length convention with motif units.
+    assert expected != 4
+    assert all(context.repeat_count == expected for context in contexts)
+    assert measure_locus_product(sequence, locus).called_allele == expected
+    bounded = [context for context in contexts if context.sequence == sequence]
+    calibration = reference_nonrepeat_lengths([locus], bounded)["L"]
+    partial = measure_locus_product("GGC" + "GATA" * 4 + "CC", locus, reference_nonrepeat_bp=calibration)
+    assert partial.called_allele == expected
 
 
 def test_duplicate_alignments_and_reference_copies_do_not_add_support():

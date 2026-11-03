@@ -235,6 +235,7 @@ def infer_alleles(
             "second_best_probability": round(second[1], 8),
             "margin": round(best[1] - second[1], 8),
             "molecule_support": len(informative),
+            "molecule_allele_counts": dict(molecule_counts),
             "presence_support": len(locus_items),
             "direct_product_support": len(direct),
             "full_span_support": len(full),
@@ -271,12 +272,13 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
             if any("ambiguous_locus" in row.quality_flags for row in rows):
                 continue
             measured = [row for row in rows if row.measured_repeat_count is not None]
-            if not measured or len({row.measured_repeat_count for row in measured}) != 1:
+            if not measured:
                 continue
             # Complete products use the assembly scale; flank-only observations
             # cannot replace that scale on the same molecule.
             selected = [row for row in measured if row.direct_product_measurement] or measured
-            raw_values = {row.raw_repeat_count for row in selected if row.raw_repeat_count is not None}
+            raw_values = {row.raw_repeat_count if row.raw_repeat_count is not None else row.measured_repeat_count
+                          for row in selected}
             if len(raw_values) > 1:
                 continue
             raw = next(iter(raw_values)) if raw_values else selected[0].measured_repeat_count
@@ -290,7 +292,7 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
             if all(row.evidence_tier == "microassembly" for row in selected):
                 derived.add(molecule)
             else:
-                molecule_calls[(locus.locus_id, molecule)] = selected[0].measured_repeat_count
+                molecule_calls[(locus.locus_id, molecule)] = legacy_round_repeat_count(raw, round_tolerance)
 
         counts = Counter(value for molecule, value in observations.items() if molecule not in derived)
         for value in {observations[molecule] for molecule in derived}:
@@ -435,9 +437,11 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
                     grouped_fractions[legacy_round_repeat_count(state, round_tolerance)] += float(fraction)
                 fractions = sorted(grouped_fractions.items(), key=lambda item: (-item[1], item[0]))
                 minimum = max(3 if technology == "illumina" else 2, thresholds.mixture_min_molecules)
+                observed_counts = Counter(molecule_calls[(locus.locus_id, molecule)] for molecule in observations
+                                          if (locus.locus_id, molecule) in molecule_calls)
                 supported = [(allele, fraction) for allele, fraction in fractions
                              if fraction >= thresholds.mixture_min_fraction
-                             and fraction * len(observations) >= minimum]
+                             and max(fraction * len(observations), observed_counts[allele]) >= minimum]
                 # Require a penalized likelihood gain over the single-allele
                 # model. Diffuse/identical mappings alone cannot establish a
                 # mixture; many individually ambiguous molecules still can.
@@ -512,6 +516,8 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
             "second_best_probability": round(second_probability, 8),
             "margin": round(best_probability - second_probability, 8),
             "molecule_support": measured_support, "presence_support": len(molecules),
+            "molecule_allele_counts": dict(Counter(molecule_calls[(locus.locus_id, molecule)] for molecule in observations
+                if (locus.locus_id, molecule) in molecule_calls)),
             "direct_product_support": len({row.molecule_id for row in rows if row.direct_product_measurement}),
             "full_span_support": len({row.molecule_id for row in rows if row.full_repeat_span}),
             "junction_support": len({row.molecule_id for row in rows if row.left_boundary_span or row.right_boundary_span}),
@@ -545,7 +551,8 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
     return calls, molecule_calls
 
 
-def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresholds=None):
+def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresholds=None,
+                              *, loci=(), round_tolerance=0.25):
     """Fill unresolved calls with labelled estimates, without creating measurements.
 
     Prefer conflicting direct observations, then repeat-spanning CIGAR projections,
@@ -554,6 +561,8 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresh
     """
     thresholds = thresholds or InferenceThresholds()
     known = {context.candidate_id: context for context in contexts}
+    locus_by_id = {locus.locus_id: locus for locus in loci}
+    reference_raw = {}
     by_locus = defaultdict(list)
     for row in evidence:
         by_locus[row.locus_id].append(row)
@@ -605,8 +614,18 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresh
             molecule_scores, weights = defaultdict(dict), {}
             alternatives = defaultdict(set)
             for row in selected:
-                count = row.measured_repeat_count if measured else max(0, row.metadata["pair_repeat_count"]) if paired else row.repeat_count
+                count = ((row.raw_repeat_count if row.raw_repeat_count is not None else row.measured_repeat_count)
+                         if measured else max(0, row.metadata["pair_repeat_count"]) if paired else row.repeat_count)
                 if spanning and not measured and not paired:
+                    locus = locus_by_id.get(row.locus_id)
+                    if locus is not None:
+                        if row.candidate_id not in reference_raw:
+                            from .locus_measurement import reference_product_allele
+
+                            context = known[row.candidate_id]
+                            reference_raw[row.candidate_id] = reference_product_allele(context.sequence, locus, 0)[0]
+                        if reference_raw[row.candidate_id] is not None:
+                            count = reference_raw[row.candidate_id]
                     count += float(row.metadata["spanning_repeat_indel_delta"])
                 if not math.isfinite(count) or count < 0:
                     continue
@@ -644,6 +663,13 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresh
                         score = scores.get(state, min(scores.values()) - 20.) - max(scores.values())
                     totals[state] += weights[molecule] * score
             ranked = sorted(_softmax(totals).items(), key=lambda item: (-item[1], item[0]))
+            raw_best = ranked[0][0]
+            best_count = legacy_round_repeat_count(raw_best, round_tolerance)
+            grouped_support = defaultdict(float)
+            for state, probability in ranked:
+                grouped_support[legacy_round_repeat_count(state, round_tolerance)] += probability
+            ranked = sorted(grouped_support.items(), key=lambda item: (-item[1], item[0]))
+            ranked.sort(key=lambda item: item[0] != best_count)
             best = ranked[0]
             second = ranked[1][1] if len(ranked) > 1 else 0.0
             support = len(molecule_scores)
@@ -658,10 +684,10 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresh
                 best_candidate_repeat=best[0], best_probability=round(best[1], 8),
                 second_best_probability=round(second, 8), margin=round(best[1] - second, 8),
                 candidate_distribution=";".join(f"{count}:{probability:.8f}" for count, probability in ranked),
+                repeat_count_raw=raw_best,
             )
         call.update(estimation_method=method, estimation_reason=reason, estimate_support=support)
         call.update(repeat_count=call["best_candidate_repeat"],
-                    repeat_count_raw=call["best_candidate_repeat"],
                     status="estimated", confidence="low")
 
 
@@ -700,7 +726,7 @@ def locus_repeat_prior(locus, contexts, maximum_candidates=2048):
     return {state: 1 / len(states) for state in states}, source, limited
 
 
-def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None):
+def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None, *, round_tolerance=0.25):
     """Complete FASTQ predictions after reconstruction, without creating reads."""
     thresholds = thresholds or InferenceThresholds()
     by_locus = defaultdict(list)
@@ -755,9 +781,15 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
                           "No upper repeat boundary was measured; the reported interval is a bounded candidate envelope.")
                 call.update(status="estimated", repeat_lower_bound=lower)
             best = min(prior, key=lambda state: (-prior[state], state))
-            call.update(repeat_count=best, repeat_count_raw=best, best_candidate_repeat=best,
-                        best_probability=prior[best], second_best_probability=sorted(prior.values(), reverse=True)[1] if len(prior) > 1 else 0.,
-                        candidate_distribution=";".join(f"{state}:{prob:.8f}" for state, prob in prior.items()),
+            rounded = legacy_round_repeat_count(best, round_tolerance) if bounds else best
+            probabilities = defaultdict(float)
+            for state, probability in prior.items():
+                probabilities[legacy_round_repeat_count(state, round_tolerance) if bounds else state] += probability
+            second_probability = max((prob for state, prob in probabilities.items() if state != rounded), default=0.)
+            call.update(repeat_count=rounded, repeat_count_raw=best, best_candidate_repeat=rounded,
+                        best_probability=probabilities[rounded], second_best_probability=second_probability,
+                        margin=probabilities[rounded] - second_probability,
+                        candidate_distribution=";".join(f"{state}:{prob:.8f}" for state, prob in probabilities.items()),
                         repeat_interval_low=min(prior), repeat_interval_high=max(prior),
                         computational_fallback=call.get("computational_fallback") or limited,
                         confidence="low" if bounds else "unresolved", estimation_method=source,
@@ -799,6 +831,8 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
         if call.get("repeat_interval_high") in (None, ""):
             call["repeat_interval_high"] = max((state for state, _ in distribution), default=value)
         call.update(estimate_source=source, prior_only=prior_only, independent_support=support,
+                    primary_molecule_support=call.get("molecule_allele_counts", {}).get(value, 0),
+                    secondary_molecule_support=call.get("molecule_allele_counts", {}).get(call.get("secondary_repeat"), 0),
                     model_support=model_support, data_evidence_confidence=round(confidence, 8),
                     second_best_repeat_count=alternative[0][0] if alternative else "",
                     second_best_support=alternative[0][1] if alternative else 0.,
@@ -825,6 +859,7 @@ COMMON_LOCUS_CALL_FIELDS += [
     "computational_fallback", "possible_secondary", "repeat_interval_low", "repeat_interval_high",
     "log_likelihood_gap", "inference_tier",
     "derived_molecule_support", "repeat_lower_bound",
+    "primary_molecule_support", "secondary_molecule_support",
     "genotype_status",
 ]
 COMMON_LOCUS_CALL_FIELDS += [field for field in CONFIDENCE_FIELDS + ["second_best_repeat_count"]

@@ -910,6 +910,25 @@ def test_combined_marker_matrix_falls_back_to_repeat_calls_when_sequences_are_un
     assert pair["combined_marker_distance"] != ""
 
 
+@pytest.mark.parametrize("available", ["repeats", "snps"])
+def test_disabled_marker_component_cannot_supply_zero_distance_or_overlap(tmp_path, available):
+    results = tmp_path / "results"
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text("shared_identifier\tlatitude\tlongitude\nS1\t1\t2\nS2\t3\t4\n")
+    for sample in ("S1", "S2"):
+        path = _write_calls(results, sample, {"L1": 3 if available == "repeats" else None})
+        if available == "snps":
+            _write_gzip_fasta(path.parent / "phylogeny/L1/query.fasta.gz", sample, "AACCGG")
+    export_myoga(results, metadata, tmp_path / "export", combined_markers=True,
+                 repeat_weight=0 if available == "repeats" else 1,
+                 snp_weight=0 if available == "snps" else 1)
+    matrix = _read_tsv(tmp_path / "export/combined_marker_distance_matrix.tsv")
+    assert matrix[0]["S2"] == "" and matrix[1]["S1"] == ""
+    pair = _read_tsv(tmp_path / "export/combined_marker_pairwise_distances.tsv")[0]
+    assert pair["loci_compared"] == "0" and pair["comparison_status"] == "insufficient_overlap"
+    assert not (tmp_path / "export/combined_marker_nj.tree").exists()
+
+
 @pytest.mark.parametrize("query_file", ["classification/query_amplicons.fasta", "query_loci.fasta"])
 def test_combined_marker_export_uses_current_alignment_query_amplicons(tmp_path, query_file):
     results = tmp_path / "results"
@@ -973,6 +992,12 @@ def test_retained_assembly_evidence_is_masked_with_rich_panel(tmp_path):
         repeat_motif="AT", repeat_unit_length_bp=2,
     )
 
+    # Selected assembly evidence also takes precedence over files left by an
+    # earlier FASTQ run in the same directory.
+    _write_gzip_fasta(calls_path.parent / "phylogeny/L1/query.fasta.gz", "old", "TTTT")
+    (calls_path.parent / "query_locus_reconstruction.tsv").write_text(
+        "locus_id\texported\trepeat_count\nL1\tno\t3\n")
+
     recovered, statuses = recover_masked_sequences(
         [SampleCalls("S1", calls_path, rows, ["L1"])],
         ["L1"],
@@ -1009,3 +1034,45 @@ def test_reconstructed_query_uses_pcr_audit_and_must_match_final_allele(tmp_path
         [SampleCalls("S1", calls_path, rows, ["L1"])], ["L1"], {"L1": locus})
     assert statuses[0]["status"] == expected_status
     assert bool(recovered) == (expected_status == "RECOVERED")
+
+
+@pytest.mark.parametrize("stale_source", ["phylogeny/L1/query.fasta", "classification/query_amplicons.fasta",
+                                          "local_locus_products.fasta", "local_assembly_pcr/matches.tsv"])
+def test_rejected_reconstruction_cannot_reenter_combined_distances_through_fallback(tmp_path, stale_source):
+    calls_path = _write_calls(tmp_path / "results", "S1", {"L1": 3})
+    rows = _read_tsv(calls_path)
+    rows[0]["product_size_bp"] = ""  # FASTQ estimates retain counts without a selected product.
+    (calls_path.parent / "query_locus_reconstruction.tsv").write_text(
+        "locus_id\texported\trepeat_count\nL1\tno\t2\n")
+    stale = calls_path.parent / stale_source
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    if stale.suffix == ".tsv":
+        stale.write_text("primer_name\tproduct_seq\nL1\tAAAGGATATCCGGG\n")
+    else:
+        name = "L1_local_primary" if stale_source == "local_locus_products.fasta" else "L1"
+        stale.write_text(f">{name}\nAAAGGATATCCGGG\n")
+    locus = Locus("L1", forward_primer="AAA", reverse_primer="CCC",
+                  left_flank_sequence="GG", right_flank_sequence="CC", repeat_motif="AT", repeat_unit_length_bp=2)
+    recovered, statuses = recover_masked_sequences(
+        [SampleCalls("S1", calls_path, rows, ["L1"])], ["L1"], {"L1": locus})
+    assert not recovered
+    assert statuses[0]["status"] == "SEQUENCE_UNAVAILABLE"
+    assert rows[0]["repeat_count"] == "3"
+
+
+def test_current_reconstruction_takes_precedence_over_old_sequence_exports(tmp_path):
+    calls_path = _write_calls(tmp_path / "results", "S1", {"L1": 2})
+    rows = _read_tsv(calls_path)
+    (calls_path.parent / "query_loci.fasta").write_text(">L1\nAAAGGATATCCGGG\n")
+    (calls_path.parent / "query_locus_reconstruction.tsv").write_text(
+        "locus_id\texported\trepeat_count\nL1\tyes\t2\n")
+    for filename in ("phylogeny/L1/query.fasta", "classification/query_amplicons.fasta"):
+        path = calls_path.parent / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(">L1\nAAAGGATATCTGGG\n")
+    locus = Locus("L1", forward_primer="AAA", reverse_primer="CCC",
+                  left_flank_sequence="GG", right_flank_sequence="CC", repeat_motif="AT", repeat_unit_length_bp=2)
+    recovered, statuses = recover_masked_sequences(
+        [SampleCalls("S1", calls_path, rows, ["L1"])], ["L1"], {"L1": locus})
+    assert recovered[("S1", "L1")].sequence == "AAAGGCCGGG"
+    assert statuses[0]["source"].endswith("/query_loci.fasta")

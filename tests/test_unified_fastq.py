@@ -294,6 +294,28 @@ def test_primer_recovery_rejects_tied_loci_and_different_product_sizes():
         )[0].passes_assignment_qc
 
 
+def test_primer_rescue_keeps_disjoint_products_and_rejects_only_overlapping_competitors():
+    from mlvamaps.locus_assignment import assignments_from_pcr
+    from mlvamaps.models import ReadRecord
+    from mlvamaps.sequence import revcomp
+
+    loci = [Locus(name, forward_primer="AAAA", reverse_primer="CCCC") for name in ("A", "B")]
+    read = ReadRecord("m", "ACGT" * 25, "".join(chr(33 + i % 40) for i in range(100)))
+    first = dict(reference_id="m", primer_name="A", full_len=20, strand="+",
+                 fwd_mismatches=0, rev_mismatches=0, fwd_start=0, fwd_end=4, rev_start=16, rev_end=20)
+    second = dict(first, primer_name="B", strand="-", fwd_start=10, fwd_end=14, rev_start=26, rev_end=30)
+    rows = assignments_from_pcr([read], loci, [first, second], "s", allow_multi_locus=True)
+    assert len(rows) == 2 and all(row.passes_assignment_qc for row in rows)
+    assert [row.assigned_locus for row in rows] == ["A", "B"]
+    assert rows[0].oriented_sequence == read.sequence[:20]
+    assert rows[1].oriented_sequence == revcomp(read.sequence)[10:30]
+    assert rows[1].oriented_quality == read.quality[::-1][10:30]
+    assert all((row.forward_start, row.reverse_end) == (0, 20) for row in rows)
+    rejected = assignments_from_pcr([read], loci, [first, dict(first, primer_name="B"), second],
+                                    "s", allow_multi_locus=True)
+    assert len(rejected) == 2 and not rejected[0].passes_assignment_qc and rejected[1].passes_assignment_qc
+
+
 def test_duplicate_reference_contexts_do_not_multiply_state_support():
     locus = _locus()
     contexts = generate_candidate_contexts([locus])

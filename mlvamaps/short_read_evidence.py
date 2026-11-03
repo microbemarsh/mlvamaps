@@ -13,7 +13,7 @@ import regex
 from .alignment_evidence import CandidateAlignment, CandidateEvidence
 from .candidate_contexts import CandidateContext
 from .calling import assembly_equivalent_product_allele
-from .locus_measurement import mapped_locus_window, measure_locus_product
+from .locus_measurement import mapped_locus_window, measure_locus_product, reference_nonrepeat_lengths, reference_product_allele
 from .models import Locus, ReadPair, ReadRecord
 from .sequence import revcomp
 from .short_reads import _merge_overlap_is_repeat_only, merge_read_pair
@@ -58,7 +58,7 @@ def estimate_insert_distribution(alignments, contexts, minimum_fragments=100):
     return statistics.fmean(retained), deviation, len(retained)
 
 
-def partial_repeat_lower_bound(sequence, locus):
+def partial_repeat_lower_bound(sequence, locus, reference_nonrepeat_bp=None):
     """Exact uniquely anchored terminal motif runs provide a conservative bound."""
     motif, flank = locus.repeat_motif, locus.left_flank_sequence
     if not motif or len(flank) < 12 or set(motif + flank) - set("ACGT"):
@@ -73,8 +73,13 @@ def partial_repeat_lower_bound(sequence, locus):
     unit = locus.repeat_unit_length_bp or len(motif)
     nonrepeat = (len(locus.forward_primer) + len(locus.left_flank_sequence)
                  + len(locus.right_flank_sequence) + len(locus.reverse_primer))
-    offset = (locus.nominal_repeat_units - (locus.expected_product_size_bp - nonrepeat) / unit
-              if locus.expected_product_size_bp and locus.nominal_repeat_units else 0)
+    if reference_nonrepeat_bp is not None:
+        if len(reference_nonrepeat_bp) != 1:
+            return None
+        nonrepeat = reference_nonrepeat_bp[0]
+    if not (locus.expected_product_size_bp and locus.nominal_repeat_units):
+        return assembly_equivalent_product_allele(locus, nonrepeat + len(suffix), 0)[0]
+    offset = locus.nominal_repeat_units - (locus.expected_product_size_bp - nonrepeat) / unit
     return max(0, len(suffix) / unit + offset)
 
 
@@ -84,16 +89,13 @@ def _repeat_indel_delta(alignment: CandidateAlignment, context: CandidateContext
     unit = max(context.repeat_unit_length, 1)
     for length_text, operation in _CIGAR.findall(alignment.cigar):
         length = int(length_text)
-        if operation in "M=X":
+        if operation == "D":
+            delta -= max(0, min(reference + length, context.repeat_end) - max(reference, context.repeat_start))
+        elif operation == "I" and context.repeat_start <= reference <= context.repeat_end:
+            delta += length
+        if operation in "MDN=X":
             reference += length
-        elif operation == "D":
-            if context.repeat_start - unit <= reference <= context.repeat_end + unit and length % unit == 0:
-                delta -= length / unit
-            reference += length
-        elif operation == "I":
-            if context.repeat_start - unit <= reference <= context.repeat_end + unit and length % unit == 0:
-                delta += length / unit
-    return delta
+    return delta / unit
 
 
 def extract_short_read_evidence(
@@ -112,11 +114,14 @@ def extract_short_read_evidence(
         raise ValueError("Insert-size mean and standard deviation must both be finite and positive")
     context_by_id = {context.candidate_id: context for context in contexts}
     locus_by_id = {locus.locus_id: locus for locus in loci}
+    nonrepeat_lengths = reference_nonrepeat_lengths(loci, contexts)
     span_patterns = {}
     if recruited_fragments is not None:
         for locus in loci:
+            calibrated = len(nonrepeat_lengths.get(locus.locus_id, ())) == 1
             anchors = (locus.forward_primer, revcomp(locus.reverse_primer),
-                       locus.left_flank_sequence, locus.right_flank_sequence)
+                       locus.left_flank_sequence[-21:] if calibrated else locus.left_flank_sequence,
+                       locus.right_flank_sequence[:21] if calibrated else locus.right_flank_sequence)
             span_patterns[locus.locus_id] = [
                 regex.compile(f"(?:{anchor}){{e<={min(3, max(1, len(anchor) // 5))}}}")
                 if anchor and set(anchor) <= set("ACGT") else None
@@ -149,6 +154,7 @@ def extract_short_read_evidence(
                 continue
             measurements.append(measure_locus_product(
                 oriented, locus_by_id[locus_id], qualities, source="illumina_molecule", round_tolerance=round_tolerance,
+                reference_nonrepeat_bp=nonrepeat_lengths.get(locus_id),
             ))
         if not measurements:
             return None, "PRESENCE_ONLY", 0, None, None, "", {}
@@ -156,17 +162,39 @@ def extract_short_read_evidence(
         return (best.called_allele, best.status, best.confidence or 0,
                 getattr(best, "raw_repeat_count", None),
                 (getattr(best, "metadata", None) or {}).get("repeat_sigma"), best.product_sequence,
-                getattr(best, "metadata", None) or {})
+                {**(getattr(best, "metadata", None) or {}),
+                 "product_quality": getattr(best, "product_quality", None) or ""})
 
-    grouped: dict[tuple[str, str, int | float], list[CandidateAlignment]] = defaultdict(list)
+    # Equal repeat labels can have different paired geometry or CIGAR evidence.
+    # Retain each reference background; inference still groups by molecule ID.
+    grouped: dict[tuple[str, str, str], list[CandidateAlignment]] = defaultdict(list)
     best_mates = {}
     for alignment in alignments:
-        grouped[(alignment.molecule_id, alignment.locus_id, alignment.repeat_count)].append(alignment)
+        grouped[(alignment.molecule_id, alignment.locus_id, alignment.candidate_id)].append(alignment)
         key = (alignment.molecule_id, alignment.locus_id, alignment.mate or 1)
         if key not in best_mates or alignment.alignment_score > best_mates[key].alignment_score:
             best_mates[key] = alignment
     evidence = []
     direct_by_molecule: dict[tuple[str, str], tuple[int | float, str]] = {}
+    conflicting_by_molecule = defaultdict(dict)
+
+    def select_measurement(molecule, locus_id, measurements):
+        usable = [item for item in measurements if item[0] is not None
+                  and item[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}]
+        # A complete sample product determines its own calibration; partial
+        # spans must not veto it based on unobserved nonrepeat sequence.
+        usable = [item for item in usable if item[1] == "FULL_PRODUCT"] or usable
+        if not usable:
+            return None
+        if len({(item[0], item[3]) for item in usable}) > 1:
+            for item in usable:
+                conflicting_by_molecule[(molecule, locus_id)][(item[0], item[3], item[4], item[5])] = item
+            return None
+        best = max(usable, key=lambda item: item[2])
+        if len({item[5] for item in usable if item[1] == "FULL_PRODUCT"}) > 1:
+            best = (*best[:5], "", best[6])
+        return best
+
     guided_segments = {}
     fragment_methods = {}
     for locus_id, fragments in (recruited_fragments or {}).items():
@@ -210,13 +238,14 @@ def extract_short_read_evidence(
                     if item[0] is not None and item[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:
                         complete.append(item)
                         method = "merged_fragment"
-            if complete and len({item[0] for item in complete}) == 1:
-                best = max(complete, key=lambda item: (item[1] == "FULL_PRODUCT", item[2]))
-                if len({item[5] for item in complete if item[1] == "FULL_PRODUCT"}) > 1:
-                    best = (*best[:5], "", best[6])
+            best = select_measurement(molecule, locus_id, complete)
+            if best is not None:
                 direct_by_molecule[(molecule, locus_id)] = best
                 fragment_methods[(molecule, locus_id)] = method
-    for (molecule, locus_id, _repeat), rows in grouped.items():
+    observed_mates = defaultdict(list)
+    for (molecule, locus_id, _mate), alignment in best_mates.items():
+        observed_mates[(molecule, locus_id)].append(alignment)
+    for (molecule, locus_id), rows in observed_mates.items():
         if molecule in (recruited_fragments or {}).get(locus_id, {}):
             continue
         if (molecule, locus_id) in direct_by_molecule:
@@ -234,27 +263,14 @@ def extract_short_read_evidence(
                 sequences.append(merged)
         sequences.extend(ReadRecord(row.read_id, row.query_sequence, row.query_quality) for row in rows)
         measurements = [measure_sequence(locus_id, read.sequence, read.quality) for read in sequences]
-        usable = [item for item in measurements if item[0] is not None and item[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}]
-        measured = (max(usable, key=lambda item: (item[1] == "FULL_PRODUCT", item[2]))
-                    if usable and len({(item[0], item[3]) for item in usable}) == 1 else None)
+        measured = select_measurement(molecule, locus_id, measurements)
         if measured and measured[0] is not None and measured[1] in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:
             direct_by_molecule[(molecule, locus_id)] = measured
 
-    for (molecule, locus_id, repeat), rows in grouped.items():
+    for (molecule, locus_id, _candidate), rows in grouped.items():
         best = max(rows, key=lambda row: (row.alignment_score, row.alignment_identity))
-        scores_by_candidate: dict[str, float] = {}
-        for row in rows:
-            scores_by_candidate[row.candidate_id] = max(
-                scores_by_candidate.get(row.candidate_id, -math.inf), row.alignment_score
-            )
-        alternatives = [
-            score for candidate_id, score in scores_by_candidate.items()
-            if candidate_id != best.candidate_id
-        ]
-        background_margin = (
-            best.alignment_score - max(alternatives) if alternatives else math.inf
-        )
         context = context_by_id[best.candidate_id]
+        repeat = context.repeat_count
         from .mapped_reconstruction import aligned_flanks
         anchor_sizes = [(row, aligned_flanks(row, context_by_id[row.candidate_id])) for row in rows]
         minimum_left = max(1, min(21, context.repeat_start))
@@ -289,9 +305,7 @@ def extract_short_read_evidence(
                         and second.reference_start >= context.repeat_end
                         and all(row.query_coverage >= .95 and row.alignment_identity >= .95
                                 and row.reference_end - row.reference_start >= 21 for row in (first, second))):
-                    reference_raw = assembly_equivalent_product_allele(
-                        locus_by_id[locus_id], len(context.sequence), 0,
-                    )[0]
+                    reference_raw = reference_product_allele(context.sequence, locus_by_id[locus_id], 0)[0]
                     if reference_raw is not None:
                         pair_estimate = {
                             "pair_repeat_count": reference_raw + (insert_mean - (
@@ -317,7 +331,6 @@ def extract_short_read_evidence(
                     0, min(best.reference_end, context.repeat_start) - best.reference_start,
                     best.reference_end - max(best.reference_start, context.repeat_end),
                 ),
-                "background_alignment_margin": background_margin,
                 "product_sequence": measured[5] if measured and measured[1] == "FULL_PRODUCT" else "",
                 **(measured[6] if measured else {}),
                 **guided_segments.get((molecule, locus_id), {}),
@@ -339,7 +352,8 @@ def extract_short_read_evidence(
             measured = direct_by_molecule.get((molecule, locus_id))
             bounds = [bound for read in (fragment.pair.read1, fragment.pair.read2) if read is not None
                       for sequence in (read.sequence, revcomp(read.sequence))
-                      if (bound := partial_repeat_lower_bound(sequence, locus_by_id[locus_id])) is not None]
+                      if (bound := partial_repeat_lower_bound(sequence, locus_by_id[locus_id],
+                          nonrepeat_lengths.get(locus_id))) is not None]
             evidence.append(CandidateEvidence(
                 locus_id, measured[0] if measured else None, molecule,
                 locus_confidence=1.0,
@@ -357,5 +371,14 @@ def extract_short_read_evidence(
                 raw_repeat_count=measured[3] if measured else None,
                 repeat_sigma=measured[4] if measured else None,
                 quality_flags=("boundary_ambiguous",) if measured and measured[6].get("boundary_ambiguous") else (),
+            ))
+    for (molecule, locus_id), alternatives in conflicting_by_molecule.items():
+        for measured in alternatives.values():
+            evidence.append(CandidateEvidence(
+                locus_id, measured[0], molecule, technology="illumina", locus_confidence=1.0,
+                measured_repeat_count=measured[0], raw_repeat_count=measured[3], repeat_sigma=measured[4],
+                direct_product_measurement=measured[1] == "FULL_PRODUCT", full_repeat_span=True,
+                evidence_tier="conflicting_measurements", quality_flags=("conflicting_measurements",),
+                metadata={**measured[6], "product_sequence": measured[5]},
             ))
     return evidence

@@ -101,6 +101,13 @@ def test_incomplete_anchor_never_becomes_full_product():
     assert measurement.called_allele == 5
 
 
+def test_reference_calibration_resolves_forward_site_using_the_ordered_reverse_primer():
+    from mlvamaps.candidate_contexts import CandidateContext
+    from mlvamaps.locus_measurement import reference_nonrepeat_lengths
+    context = CandidateContext("c", "L1", _product(), 5, 4, 12, 32, "GCTA", "TAGC")
+    assert reference_nonrepeat_lengths([_locus()], [context]) == {"L1": (24,)}
+
+
 def test_true_zero_repeat_uses_anchor_quality_instead_of_an_empty_quality_slice():
     from dataclasses import replace
     locus = replace(_locus(), expected_min_repeats=0)

@@ -265,6 +265,12 @@ def test_dropout_is_reported(tmp_path):
     loci, _profiles = write_panel(tmp_path)
     reads = tmp_path / "empty.fastq"
     reads.write_text("")
+    output = tmp_path / "dropout"
+    output.mkdir()
+    for name in ("query_loci.fasta", "taxonomic_query_sequences.fasta"):
+        (output / name).write_text(">VNTR_01\nACGT\n")
+    (output / "query_locus_reconstruction.tsv").write_text("locus_id\texported\trepeat_count\nVNTR_01\tyes\t5\n")
+    (output / "molecule_candidate_evidence.tsv").write_text("stale evidence\n")
     result = run_call(
         reads_path=str(reads),
         loci_path=str(loci),
@@ -280,6 +286,10 @@ def test_dropout_is_reported(tmp_path):
         assert float(row["repeat_count"]) >= 0 and row["prior_only"] == "True"
         assert row["genotype_status"] == "PRIOR_ONLY" and float(row["data_evidence_confidence"]) == 0
     assert result["myoga_loci"].exists()
+    assert not (output / "query_loci.fasta").read_text().strip()
+    assert not (output / "taxonomic_query_sequences.fasta").read_text().strip()
+    assert all(row["exported"] == "no" for row in read_tsv(output / "query_locus_reconstruction.tsv"))
+    assert read_tsv(output / "molecule_candidate_evidence.tsv") == []
 
 
 def test_primer_export_and_expected_bounds(tmp_path):

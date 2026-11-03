@@ -231,9 +231,10 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
         rows = rows_by_locus[locus_id]
         accepted = set(pool) | {row.molecule_id for row in rows}
         mapped = [row for row in alignments_by_locus[locus_id] if row.molecule_id in accepted]
-        measured = {row.molecule_id: row.measured_repeat_count for row in rows if row.measured_repeat_count is not None}
+        measured = {row.molecule_id: row.measured_repeat_count for row in rows
+                    if row.measured_repeat_count is not None and "conflicting_measurements" not in row.quality_flags}
         complete = {row.molecule_id for row in rows
-                    if row.direct_product_measurement and row.metadata.get("product_sequence")}
+                    if row.molecule_id in measured and row.direct_product_measurement and row.metadata.get("product_sequence")}
         distribution = Counter(measured.values())
         dominant = distribution.most_common(1)
         strong = bool(dominant and len(complete) >= thresholds.minimum_molecules
@@ -306,14 +307,16 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
         allele = assembly_call["repeat_count"]
         # Preserve original molecule IDs: assembled support is not a new set
         # of independent complete spanning reads.
-        rows = [row for row in rows_by_locus[locus_id] if row.molecule_id not in support]
+        observed = {row.molecule_id for row in rows_by_locus[locus_id] if row.measured_repeat_count is not None}
+        derived_support = support - observed
+        rows = [row for row in rows_by_locus[locus_id] if row.molecule_id not in derived_support]
         rows.extend(CandidateEvidence(
             locus_id, allele, name, locus_confidence=1.0,
             left_boundary_span=pool[name].left, right_boundary_span=pool[name].right,
             technology="illumina", measured_repeat_count=allele,
             evidence_tier="microassembly", raw_repeat_count=float(assembly_call["repeat_count_raw"]),
             repeat_sigma=0.08,
-        ) for name in sorted(support))
+        ) for name in sorted(derived_support))
         rows_by_locus[locus_id] = [row if row.measured_repeat_count is not None else replace(
             row, full_repeat_span=False, left_boundary_span=False, right_boundary_span=False,
             repeat_indel_support=0, pair_geometry_support=0,

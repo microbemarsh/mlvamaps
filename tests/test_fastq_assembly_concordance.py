@@ -79,6 +79,72 @@ def _fingerprint(path):
     not shutil.which("minimap2") or not shutil.which("sassy"),
     reason="minimap2 and sassy are needed for FASTQ/assembly concordance",
 )
+@pytest.mark.parametrize("panel_style", ["historical", "minimal"])
+def test_calibrated_flank_reads_preserve_assembly_distance_matrices(tmp_path, panel_style):
+    """Read endpoints must not change an isolate's allele or pairwise distance."""
+    from dataclasses import replace
+    from mlvamaps.myoga_export import export_myoga
+
+    records, panel, _assembly, expected = _sample(tmp_path)
+    # Historical allele labels need not equal the physical motif count.
+    originals = read_loci(panel)[:3]
+    loci = [replace(locus, nominal_repeat_units=6) if panel_style == "historical" else
+            replace(locus, nominal_repeat_units=0, expected_product_size_bp=0,
+                    left_flank_sequence=locus.left_flank_sequence[-21:],
+                    right_flank_sequence=locus.right_flank_sequence[:21]) for locus in originals]
+    write_tsv([vars(locus) for locus in loci], panel, list(vars(loci[0])))
+    expected = {locus.locus_id: str(float(expected[locus.locus_id]) + 2).removesuffix(".0") for locus in loci}
+    database = tmp_path / "database"
+    database.mkdir()
+    for locus, original in zip(loci, originals):
+        reference = (locus.forward_primer + original.left_flank_sequence + "ATGC" * 4
+                     + original.right_flank_sequence + revcomp(locus.reverse_primer))
+        (database / f"{locus.locus_id}.fasta").write_text(f">reference\n{reference}\n")
+    assets = write_candidate_contexts(generate_candidate_contexts(loci, database), database / "competitive_mapping")
+    build_competitive_indexes(assets["fasta"], database / "competitive_mapping")
+    (database / "manifest.json").write_text("{}")
+    metadata = tmp_path / "metadata.tsv"
+    metadata.write_text("shared_identifier\tlatitude\tlongitude\nfull\t1\t2\nflanks\t1\t2\nexpanded\t1\t2\n")
+    for sample in ("full", "flanks", "expanded"):
+        sample_records = []
+        for locus, (_name, product) in zip(loci, records):
+            if sample == "expanded":
+                product = product if product.startswith(locus.forward_primer) else revcomp(product)
+                product = product.replace(locus.right_flank_sequence, "ATGC" * 2 + locus.right_flank_sequence, 1)
+            sample_records.append((locus.locus_id, product))
+        assembly = tmp_path / f"{sample}.fasta"
+        assembly.write_text("".join(f">{name}\n{sequence}\n" for name, sequence in sample_records))
+        sample_expected = {name: str(float(value) + (2 if sample == "expanded" else 0)).removesuffix(".0")
+                           for name, value in expected.items()}
+        run_assembly_call(str(assembly), str(panel), str(tmp_path / "assemblies" / sample), sample_id=sample, threads=2)
+        assert _fingerprint(tmp_path / "assemblies" / sample / "mlva_fingerprint.tsv") == sample_expected
+        reads = tmp_path / f"{sample}.fastq"
+        fragments = []
+        for locus, product in sample_records:
+            sequence = product[20:-20] if sample == "flanks" else product
+            for molecule in range(4):
+                fragments.append(f"@{locus}_{molecule}\n{sequence}\n+\n{'I' * len(sequence)}\n")
+        reads.write_text("".join(fragments))
+        output = tmp_path / "reads" / sample
+        assert main(["call", "-i", "sr", "--fq1", str(reads), "-p", str(panel),
+                     "--database", str(database), "--sample-id", sample, "--sample-mode", "isolate",
+                     "-o", str(output), "-t", "2", "--quiet"]) == 0
+        assert _fingerprint(output / "mlva_fingerprint.tsv") == sample_expected
+        if sample == "flanks":
+            assert not (output / "query_loci.fasta").read_text().strip()
+            with (output / "genotype_evidence.tsv").open() as handle:
+                assert all(row["genotype_status"] != "EXACT" for row in csv.DictReader(handle, delimiter="\t"))
+    for workflow in ("assemblies", "reads"):
+        export_myoga(tmp_path / workflow, metadata, tmp_path / f"{workflow}_export",
+                     loci_path=panel, combined_markers=True)
+    for name in ("mlva_distance_matrix.tsv", "mlva_pairwise_distances.tsv", "combined_marker_distance_matrix.tsv"):
+        assert (tmp_path / "reads_export" / name).read_text() == (tmp_path / "assemblies_export" / name).read_text()
+
+
+@pytest.mark.skipif(
+    not shutil.which("minimap2") or not shutil.which("sassy"),
+    reason="minimap2 and sassy are needed for FASTQ/assembly concordance",
+)
 @pytest.mark.parametrize("layout", ["single", "paired", "overlap", "shotgun", "long", "long_unmapped"])
 @pytest.mark.parametrize("tolerance", [0.25, 0.4, 0])
 def test_short_read_fingerprint_matches_assembly(tmp_path, layout, tolerance, monkeypatch):

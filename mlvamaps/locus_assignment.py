@@ -15,6 +15,7 @@ def assignments_from_pcr(
     min_assignment_score: float = 0.55,
     progress: ProgressReporter | None = None,
     retain_unassigned_sequence: bool = True,
+    allow_multi_locus: bool = False,
 ) -> list[Assignment]:
     """Build read assignments from native paired-primer products."""
     progress = progress or ProgressReporter(enabled=False)
@@ -61,15 +62,33 @@ def assignments_from_pcr(
     results = []
     total = len(reads)
     for idx, read in enumerate(reads, start=1):
-        assignment = _assignment_from_candidates(
+        candidates = candidates_by_read.get(read.read_id, [])
+        groups = [candidates]
+        if allow_multi_locus and candidates:
+            from .mapped_reconstruction import query_interval_groups
+            def interval(candidate):
+                start, end = candidate[5], candidate[8]
+                return (len(read.sequence) - end, len(read.sequence) - start) if candidate[1] == "reverse" else (start, end)
+            groups = query_interval_groups(candidates, interval)
+        for candidates in groups:
+            assignment = _assignment_from_candidates(
                 read,
                 sample_id,
-                candidates_by_read.get(read.read_id, []),
+                candidates,
                 min_assignment_score,
             )
-        if not retain_unassigned_sequence and not assignment.passes_assignment_qc:
-            assignment = replace(assignment, oriented_sequence="", oriented_quality=None)
-        results.append(assignment)
+            if allow_multi_locus and assignment.passes_assignment_qc:
+                # Measure this product, not the first primer pair on a read
+                # that can independently cover several loci.
+                start, end = assignment.forward_start, assignment.reverse_end
+                assignment = replace(assignment,
+                    oriented_sequence=assignment.oriented_sequence[start:end],
+                    oriented_quality=assignment.oriented_quality[start:end] if assignment.oriented_quality else None,
+                    forward_start=0, forward_end=assignment.forward_end - start,
+                    reverse_start=assignment.reverse_start - start, reverse_end=end - start)
+            if not retain_unassigned_sequence and not assignment.passes_assignment_qc:
+                assignment = replace(assignment, oriented_sequence="", oriented_quality=None)
+            results.append(assignment)
         progress.count("Assigned reads", idx, total)
     progress.count("Assigned reads", total, total, force=True)
     return results

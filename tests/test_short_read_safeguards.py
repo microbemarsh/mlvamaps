@@ -1,5 +1,6 @@
 from dataclasses import replace
 import gzip
+import shutil
 
 import pytest
 
@@ -10,6 +11,93 @@ from mlvamaps.io import read_fastq
 from mlvamaps.models import Locus, ReadPair, ReadRecord
 from mlvamaps.short_read_evidence import estimate_insert_distribution, extract_short_read_evidence
 from mlvamaps.short_read_fragments import RecruitedFragment
+
+
+def test_conflicting_mates_keep_their_alleles_and_independent_molecule_count():
+    from mlvamaps.sequence import revcomp
+    locus = Locus("L", forward_primer="ACGTTAGCTAGTCGTACGAT", reverse_primer="TGCATCAGTCGATGCTAGCA",
+        left_flank_sequence="GACTGACCTGATCGACGTTAGCTA", right_flank_sequence="CCGTAACCGGTTAGGCTACTGAC",
+        repeat_motif="ATGC", repeat_unit_length_bp=4)
+    fragments = {}
+    for name, alleles in (("a", (4, 8)), ("b", (6, 8))):
+        reads = []
+        for mate, allele in enumerate(alleles, 1):
+            sequence = (locus.forward_primer + locus.left_flank_sequence + "ATGC" * allele
+                        + locus.right_flank_sequence + revcomp(locus.reverse_primer))
+            sequence = sequence if mate == 1 else revcomp(sequence)
+            reads.append(ReadRecord(f"{name}/{mate}", sequence, "I" * len(sequence)))
+        fragments[name] = RecruitedFragment(ReadPair(name, *reads), True, True, False)
+    evidence = extract_short_read_evidence([], [], [locus], recruited_fragments={"L": fragments})
+    assert {(row.molecule_id, row.measured_repeat_count) for row in evidence if row.measured_repeat_count is not None} == {
+        ("a", 4), ("a", 8), ("b", 6), ("b", 8)}
+    calls, molecule_calls = infer_alleles(evidence, [locus], [], "s", "illumina", require_measurement=True)
+    estimate_unresolved_calls(calls, evidence, [])
+    assert not molecule_calls
+    assert calls[0]["repeat_count"] == 8
+    assert calls[0]["presence_support"] == calls[0]["estimate_support"] == 2
+    assert calls[0]["status"] == "estimated"
+
+
+def test_partial_bound_uses_observed_nonrepeat_length_for_short_boundary_anchors():
+    from mlvamaps.short_read_evidence import partial_repeat_lower_bound
+    locus = Locus("L", forward_primer="A" * 20, reverse_primer="T" * 20,
+                  left_flank_sequence="GACTGACCTGATCGACGTTAGCTA", right_flank_sequence="C" * 24,
+                  repeat_motif="ATGC", repeat_unit_length_bp=4,
+                  expected_product_size_bp=140, nominal_repeat_units=7)
+    partial = locus.left_flank_sequence + "ATGC" * 12
+    # Observed nonrepeat span is 120 bp; 48 bp visible repeat gives allele 14.
+    assert partial_repeat_lower_bound(partial, locus, reference_nonrepeat_bp=(120,)) == 14
+    assert partial_repeat_lower_bound(partial, locus, reference_nonrepeat_bp=(120, 124)) is None
+
+
+@pytest.mark.parametrize("cigar,delta", [("50M1I50M", .25), ("50M3D47M", -.75),
+    ("39M4I61M", 0), ("61M4I39M", 0), ("35M4D61M", 0), ("59M3D38M", -.25)])
+def test_repeat_indels_preserve_partial_units_and_exclude_flank_bases(cigar, delta):
+    from mlvamaps.short_read_evidence import _repeat_indel_delta
+    context = CandidateContext("c", "L", "A" * 100, 5, 4, 40, 60, "", "")
+    row = CandidateAlignment("m", "m", None, "L", "c", 5, "r", 100, 60, 1, 1, 1,
+                             0, 100, 0, 100, cigar, "", True, False, False)
+    assert _repeat_indel_delta(row, context) == delta
+
+
+def test_same_count_reference_backgrounds_keep_competing_pair_lengths():
+    locus = Locus("L", expected_product_size_bp=200, nominal_repeat_units=5, repeat_unit_length_bp=4)
+    contexts = [CandidateContext(name, "L", "A" * 200, 5, 4, 90, 110, "", "") for name in ("a", "b")]
+    first = CandidateAlignment("m", "m/1", 1, "L", "a", 5, "ref", 100, 60, 1, 1, .2,
+                               0, 40, 20, 60, "40M", "", True, False, False)
+    rows = [first, replace(first, mate=2, reverse=True, reference_start=120, reference_end=160),
+            replace(first, candidate_id="b"),
+            replace(first, candidate_id="b", mate=2, reverse=True, reference_start=140, reference_end=180)]
+    evidence = extract_short_read_evidence(rows, contexts, [locus], insert_mean=160, insert_sd=2)
+    assert {row.metadata["pair_repeat_count"] for row in evidence} == {5, 10}
+    assert {row.molecule_id for row in evidence} == {"m"}
+
+
+@pytest.mark.skipif(not shutil.which("sassy"), reason="native primer indel calibration required")
+@pytest.mark.parametrize("reference_index", [7, 8, 9, 10])
+def test_pair_geometry_excludes_reference_primer_indels_outside_the_fragment(tmp_path, reference_index):
+    from test_fastq_assembly_concordance import _sample
+    from mlvamaps.io import read_loci
+    from mlvamaps.sequence import revcomp
+
+    records, panel, _assembly, expected = _sample(tmp_path)
+    locus = read_loci(panel)[reference_index]
+    sequence = records[reference_index][1]
+    if reference_index % 2:
+        sequence = revcomp(sequence)
+    start = sequence.index(locus.left_flank_sequence) + len(locus.left_flank_sequence)
+    end = sequence.index(locus.right_flank_sequence)
+    count = float(expected[locus.locus_id])
+    context = CandidateContext("c", locus.locus_id, sequence, count, 4, start, end, "", "")
+    first = CandidateAlignment("m", "m/1", 1, locus.locus_id, "c", count, "R", 42, 60, 1, 1, .2,
+        0, 21, start - 21, start, "21M", "", True, False, False,
+        query_sequence=sequence[start - 21:start], query_quality="I" * 21)
+    second = replace(first, read_id="m/2", mate=2, reverse=True, reference_start=end, reference_end=end + 21,
+                     query_sequence=revcomp(sequence[end:end + 21]))
+    evidence = extract_short_read_evidence([first, second], [context], [locus],
+        insert_mean=end + 21 - (start - 21), insert_sd=2)
+    assert evidence[0].measured_repeat_count is None
+    assert evidence[0].metadata["pair_repeat_count"] == count == 5
 
 
 def test_insert_calibration_uses_independent_flank_pairs_and_rejects_repeat_geometry():

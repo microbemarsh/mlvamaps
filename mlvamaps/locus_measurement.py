@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Sequence
 
-from .calling import estimate_repeat_count_from_spanning_read, gaussian_allele_probabilities, legacy_round_repeat_count, repeat_unit_length
+from .calling import assembly_equivalent_product_allele, gaussian_allele_probabilities, legacy_round_repeat_count, repeat_unit_length
 from .models import AnchorMeasurement, Locus, LocusMeasurement
 from .sequence import _sassy_searcher, mean_qscore, repeat_motif_statistics, revcomp
 
@@ -278,7 +278,54 @@ def _credible_set(ranked: list[tuple[int | float, float]], mass: float = 0.95) -
     return tuple(selected)
 
 
-def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Sequence[int] | None = None, source: str = "assembly", sequence_id: str | None = None, max_anchor_edits: int = 3, round_tolerance: float = 0.25, calibrated_product_size_bp: int | None = None) -> LocusMeasurement:
+@lru_cache(maxsize=512)
+def _reference_measurement(sequence: str, locus: Locus) -> LocusMeasurement:
+    return measure_locus_product(sequence, locus, round_tolerance=0)
+
+
+def reference_product_allele(sequence: str, locus: Locus, round_tolerance: float = 0.25):
+    """Use primer-adjusted reference length on the assembly allele scale.
+
+    Only an unambiguous product covering the complete reference permits primer
+    correction. Other reference records retain their whole-length convention.
+    Reference anchor searches are shared across calibration and inference.
+    """
+    measured = _reference_measurement(sequence, locus)
+    if (measured.status == "FULL_PRODUCT" and measured.product_start == 0
+            and measured.product_end == len(sequence)
+            and not measured.forward_anchor.ambiguous and not measured.reverse_anchor.ambiguous):
+        raw = measured.raw_repeat_count
+        return raw, legacy_round_repeat_count(raw, round_tolerance) if raw is not None else None
+    return assembly_equivalent_product_allele(locus, len(sequence), round_tolerance)
+
+
+def reference_nonrepeat_lengths(loci, contexts):
+    """Calibrate flank spans only when reference products agree on nonrepeat size.
+
+    Configured flanks can be short boundary anchors, so their lengths alone
+    cannot reconstruct the primer-to-primer nonrepeat length. Reference repeat
+    counts and copy numbers do not determine this calibration.
+    """
+    models = {locus.locus_id: locus for locus in loci
+              if repeat_unit_length(locus) and locus.left_flank_sequence and locus.right_flank_sequence}
+    lengths = {name: set() for name in models}
+    for context in contexts:
+        locus = models.get(context.locus_id)
+        if locus is None:
+            continue
+        measured = _reference_measurement(context.sequence, locus)
+        anchors = (measured.forward_anchor, measured.reverse_anchor)
+        if (measured.status != "FULL_PRODUCT" or not measured.metadata.get("flanks_resolved")
+                or measured.metadata.get("boundary_ambiguous")
+                or any(anchor is None or anchor.ambiguous for anchor in anchors)):
+            lengths[locus.locus_id].add(None)
+            continue
+        lengths[locus.locus_id].add(measured.reverse_anchor.start - measured.forward_anchor.end
+            + len(locus.forward_primer) + len(locus.reverse_primer) - measured.repeat_length_bp)
+    return {name: tuple(sorted(values)) if None not in values else () for name, values in lengths.items()}
+
+
+def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Sequence[int] | None = None, source: str = "assembly", sequence_id: str | None = None, max_anchor_edits: int = 3, round_tolerance: float = 0.25, calibrated_product_size_bp: int | None = None, reference_nonrepeat_bp: tuple[int, ...] | None = None) -> LocusMeasurement:
     """Measure a locus from independently verified anchors in a sequence."""
     sequence = sequence.upper()
     quality = _quality_text(qualities)
@@ -301,13 +348,37 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
                     prime(patterns, [sequence.encode("ascii")], edits)
     forward = find_anchor(locus_model.forward_primer, sequence, max_anchor_edits)
     reverse = find_anchor(revcomp(locus_model.reverse_primer), sequence, max_anchor_edits, forward.end) if forward else None
+    if forward and forward.ambiguous and reverse:
+        # An alternative start beyond the selected end cannot form this pair.
+        forward = find_anchor(locus_model.forward_primer, sequence, max_anchor_edits, 0, reverse.start)
     product_start = forward.start if forward else None
     product_end = reverse.end if reverse else None
     inner_start = forward.end if forward else 0
     inner_end = reverse.start if reverse else len(sequence)
-    left = find_anchor(locus_model.left_flank_sequence, sequence, max_anchor_edits, inner_start, inner_end) if locus_model.left_flank_sequence else None
+    left_pattern, right_pattern = locus_model.left_flank_sequence, locus_model.right_flank_sequence
+    left = find_anchor(left_pattern, sequence, max_anchor_edits, inner_start, inner_end) if left_pattern else None
     right_start = left.end if left else inner_start
-    right = find_anchor(locus_model.right_flank_sequence, sequence, max_anchor_edits, right_start, inner_end) if locus_model.right_flank_sequence else None
+    right = find_anchor(right_pattern, sequence, max_anchor_edits, right_start, inner_end) if right_pattern else None
+    partial_flanks = False
+    if reference_nonrepeat_bp is not None and len(reference_nonrepeat_bp) == 1:
+        # A read endpoint can truncate a long configured flank while retaining
+        # its repeat boundary. Require independently calibrated nonrepeat length
+        # and retain the complete-flank search whenever it succeeds.
+        if left is None and forward is None and len(left_pattern) > 21:
+            candidate = find_anchor(left_pattern[-21:], sequence, min(2, max_anchor_edits),
+                                    inner_start, right.start if right else inner_end)
+            if candidate and candidate.end - inner_start < len(left_pattern):
+                left, left_pattern, partial_flanks = candidate, left_pattern[-21:], True
+        if right is None and len(right_pattern) > 21:
+            candidate = find_anchor(right_pattern[:21], sequence, min(2, max_anchor_edits),
+                                    left.end if left else inner_start, inner_end)
+            if (candidate and inner_end - candidate.start < len(right_pattern)
+                    and not find_anchor(revcomp(locus_model.reverse_primer), sequence,
+                                        max_anchor_edits, candidate.end, inner_end)):
+                right, right_pattern, partial_flanks = candidate, right_pattern[:21], True
+    if left and left.ambiguous and right:
+        left = find_anchor(left_pattern, sequence, min(2, max_anchor_edits) if left_pattern != locus_model.left_flank_sequence else max_anchor_edits,
+                           inner_start, right.start)
     unit_length = repeat_unit_length(locus_model) or None
     flank_repeat_length = right.start - left.end if left and right else None
     plausible_minimum = max(
@@ -319,13 +390,20 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
         (locus_model.expected_max_repeats + 1) * unit_length
         if unit_length else len(sequence)
     )
-    # Exact ordered flanks can establish novel/zero alleles. Retain the range
-    # guard for fuzzy anchors, which can match repeat-like partial sequences.
+    strong_flanks = all(anchor and not anchor.ambiguous and anchor.identity >= .9
+                        and len(pattern) >= 21 and len(set(pattern)) >= 3
+                        and not set(pattern) - set("ACGT")
+                        for anchor, pattern in ((left, left_pattern), (right, right_pattern)))
+    # Long, unique high-identity anchors also establish novel/zero alleles.
+    # Weak fuzzy anchors still require the expected range; truncated flanks
+    # always require the stronger check, including for in-range measurements.
     flanks_resolved = bool(
         left and right and flank_repeat_length is not None
         and flank_repeat_length >= 0
+        and (not partial_flanks or strong_flanks)
         and (
             left.edit_distance == right.edit_distance == 0
+            or strong_flanks
             or plausible_minimum <= flank_repeat_length <= plausible_maximum
         )
     )
@@ -346,9 +424,17 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
                 reverse.start - forward.end
                 + len(locus_model.forward_primer) + len(locus_model.reverse_primer)
             )
-        raw_count, method = estimate_repeat_count_from_spanning_read(locus_model, product_size, repeat_length, flanks_resolved=flanks_resolved)
+        raw_count, _ = assembly_equivalent_product_allele(locus_model, product_size, round_tolerance)
+        method = "assembly_product_length"
     elif flanks_resolved and unit_length:
-        raw_count, method = repeat_length / unit_length, "flank_bounded_repeat_length"
+        if reference_nonrepeat_bp is None:
+            raw_count, method = repeat_length / unit_length, "flank_bounded_repeat_length"
+        elif len(reference_nonrepeat_bp) == 1:
+            raw_count, _ = assembly_equivalent_product_allele(
+                locus_model, reference_nonrepeat_bp[0] + repeat_length, round_tolerance)
+            method = "assembly_calibrated_flank_length"
+        else:
+            method = "unresolved_flank_calibration"
     motif_identity = None
     if repeat_sequence and locus_model.repeat_motif and unit_length:
         _parts, mismatches, _kmers = repeat_motif_statistics(repeat_sequence, locus_model.repeat_motif, unit_length)
@@ -389,7 +475,9 @@ def measure_locus_product(sequence: str, locus_model: Locus, qualities: str | Se
     elif flanks_resolved and raw_count is not None:
         status, failure = "REPEAT_INFORMATIVE", None
     elif forward or reverse or left or right:
-        status, failure = "PRESENCE_ONLY", "insufficient anchors to measure the repeat interval"
+        status = "PRESENCE_ONLY"
+        failure = ("reference nonrepeat length is unavailable or ambiguous" if method == "unresolved_flank_calibration"
+                   else "insufficient anchors to measure the repeat interval")
     else:
         status, failure = "ANCHOR_FAILURE", "no complete locus anchors were identified"
     product_sequence = sequence[product_start:product_end] if product_start is not None and product_end is not None else ""

@@ -27,7 +27,9 @@ The clean fixture exercises three layouts and 11 known alleles. With
 `--challenge`, `fastq_challenge_fixture.py` adds fixed-seed paired and long-read
 fixtures with expansions, contractions, errors, long arrays, ambiguous loci,
 mixtures, and missing/low coverage. Their truth is specified before calling;
-neither version defines truth. `--copies` changes coverage by copying reads with
+neither version defines truth. `--layouts paired shotgun --challenge` includes
+only the short-read challenge; the simulated long-read challenge requires
+selecting `long`. `--copies` changes coverage by copying reads with
 new IDs; these are not independent sequencing-error replicates. All loci stay in
 the summaries. Stratified metrics and accuracy/call-rate curves retain missing
 calls; model-support thresholds are not calibrated probabilities.

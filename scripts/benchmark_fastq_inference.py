@@ -210,7 +210,9 @@ def compare_versions(args, fixture):
         result["output"] = str(target / "calls")
         return result
 
-    for layout in args.layouts + (["challenge_paired", "challenge_long"] if args.challenge else []):
+    challenges = (["challenge_paired"] if {"paired", "shotgun"}.intersection(args.layouts) else [])
+    challenges += ["challenge_long"] if "long" in args.layouts else []
+    for layout in args.layouts + (challenges if args.challenge else []):
         prepared = directory / layout / "inputs"
         if not layout.startswith("challenge_"):
             prepared.mkdir(parents=True)

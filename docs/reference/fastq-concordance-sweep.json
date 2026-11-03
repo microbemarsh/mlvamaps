@@ -1,0 +1,1255 @@
+{
+  "date": "2026-11-03",
+  "scope": "Organism-independent synthetic regression validation; inaccessible server cohort and Parsnp matrices were not evaluated. No simulated noisy ONT challenge was run.",
+  "baseline": "Saved working source immediately before this sweep, including the preceding reference-flank calibration change; this is not an unmodified release.",
+  "method": "Alternating serial fresh processes, identical input bytes. Wall time excludes imports. RSS is max(parent, largest child), not concurrent total. Synthetic expected alleles are specified independently of caller agreement. Preparation is excluded from timing. All outputs and disagreements are retained.",
+  "repetitions": 1,
+  "copies": 2,
+  "sample_mode": "isolate",
+  "tests": {
+    "command": "python -m pytest -q",
+    "passed": 552,
+    "seconds": 39.94
+  },
+  "sources": {
+    "baseline": "/private/tmp/mlvamaps-sweep-baseline-jo85zfpv",
+    "updated": "/Users/ag.marshall/Documents/mlvamaps"
+  },
+  "source_files_sha256": {
+    "baseline": {
+      "mlvamaps/__init__.py": "f07e6e2284c9ed466d9bf57cae93ace47d54d62d2a68730eabf9b77a1a1e7a79",
+      "mlvamaps/_version.py": "17731d00ddac369e4b9a50d87de8b8164b191edd5709322b5edf29f58ce6bc30",
+      "mlvamaps/alignment.py": "bbb1dd0e07a5f40156f24b611204288a9be460fde2fdcbc0dfed0f212683a8c6",
+      "mlvamaps/alignment_evidence.py": "b3b64d5b460e3903573abe00ef4abd36e2246896148c69ef73257f5abf867448",
+      "mlvamaps/allele_inference.py": "90b7d51258d7651f050775aeaa5ddefa7f722a016848ed766d309ad216d4d0d7",
+      "mlvamaps/assembly_call.py": "d47baea74669a50962f78436543a7bb535ecd1b75f9b50c9f0b5fbb3022f89a6",
+      "mlvamaps/bayesian_caller.py": "fd36c4d5a5229fa152ee1df91061226b0879078a7a0404118e0a165698cc507d",
+      "mlvamaps/calling.py": "8372a136648c7712c65f6c5725632a3697b41efa8b4f90c5ebb350260f0a1283",
+      "mlvamaps/candidate_contexts.py": "859abdbcf93b4598ec4601062106d989b27c84715c01c44c554cfeeaf23a0663",
+      "mlvamaps/cli.py": "99d8c3752fecda7168bf6c2ba7e589b4d06ccc3669aa724f52295fac772f5f16",
+      "mlvamaps/combined_marker_export.py": "9c024f1b1bc1291d9b2e2de9a0e095025c15bb36e0e853c438ac0f4d0d53a28c",
+      "mlvamaps/combined_marker_phylogeny.py": "3a7165c0f7393b7cc1c2e125fda9f120bfc98765b265860014d78b0324d3a4c9",
+      "mlvamaps/concurrency.py": "cf2a4ce00810c046a2284a0b85e6aa14f8d8353063b84a4eb868669b428ee098",
+      "mlvamaps/evidence_reporting.py": "38e7b135925c1dc88ec9f66c2df0925e34758d973c79a04cadb0ea6e7c2681f6",
+      "mlvamaps/in_silico_pcr.py": "7291a4b23b1652e0ca750b9e7d3ff4df580d24292a79c7b8fdd2311f0415ddc4",
+      "mlvamaps/io.py": "149439b5b745e60ecf6f15241f116a9d4b36cde326bacd64e4c9c5cadd34d425",
+      "mlvamaps/local_assembly.py": "5173929508990fbfafe89bb4659caca0a0d253fc6b2ea393e9f52c035f9a9f1d",
+      "mlvamaps/locus_assignment.py": "0989aa4b99baf61f16b1d2302ec635a5ba776df3780406ad1de3abd3e363e6e8",
+      "mlvamaps/locus_measurement.py": "6a8d3518cbe2e12ad0f10670b16a1a1dbe09c7543c92aedd0ec2ed159982af55",
+      "mlvamaps/long_read_evidence.py": "de9f242397a9eb5dc916ef33e1b7686f0a4280c5284eee1e6d467ebfe4e98f47",
+      "mlvamaps/mapped_reconstruction.py": "684b03d08bef0bc6af6f59acf0cf54b86467dcad6e64f68ebddbbf56f313d301",
+      "mlvamaps/mapped_variants.py": "d3bbaad35762dd4e423a1e2c502e284c08abed614791b538b3ebd8b0e25efa02",
+      "mlvamaps/mapping.py": "d8a13d516655274d279e1aa2d08dd797a0c19e625e08f9c31b07e0348142643f",
+      "mlvamaps/mapping_classification.py": "aae0fd9d62f48a1c9652daa25ce2ac3481540a3bb65673cdce3bda166bee8d3d",
+      "mlvamaps/minimap_mapping.py": "1e0ef630d1bb0ae3dbc5abed6dcfc5221449b204529e88cda9ebf25ff4a368ff",
+      "mlvamaps/mixture.py": "680bdca3020a9252debc3b7856e4a1cb50ed3938c206fa9efa1ec3650f1d4348",
+      "mlvamaps/ml_classifier.py": "3492713caef36a5e40badd04c36a38df67cad4820080518dc27acd9fcc05f563",
+      "mlvamaps/models.py": "e05ea1851e639f7cc472ceabb00c71639fe32af4d935d1f7b4f4a12fa1469fea",
+      "mlvamaps/myoga_export.py": "229c1f9577b0e461b6cb83936fd4b4047fbb1c6e2539877226d016f386c55f97",
+      "mlvamaps/pipeline.py": "1e2e940925508465f76e9855691b4bbd76ab891e2a37eedae8bb0e54978016f7",
+      "mlvamaps/primers.py": "ab0a3332a4458e8f4a15c9dcd212bee3ab55d1fa83d983c58c3111db166e7f8a",
+      "mlvamaps/profile_matching.py": "ffc2c98b939b143eb31a642762584ecfc80d8679f5d6ae00f4d5ef117be2746e",
+      "mlvamaps/profile_tree.py": "555213abd33d160d16eb5c54ced1d1f5a0a623d233a9bd4dbe0f93c8e8b49d0c",
+      "mlvamaps/progress.py": "111a980e8fe170e77fd2d222a046fe253ed623cc861ce6fc955950da9b126cc7",
+      "mlvamaps/qc.py": "005831f7c0cf0ad8409da78ea601e89eb409ef77b55e278c284e70396657b69a",
+      "mlvamaps/recruitment.py": "74497d9edd2d6a7341dc946f465fc53d3c50c87c77d1c8dda91eda641abcdb79",
+      "mlvamaps/reference_builder.py": "e7ee5a7e2dce33f4f7f8752a400745b113b3056ac710b23d5f2518692e3c7dea",
+      "mlvamaps/reference_database.py": "6bffb39548a5513b0083d0a3c1352de263bd69fab4039b029575357a0d68eda4",
+      "mlvamaps/reference_pipeline.py": "784966c78d58c0a276821faaabd103876cd1dfc272f9495764e4eec920e3b209",
+      "mlvamaps/repeat_calibration.py": "5c68927d666f0729623566cb03b53d6b7aa0c6a9439a9d92df52102ad5abc9bd",
+      "mlvamaps/repeat_parser.py": "45796c147400f571eccd7e2cacfa899ff17a096fc2eb4dfea3ff41733cfd5bc5",
+      "mlvamaps/report.py": "953ab3e82a2060e0c43c0bc1885032029a01f5b9db319500b85880faac9bc41f",
+      "mlvamaps/sample_metadata.py": "4c9bf9cbcd501d1846aa116ab0ac21cadd38dfb89d41cfba5576d35b55b1dd3a",
+      "mlvamaps/sassy_cli.py": "3c7931352ad647ade9a9262b32489a272e5813f43905f061e841bebd4b388c9e",
+      "mlvamaps/sequence.py": "9321e68fb21dc4d09e2d139a902987a749f06e040aa2562232ed0b93eabdcab3",
+      "mlvamaps/short_read_evidence.py": "28e903594801bf617362ee4d5a8fa105fff4e45e8171c74552d65ac32fac1df9",
+      "mlvamaps/short_read_fragments.py": "70d89e32216a335034c2f09960905345f201f6cadb6626901c9c0aaf7b1e6c7f",
+      "mlvamaps/short_read_mapping.py": "ab908d901c826915e1f26343adfb20c49f3048a0fc5dfe4f9f9925848e58449b",
+      "mlvamaps/short_reads.py": "7c4ea6b989ca9be229689180208d9a8d7f6fccb0142fc28d2ebeadb3fe62e324",
+      "mlvamaps/taxon_screen.py": "d8a6f496eef95cabd27629501c759b675b694347e534cf2dc5c71940f0dfb17e",
+      "mlvamaps/unified_fastq.py": "e71e31efb46059ab7c2ef03e7b36a9a86879d7ca7aca959c6ea0a4b5efacc691"
+    },
+    "updated": {
+      "mlvamaps/__init__.py": "f07e6e2284c9ed466d9bf57cae93ace47d54d62d2a68730eabf9b77a1a1e7a79",
+      "mlvamaps/_version.py": "17731d00ddac369e4b9a50d87de8b8164b191edd5709322b5edf29f58ce6bc30",
+      "mlvamaps/alignment.py": "bbb1dd0e07a5f40156f24b611204288a9be460fde2fdcbc0dfed0f212683a8c6",
+      "mlvamaps/alignment_evidence.py": "2274ac6560150b4f1084d8dc2df1634d22879850d7279819bc0c06063eca9631",
+      "mlvamaps/allele_inference.py": "4f99059699b7ed0f53ac8f085456b8334615e24c8caac93e038e550b0e1a79c6",
+      "mlvamaps/assembly_call.py": "d47baea74669a50962f78436543a7bb535ecd1b75f9b50c9f0b5fbb3022f89a6",
+      "mlvamaps/bayesian_caller.py": "fd36c4d5a5229fa152ee1df91061226b0879078a7a0404118e0a165698cc507d",
+      "mlvamaps/calling.py": "8372a136648c7712c65f6c5725632a3697b41efa8b4f90c5ebb350260f0a1283",
+      "mlvamaps/candidate_contexts.py": "859abdbcf93b4598ec4601062106d989b27c84715c01c44c554cfeeaf23a0663",
+      "mlvamaps/cli.py": "99d8c3752fecda7168bf6c2ba7e589b4d06ccc3669aa724f52295fac772f5f16",
+      "mlvamaps/combined_marker_export.py": "f27a031309c2c8c7e69d294af9999a4621bf82b08baad2cd1239723807782b8a",
+      "mlvamaps/combined_marker_phylogeny.py": "3a7165c0f7393b7cc1c2e125fda9f120bfc98765b265860014d78b0324d3a4c9",
+      "mlvamaps/concurrency.py": "cf2a4ce00810c046a2284a0b85e6aa14f8d8353063b84a4eb868669b428ee098",
+      "mlvamaps/evidence_reporting.py": "38e7b135925c1dc88ec9f66c2df0925e34758d973c79a04cadb0ea6e7c2681f6",
+      "mlvamaps/in_silico_pcr.py": "7291a4b23b1652e0ca750b9e7d3ff4df580d24292a79c7b8fdd2311f0415ddc4",
+      "mlvamaps/io.py": "149439b5b745e60ecf6f15241f116a9d4b36cde326bacd64e4c9c5cadd34d425",
+      "mlvamaps/local_assembly.py": "5173929508990fbfafe89bb4659caca0a0d253fc6b2ea393e9f52c035f9a9f1d",
+      "mlvamaps/locus_assignment.py": "4e7e3014ece4f3b2aeb404d78c709aad95fbae05ad073ffddb607faefd4bfb8d",
+      "mlvamaps/locus_measurement.py": "a290fa07de3559c3b5c6a462714a3c3e0d32b44047c5d8dcfd0f5585303bd044",
+      "mlvamaps/long_read_evidence.py": "e95293374d0851c8229f0842a9b15f4f47bfd064af3683d08fbbe94977cf5bae",
+      "mlvamaps/mapped_reconstruction.py": "286e355863f0cc25f40947a38fb8ceb23a6c01f1caa09f22f08496529f2ec5e5",
+      "mlvamaps/mapped_variants.py": "d3bbaad35762dd4e423a1e2c502e284c08abed614791b538b3ebd8b0e25efa02",
+      "mlvamaps/mapping.py": "d8a13d516655274d279e1aa2d08dd797a0c19e625e08f9c31b07e0348142643f",
+      "mlvamaps/mapping_classification.py": "9743c4a27864dd8e37a863b637993e2b7a3ccb7bd7811e30636628153acf9327",
+      "mlvamaps/minimap_mapping.py": "f38fe906eb76f3857f92a3c0f90271e8e2f3d1bcc473fc32b6538567c2cbe4a6",
+      "mlvamaps/mixture.py": "680bdca3020a9252debc3b7856e4a1cb50ed3938c206fa9efa1ec3650f1d4348",
+      "mlvamaps/ml_classifier.py": "3492713caef36a5e40badd04c36a38df67cad4820080518dc27acd9fcc05f563",
+      "mlvamaps/models.py": "e05ea1851e639f7cc472ceabb00c71639fe32af4d935d1f7b4f4a12fa1469fea",
+      "mlvamaps/myoga_export.py": "229c1f9577b0e461b6cb83936fd4b4047fbb1c6e2539877226d016f386c55f97",
+      "mlvamaps/pipeline.py": "d062fdf497ff7e10512ff96461c12dea3bf5b34f2f0fec382b4d4fbf970ee968",
+      "mlvamaps/primers.py": "ab0a3332a4458e8f4a15c9dcd212bee3ab55d1fa83d983c58c3111db166e7f8a",
+      "mlvamaps/profile_matching.py": "ffc2c98b939b143eb31a642762584ecfc80d8679f5d6ae00f4d5ef117be2746e",
+      "mlvamaps/profile_tree.py": "555213abd33d160d16eb5c54ced1d1f5a0a623d233a9bd4dbe0f93c8e8b49d0c",
+      "mlvamaps/progress.py": "111a980e8fe170e77fd2d222a046fe253ed623cc861ce6fc955950da9b126cc7",
+      "mlvamaps/qc.py": "005831f7c0cf0ad8409da78ea601e89eb409ef77b55e278c284e70396657b69a",
+      "mlvamaps/recruitment.py": "75e5d46ae0268de552c0a2ef5f99c92a9d6e20b51c7c275d14e7e0091c5f5ec8",
+      "mlvamaps/reference_builder.py": "e7ee5a7e2dce33f4f7f8752a400745b113b3056ac710b23d5f2518692e3c7dea",
+      "mlvamaps/reference_database.py": "6bffb39548a5513b0083d0a3c1352de263bd69fab4039b029575357a0d68eda4",
+      "mlvamaps/reference_pipeline.py": "784966c78d58c0a276821faaabd103876cd1dfc272f9495764e4eec920e3b209",
+      "mlvamaps/repeat_calibration.py": "5c68927d666f0729623566cb03b53d6b7aa0c6a9439a9d92df52102ad5abc9bd",
+      "mlvamaps/repeat_parser.py": "45796c147400f571eccd7e2cacfa899ff17a096fc2eb4dfea3ff41733cfd5bc5",
+      "mlvamaps/report.py": "884ceb251259fb1db09d158763e187a19ab2e506d1b9cdf831b20b81c87d5d96",
+      "mlvamaps/sample_metadata.py": "4c9bf9cbcd501d1846aa116ab0ac21cadd38dfb89d41cfba5576d35b55b1dd3a",
+      "mlvamaps/sassy_cli.py": "3c7931352ad647ade9a9262b32489a272e5813f43905f061e841bebd4b388c9e",
+      "mlvamaps/sequence.py": "9321e68fb21dc4d09e2d139a902987a749f06e040aa2562232ed0b93eabdcab3",
+      "mlvamaps/short_read_evidence.py": "f58f8975264a21d78474abcdb9a022f96232137172f0f84af486a60e4e455d61",
+      "mlvamaps/short_read_fragments.py": "5a6b740ce07b606fd290cc89a3e51e2e489929002e799ff0694994e905add3ab",
+      "mlvamaps/short_read_mapping.py": "aeed9e1389dfdc64ba19f6946d2fb8aebcfeafcc43894478809f0332d76de230",
+      "mlvamaps/short_reads.py": "7c4ea6b989ca9be229689180208d9a8d7f6fccb0142fc28d2ebeadb3fe62e324",
+      "mlvamaps/taxon_screen.py": "d8a6f496eef95cabd27629501c759b675b694347e534cf2dc5c71940f0dfb17e",
+      "mlvamaps/unified_fastq.py": "66f56c28523440cf5ad952619525740daff6fbcb433507c39f9e62bcb6d5f071"
+    }
+  },
+  "raw_reports": {
+    "short": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/comparison.json",
+    "clean_long": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/clean_long/comparison.json"
+  },
+  "environment": {
+    "python": "3.13.15 | packaged by conda-forge | (main, Aug 10 2026, 13:01:04) [Clang 19.1.7 ]",
+    "packages": {
+      "numpy": "2.5.2",
+      "parasail": "1.3.4",
+      "pysam": "0.24.0",
+      "regex": "2026.7.19",
+      "spoars": "0.1.3",
+      "pytest": "9.1.1"
+    },
+    "minimap2": "2.31-r1302",
+    "sassy": "sassy 0.2.1"
+  },
+  "workflows": {
+    "paired": {
+      "inputs_sha256": {
+        "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/paired/inputs/r1.fastq": "9ea3dea3b74211efd1c14cb27596bb0c4bf63d7f3c802665ddace5e82483a0e7",
+        "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/paired/inputs/r2.fastq": "38b4e147b231d5a655c004f122d3ffe595d57bf0e8dc2e7a54af2f46a535e4db"
+      },
+      "baseline": {
+        "exit_code": 0,
+        "seconds": 0.19560279199504294,
+        "peak_rss_mib": 76.125,
+        "artifact_sha256": {
+          "calls.tsv": "9541ab9b3a03b6ffb8cfe95647fb242093c3cfaa0ddd28189791d1c8c4aeada4",
+          "common_locus_calls.tsv": "06ad1601776ce83be2c9b6142773b4abd1219ddcf4e91ad051279a4b819647b9",
+          "genotype_evidence.tsv": "220b442cd57f4593e6c2ed5c2abc4eb5bb9015cf2b1b685e82ca501a9f2e561c",
+          "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+          "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+          "molecule_candidate_evidence.tsv": "50aae6fa1135556dfb0b93e6c16512dcd9b0e6e51f9628849a3d04f2f54a60a4"
+        },
+        "output": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/paired/baseline_0/calls",
+        "truth_summary": {
+          "n": 11,
+          "exact_agreement": 1.0,
+          "within_1": 1.0,
+          "within_2": 1.0,
+          "mae": 0.0,
+          "median_absolute_error": 0.0,
+          "mean_signed_error": 0.0,
+          "spearman": 1.0,
+          "total_sample_loci": 11,
+          "missing_assembly": 0,
+          "missing_short_read": 0
+        },
+        "disagreements": []
+      },
+      "updated": {
+        "exit_code": 0,
+        "seconds": 0.14680724999925587,
+        "peak_rss_mib": 77.390625,
+        "artifact_sha256": {
+          "calls.tsv": "0375ff90b1bc6bedcd52d38a4056f596a3cefc28fe4fa535f1cc4e68fa70214f",
+          "common_locus_calls.tsv": "df5e2fc4e5e0f748b77ce73aab0039dc5395596064a8cf7cead6ab1b3e5a75dd",
+          "genotype_evidence.tsv": "220b442cd57f4593e6c2ed5c2abc4eb5bb9015cf2b1b685e82ca501a9f2e561c",
+          "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+          "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+          "molecule_candidate_evidence.tsv": "94695f6b80a36f77df648b7fbc9ea77f63b2545552720ad79e2ad298401463ef"
+        },
+        "output": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/paired/updated_0/calls",
+        "truth_summary": {
+          "n": 11,
+          "exact_agreement": 1.0,
+          "within_1": 1.0,
+          "within_2": 1.0,
+          "mae": 0.0,
+          "median_absolute_error": 0.0,
+          "mean_signed_error": 0.0,
+          "spearman": 1.0,
+          "total_sample_loci": 11,
+          "missing_assembly": 0,
+          "missing_short_read": 0
+        },
+        "disagreements": []
+      }
+    },
+    "shotgun": {
+      "inputs_sha256": {
+        "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/shotgun/inputs/r1.fastq": "87b308c44f6aaba4d32a1313e16f6db27e2d8ecde5c51d232093ab291b2d26d3",
+        "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/shotgun/inputs/r2.fastq": "68d0ed8cc7151706a29e95b6b9943d768ccfc0e8e391f79fc22d6827ef9a72e4"
+      },
+      "baseline": {
+        "exit_code": 0,
+        "seconds": 1.6603061250061728,
+        "peak_rss_mib": 78.46875,
+        "artifact_sha256": {
+          "calls.tsv": "df00998f07e30d76a0d10e002fcdfada9dfd3cfbb3112192ec6fb13ceb82096e",
+          "common_locus_calls.tsv": "10fff92d45fb2c8d173f406ffeb166cd289117b91290a1b5340e9c8e46f516b8",
+          "genotype_evidence.tsv": "3c022dcec617a5ce3e5769040d54a07c19ac10366c7d82f0ab601241f64c3f6a",
+          "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+          "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+          "molecule_candidate_evidence.tsv": "51f47d0f4ba2823bfd727310652740e1276644e07b5025b1c41a893082668291"
+        },
+        "output": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/shotgun/baseline_0/calls",
+        "truth_summary": {
+          "n": 11,
+          "exact_agreement": 1.0,
+          "within_1": 1.0,
+          "within_2": 1.0,
+          "mae": 0.0,
+          "median_absolute_error": 0.0,
+          "mean_signed_error": 0.0,
+          "spearman": 1.0,
+          "total_sample_loci": 11,
+          "missing_assembly": 0,
+          "missing_short_read": 0
+        },
+        "disagreements": []
+      },
+      "updated": {
+        "exit_code": 0,
+        "seconds": 1.6697853340010624,
+        "peak_rss_mib": 78.765625,
+        "artifact_sha256": {
+          "calls.tsv": "6a9c34ecdf68bd222e1baaac68b8505aea2387babec42cfea6633919dd80cc71",
+          "common_locus_calls.tsv": "f0ac8a6ead54cd90c6fa9c02740a09a50d7c1ed3c9b36c325baf4079b5aac224",
+          "genotype_evidence.tsv": "fabaaae76f78c33d5f955c83e469edbdb4a44cf1ed873bc667c5d0a9f2ba1b9e",
+          "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+          "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+          "molecule_candidate_evidence.tsv": "8e1b137771da635dc0cb41af132124b90a923db13e83430875a03075cb526a9a"
+        },
+        "output": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/shotgun/updated_0/calls",
+        "truth_summary": {
+          "n": 11,
+          "exact_agreement": 1.0,
+          "within_1": 1.0,
+          "within_2": 1.0,
+          "mae": 0.0,
+          "median_absolute_error": 0.0,
+          "mean_signed_error": 0.0,
+          "spearman": 1.0,
+          "total_sample_loci": 11,
+          "missing_assembly": 0,
+          "missing_short_read": 0
+        },
+        "disagreements": []
+      }
+    },
+    "challenge_paired": {
+      "inputs_sha256": {
+        "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/inputs/r1.fastq": "268cae161ba8557913c8262ebf080597d1aec92bae7b50bb6095fcc3d614b1a6",
+        "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/inputs/r2.fastq": "6b438cf22fdb229f143e092ce41fc7318c51b7ce41fbbcdb99a6b6e44ddd7115"
+      },
+      "baseline": {
+        "exit_code": 0,
+        "seconds": 0.8745170420006616,
+        "peak_rss_mib": 83.625,
+        "artifact_sha256": {
+          "calls.tsv": "f321c263d2313610dd0639148164d2c238bdb4ee0e8adea044ccb2fc5e67221d",
+          "common_locus_calls.tsv": "6c84111a789173d42f81e847172e6d2706d642267c5fcda46f29d40e4fed69a0",
+          "genotype_evidence.tsv": "7508b05b343cd33c674159a3d22e462d80b333dadf6b0690e1ffc3ceb1b5df47",
+          "sequence_alleles.tsv": "4d3818f2b3f5581221504f03f2f7c860de13915595f3b5aef9c6e87c3c56a895",
+          "mlva_fingerprint.tsv": "2e790500c1e40d19c5629d224b2af13888690fbd1c64a7eff57b7be9e4646ef2",
+          "molecule_candidate_evidence.tsv": "d98b2f2cc2f96def724b65b106c0c9ae2a6104d124479b79ba4556ec4817aafc"
+        },
+        "output": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls",
+        "truth_summary": {
+          "n": 14,
+          "exact_agreement": 0.42857142857142855,
+          "within_1": 0.7142857142857143,
+          "within_2": 0.7857142857142857,
+          "mae": 29.543650793650794,
+          "median_absolute_error": 0.5555555555555554,
+          "mean_signed_error": -29.543650793650794,
+          "spearman": 0.9293216095747012,
+          "total_sample_loci": 15,
+          "missing_assembly": 1,
+          "missing_short_read": 0
+        },
+        "disagreements": [
+          {
+            "sample_id": "sample",
+            "locus_id": "long_array",
+            "assembly_repeat": 400,
+            "read_repeat": 17.5,
+            "signed_error": -382.5,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "ESTIMATED",
+            "inference_method": "partial_repeat_likelihood",
+            "estimation_method": "partial_repeat_likelihood",
+            "estimation_reason": "Joint anchored lower-bound constraints condition the locus prior with an exponential expansion tail. No upper repeat boundary was measured; the reported interval is a bounded candidate envelope.",
+            "estimate_support": "2",
+            "read_depth": "4",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "expansion",
+            "assembly_repeat": 40,
+            "read_repeat": 17.5,
+            "signed_error": -22.5,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "ESTIMATED",
+            "inference_method": "partial_repeat_likelihood",
+            "estimation_method": "partial_repeat_likelihood",
+            "estimation_reason": "Joint anchored lower-bound constraints condition the locus prior with an exponential expansion tail. No upper repeat boundary was measured; the reported interval is a bounded candidate envelope.",
+            "estimate_support": "10",
+            "read_depth": "20",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "noisy",
+            "assembly_repeat": 16,
+            "read_repeat": 12.5,
+            "signed_error": -3.5,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "ESTIMATED",
+            "inference_method": "partial_repeat_likelihood",
+            "estimation_method": "partial_repeat_likelihood",
+            "estimation_reason": "Joint anchored lower-bound constraints condition the locus prior with an exponential expansion tail. No upper repeat boundary was measured; the reported interval is a bounded candidate envelope.",
+            "estimate_support": "3",
+            "read_depth": "40",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "zero_coverage",
+            "assembly_repeat": 6,
+            "read_repeat": 4.0,
+            "signed_error": -2.0,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "NOT_FOUND",
+            "inference_method": "observed_reference_prior",
+            "estimation_method": "observed_reference_prior",
+            "estimation_reason": "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
+            "estimate_support": "0",
+            "read_depth": "0",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "ambiguous_a",
+            "assembly_repeat": 5,
+            "read_repeat": 4.0,
+            "signed_error": -1.0,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "PRESENT_COUNT_UNKNOWN",
+            "inference_method": "observed_reference_prior",
+            "estimation_method": "observed_reference_prior",
+            "estimation_reason": "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
+            "estimate_support": "0",
+            "read_depth": "40",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "ambiguous_b",
+            "assembly_repeat": 5,
+            "read_repeat": 4.0,
+            "signed_error": -1.0,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "PRESENT_COUNT_UNKNOWN",
+            "inference_method": "observed_reference_prior",
+            "estimation_method": "observed_reference_prior",
+            "estimation_reason": "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
+            "estimate_support": "0",
+            "read_depth": "40",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "homopolymer",
+            "assembly_repeat": 16,
+            "read_repeat": 15.0,
+            "signed_error": -1.0,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "PASS",
+            "inference_method": "molecule_likelihood",
+            "estimation_method": "",
+            "estimation_reason": "",
+            "estimate_support": "",
+            "read_depth": "24",
+            "primary_read_depth": "6",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "long_motif",
+            "assembly_repeat": 8,
+            "read_repeat": 7.888888888888889,
+            "signed_error": -0.11111111111111072,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "ESTIMATED",
+            "inference_method": "partial_repeat_likelihood",
+            "estimation_method": "partial_repeat_likelihood",
+            "estimation_reason": "Joint anchored lower-bound constraints condition the locus prior with an exponential expansion tail. No upper repeat boundary was measured; the reported interval is a bounded candidate envelope.",
+            "estimate_support": "10",
+            "read_depth": "24",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "absent",
+            "assembly_repeat": null,
+            "read_repeat": 4.0,
+            "signed_error": null,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "NOT_FOUND",
+            "inference_method": "observed_reference_prior",
+            "estimation_method": "observed_reference_prior",
+            "estimation_reason": "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
+            "estimate_support": "0",
+            "read_depth": "0",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/baseline_0/calls/calls.tsv",
+            "comparison": "missing_call"
+          }
+        ],
+        "challenge_metrics": {
+          "call_rate": 1.0,
+          "configured_loci": 15,
+          "truth_known_loci": 14,
+          "numerical_completion_rate": 1.0,
+          "exact_accuracy_all_truth_known": 0.42857142857142855,
+          "missing_truth_known": 0,
+          "mae_all_truth_known": 29.543650793650794,
+          "evidence_classes": {
+            "EXACT": {
+              "total": 4,
+              "numeric": 4,
+              "correct": 4,
+              "absolute_errors": [
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "accuracy_all_loci": 1.0,
+              "mae_among_numeric": 0.0
+            },
+            "LOWER_BOUND": {
+              "total": 4,
+              "numeric": 4,
+              "correct": 0,
+              "absolute_errors": [
+                22.5,
+                382.5,
+                0.11111111111111072,
+                3.5
+              ],
+              "accuracy_all_loci": 0.0,
+              "mae_among_numeric": 102.15277777777777
+            },
+            "ESTIMATED": {
+              "total": 2,
+              "numeric": 2,
+              "correct": 1,
+              "absolute_errors": [
+                1.0,
+                0.0
+              ],
+              "accuracy_all_loci": 0.5,
+              "mae_among_numeric": 0.5
+            },
+            "PRIOR_ONLY": {
+              "total": 1,
+              "numeric": 1,
+              "correct": 0,
+              "absolute_errors": [
+                2.0
+              ],
+              "accuracy_all_loci": 0.0,
+              "mae_among_numeric": 2.0
+            },
+            "POSSIBLE_MIXTURE": {
+              "total": 1,
+              "numeric": 1,
+              "correct": 1,
+              "absolute_errors": [
+                0.0
+              ],
+              "accuracy_all_loci": 1.0,
+              "mae_among_numeric": 0.0
+            },
+            "AMBIGUOUS_LOCUS": {
+              "total": 2,
+              "numeric": 2,
+              "correct": 0,
+              "absolute_errors": [
+                1.0,
+                1.0
+              ],
+              "accuracy_all_loci": 0.0,
+              "mae_among_numeric": 1.0
+            }
+          },
+          "calibration": {
+            "model_support": {
+              "bins": [
+                {
+                  "lower": 0,
+                  "upper": 0.25,
+                  "n": 0,
+                  "mean_support": null,
+                  "observed_accuracy": null
+                },
+                {
+                  "lower": 0.25,
+                  "upper": 0.5,
+                  "n": 0,
+                  "mean_support": null,
+                  "observed_accuracy": null
+                },
+                {
+                  "lower": 0.5,
+                  "upper": 0.75,
+                  "n": 4,
+                  "mean_support": 0.6321205588285657,
+                  "observed_accuracy": 0
+                },
+                {
+                  "lower": 0.75,
+                  "upper": 1,
+                  "n": 10,
+                  "mean_support": 0.987760823,
+                  "observed_accuracy": 0.6
+                }
+              ],
+              "brier": 0.3834644362375387
+            },
+            "data_evidence_confidence": {
+              "bins": [
+                {
+                  "lower": 0,
+                  "upper": 0.25,
+                  "n": 9,
+                  "mean_support": 0.05276633555555556,
+                  "observed_accuracy": 0.2222222222222222
+                },
+                {
+                  "lower": 0.25,
+                  "upper": 0.5,
+                  "n": 1,
+                  "mean_support": 0.34214752,
+                  "observed_accuracy": 0
+                },
+                {
+                  "lower": 0.5,
+                  "upper": 0.75,
+                  "n": 2,
+                  "mean_support": 0.71821665,
+                  "observed_accuracy": 1
+                },
+                {
+                  "lower": 0.75,
+                  "upper": 1,
+                  "n": 2,
+                  "mean_support": 0.75650118,
+                  "observed_accuracy": 1
+                }
+              ],
+              "brier": 0.12795569024475287
+            }
+          },
+          "accuracy_among_calls": 0.42857142857142855,
+          "mae": 29.543650793650794,
+          "absent_numeric_prediction_rate": 1.0,
+          "false_positive_genotype_rate": 0.0,
+          "sequence_accuracy_among_reported": 1.0,
+          "strata": {
+            "coverage": {
+              "0": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "2": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "20": {
+                "total": 2,
+                "called": 2,
+                "correct": 0
+              },
+              "24": {
+                "total": 8,
+                "called": 8,
+                "correct": 4
+              },
+              "40": {
+                "total": 2,
+                "called": 2,
+                "correct": 1
+              }
+            },
+            "motif_length": {
+              "1": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "4": {
+                "total": 12,
+                "called": 12,
+                "correct": 6
+              },
+              "9": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              }
+            },
+            "repeat_bases": {
+              "4": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "16": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "20": {
+                "total": 4,
+                "called": 4,
+                "correct": 2
+              },
+              "21": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "24": {
+                "total": 2,
+                "called": 2,
+                "correct": 1
+              },
+              "32": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "64": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "72": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "160": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "1600": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              }
+            },
+            "error_rate": {
+              "0": {
+                "total": 11,
+                "called": 11,
+                "correct": 6
+              },
+              "0.01": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "0.02": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "0.04": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              }
+            }
+          },
+          "locus_assignment_accuracy": 1.0,
+          "locus_assignment_rate": 0.7961783439490446,
+          "accuracy_call_rate_curve": [
+            {
+              "model_support_threshold": 0,
+              "call_rate": 1.0,
+              "accuracy": 0.42857142857142855
+            },
+            {
+              "model_support_threshold": 0.5,
+              "call_rate": 1.0,
+              "accuracy": 0.42857142857142855
+            },
+            {
+              "model_support_threshold": 0.8,
+              "call_rate": 0.7142857142857143,
+              "accuracy": 0.6
+            },
+            {
+              "model_support_threshold": 0.95,
+              "call_rate": 0.6428571428571429,
+              "accuracy": 0.6666666666666666
+            },
+            {
+              "model_support_threshold": 0.99,
+              "call_rate": 0.6428571428571429,
+              "accuracy": 0.6666666666666666
+            }
+          ],
+          "note": "Mixture counts are scored against either known allele. Missing calls fail all-locus exact accuracy; their absolute error is undefined. Absent loci have no truth allele: numerical completion is separate from observed presence. Calibration is descriptive on this small synthetic set, not validation."
+        }
+      },
+      "updated": {
+        "exit_code": 0,
+        "seconds": 1.007401958006085,
+        "peak_rss_mib": 83.171875,
+        "artifact_sha256": {
+          "calls.tsv": "6059392cf447295c3123fb57fcce95af065a51415a0f96793c102da026f4eb2c",
+          "common_locus_calls.tsv": "89ba9bb3c887d3ee196d640f7ba5df63b5530cc8329691d9025b218f61dff21a",
+          "genotype_evidence.tsv": "580769f6272e99acc3327a983001853c2000dc9beb5ad5d3ec46199f2fc6268e",
+          "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+          "mlva_fingerprint.tsv": "f2b03d594f93d915e0b7743cbf5ec306ea2cfd1939ad6d6f7ec3b0a57d3c8829",
+          "molecule_candidate_evidence.tsv": "9064fff793cbac9a4e8db2f48ea738a58a85d67dfcd97b00caf11822ba58ed1f"
+        },
+        "output": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/updated_0/calls",
+        "truth_summary": {
+          "n": 14,
+          "exact_agreement": 0.6428571428571429,
+          "within_1": 0.7857142857142857,
+          "within_2": 0.8571428571428571,
+          "mae": 29.214285714285715,
+          "median_absolute_error": 0.0,
+          "mean_signed_error": -29.214285714285715,
+          "spearman": 0.9313983084986082,
+          "total_sample_loci": 15,
+          "missing_assembly": 1,
+          "missing_short_read": 0
+        },
+        "disagreements": [
+          {
+            "sample_id": "sample",
+            "locus_id": "long_array",
+            "assembly_repeat": 400,
+            "read_repeat": 17.5,
+            "signed_error": -382.5,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "ESTIMATED",
+            "inference_method": "partial_repeat_likelihood",
+            "estimation_method": "partial_repeat_likelihood",
+            "estimation_reason": "Joint anchored lower-bound constraints condition the locus prior with an exponential expansion tail. No upper repeat boundary was measured; the reported interval is a bounded candidate envelope.",
+            "estimate_support": "2",
+            "read_depth": "4",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/updated_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "expansion",
+            "assembly_repeat": 40,
+            "read_repeat": 17.5,
+            "signed_error": -22.5,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "ESTIMATED",
+            "inference_method": "partial_repeat_likelihood",
+            "estimation_method": "partial_repeat_likelihood",
+            "estimation_reason": "Joint anchored lower-bound constraints condition the locus prior with an exponential expansion tail. No upper repeat boundary was measured; the reported interval is a bounded candidate envelope.",
+            "estimate_support": "10",
+            "read_depth": "20",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/updated_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "zero_coverage",
+            "assembly_repeat": 6,
+            "read_repeat": 4.0,
+            "signed_error": -2.0,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "NOT_FOUND",
+            "inference_method": "observed_reference_prior",
+            "estimation_method": "observed_reference_prior",
+            "estimation_reason": "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
+            "estimate_support": "0",
+            "read_depth": "0",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/updated_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "ambiguous_a",
+            "assembly_repeat": 5,
+            "read_repeat": 4.0,
+            "signed_error": -1.0,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "PRESENT_COUNT_UNKNOWN",
+            "inference_method": "observed_reference_prior",
+            "estimation_method": "observed_reference_prior",
+            "estimation_reason": "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
+            "estimate_support": "0",
+            "read_depth": "40",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/updated_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "ambiguous_b",
+            "assembly_repeat": 5,
+            "read_repeat": 4.0,
+            "signed_error": -1.0,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "PRESENT_COUNT_UNKNOWN",
+            "inference_method": "observed_reference_prior",
+            "estimation_method": "observed_reference_prior",
+            "estimation_reason": "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
+            "estimate_support": "0",
+            "read_depth": "40",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/updated_0/calls/calls.tsv",
+            "comparison": "disagreement"
+          },
+          {
+            "sample_id": "sample",
+            "locus_id": "absent",
+            "assembly_repeat": null,
+            "read_repeat": 4.0,
+            "signed_error": null,
+            "assembly_status": "KNOWN_SYNTHETIC_TRUTH",
+            "read_status": "NOT_FOUND",
+            "inference_method": "observed_reference_prior",
+            "estimation_method": "observed_reference_prior",
+            "estimation_reason": "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately.",
+            "estimate_support": "0",
+            "read_depth": "0",
+            "primary_read_depth": "0",
+            "call_file": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/short/challenge_paired/updated_0/calls/calls.tsv",
+            "comparison": "missing_call"
+          }
+        ],
+        "challenge_metrics": {
+          "call_rate": 1.0,
+          "configured_loci": 15,
+          "truth_known_loci": 14,
+          "numerical_completion_rate": 1.0,
+          "exact_accuracy_all_truth_known": 0.6428571428571429,
+          "missing_truth_known": 0,
+          "mae_all_truth_known": 29.214285714285715,
+          "evidence_classes": {
+            "ESTIMATED": {
+              "total": 5,
+              "numeric": 5,
+              "correct": 5,
+              "absolute_errors": [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0
+              ],
+              "accuracy_all_loci": 1.0,
+              "mae_among_numeric": 0.0
+            },
+            "LOWER_BOUND": {
+              "total": 3,
+              "numeric": 3,
+              "correct": 1,
+              "absolute_errors": [
+                22.5,
+                382.5,
+                0.0
+              ],
+              "accuracy_all_loci": 0.3333333333333333,
+              "mae_among_numeric": 135.0
+            },
+            "EXACT": {
+              "total": 2,
+              "numeric": 2,
+              "correct": 2,
+              "absolute_errors": [
+                0.0,
+                0.0
+              ],
+              "accuracy_all_loci": 1.0,
+              "mae_among_numeric": 0.0
+            },
+            "PRIOR_ONLY": {
+              "total": 1,
+              "numeric": 1,
+              "correct": 0,
+              "absolute_errors": [
+                2.0
+              ],
+              "accuracy_all_loci": 0.0,
+              "mae_among_numeric": 2.0
+            },
+            "POSSIBLE_MIXTURE": {
+              "total": 1,
+              "numeric": 1,
+              "correct": 1,
+              "absolute_errors": [
+                0.0
+              ],
+              "accuracy_all_loci": 1.0,
+              "mae_among_numeric": 0.0
+            },
+            "AMBIGUOUS_LOCUS": {
+              "total": 2,
+              "numeric": 2,
+              "correct": 0,
+              "absolute_errors": [
+                1.0,
+                1.0
+              ],
+              "accuracy_all_loci": 0.0,
+              "mae_among_numeric": 1.0
+            }
+          },
+          "calibration": {
+            "model_support": {
+              "bins": [
+                {
+                  "lower": 0,
+                  "upper": 0.25,
+                  "n": 0,
+                  "mean_support": null,
+                  "observed_accuracy": null
+                },
+                {
+                  "lower": 0.25,
+                  "upper": 0.5,
+                  "n": 0,
+                  "mean_support": null,
+                  "observed_accuracy": null
+                },
+                {
+                  "lower": 0.5,
+                  "upper": 0.75,
+                  "n": 4,
+                  "mean_support": 0.6017100841214242,
+                  "observed_accuracy": 0.5
+                },
+                {
+                  "lower": 0.75,
+                  "upper": 1,
+                  "n": 10,
+                  "mean_support": 0.979248855,
+                  "observed_accuracy": 0.7
+                }
+              ],
+              "brier": 0.301227090455587
+            },
+            "data_evidence_confidence": {
+              "bins": [
+                {
+                  "lower": 0,
+                  "upper": 0.25,
+                  "n": 9,
+                  "mean_support": 0.04609481888888889,
+                  "observed_accuracy": 0.4444444444444444
+                },
+                {
+                  "lower": 0.25,
+                  "upper": 0.5,
+                  "n": 0,
+                  "mean_support": null,
+                  "observed_accuracy": null
+                },
+                {
+                  "lower": 0.5,
+                  "upper": 0.75,
+                  "n": 3,
+                  "mean_support": 0.6246844500000001,
+                  "observed_accuracy": 1
+                },
+                {
+                  "lower": 0.75,
+                  "upper": 1,
+                  "n": 2,
+                  "mean_support": 0.75650118,
+                  "observed_accuracy": 1
+                }
+              ],
+              "brier": 0.27981923692297234
+            }
+          },
+          "accuracy_among_calls": 0.6428571428571429,
+          "mae": 29.214285714285715,
+          "absent_numeric_prediction_rate": 1.0,
+          "false_positive_genotype_rate": 0.0,
+          "sequence_accuracy_among_reported": 1.0,
+          "strata": {
+            "coverage": {
+              "0": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "2": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "20": {
+                "total": 2,
+                "called": 2,
+                "correct": 0
+              },
+              "24": {
+                "total": 8,
+                "called": 8,
+                "correct": 6
+              },
+              "40": {
+                "total": 2,
+                "called": 2,
+                "correct": 2
+              }
+            },
+            "motif_length": {
+              "1": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "4": {
+                "total": 12,
+                "called": 12,
+                "correct": 7
+              },
+              "9": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              }
+            },
+            "repeat_bases": {
+              "4": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "16": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "20": {
+                "total": 4,
+                "called": 4,
+                "correct": 2
+              },
+              "21": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "24": {
+                "total": 2,
+                "called": 2,
+                "correct": 1
+              },
+              "32": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "64": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "72": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "160": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              },
+              "1600": {
+                "total": 1,
+                "called": 1,
+                "correct": 0
+              }
+            },
+            "error_rate": {
+              "0": {
+                "total": 11,
+                "called": 11,
+                "correct": 6
+              },
+              "0.01": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "0.02": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              },
+              "0.04": {
+                "total": 1,
+                "called": 1,
+                "correct": 1
+              }
+            }
+          },
+          "locus_assignment_accuracy": 1.0,
+          "locus_assignment_rate": 0.7961783439490446,
+          "accuracy_call_rate_curve": [
+            {
+              "model_support_threshold": 0,
+              "call_rate": 1.0,
+              "accuracy": 0.6428571428571429
+            },
+            {
+              "model_support_threshold": 0.5,
+              "call_rate": 1.0,
+              "accuracy": 0.6428571428571429
+            },
+            {
+              "model_support_threshold": 0.8,
+              "call_rate": 0.6428571428571429,
+              "accuracy": 0.6666666666666666
+            },
+            {
+              "model_support_threshold": 0.95,
+              "call_rate": 0.6428571428571429,
+              "accuracy": 0.6666666666666666
+            },
+            {
+              "model_support_threshold": 0.99,
+              "call_rate": 0.6428571428571429,
+              "accuracy": 0.6666666666666666
+            }
+          ],
+          "note": "Mixture counts are scored against either known allele. Missing calls fail all-locus exact accuracy; their absolute error is undefined. Absent loci have no truth allele: numerical completion is separate from observed presence. Calibration is descriptive on this small synthetic set, not validation."
+        }
+      }
+    },
+    "long": {
+      "inputs_sha256": {
+        "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/clean_long/long/inputs/r1.fastq": "9ea3dea3b74211efd1c14cb27596bb0c4bf63d7f3c802665ddace5e82483a0e7"
+      },
+      "baseline": {
+        "exit_code": 0,
+        "seconds": 0.7242809169983957,
+        "peak_rss_mib": 80.84375,
+        "artifact_sha256": {
+          "calls.tsv": "ad9308e1fd6753e703fe9b1bcc60f97d1fd7904249084f819cd758097f20017d",
+          "common_locus_calls.tsv": "3c4ef3b6de813cc292be616ebd3af9c08e468a96d01915caf4f8e724d4bdc263",
+          "genotype_evidence.tsv": "a38dfb4c0e493988131bf07db50f4ff0a9b847fbc427963ce5599786699a37a8",
+          "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+          "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+          "locus_snps.tsv": "4e36cca7bacca09d333791ec27b94c99f998238f1938742e6e087db8c3e5a617",
+          "molecule_candidate_evidence.tsv": "dbcbbb46c3000eb4d1a48b7150f5d9322ffbf3e1f5edfd8db84437d5ef24d963"
+        },
+        "output": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/clean_long/long/baseline_0/calls",
+        "truth_summary": {
+          "n": 11,
+          "exact_agreement": 1.0,
+          "within_1": 1.0,
+          "within_2": 1.0,
+          "mae": 0.0,
+          "median_absolute_error": 0.0,
+          "mean_signed_error": 0.0,
+          "spearman": 1.0,
+          "total_sample_loci": 11,
+          "missing_assembly": 0,
+          "missing_short_read": 0
+        },
+        "disagreements": []
+      },
+      "updated": {
+        "exit_code": 0,
+        "seconds": 0.7812337909999769,
+        "peak_rss_mib": 85.3125,
+        "artifact_sha256": {
+          "calls.tsv": "00d1ac3f981d7803a0957f08b79b2d9f1d23451336a491a76c35e450583071dd",
+          "common_locus_calls.tsv": "b9e25d8e49a092588e10757d4731e5890588aea3a89cf902cc8be4d09413ec42",
+          "genotype_evidence.tsv": "a38dfb4c0e493988131bf07db50f4ff0a9b847fbc427963ce5599786699a37a8",
+          "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+          "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+          "locus_snps.tsv": "4e36cca7bacca09d333791ec27b94c99f998238f1938742e6e087db8c3e5a617",
+          "molecule_candidate_evidence.tsv": "b73a9e73faee273ac39dbea471fa1e15ff2a1ff41b1c4622d3e3a43870d6eafb"
+        },
+        "output": "/private/tmp/mlvamaps-sweep-final-zeuhi_oz/clean_long/long/updated_0/calls",
+        "truth_summary": {
+          "n": 11,
+          "exact_agreement": 1.0,
+          "within_1": 1.0,
+          "within_2": 1.0,
+          "mae": 0.0,
+          "median_absolute_error": 0.0,
+          "mean_signed_error": 0.0,
+          "spearman": 1.0,
+          "total_sample_loci": 11,
+          "missing_assembly": 0,
+          "missing_short_read": 0
+        },
+        "disagreements": []
+      }
+    }
+  }
+}

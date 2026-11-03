@@ -34,6 +34,7 @@ class CandidateAlignment:
     next_reference_start: int = -1
     supplementary: bool = False
     query_offset: int = 0  # Local sequence origin in reference-oriented original read.
+    query_length: int = 0  # Original read length, before clipping/window extraction.
 
 
 @dataclass(frozen=True, slots=True)

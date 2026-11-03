@@ -147,15 +147,64 @@ def test_reconstruction_preserves_sample_flank_variants():
     assert len(support) >= 3
 
 
+def test_microassembly_preserves_existing_molecule_measurements(monkeypatch):
+    from mlvamaps.alignment_evidence import CandidateEvidence
+    from mlvamaps.allele_inference import InferenceThresholds
+    from mlvamaps.short_read_fragments import resolve_fragment_calls
+    locus, product = locus_and_product(5)
+    direct = CandidateEvidence("L", 5, "direct", measured_repeat_count=5, raw_repeat_count=5,
+                               repeat_sigma=.08, direct_product_measurement=True, full_repeat_span=True,
+                               metadata={"product_sequence": product})
+    pool = {name: RecruitedFragment(pair(name, product, revcomp(product)), True, True, False)
+            for name in ("direct", "partial_a", "partial_b")}
+    calls, molecule_calls = infer_alleles([direct], [locus], [], "s", "illumina", require_measurement=True)
+    monkeypatch.setattr("mlvamaps.short_read_fragments.assemble_fragments",
+                        lambda *args: (product, set(pool), "assembled"))
+    monkeypatch.setattr("mlvamaps.mapped_reconstruction.call_query_products", lambda *args:
+                        {"L": ({"status": "PASS", "repeat_count": 8, "repeat_count_raw": 8}, product)})
+    _calls, evidence, molecule_calls, _diagnostics, _products = resolve_fragment_calls(
+        calls, [direct], molecule_calls, [], [], [locus], {"L": pool}, "s", InferenceThresholds(), .25,
+        require_measurement=True, sample_mode="isolate")
+    assert next(row for row in evidence if row.molecule_id == "direct") is direct
+    assert molecule_calls == {("L", "direct"): 5}
+    assert {row.molecule_id for row in evidence if row.evidence_tier == "microassembly"} == {"partial_a", "partial_b"}
+
+
 @pytest.mark.skipif(not shutil.which("minimap2") or not shutil.which("sassy"), reason="native tools unavailable")
-@pytest.mark.parametrize("layout", ["single", "orphan_r1", "orphan_r2", "paired_flank_snp", "mapping_only"])
+def test_short_read_outputs_retain_uninformative_depth_and_report_mixed_loci(tmp_path):
+    from mlvamaps.short_reads import run_short_read_call
+    locus, product = locus_and_product(5)
+    _locus, alternate = locus_and_product(8)
+    panel = tmp_path / "panel.tsv"
+    write_tsv([vars(locus)], panel, list(vars(locus)))
+    database = tmp_path / "database"
+    database.mkdir()
+    (database / "L.fasta").write_text(f">reference\n{product}\n")
+    reads = tmp_path / "reads.fastq"
+    sequences = [product] * 6 + [alternate] * 4 + [product[:70]] * 5
+    write_fastq((ReadRecord(f"m{i}", sequence, "I" * len(sequence)) for i, sequence in enumerate(sequences)), reads)
+    paths = run_short_read_call(str(reads), None, str(panel), str(tmp_path / "out"), "s",
+        database_path=str(database), threads=2, show_progress=False, sample_mode="metagenome")
+    with paths["calls"].open() as handle:
+        call = next(csv.DictReader(handle, delimiter="\t"))
+    assert call["status"] == "MULTIPLE_VARIANTS"
+    assert int(call["read_depth"]) == 15
+    assert int(call["informative_molecule_count"]) == 10
+    assert int(call["uninformative_locus_reads"]) == 5
+    with paths["sample_summary"].open() as handle:
+        assert next(csv.DictReader(handle, delimiter="\t"))["mixed_loci"] == "1"
+
+
+@pytest.mark.skipif(not shutil.which("minimap2") or not shutil.which("sassy"), reason="native tools unavailable")
+@pytest.mark.parametrize("layout", ["single", "orphan_r1", "orphan_r2", "paired_flank_snp", "mapping_only",
+                                   "orphan_r1_mapping_only", "orphan_r2_mapping_only"])
 def test_reconstructed_short_read_fingerprint_matches_assembly(tmp_path, layout, monkeypatch):
     from mlvamaps.assembly_call import run_assembly_call
     from mlvamaps.short_reads import run_short_read_call
 
     count = 12 if layout == "paired_flank_snp" else 5
     locus, product = locus_and_product(count, imperfect=layout == "paired_flank_snp")
-    if layout == "mapping_only":
+    if "mapping_only" in layout:
         # A sample primer SNP changes the graph's terminal seed. Mapping must
         # locate the observed end without supplying the reference nucleotide.
         product = product[:10] + ("A" if product[10] != "A" else "C") + product[11:]
@@ -169,7 +218,7 @@ def test_reconstructed_short_read_fingerprint_matches_assembly(tmp_path, layout,
             for copy in range(3):
                 name = f"{start}_{copy}"
                 fragment = pair(name, product[start:start + 100], "N" * 100)
-                if layout == "orphan_r2":
+                if layout.startswith("orphan_r2"):
                     fragment = pair(name, "N" * 100, revcomp(product[start:start + 100]))
                     fragment = replace(fragment, read1=replace(fragment.read1, quality="!" * 100))
                 else:
@@ -205,10 +254,12 @@ def test_reconstructed_short_read_fingerprint_matches_assembly(tmp_path, layout,
     with paths["short_read_diagnostics"].open() as handle:
         diagnostic = next(csv.DictReader(handle, delimiter="\t"))
     assert diagnostic["microassembly_success"] == "yes"
-    assert diagnostic["spanning_fragment_count"] == "0"
+    # Two tiled endpoints (three molecules each) now resolve the repeat from
+    # calibrated partial flanks; none individually spans the primer product.
+    assert diagnostic["spanning_fragment_count"] == ("0" if layout == "paired_flank_snp" else "6")
     assert product == "".join(paths["short_read_microassembly"].read_text().splitlines()[1:])
     assert product == "".join(paths["query_loci"].read_text().splitlines()[1:])
-    if layout == "mapping_only":
+    if "mapping_only" in layout:
         assert int(diagnostic["mapping_recruited_fragment_count"]) > 0
         assert diagnostic["flank_recruited_fragment_count"] == "0"
     if layout.startswith("orphan"):

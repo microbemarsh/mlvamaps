@@ -157,6 +157,15 @@ count. `molecule_candidate_evidence.tsv` also records `aligned_flank_bases` and
 `spanning_repeat_indel_delta` for auditing alignment estimates. Estimates do not
 inflate measured `molecule_support`.
 
+`presence_support` counts detected independent molecules, while
+`molecule_support` counts informative molecules. `primary_molecule_support` and
+`secondary_molecule_support` count observations whose rounded measurement matches
+each reported allele. `calls.tsv` uses total presence for `read_depth` and the
+observed primary count for `primary_read_depth`; fitted allele fractions do not
+create read counts. Mates and alternative mappings share their molecule identity.
+Confidence thresholds never erase these observed depths or the selected repeat
+prediction.
+
 `common_locus_calls.tsv` also includes `repeat_count_raw`, `inference_method`,
 `probability_kind`, `allele_fractions`, `em_iterations`, `em_converged`, and
 `consensus_status`. `best_probability` and `candidate_distribution` describe

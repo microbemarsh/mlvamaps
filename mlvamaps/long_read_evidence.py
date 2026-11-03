@@ -11,7 +11,7 @@ import parasail
 
 from .alignment_evidence import CandidateAlignment, CandidateEvidence
 from .candidate_contexts import CandidateContext
-from .locus_measurement import mapped_locus_window, measure_locus_product
+from .locus_measurement import mapped_locus_window, measure_locus_product, reference_nonrepeat_lengths
 from .models import Locus
 from .short_read_evidence import _repeat_indel_delta
 from .allele_inference import InferenceThresholds
@@ -125,15 +125,18 @@ def extract_long_read_evidence(
     error_model = flank_error_model(alignments, contexts) if technology in {"ont", "ont-hq"} else None
     context_by_id = {context.candidate_id: context for context in contexts}
     locus_by_id = {locus.locus_id: locus for locus in loci}
+    nonrepeat_lengths = reference_nonrepeat_lengths(loci, contexts)
     grouped: dict[tuple[str, str, int | float], list[CandidateAlignment]] = defaultdict(list)
     for alignment in alignments:
         grouped[(alignment.molecule_id, alignment.locus_id, alignment.repeat_count)].append(alignment)
     @lru_cache(maxsize=512)
     def measure(locus_id, sequence, quality, refine=True):
         observation = measure_locus_product(sequence, locus_by_id[locus_id], quality,
-                                           source="long_read_molecule", round_tolerance=round_tolerance)
+                                           source="long_read_molecule", round_tolerance=round_tolerance,
+                                           reference_nonrepeat_bp=nonrepeat_lengths.get(locus_id))
         if observation.called_allele is not None and observation.status in {"FULL_PRODUCT", "REPEAT_INFORMATIVE"}:
             metadata = long_read_measurement_metadata(observation, locus_by_id[locus_id], error_model, limits, refine)
+            metadata["product_quality"] = getattr(observation, "product_quality", None)
             return (observation.called_allele, observation.status, observation.raw_repeat_count,
                     metadata.get("repeat_sigma"), observation.product_sequence, metadata)
         return None

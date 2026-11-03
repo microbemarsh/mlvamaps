@@ -18,10 +18,11 @@ import numpy as np
 from .alignment_evidence import CandidateAlignment
 from .candidate_contexts import CandidateContext, repeat_interval
 from .io import write_fasta, write_tsv
+from .locus_measurement import reference_product_allele
 from .minimap_mapping import map_reads_to_candidates_bam
 from .models import Locus
 from .reference_database import read_reference_metadata, read_sequence_database
-from .repeat_calibration import assembly_equivalent_product_allele, repeat_unit_length
+from .repeat_calibration import repeat_unit_length
 
 MISSING_LOCUS_FIELDS = [
     "missing_locus_penalty",
@@ -108,7 +109,7 @@ def observed_reference_contexts(database_path, loci, round_tolerance=0.25):
     for index, ((locus_id, sequence), references) in enumerate(sorted(collapsed.items())):
         locus = by_id[locus_id]
         start, end = repeat_interval(sequence, locus)
-        count = assembly_equivalent_product_allele(locus, len(sequence), round_tolerance)[1]
+        count = reference_product_allele(sequence, locus, round_tolerance)[1]
         unit = repeat_unit_length(locus)
         if count is None and unit and locus.left_flank_sequence and locus.right_flank_sequence:
             count = (end - start) / unit
@@ -199,16 +200,26 @@ def alignment_statistics(alignment, context):
 
 
 def molecule_log_likelihoods(alignments, contexts, members, repeat_scale=1.0,
-                           measured_repeats=None):
+                           measured_repeats=None, allow_multi_locus=False):
     if not math.isfinite(repeat_scale) or repeat_scale <= 0:
         raise ValueError("Classification repeat scale must be finite and positive")
     context_by_id = {c.candidate_id: c for c in contexts}
+
+    def query_interval(row):
+        start, end = row.query_offset + row.query_start, row.query_offset + row.query_end
+        if row.reverse:
+            length = row.query_length or len(row.query_sequence)
+            start, end = length - end, length - start
+        return start, end
+
     best = {}
     for alignment in alignments:
         context = context_by_id.get(alignment.candidate_id)
         if context is None or not math.isfinite(alignment.alignment_score):
             continue
         key = (alignment.molecule_id, alignment.mate, alignment.candidate_id)
+        if allow_multi_locus:
+            key += (query_interval(alignment),)
         if key not in best or alignment.alignment_score > best[key].alignment_score:
             best[key] = alignment
     stats = {key: alignment_statistics(row, context_by_id[row.candidate_id]) for key, row in best.items()}
@@ -226,26 +237,40 @@ def molecule_log_likelihoods(alignments, contexts, members, repeat_scale=1.0,
     denominator = sum(totals.values())
     errors = {field: min(0.25, max(1e-4, totals[field] / denominator)) for field in ("mismatches", "insertions", "deletions")}
     logs = {field: math.log(value / (3 if field == "mismatches" else 1)) for field, value in errors.items()}
+    molecule_rows = defaultdict(list)
+    for key, row in best.items():
+        molecule_rows[row.molecule_id].append(key)
+    if allow_multi_locus:
+        from .mapped_reconstruction import query_interval_groups
+
+    # Distinct windows of a long read can cover independent loci. Overlapping
+    # mappings still compete, and paired reads retain one locus assignment.
+    assigned = set()
+    for keys in molecule_rows.values():
+        groups = query_interval_groups(keys, lambda key: query_interval(best[key])) if allow_multi_locus else [keys]
+        for group in groups:
+            scores = {}
+            for key in group:
+                row = best[key]
+                scores[row.locus_id] = max(scores.get(row.locus_id, -math.inf), row.alignment_score)
+            ranked = sorted(scores, key=lambda locus: (-scores[locus], locus))
+            if len(ranked) == 1 or scores[ranked[0]] > scores[ranked[1]]:
+                assigned.update(key for key in group if best[key].locus_id == ranked[0])
+    # Resolve window competition before retaining one alignment per reference;
+    # repeated matches must neither hide a locus tie nor add molecule depth.
+    selected = {}
+    for key, row in best.items():
+        if key in assigned and (key[:3] not in selected or
+                row.alignment_score > best[selected[key[:3]]].alignment_score):
+            selected[key[:3]] = key
+    best = {key: best[key] for key in selected.values()}
     maximum_span = defaultdict(int)
-    locus_scores = defaultdict(dict)
     for key, row in best.items():
         maximum_span[(row.molecule_id, row.mate, row.locus_id)] = max(
             maximum_span[(row.molecule_id, row.mate, row.locus_id)], stats[key]["outside_bases"]
         )
-        locus_scores[row.molecule_id][row.locus_id] = max(
-            locus_scores[row.molecule_id].get(row.locus_id, -math.inf), row.alignment_score
-        )
-    # A molecule mapping equally well to different loci is not independent
-    # evidence at each of them. Exclude locus ties rather than duplicating it.
-    assigned_locus = {}
-    for molecule, scores in locus_scores.items():
-        ranked = sorted(scores, key=lambda locus: (-scores[locus], locus))
-        if len(ranked) == 1 or scores[ranked[0]] > scores[ranked[1]]:
-            assigned_locus[molecule] = ranked[0]
     by_molecule = defaultdict(lambda: defaultdict(dict))
     for key, row in best.items():
-        if assigned_locus.get(row.molecule_id) != row.locus_id:
-            continue
         values = stats[key]
         sequence_score = sum(values[field] * logs[field] for field in logs)
         uncovered = maximum_span[(row.molecule_id, row.mate, row.locus_id)] - values["outside_bases"]
@@ -435,6 +460,7 @@ def run_mapping_classification(
         ])
     likelihoods, errors = molecule_log_likelihoods(
         alignments, contexts, members, repeat_scale, measured_repeats,
+        reads1 is not None and technology != "illumina",
     )
     reference_loci = defaultdict(set)
     for context in contexts:

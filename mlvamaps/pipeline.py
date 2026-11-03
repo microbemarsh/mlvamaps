@@ -522,10 +522,23 @@ def run_call(
             contexts = (observed_reference_contexts(database, loci, assembly_round_tolerance)[1]
                         if database else generate_candidate_contexts(loci))
             unified_calls, _molecule_calls = infer_alleles([], loci, contexts, sample_id, "hifi", limits, require_measurement=True)
-            finalize_repeat_count_calls(unified_calls, [], loci, contexts, limits)
+            finalize_repeat_count_calls(unified_calls, [], loci, contexts, limits, round_tolerance=assembly_round_tolerance)
             unified_paths.update(write_evidence_reports(unified_calls, [], loci, outdir_path, limits))
             unified_paths["common_locus_calls"] = outdir_path / "common_locus_calls.tsv"
             write_tsv(unified_calls, unified_paths["common_locus_calls"], COMMON_LOCUS_CALL_FIELDS)
+            from .alignment_evidence import EVIDENCE_FIELDS
+            from .mapped_reconstruction import resolve_query_products
+            _, reconstruction, _, _ = resolve_query_products(
+                unified_calls, [], loci, [], sample_id, limits, assembly_round_tolerance, sample_mode=sample_mode)
+            for row in reconstruction:
+                row["exported"] = "no"
+            for name in ("query_loci", "taxonomic_query_sequences"):
+                unified_paths[name] = outdir_path / f"{name}.fasta"
+                write_fasta([], unified_paths[name])
+            unified_paths["query_locus_reconstruction"] = outdir_path / "query_locus_reconstruction.tsv"
+            write_tsv(reconstruction, unified_paths["query_locus_reconstruction"], list(reconstruction[0]) if reconstruction else [])
+            unified_paths["molecule_evidence"] = outdir_path / "molecule_candidate_evidence.tsv"
+            write_tsv([], unified_paths["molecule_evidence"], EVIDENCE_FIELDS)
 
         recruitment_paths = {
             "recruited_reads": outdir_path / "locus_recruited_reads.tsv",
@@ -560,14 +573,18 @@ def run_call(
             min_aligned_bp=recruitment_min_aligned_bp,
             min_locus_score_margin=recruitment_min_locus_margin,
             mapped_paths=unified_paths if filtered_reads else None,
+            round_tolerance=assembly_round_tolerance,
         )
 
     recruited_by_read = {
-        assignment.read_id: assignment for assignment in recruited_assignments
+        (assignment.read_id, assignment.assigned_locus): assignment for assignment in recruited_assignments
     }
+    recruited_names = {assignment.read_id for assignment in recruited_assignments}
     assignments = []
     for assignment in primer_assignments:
-        recruited = recruited_by_read.get(assignment.read_id)
+        if assignment.assigned_locus == "UNASSIGNED" and assignment.read_id in recruited_names:
+            continue
+        recruited = recruited_by_read.get((assignment.read_id, assignment.assigned_locus))
         if not assignment.passes_assignment_qc:
             assignments.append(recruited or assignment)
         elif (
@@ -583,17 +600,17 @@ def run_call(
             )
         else:
             assignments.append(assignment)
-    primer_read_ids = {assignment.read_id for assignment in primer_assignments}
+    primer_read_ids = {(assignment.read_id, assignment.assigned_locus) for assignment in primer_assignments}
     assignments.extend(
         assignment
         for assignment in recruited_assignments
-        if assignment.read_id not in primer_read_ids
+        if (assignment.read_id, assignment.assigned_locus) not in primer_read_ids
     )
-    recruited_read_ids = {str(row["read_id"]) for row in recruited_rows}
+    recruited_read_ids = {(str(row["read_id"]), str(row["locus_id"])) for row in recruited_rows}
     for assignment in assignments:
         if (
             not assignment.passes_assignment_qc
-            or assignment.read_id in recruited_read_ids
+            or (assignment.read_id, assignment.assigned_locus) in recruited_read_ids
         ):
             continue
         recruited_rows.append(
@@ -626,8 +643,8 @@ def run_call(
     )
     assignment_rows = [{field: getattr(row, field) for field in ASSIGNMENT_FIELDS} for row in assignments]
     write_tsv(assignment_rows, outdir_path / "read_locus_assignments.tsv", ASSIGNMENT_FIELDS)
-    assigned_count = sum(1 for row in assignments if row.passes_assignment_qc)
-    progress.step(f"Assigned {assigned_count:,}/{len(assignments):,} reads to primer-supported loci")
+    assigned_count = len({row.read_id for row in assignments if row.passes_assignment_qc})
+    progress.step(f"Assigned {assigned_count:,}/{len(filtered_reads):,} reads to loci")
 
     features = extract_repeat_features(assignments, loci, threads=threads, progress=progress)
     feature_rows = [{field: getattr(row, field) for field in FEATURE_FIELDS} for row in features]
@@ -798,7 +815,7 @@ def run_call(
             ),
             "second_best_posterior": shared["second_best_probability"],
             "read_depth": shared["presence_support"],
-            "primary_read_depth": shared["molecule_support"],
+            "primary_read_depth": shared.get("primary_molecule_support", shared["molecule_support"]),
             "dominant_variant_fraction": shared["dominant_fraction"] or 0,
             "allele_distribution": shared["candidate_distribution"],
             "call_status": status_map[str(shared["status"])],
@@ -909,7 +926,7 @@ def run_call(
             threads=thread_count, minimap2_bin=minimap2_bin,
             locus_quality={str(row["locus"]): {"depth": row["molecule_support"], "status": row["status"]} for row in unified_calls},
             query_repeat_counts={str(row["locus_id"]): row.get("repeat_count", "") for row in simple_call_rows
-                                 if repeat_is_comparable(row) and row.get("status") in {"PASS", "LOW_DEPTH", "PRESENT"}},
+                                 if repeat_is_comparable(row)},
             reference_metadata_path=reference_metadata_path,
             taxon_identification=taxon_identification, minimum_loci=taxon_min_loci or 2,
             repeat_scale=classification_repeat_scale,

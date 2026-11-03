@@ -7,8 +7,11 @@ numerical prediction when an eligible prior exists. Direct measurements take
 precedence; uncertainty changes confidence rather than suppressing the count.
 
 ```bash
-mlvamaps call --database reference_build -i sample.fastq.gz -o results
+mlvamaps call --database reference_build -i sample.fastq.gz -o results --sample-mode isolate
 ```
+
+Use `--sample-mode isolate` for the isolate-versus-assembly comparison. The
+default `metagenome` mode fits mixtures and should be used for mixed samples.
 
 For paired reads, see the [Illumina workflow](illumina.md).
 For current uncertainty rules, limits, and same-input old/new comparisons, see
@@ -43,7 +46,10 @@ and 21 bases with 24-base padding. Reference sequence locates the interval but
 never supplies missing sample bases or determines its repeat count.
 
 Long reads without a measured complete product enter the Sassy whole-read PCR
-rescue step. Primer orientation, pairing, IUPAC handling, and product-length rules
+rescue step. Reads long enough to contain another product also enter rescue.
+Disjoint locus intervals on one genomic read contribute once to each locus,
+including intervals on opposite strands. Overlapping competing loci remain
+ambiguous. Primer orientation, pairing, IUPAC handling, and product-length rules
 remain unchanged. Tied loci or product sizes do not become accepted assignments.
 Rescue outputs include `primer_rescue.fasta.gz` and `in_silico_pcr/` when needed.
 
@@ -55,7 +61,10 @@ reference IDs. Alternative reference mappings are preserved. Synthetic repeat
 expansions do not define the sample's allele hypotheses in this path.
 
 For short reads, flank recruitment and mate rescue run during QC and feed the
-same measurement stage. The appropriate technology preset is used for mapping.
+same measurement stage. Surviving orphan mates are mapped as unpaired reads;
+they retain the original molecule identity. Conflicting mate measurements remain
+alternatives from one molecule, and a complete product takes precedence over a
+partial measurement. The appropriate technology preset is used for mapping.
 The observed target FASTA, metadata, and provenance are recorded under
 `candidate_mapping/`; minimap2 builds its target index in memory.
 
@@ -82,7 +91,35 @@ quality, including failed measurements, rather than repeated for each reference
 allele. These caches are bounded and local to one inference run.
 
 Independently resolved repeat flanks can also measure
-a repeat interval. Paired reads can contribute a uniquely merged fragment or a
+a repeat interval. For historical and minimal panels, a read missing a primer
+uses the reference products' nonrepeat length to convert that observed interval
+into assembly allele units. Configured flanks may be short boundary anchors;
+their lengths are not assumed to cover the whole nonrepeat interior. The
+conversion requires unambiguous reference anchors and agreement across reference
+nonrepeat lengths. Otherwise the flank span does not supply a direct calibrated
+allele, and the existing reconstruction/estimate paths remain available. Complete
+sample products retain their own measured calibration. No reference bases are
+exported as sample sequence, and this conversion cannot establish an unobserved
+sample-specific indel outside the repeat.
+
+Observed reference labels use this same product calibration, including correction
+for primer indels. Minimal panels retain the assembly convention for nonrepeat
+spacer sequence outside the configured flank anchors.
+
+When a read endpoint truncates a configured flank longer than 21 bases, the
+boundary can be recovered from its terminal 21 bases if reference nonrepeat
+calibration is unique. Both boundary anchors must be ordered, unambiguous,
+contain at least three base types, and be at least 90% identical; ambiguous or weak partial anchors
+remain unresolved. Strong anchors can support novel repeat lengths outside the
+panel's expected range. This does not resolve arrays longer than the available
+fragment span.
+
+The regression `test_calibrated_flank_reads_preserve_assembly_distance_matrices`
+checks an offset panel on matching assembly and short-read samples, including
+fractional alleles, and requires identical repeat-only and combined-marker
+distance matrices. This is a regression check, not a real-cohort accuracy claim.
+
+Paired reads can contribute a uniquely merged fragment or a
 supported local assembly, as described in the Illumina workflow.
 For concrete DNA anchors in windows of at most 512 bases, an in-process edit-distance
 existence check rejects impossible matches before launching Sassy. Accepted
@@ -100,7 +137,11 @@ labelled estimate when no direct measurement is available; see the
 [Illumina guide](illumina.md).
 
 `common_locus_calls.tsv` distinguishes `presence_support` from informative
-`molecule_support`. `molecule_candidate_evidence.tsv` retains reference IDs,
+`molecule_support`. `primary_molecule_support` and `secondary_molecule_support`
+count independent observations matching the corresponding rounded allele;
+neither is inferred by multiplying a fitted fraction by total depth. These can
+be smaller than total informative support, especially for noisy sizing or a
+consensus-derived estimate. `molecule_candidate_evidence.tsv` retains reference IDs,
 alignment diagnostics, evidence types, and inferred molecule counts.
 
 `genotype_evidence.tsv` distinguishes exact, estimated, bounded, unresolved,
@@ -129,9 +170,13 @@ requiring successful PCR on individual reads. Short reads also retain their
 bounded fragment graph for products not spanned by an individual read or pair.
 
 A supported consensus supplies an assembly-PCR measurement without adding votes
-or replacing original measurements used for reference classification. A conflict
-with a confident molecule call produces `AMBIGUOUS` and `consensus_status=disagrees`.
-Mixtures remain separate. Consensus-derived calls use
+or replacing original measurements used for reference classification. In isolate
+mode, nearby uncertain raw measurements can contribute to the same reconstruction
+even when they straddle a rounding boundary. A consensus evaluated against molecule
+likelihoods retains that likelihood and its confidence; a rejected consensus cannot
+overwrite the numerical prediction. A conflict with a confident molecule call
+produces `AMBIGUOUS` and `consensus_status=disagrees`. Mixtures remain separate.
+Products recovered without a measurable molecule likelihood use
 `probability_kind=reconstruction_support_fraction`; this is observed support,
 not calibrated accuracy. Only products agreeing with final resolved calls enter
 `query_loci.fasta`; `query_locus_reconstruction.tsv` records the decision.
@@ -152,6 +197,10 @@ count exists, the existing alignment-derived repeat evidence remains available
 to classification. A reported estimate does not become an independent measured
 count in that classification model.
 
+For long genomic reads, classification also retains independently assigned,
+non-overlapping locus intervals. Repeated mappings do not add molecule support,
+and overlapping locus ties remain unresolved.
+
 Equivalent references remain grouped. Isolate support and metagenome mixture EM
 retain an unclassified component, and weak or ambiguous evidence remains explicit.
 Model support is conditional on the available reference catalog.
@@ -168,10 +217,62 @@ Start with `report.html`, `calls.tsv`, `mlva_fingerprint.tsv`, and
 comparisons exclude prior-only values. Use the same panel calibration and `--assembly-round-tolerance` when
 comparing FASTQ and assembly fingerprints.
 
+Low-confidence predictions supported by sample evidence remain available to
+profile and combined-marker distances. Their status, uncertainty, and support
+remain explicit; including them does not make the estimate exact. For FASTQ
+combined-marker exports, the current reconstruction audit governs sample sequence
+eligibility. Rejected or mismatched products cannot re-enter through stale
+classification or local-assembly files. Empty runs clear the current query
+sequences and evidence table. A disabled distance component contributes neither
+distance nor callable overlap.
+
 Synthetic regression coverage includes single-end, paired, overlapping,
 shotgun, and long reads, novel and fractional alleles, zero-repeat products,
 primer indels, and primer rescue when mapping misses reads. Performance and
 accuracy on a particular sample still require comparison with its known truth.
+
+## FASTQ concordance sweep (2026-11-03)
+
+The complete native-enabled suite passed **552 tests**. Regressions cover orphan
+mates, conflicting measurements, independent loci on both strands of a genomic
+read, primer indels, partial flanks, consensus disagreements, empty-run artifacts,
+and low-confidence count/depth retention through exports. Matching assembly and
+FASTQ samples produce identical repeat-only and combined-marker distance matrices
+in both historical and minimal-panel calibration fixtures.
+
+A fresh-process comparison used identical retained inputs and the working source
+saved immediately before this sweep (including the preceding flank-calibration
+fix). One trial per layout used two copies and isolate mode:
+
+| Fixture | Before exact | After exact |
+| --- | ---: | ---: |
+| Clean paired short reads | 11/11 | 11/11 |
+| Clean shotgun short reads | 11/11 | 11/11 |
+| Clean long-read products | 11/11 | 11/11 |
+| Difficult paired short reads, all known-truth loci | 6/14 | 9/14 |
+
+Partial-flank recovery corrected the homopolymer call from 15 to 16, increasing
+informative support from 6 to 18 molecules without changing total presence (24).
+The noisy locus changed from a lower-bound estimate of 12.5 to a measured estimate
+of 16 with three informative molecules out of 40 detected. It remains
+`AMBIGUOUS`; its low confidence does not erase the count. The long-motif lower-bound
+estimate now uses assembly rounding (raw 7.8889, reported 8).
+
+All 15 challenge loci retain numerical predictions, including the locus with no
+truth allele. Five known-truth discrepancies remain: expansions of 40 and 400
+repeats reported as lower-bound estimates of 17.5, two indistinguishable loci
+with truth 5 and prior predictions 4, and a zero-coverage locus with truth 6 and
+prior prediction 4. These remain in the accuracy denominator. The fragment span
+does not resolve either expansion; no calibrated insert distribution was supplied.
+The noisy fixture's Q40 qualities do not describe its simulated 2–4% error rate,
+so these results do not calibrate real-data confidence.
+
+The [validation record](../reference/fastq-concordance-sweep.json) retains source
+and input hashes, environment versions, timings, support metrics, and every
+disagreement. Single-trial timings are descriptive, not speedup evidence. No noisy
+simulated ONT challenge was run. The inaccessible server cohort and Parsnp
+matrices were not evaluated, so these checks do not establish 100% real-cohort
+agreement.
 
 ## Synthetic runtime check
 

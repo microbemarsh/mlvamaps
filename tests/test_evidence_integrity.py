@@ -26,6 +26,7 @@ def test_supplementary_and_secondary_restore_original_sequence_and_coordinates(t
         f"m\t16\tc\t1\t60\t6M4S\t*\t0\t0\t{oriented}\tABCDEFGHIJ\tAS:i:6\n")
     rows = parse_candidate_alignments(path, [context])
     assert len(rows) == 3 and rows[0].supplementary and not rows[0].primary
+    assert rows[0].query_coverage == .4 and rows[0].query_length == 10
     assert (rows[0].query_start, rows[0].query_end, rows[0].cigar) == (6, 10, "6S4M")
     assert all(row.query_sequence == original and row.query_quality == "JIHGFEDCBA" for row in rows)
     assert rows[0].query_sequence is rows[-1].query_sequence

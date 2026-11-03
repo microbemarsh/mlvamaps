@@ -26,6 +26,47 @@ def mapped_fixture():
     return locus, ctx, row
 
 
+@pytest.mark.parametrize("tolerance", [0, .25, .4])
+def test_flank_measurements_use_reference_nonrepeat_length_not_reference_allele(tolerance):
+    from mlvamaps.locus_measurement import measure_locus_product, reference_nonrepeat_lengths
+    locus, ctx, _ = mapped_fixture()
+    # Boundary anchors cover only part of the nonrepeat interior. Their summed
+    # lengths would give the wrong historical product-size calibration.
+    locus = replace(locus, nominal_repeat_units=7,
+                    left_flank_sequence=locus.left_flank_sequence[-25:],
+                    right_flank_sequence=locus.right_flank_sequence[:25])
+    other = replace(ctx, sequence=ctx.sequence[:60] + "ATGC" * 9 + ctx.sequence[80:], repeat_count=999)
+    calibration = reference_nonrepeat_lengths([locus], [ctx, other, ctx])
+    assert calibration == {"L": (120,)}
+    for repeat_bases in (0, 20, 21, 22, 23, 36):
+        repeat = ("ATGC" * 9)[:repeat_bases]
+        full = ctx.sequence[:60] + repeat + ctx.sequence[80:]
+        partial = locus.left_flank_sequence + repeat + locus.right_flank_sequence
+        complete = measure_locus_product(full, locus, round_tolerance=tolerance)
+        measured = measure_locus_product(partial, locus, round_tolerance=tolerance,
+                                        reference_nonrepeat_bp=calibration["L"])
+        assert measured.status == "REPEAT_INFORMATIVE"
+        assert measured.product_sequence == ""
+        assert measured.raw_repeat_count == complete.raw_repeat_count
+        assert measured.called_allele == complete.called_allele
+        assert measured.measurement_method == "assembly_calibrated_flank_length"
+
+
+def test_conflicting_or_unavailable_nonrepeat_calibration_never_becomes_a_direct_call():
+    from mlvamaps.locus_measurement import measure_locus_product, reference_nonrepeat_lengths
+    locus, ctx, _ = mapped_fixture()
+    partial = ctx.sequence[20:-20]
+    # A length change outside the observed repeat gives competing conversions.
+    alternative = replace(ctx, sequence=ctx.sequence[:20] + "ACGT" + ctx.sequence[20:])
+    for contexts in ([], [ctx, alternative], [ctx, replace(ctx, sequence=partial)]):
+        calibration = reference_nonrepeat_lengths([locus], contexts)["L"]
+        assert len(calibration) != 1
+        measured = measure_locus_product(partial, locus, reference_nonrepeat_bp=calibration)
+        assert measured.status == "PRESENCE_ONLY" and measured.called_allele is None
+        assert "nonrepeat length" in measured.failure_reason
+        assert measure_locus_product(ctx.sequence, locus, reference_nonrepeat_bp=calibration).called_allele == 5
+
+
 def context(locus="L", identifier="c"):
     return CandidateContext(identifier, locus, "A" * 150, 5, 10, 50, 100, "A" * 50, "A" * 50)
 

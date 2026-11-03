@@ -201,7 +201,7 @@ def parse_candidate_alignments(
                 alignment_score=float(alignment.get_tag("AS")) if alignment.has_tag("AS") else float(aligned),
                 mapping_quality=int(alignment.mapping_quality),
                 alignment_identity=identity,
-                query_coverage=aligned / max(alignment.query_length or alignment.infer_query_length() or aligned, 1),
+                query_coverage=aligned / max(alignment.infer_read_length() or alignment.query_length or aligned, 1),
                 reference_coverage=(alignment.reference_end - alignment.reference_start) / max(len(context.sequence), 1),
                 query_start=alignment.query_alignment_start,
                 query_end=alignment.query_alignment_end,
@@ -220,6 +220,7 @@ def parse_candidate_alignments(
                 template_length=alignment.template_length,
                 next_reference_start=alignment.next_reference_start,
                 supplementary=alignment.is_supplementary,
+                query_length=alignment.infer_read_length() or alignment.query_length or 0,
             ))
             if query_reads is not None:
                 row = rows[-1]
@@ -244,7 +245,8 @@ def parse_candidate_alignments(
                 local_quality = quality[start:end] if quality else None
                 rows[-1] = replace(row, query_sequence=revcomp(local) if row.reverse else local,
                     query_quality=local_quality[::-1] if row.reverse and local_quality else local_quality,
-                    query_start=first - start, query_end=last - start, cigar="".join(cigar), query_offset=start)
+                    query_start=first - start, query_end=last - start, cigar="".join(cigar), query_offset=start,
+                    query_length=len(sequence))
     if query_reads is not None:
         return rows
     # Secondary SAM records may omit SEQ/QUAL. Recover the original orientation

@@ -203,14 +203,22 @@ def recover_masked_sequences(
         sample_id = str(getattr(sample, "sample_id"))
         sample_dir = Path(getattr(sample, "path")).parent
         assembly_sequences, retained_candidates = _retained_sample_sequences(sample_dir)
+        reconstruction_path = sample_dir / "query_locus_reconstruction.tsv"
+        has_reconstruction = reconstruction_path.is_file()
         reconstruction = {row["locus_id"]: row for row in _read_delimited(
-            sample_dir / "query_locus_reconstruction.tsv")}
+            reconstruction_path)}
         rows_by_locus = {
             str(row.get("locus_id", "")): row for row in getattr(sample, "rows")
         }
         for locus_id in locus_order:
             call = rows_by_locus.get(locus_id, {})
-            sequence = _precomputed_masked_sequence(sample_dir, locus_id)
+            evidence = str(call.get("evidence", ""))
+            evidence_sequence = assembly_sequences.get(evidence, "")
+            # Current selected products take precedence over historical files.
+            # A rejected FASTQ reconstruction must not re-enter through a local
+            # contig, classification copy, or precomputed phylogeny query.
+            sequence = ("" if has_reconstruction or evidence_sequence
+                        else _precomputed_masked_sequence(sample_dir, locus_id))
             if sequence:
                 item = RecoveredSequence(
                     sequence, "precomputed_phylogeny_query", "precomputed_repeat_mask"
@@ -233,12 +241,11 @@ def recover_masked_sequences(
                 )
                 continue
 
-            evidence = str(call.get("evidence", ""))
-            evidence_sequence = assembly_sequences.get(evidence, "")
             candidates: list[tuple[int, str, str]] = []
             if evidence_sequence:
                 candidates.append((0, "assembly_amplicons:evidence", evidence_sequence))
-            candidates.extend(retained_candidates.get(locus_id, []))
+            candidates.extend(item for item in retained_candidates.get(locus_id, [])
+                              if not has_reconstruction or item[1].endswith("/query_loci.fasta"))
             accepted: dict[str, tuple[str, str]] = {}
             unmasked = 0
             expected_size = _finite_repeat(call.get("product_size_bp"))
@@ -247,8 +254,8 @@ def recover_masked_sequences(
                 if accepted_priority is not None and priority > accepted_priority:
                     break
                 validated_query = False
-                if source.endswith("/query_loci.fasta") and locus_id in reconstruction:
-                    audit = reconstruction[locus_id]
+                if source.endswith("/query_loci.fasta") and has_reconstruction:
+                    audit = reconstruction.get(locus_id, {})
                     expected_repeat = _finite_repeat(call.get("repeat_count"))
                     if (audit.get("exported") != "yes" or
                             (expected_repeat is not None and expected_repeat != _finite_repeat(audit.get("repeat_count")))):
@@ -463,7 +470,8 @@ def export_combined_markers(
                     repeat_sum[right, left] += normalized_repeat
                     repeat_loci_compared[left, right] += 1
                     repeat_loci_compared[right, left] += 1
-                    locus_compared[left, right] = locus_compared[right, left] = True
+                    if repeat_weight > 0:
+                        locus_compared[left, right] = locus_compared[right, left] = True
             if not members:
                 loci_compared += locus_compared
                 locus_status.append(
@@ -567,7 +575,8 @@ def export_combined_markers(
                     snp_sum[right, left] += normalized
                     snp_loci_compared[left, right] += 1
                     snp_loci_compared[right, left] += 1
-                    locus_compared[left, right] = locus_compared[right, left] = True
+                    if snp_weight > 0:
+                        locus_compared[left, right] = locus_compared[right, left] = True
                     writer.writerow(
                         {
                             "locus_id": locus_id,
@@ -581,6 +590,7 @@ def export_combined_markers(
                             "normalized_repeat_distance": "" if not math.isfinite(normalized_repeat) else f"{normalized_repeat:.8f}",
                             "combined_locus_distance": (
                                 f"{snp_weight * normalized + (repeat_weight * normalized_repeat if math.isfinite(normalized_repeat) else 0):.8f}"
+                                if locus_compared[left, right] else ""
                             ),
                         }
                     )
@@ -667,8 +677,8 @@ def export_combined_markers(
     callable_counts = np.asarray(
         [
             sum(
-                (sample_id, locus_id) in recovered
-                or math.isfinite(float(repeat_calls[sample_index, locus_index]))
+                (snp_weight > 0 and (sample_id, locus_id) in recovered)
+                or (repeat_weight > 0 and math.isfinite(float(repeat_calls[sample_index, locus_index])))
                 for locus_index, locus_id in enumerate(locus_order)
             )
             for sample_index, sample_id in enumerate(sample_ids)

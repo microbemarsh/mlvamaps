@@ -29,7 +29,8 @@ def taxonomic_query_sequences(calls, products):
     return {
         str(call["locus"]): products[str(call["locus"])][0]
         for call in calls
-        if call["status"] in {"called", "low_coverage"}
+        if call["status"] in {"called", "low_coverage", "estimated"}
+        and not call.get("prior_only") and not call.get("possible_secondary")
         and str(call["locus"]) in products
         and call["repeat_count"] == products[str(call["locus"])][1]
     }
@@ -39,6 +40,7 @@ def run_unified_fastq_inference(
     *,
     reads1: str | Path,
     reads2: str | Path | None,
+    reads_unpaired: str | Path | None = None,
     loci: list[Locus],
     database_path: str | Path | None,
     outdir: str | Path,
@@ -95,6 +97,16 @@ def run_unified_fastq_inference(
         unmapped_mates=unmapped_mates if technology == "illumina" else None,
         query_reads=rescue_reads if technology != "illumina" and hasattr(rescue_reads, "get") else None,
     )
+    orphan_bam = None
+    if reads_unpaired is not None:
+        if technology != "illumina":
+            raise ValueError("Additional unpaired reads are supported only for Illumina inputs")
+        orphan_bam = work / "orphan_alignments.bam"
+        alignments.extend(map_reads_to_candidates_bam(
+            paths["fasta"], reads_unpaired, None, contexts, orphan_bam, threads, technology,
+            executable=minimap2_bin, max_secondary=max(100, len(contexts)),
+            include_unknown_repeats=bool(database_path), retain_all_competitors=bool(database_path),
+        ))
     mapped_at = perf_counter()
     if database_path and reference_alignments is not None:
         reference_alignments.extend(alignments)
@@ -125,21 +137,28 @@ def run_unified_fastq_inference(
                     row.metadata["insert_calibration"] = "mapped_unique_flanks" if insert_calibration else "user_supplied"
                     row.metadata["insert_calibration_fragments"] = insert_calibration[2] if insert_calibration else ""
     else:
-        pools = recruit_mapping_fragments(alignments, contexts, ambiguous_assignments=ambiguous_assignments)
-        owners = {name: locus for locus, pool in pools.items() for name in pool}
-        inference_alignments = [row for row in alignments if owners.get(row.molecule_id) == row.locus_id]
+        pools = recruit_mapping_fragments(alignments, contexts, ambiguous_assignments=ambiguous_assignments,
+                                         allow_multi_locus=True)
+        owners = {(locus, name) for locus, pool in pools.items() for name in pool}
+        inference_alignments = [row for row in alignments if (row.locus_id, row.molecule_id) in owners]
         evidence = extract_long_read_evidence(inference_alignments, contexts, loci, technology,
             round_tolerance=round_tolerance, limits=thresholds)
         if rescue_reads is not None:
             from .in_silico_pcr import read_pcr_results, run_in_silico_pcr_loci
             from .locus_assignment import assignments_from_pcr
 
-            complete = {row.molecule_id for row in evidence if row.direct_product_measurement}
+            complete = {}
+            for row in evidence:
+                if row.direct_product_measurement:
+                    complete[row.molecule_id] = max(complete.get(row.molecule_id, 0), len(row.metadata.get("product_sequence", "")))
+            minimum_product = min((locus.expected_amplicon_min_bp or len(locus.forward_primer) + len(locus.reverse_primer)
+                                   for locus in loci), default=1)
             rescue_fasta = outdir / "primer_rescue.fasta.gz"
             with ReadSpool() as unresolved:
                 def rescue_records():
                     for read in rescue_reads:
-                        if normalize_read_id(read.read_id)[0] not in complete:
+                        measured_length = complete.get(normalize_read_id(read.read_id)[0], 0)
+                        if not measured_length or len(read.sequence) >= measured_length + max(1, minimum_product):
                             unresolved.append(read)
                             yield read.read_id, read.sequence
                 write_fasta(rescue_records(), rescue_fasta)
@@ -152,7 +171,7 @@ def run_unified_fastq_inference(
                     # Failed rescue records have no sequence evidence to retain.
                     # Keep their compact assignments, releasing original bases.
                     rescued = assignments_from_pcr(unresolved, loci, pcr_rows, sample_id,
-                                                   retain_unassigned_sequence=False)
+                                                   retain_unassigned_sequence=False, allow_multi_locus=True)
                 if primer_assignments is None:
                     primer_assignments = []
                 primer_assignments.extend(rescued)
@@ -186,7 +205,8 @@ def run_unified_fastq_inference(
                     direct_product_measurement=True, full_repeat_span=True,
                     measured_repeat_count=measurement.called_allele,
                     evidence_tier="primer_recovery",
-                    metadata={"product_sequence": measurement.product_sequence, **metadata},
+                    metadata={"product_sequence": measurement.product_sequence,
+                              "product_quality": measurement.product_quality, **metadata},
                     raw_repeat_count=measurement.raw_repeat_count,
                     repeat_sigma=metadata.get("repeat_sigma"),
                     orientation=assignment.orientation,
@@ -224,16 +244,24 @@ def run_unified_fastq_inference(
             write_fasta(products, fragment_paths["short_read_microassembly"])
     query_products, reconstruction, evidence, changed = resolve_query_products(
         calls, evidence, loci, products, sample_id, thresholds, round_tolerance, max_primer_mismatches,
+        sample_mode=sample_mode,
     )
-    if changed:
+    unresolved_mixtures = {call["locus"] for call in calls if call["status"] == "mixed" or call.get("possible_secondary")}
+    consensus = {row["locus_id"]: {"raw_repeat_count": row["raw_repeat_count"],
+                                  "supporting_reads": row["reconstruction_molecules"]}
+                 for row in reconstruction if row["status"] == "RECONSTRUCTED"
+                 and row["method"] == "mapped_flank_consensus" and row["locus_id"] not in unresolved_mixtures}
+    if changed or consensus:
         calls, molecule_calls = infer_alleles(
             evidence, loci, contexts, sample_id, technology, thresholds,
             require_measurement=bool(database_path), sample_mode=sample_mode,
             round_tolerance=round_tolerance,
+            consensus_measurements=consensus,
         )
-    estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature, thresholds)
+    estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature, thresholds,
+                              loci=loci, round_tolerance=round_tolerance)
     apply_reconstructed_calls(calls, reconstruction, thresholds)
-    finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds)
+    finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds, round_tolerance=round_tolerance)
     inferred_at = perf_counter()
     if "short_read_diagnostics" in fragment_paths:
         for diagnostic, call in zip(diagnostics, calls):
@@ -285,6 +313,8 @@ def run_unified_fastq_inference(
     write_fasta(query_sequences.items(), taxonomic_queries)
     if not keep_alignments:
         bam.unlink(missing_ok=True)
+        if orphan_bam is not None:
+            orphan_bam.unlink(missing_ok=True)
     return calls, evidence, molecule_calls, {
         "query_loci": query_path,
         "query_locus_reconstruction": reconstruction_path,
@@ -295,6 +325,7 @@ def run_unified_fastq_inference(
         "candidate_provenance": paths["provenance"],
         **({"taxonomic_query_sequences": taxonomic_queries} if database_path else {}),
         **({"candidate_alignments": bam} if keep_alignments else {}),
+        **({"orphan_alignments": orphan_bam} if keep_alignments and orphan_bam is not None else {}),
         **fragment_paths,
         **supplemental_paths,
     }
@@ -322,7 +353,7 @@ def common_calls_to_compatibility(calls: list[dict[str, object]]) -> list[dict[s
             "repeat_count_raw": row.get("repeat_count_raw", repeat),
             "product_size_bp": "",
             "read_depth": row.get("presence_support", row["molecule_support"]),
-            "primary_read_depth": row["molecule_support"],
+            "primary_read_depth": row.get("primary_molecule_support", row["molecule_support"]),
             "mean_coverage": "",
             "allele_confidence": row["best_probability"],
             "second_best_repeat_count": "",

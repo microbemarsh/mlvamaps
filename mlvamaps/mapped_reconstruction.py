@@ -10,6 +10,20 @@ from .short_read_fragments import RecruitedFragment
 _CIGAR = re.compile(r"(\d+)([MIDNSHP=X])")
 
 
+def query_interval_groups(rows, interval):
+    """Keep overlapping query windows competitive and distant loci independent."""
+    end, group = -1, []
+    for row in sorted(rows, key=interval):
+        start, stop = interval(row)
+        if group and start >= end:
+            yield group
+            group = []
+        group.append(row)
+        end = max(end, stop)
+    if group:
+        yield group
+
+
 def aligned_flanks(row, context):
     """Count aligned query bases outside the repeat; deletions are not anchors."""
     position = row.reference_start
@@ -43,7 +57,8 @@ def recruitment_identity(row, context):
 
 
 def recruit_mapping_fragments(alignments, contexts, fragments=None, unmapped_mates=None,
-                              *, minimum_identity=.9, minimum_margin=10, ambiguous_assignments=None):
+                              *, minimum_identity=.9, minimum_margin=10, ambiguous_assignments=None,
+                              allow_multi_locus=False):
     """Resolve locus identity across references, retaining each molecule once.
 
     Reference alleles within one locus remain competitors. Repeat-only matches
@@ -54,8 +69,24 @@ def recruit_mapping_fragments(alignments, contexts, fragments=None, unmapped_mat
     grouped = defaultdict(list)
     for row in alignments:
         grouped[row.molecule_id].append(row)
+    if allow_multi_locus:
+        # A long genomic molecule can cover several loci. Only alignments that
+        # overlap on the original query compete for the same locus assignment.
+        def query_interval(row):
+            start, end = row.query_offset + row.query_start, row.query_offset + row.query_end
+            if row.reverse:
+                length = getattr(row, "query_length", 0) or len(row.query_sequence)
+                start, end = length - end, length - start
+            return start, end
+
+        components = {}
+        for molecule, rows in grouped.items():
+            for component in query_interval_groups(rows, query_interval):
+                components[(molecule, len(components))] = component
+        grouped = components
     seed_owners = {name: locus for locus, pool in pools.items() for name in pool}
-    for molecule, rows in grouped.items():
+    for rows in grouped.values():
+        molecule = rows[0].molecule_id
         seed_locus = seed_owners.get(molecule)
         if seed_locus and all(row.locus_id == seed_locus for row in rows):
             # Independent seed recruitment already retained the complete pair;
@@ -86,7 +117,8 @@ def recruit_mapping_fragments(alignments, contexts, fragments=None, unmapped_mat
             if anchored and winner not in {locus for locus, score in anchored.items() if score == max(anchored.values())}:
                 ambiguous = True
         if ambiguous_assignments is not None and (ambiguous or (seed_locus and seed_locus != winner)):
-            ambiguous_assignments[molecule] = tuple(sorted(set(anchors) | ({seed_locus} if seed_locus else set())))
+            ambiguous_assignments[molecule] = tuple(sorted(set(ambiguous_assignments.get(molecule, ()))
+                | set(anchors) | ({seed_locus} if seed_locus else set())))
         if seed_locus and (ambiguous or seed_locus != winner):
             pools[seed_locus].pop(molecule, None)
             continue
@@ -134,7 +166,7 @@ def call_query_products(queries, sample_id, round_tolerance, max_primer_mismatch
 
 
 def resolve_query_products(calls, evidence, loci, assembled, sample_id, thresholds, round_tolerance,
-                           max_primer_mismatches=2):
+                           max_primer_mismatches=2, *, sample_mode="metagenome"):
     """Select supported sample products; recalibrate their original observations.
 
     No reference bases are used. Partial-read products come from the covered
@@ -142,25 +174,35 @@ def resolve_query_products(calls, evidence, loci, assembled, sample_id, threshol
     """
     by_locus = defaultdict(lambda: defaultdict(set))
     spanning = defaultdict(dict)
-    ambiguous = {row.molecule_id for row in evidence if "ambiguous_locus" in row.quality_flags}
+    sizing = defaultdict(lambda: defaultdict(set))
+    ambiguous = {(row.locus_id, row.molecule_id) for row in evidence
+                 if {"ambiguous_locus", "conflicting_measurements"}.intersection(row.quality_flags)}
     for row in evidence:
-        if row.molecule_id in ambiguous:
+        if (row.locus_id, row.molecule_id) in ambiguous:
             continue
         sequence = row.metadata.get("product_sequence")
         if sequence and row.direct_product_measurement:
             by_locus[row.locus_id][row.molecule_id].add(sequence)
-            spanning[row.locus_id].setdefault(row.molecule_id, (sequence, "", row.measured_repeat_count))
+            spanning[row.locus_id].setdefault(row.molecule_id,
+                (sequence, row.metadata.get("product_quality") or "", row.measured_repeat_count))
         if row.metadata.get("locus_sequence"):
             spanning[row.locus_id][row.molecule_id] = (
                 row.metadata["locus_sequence"], row.metadata.get("locus_quality") or "",
                 row.measured_repeat_count,
             )
+        if row.raw_repeat_count is not None:
+            sizing[row.locus_id][row.molecule_id].add((row.raw_repeat_count, row.repeat_sigma or .08))
     call_by_locus = {row["locus"]: row for row in calls}
     assembled = dict(assembled)
     products, audit, replacements, pending = {}, [], {}, {}
     for locus in loci:
         call = call_by_locus[locus.locus_id]
         molecules = by_locus[locus.locus_id]
+        # Inconsistent products from one molecule cannot choose a consensus
+        # sequence by reference/mate iteration order.
+        for molecule, sequences in molecules.items():
+            if len(sequences) > 1:
+                spanning[locus.locus_id].pop(molecule, None)
         groups = defaultdict(set)
         for molecule, sequences in molecules.items():
             if len(sequences) == 1:
@@ -181,6 +223,20 @@ def resolve_query_products(calls, evidence, loci, assembled, sample_id, threshol
                 clusters[allele if allele is not None else ("length", len(segment))].add(name)
             ranked = sorted(clusters.values(), key=lambda names: (-len(names), sorted(names)))
             support = ranked[0]
+            if sample_mode == "isolate" and not call.get("possible_secondary"):
+                center = call.get("repeat_count_raw", "")
+                if center not in ("", None):
+                    # Nearby uncertain sizing observations can straddle an
+                    # allele-rounding boundary. Correct their sample sequence
+                    # before PCR instead of requiring an identical rounded call.
+                    # ponytail: cap repair at half a unit; widening it needs
+                    # matched isolate data to separate errors from real modes.
+                    compatible = {name for name in observed
+                        if len({raw for raw, _sigma in sizing[locus.locus_id][name]}) == 1
+                        and all(abs(raw - float(center)) <= min(.5, 3 * sigma)
+                                for raw, sigma in sizing[locus.locus_id][name])}
+                    if len(compatible) > len(support):
+                        support = compatible
             if (len(support) >= thresholds.minimum_molecules
                     and len(support) / len(observed) >= thresholds.minimum_probability
                     and (len(ranked) == 1 or len(support) > len(ranked[1]))):
@@ -252,11 +308,16 @@ def apply_reconstructed_calls(calls, audit, thresholds):
             continue
         if row["method"] != "mapped_flank_consensus":
             continue
+        if call.get("consensus_status") in {"resolved_ambiguity", "disagrees"}:
+            continue  # Preserve the molecule likelihood after consensus evaluation.
         allele = row["repeat_count"]
         if call["status"] in {"called", "low_coverage"} and call["repeat_count"] != allele:
             call.update(status="ambiguous", confidence="unresolved",
                         consensus_status="disagrees", estimation_method="",
                         estimation_reason="Supported PCR product conflicts with molecule measurements.")
+            continue
+        if call["status"] in {"called", "low_coverage"}:
+            call["consensus_status"] = "agrees"
             continue
         if row["reconstruction_molecules"] < thresholds.minimum_molecules:
             continue
