@@ -446,6 +446,8 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
                       help="Independently calibrated library fragment-length mean; requires --short-insert-sd")
     call.add_argument("--short-insert-sd", type=_positive_float, metavar="BP",
                       help="Library fragment-length standard deviation; enables labelled pair-length estimates")
+    call.add_argument("--short-no-assembly", action="store_true",
+                      help="Use read mapping and molecule likelihoods without local assembly or consensus reconstruction")
     call.add_argument("--short-max-candidate-repeat-count", type=_positive_int, default=100)
     call.add_argument("--fastq-max-candidates", type=_positive_int, default=2048,
                       help="Maximum statistical allele states per locus (default: %(default)s)")
@@ -1041,6 +1043,7 @@ def _run_short_input(
         short_max_candidate_repeat_count=args.short_max_candidate_repeat_count,
         short_consider_secondary=not args.no_short_secondary_alignments,
         short_insert_mean=args.short_insert_mean, short_insert_sd=args.short_insert_sd,
+        short_no_assembly=args.short_no_assembly,
         inference_limits=_fastq_limits(args),
         min_mixture_fraction=args.min_mixture_fraction, min_secondary_reads=args.min_secondary_reads,
         assembly_round_tolerance=args.assembly_round_tolerance,

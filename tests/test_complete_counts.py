@@ -98,7 +98,8 @@ def test_partial_bounds_condition_prior_without_counting_mates_or_copies(tmp_pat
     call, molecules = complete(rows, locus)
     assert call["repeat_count"] == 15 and not molecules and not call["prior_only"]
     assert call["independent_support"] == 1 and call["data_evidence_confidence"] < .1
-    assert call["repeat_interval_high"] > 15
+    assert call["repeat_interval_high"] == "" and call["upper_unbounded"]
+    assert call["candidate_grid_high"] > 15 and call["candidate_grid_low"] == 15
     assert complete(rows * 20, locus)[0] == call
     write_evidence_reports([call], rows, [locus], tmp_path, InferenceThresholds())
     assert call["genotype_status"] == "LOWER_BOUND"
@@ -115,6 +116,24 @@ def test_conflicting_candidates_use_joint_likelihood_and_never_reference_copy_vo
     assert complete(rows + [rows[0]] * 100)[0] == call
     limited, _ = complete(rows, limits=InferenceThresholds(maximum_candidates=1))
     assert limited["repeat_count"] == 8 and limited["computational_fallback"]
+
+
+def test_spanning_alignment_supersedes_partial_only_uncertainty():
+    locus = Locus("L", repeat_unit_length_bp=4, nominal_repeat_units=4, expected_product_size_bp=156)
+    context = CandidateContext("c", "L", "A" * 70 + "ATGC" * 4 + "C" * 70, 4, 4, 70, 86, "", "")
+    evidence = [CandidateEvidence("L", 4, "partial", metadata={"repeat_lower_bound": 3}),
+                CandidateEvidence("L", 4, "span", candidate_id="c", alignment_score=100,
+                    alignment_identity=1, query_coverage=1,
+                    metadata={"aligned_flank_bases": 30, "spanning_repeat_indel_delta": 2})]
+    calls, molecules = infer_alleles(evidence, [locus], [context], "s", "illumina",
+                                   require_measurement=True, sample_mode="isolate")
+    assert calls[0]["upper_unbounded"]
+    estimate_unresolved_calls(calls, evidence, [context])
+    finalize_repeat_count_calls(calls, evidence, [locus], [context])
+    call, = calls
+    assert call["repeat_count"] == 6 and call["repeat_interval_high"] == 6
+    assert not call["upper_unbounded"] and call["finite_length_support"]
+    assert call["length_model_status"] == "superseded_by_spanning_alignment" and not molecules
 
 
 def test_competing_pair_lengths_precede_partial_or_prior_predictions():

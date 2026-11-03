@@ -10,7 +10,7 @@ import regex
 
 from .candidate_contexts import CandidateContext
 from .models import Locus, ReadPair
-from .sequence import revcomp
+from .sequence import mean_qscore, revcomp
 
 
 @dataclass(frozen=True)
@@ -94,10 +94,36 @@ class FlankRecruiter:
         ))
 
 
+def _graph_fragments(fragments, maximum=2000):
+    """Keep graph-equivalent representatives without discarding sequence diversity.
+
+    Two original molecules per sequence-pair pattern retain every edge with
+    support >=2. Both mates stay together; strand/mate order do not change the
+    bidirectional graph. Quality and molecule ID choose stable representatives.
+    """
+    if len(fragments) <= maximum:
+        return fragments
+    groups = defaultdict(list)
+    count = 0
+    for name, fragment in fragments.items():
+        reads = [read for read in (fragment.pair.read1, fragment.pair.read2) if read is not None]
+        pattern = tuple(sorted(min(read.sequence, revcomp(read.sequence)) for read in reads))
+        group = groups[pattern]
+        count += len(group) < 2
+        if count > maximum:
+            return None
+        quality = min(mean_qscore(read.quality) for read in reads)
+        group.append((-quality, name))
+        group.sort()
+        del group[2:]
+    return {name: fragments[name] for name in sorted(name for group in groups.values() for _, name in group)}
+
+
 def assemble_fragments(
     fragments: dict[str, RecruitedFragment], contexts: list[CandidateContext],
     minimum_fragments: int = 3,
     mapped_alignments=None,
+    diagnostics=None,
 ) -> tuple[str, set[str], str]:
     """Return only a unique, covered, acyclic flank-to-flank path.
 
@@ -106,10 +132,16 @@ def assemble_fragments(
     """
     if len(fragments) < max(3, minimum_fragments):
         return "", set(), "insufficient_coverage"
-    # ponytail: cap this Python graph at 2,000 fragments / 50,000 edges. If
-    # larger pools become useful, move graph construction to a native backend.
-    if len(fragments) > 2000:
-        return "", set(), "fragment_limit"
+    # ponytail: cap this Python graph at 2,000 exact-sequence representatives /
+    # 50,000 edges. More diverse pools require a native graph, not subsampling
+    # that can erase a supported competing branch and manufacture uniqueness.
+    selected = _graph_fragments(fragments)
+    if diagnostics is not None:
+        diagnostics.update(microassembly_selected_fragment_count=len(selected) if selected is not None else 0,
+                           microassembly_selection="fragment_diversity_limit" if selected is None else
+                           "all_fragments" if selected is fragments else "exact_sequence_representatives")
+    if selected is None:
+        return "", set(), "fragment_diversity_limit"
     anchors = {
         (context.sequence[:context.repeat_start], context.sequence[context.repeat_end:])
         for context in contexts
@@ -144,7 +176,7 @@ def assemble_fragments(
     sequences = {
         name: tuple(read.sequence for read in (fragment.pair.read1, fragment.pair.read2)
                     if read is not None)
-        for name, fragment in fragments.items()
+        for name, fragment in selected.items()
     }
     longest = max(len(read) for reads in sequences.values() for read in reads)
     # ponytail: at most seven graph sizes, capped at 151 bases. Longer-read
@@ -195,8 +227,9 @@ def assemble_fragments(
         if products:
             sequence = products.pop()
             support = {
-                name for name, reads in sequences.items()
-                if any(read in sequence or revcomp(read) in sequence for read in reads)
+                name for name, fragment in fragments.items()
+                if any(read.sequence in sequence or revcomp(read.sequence) in sequence
+                       for read in (fragment.pair.read1, fragment.pair.read2) if read is not None)
             }
             if len(support) >= max(3, minimum_fragments):
                 return sequence, support, "assembled"
@@ -206,7 +239,7 @@ def assemble_fragments(
 
 def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts,
                            loci, fragments, sample_id, thresholds, round_tolerance,
-                           *, require_measurement=False, sample_mode="metagenome"):
+                           *, require_measurement=False, sample_mode="metagenome", allow_assembly=True):
     """Try the graph only without a well-supported direct sequence measurement."""
     from .alignment_evidence import CandidateEvidence
     from .allele_inference import infer_alleles
@@ -267,7 +300,10 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
             "direct_repeat_count": dominant[0][0] if dominant else "",
             "candidate_repeat_count": call["repeat_count"],
             "microassembly_attempted": "no", "microassembly_success": "no",
-            "microassembly_sequence_length": "", "microassembly_reason": "strong_direct" if strong else "no_flank_fragments",
+            "microassembly_input_fragment_count": len(pool), "microassembly_selected_fragment_count": 0,
+            "microassembly_selection": "not_attempted",
+            "microassembly_sequence_length": "", "microassembly_reason": "strong_direct" if strong else
+            "disabled" if not allow_assembly else "no_flank_fragments",
         }
         # Once direct measurements agree, candidate-relative partial mappings
         # cannot outvote them. Keep weaker fragments as presence evidence.
@@ -276,10 +312,11 @@ def resolve_fragment_calls(calls, evidence, molecule_calls, alignments, contexts
                 row, full_repeat_span=False, left_boundary_span=False,
                 right_boundary_span=False, repeat_indel_support=0, pair_geometry_support=0,
             ) for row in rows]
-        elif pool and not (require_measurement and call["status"] == "mixed"):
+        elif allow_assembly and pool and not (require_measurement and call["status"] == "mixed"):
             diagnostic["microassembly_attempted"] = "yes"
+            diagnostic["microassembly_selection"] = "insufficient_coverage"
             sequence, support, reason = assemble_fragments(
-                pool, contexts_by_locus[locus_id], thresholds.minimum_molecules, mapped,
+                pool, contexts_by_locus[locus_id], thresholds.minimum_molecules, mapped, diagnostic,
             )
             diagnostic["microassembly_reason"] = reason
             if sequence:

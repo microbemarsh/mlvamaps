@@ -1,0 +1,1263 @@
+{
+  "date": "2026-11-03",
+  "scope": "Conditional paired-read rescue with an explicit mode disabling graph assembly and consensus. Baseline includes the preceding shared-group and conditional-length changes.",
+  "tests": {
+    "full_native_suite": {
+      "command": "python -m pytest -q --tb=short",
+      "passed": 647,
+      "seconds": 52.28
+    },
+    "post_resource_accounting_correction": {
+      "command": "python -m pytest -q tests/test_short_read_pair_rescue.py",
+      "passed": 13
+    },
+    "native_mapping_only_check": "Assembly and consensus functions raise if invoked; expansion40 and no new measured classification votes required; stronger existing lower bound must survive a conflicting rescue."
+  },
+  "method": "Serial fresh processes, identical input bytes; source order alternates when comparing versions. Wall time excludes imports. RSS is max(parent, largest child), not concurrent total. Synthetic expected alleles are specified independently of caller agreement. Preparation is excluded from timing. All outputs and disagreements are retained.",
+  "sources": {
+    "baseline": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/baseline",
+    "updated": "/Users/ag.marshall/Documents/mlvamaps"
+  },
+  "source_files_sha256": {
+    "baseline": {
+      "mlvamaps/__init__.py": "f07e6e2284c9ed466d9bf57cae93ace47d54d62d2a68730eabf9b77a1a1e7a79",
+      "mlvamaps/_version.py": "17731d00ddac369e4b9a50d87de8b8164b191edd5709322b5edf29f58ce6bc30",
+      "mlvamaps/alignment.py": "bbb1dd0e07a5f40156f24b611204288a9be460fde2fdcbc0dfed0f212683a8c6",
+      "mlvamaps/alignment_evidence.py": "1a68cf7fb6e169ff36bf8326729778265428886be3e3729f6aad141a049d5adf",
+      "mlvamaps/allele_inference.py": "8f6687ac76f485c979acabb9938d224844579d200e2a1cf8f6ca53dba66d2ee3",
+      "mlvamaps/assembly_call.py": "d47baea74669a50962f78436543a7bb535ecd1b75f9b50c9f0b5fbb3022f89a6",
+      "mlvamaps/bayesian_caller.py": "fd36c4d5a5229fa152ee1df91061226b0879078a7a0404118e0a165698cc507d",
+      "mlvamaps/calling.py": "8372a136648c7712c65f6c5725632a3697b41efa8b4f90c5ebb350260f0a1283",
+      "mlvamaps/candidate_contexts.py": "859abdbcf93b4598ec4601062106d989b27c84715c01c44c554cfeeaf23a0663",
+      "mlvamaps/cli.py": "99d8c3752fecda7168bf6c2ba7e589b4d06ccc3669aa724f52295fac772f5f16",
+      "mlvamaps/combined_marker_export.py": "f27a031309c2c8c7e69d294af9999a4621bf82b08baad2cd1239723807782b8a",
+      "mlvamaps/combined_marker_phylogeny.py": "3a7165c0f7393b7cc1c2e125fda9f120bfc98765b265860014d78b0324d3a4c9",
+      "mlvamaps/concurrency.py": "cf2a4ce00810c046a2284a0b85e6aa14f8d8353063b84a4eb868669b428ee098",
+      "mlvamaps/evidence_reporting.py": "38e7b135925c1dc88ec9f66c2df0925e34758d973c79a04cadb0ea6e7c2681f6",
+      "mlvamaps/in_silico_pcr.py": "7291a4b23b1652e0ca750b9e7d3ff4df580d24292a79c7b8fdd2311f0415ddc4",
+      "mlvamaps/io.py": "149439b5b745e60ecf6f15241f116a9d4b36cde326bacd64e4c9c5cadd34d425",
+      "mlvamaps/local_assembly.py": "5173929508990fbfafe89bb4659caca0a0d253fc6b2ea393e9f52c035f9a9f1d",
+      "mlvamaps/locus_assignment.py": "4e7e3014ece4f3b2aeb404d78c709aad95fbae05ad073ffddb607faefd4bfb8d",
+      "mlvamaps/locus_groups.py": "b0fcd67078f1a8f523bb2ecdec46a3a7eb53a4dfdd9d07c662daa552aa3c52d0",
+      "mlvamaps/locus_measurement.py": "a290fa07de3559c3b5c6a462714a3c3e0d32b44047c5d8dcfd0f5585303bd044",
+      "mlvamaps/long_read_evidence.py": "e95293374d0851c8229f0842a9b15f4f47bfd064af3683d08fbbe94977cf5bae",
+      "mlvamaps/mapped_reconstruction.py": "286e355863f0cc25f40947a38fb8ceb23a6c01f1caa09f22f08496529f2ec5e5",
+      "mlvamaps/mapped_variants.py": "d3bbaad35762dd4e423a1e2c502e284c08abed614791b538b3ebd8b0e25efa02",
+      "mlvamaps/mapping.py": "d8a13d516655274d279e1aa2d08dd797a0c19e625e08f9c31b07e0348142643f",
+      "mlvamaps/mapping_classification.py": "9743c4a27864dd8e37a863b637993e2b7a3ccb7bd7811e30636628153acf9327",
+      "mlvamaps/minimap_mapping.py": "f38fe906eb76f3857f92a3c0f90271e8e2f3d1bcc473fc32b6538567c2cbe4a6",
+      "mlvamaps/mixture.py": "680bdca3020a9252debc3b7856e4a1cb50ed3938c206fa9efa1ec3650f1d4348",
+      "mlvamaps/ml_classifier.py": "3492713caef36a5e40badd04c36a38df67cad4820080518dc27acd9fcc05f563",
+      "mlvamaps/models.py": "e05ea1851e639f7cc472ceabb00c71639fe32af4d935d1f7b4f4a12fa1469fea",
+      "mlvamaps/myoga_export.py": "229c1f9577b0e461b6cb83936fd4b4047fbb1c6e2539877226d016f386c55f97",
+      "mlvamaps/pipeline.py": "d062fdf497ff7e10512ff96461c12dea3bf5b34f2f0fec382b4d4fbf970ee968",
+      "mlvamaps/primers.py": "ab0a3332a4458e8f4a15c9dcd212bee3ab55d1fa83d983c58c3111db166e7f8a",
+      "mlvamaps/profile_matching.py": "ffc2c98b939b143eb31a642762584ecfc80d8679f5d6ae00f4d5ef117be2746e",
+      "mlvamaps/profile_tree.py": "555213abd33d160d16eb5c54ced1d1f5a0a623d233a9bd4dbe0f93c8e8b49d0c",
+      "mlvamaps/progress.py": "111a980e8fe170e77fd2d222a046fe253ed623cc861ce6fc955950da9b126cc7",
+      "mlvamaps/qc.py": "005831f7c0cf0ad8409da78ea601e89eb409ef77b55e278c284e70396657b69a",
+      "mlvamaps/recruitment.py": "75e5d46ae0268de552c0a2ef5f99c92a9d6e20b51c7c275d14e7e0091c5f5ec8",
+      "mlvamaps/reference_builder.py": "e7ee5a7e2dce33f4f7f8752a400745b113b3056ac710b23d5f2518692e3c7dea",
+      "mlvamaps/reference_database.py": "6bffb39548a5513b0083d0a3c1352de263bd69fab4039b029575357a0d68eda4",
+      "mlvamaps/reference_pipeline.py": "784966c78d58c0a276821faaabd103876cd1dfc272f9495764e4eec920e3b209",
+      "mlvamaps/repeat_calibration.py": "5c68927d666f0729623566cb03b53d6b7aa0c6a9439a9d92df52102ad5abc9bd",
+      "mlvamaps/repeat_parser.py": "45796c147400f571eccd7e2cacfa899ff17a096fc2eb4dfea3ff41733cfd5bc5",
+      "mlvamaps/report.py": "34a198324fe46021b5cbfcc6b4cfeb45aeb36e5b6dbdb7a0675470a633057a20",
+      "mlvamaps/sample_metadata.py": "4c9bf9cbcd501d1846aa116ab0ac21cadd38dfb89d41cfba5576d35b55b1dd3a",
+      "mlvamaps/sassy_cli.py": "3c7931352ad647ade9a9262b32489a272e5813f43905f061e841bebd4b388c9e",
+      "mlvamaps/sequence.py": "9321e68fb21dc4d09e2d139a902987a749f06e040aa2562232ed0b93eabdcab3",
+      "mlvamaps/short_read_evidence.py": "345944c0d5cb3df257e7a879a931377cbd22a429d7da00b83c1af587d3609e1a",
+      "mlvamaps/short_read_fragments.py": "625b5ae7794ef69ade550563336218ca22da7e2ca34250b07682e235d02987f2",
+      "mlvamaps/short_read_likelihood.py": "d1428801eaac29bb0adbb8245e9dfa8b35d5e4c9e1686e1d22e89b75eafe819d",
+      "mlvamaps/short_read_mapping.py": "3b7fc565adc58bde60d8ad5165262a3d1dd7a5bdfd15ce3d72b123c35f4a93dc",
+      "mlvamaps/short_reads.py": "7c4ea6b989ca9be229689180208d9a8d7f6fccb0142fc28d2ebeadb3fe62e324",
+      "mlvamaps/taxon_screen.py": "d8a6f496eef95cabd27629501c759b675b694347e534cf2dc5c71940f0dfb17e",
+      "mlvamaps/unified_fastq.py": "2af6eafab4fb4333397525c049ed8745bd45bf837fd00b50d83e56a88d696c39"
+    },
+    "updated": {
+      "mlvamaps/__init__.py": "f07e6e2284c9ed466d9bf57cae93ace47d54d62d2a68730eabf9b77a1a1e7a79",
+      "mlvamaps/_version.py": "17731d00ddac369e4b9a50d87de8b8164b191edd5709322b5edf29f58ce6bc30",
+      "mlvamaps/alignment.py": "bbb1dd0e07a5f40156f24b611204288a9be460fde2fdcbc0dfed0f212683a8c6",
+      "mlvamaps/alignment_evidence.py": "1a68cf7fb6e169ff36bf8326729778265428886be3e3729f6aad141a049d5adf",
+      "mlvamaps/allele_inference.py": "1ebe53eecc62ba94c9f5ae37d9264ef3cc0ca0c6b3ca4d5e2f1133ccfff92918",
+      "mlvamaps/assembly_call.py": "d47baea74669a50962f78436543a7bb535ecd1b75f9b50c9f0b5fbb3022f89a6",
+      "mlvamaps/bayesian_caller.py": "fd36c4d5a5229fa152ee1df91061226b0879078a7a0404118e0a165698cc507d",
+      "mlvamaps/calling.py": "8372a136648c7712c65f6c5725632a3697b41efa8b4f90c5ebb350260f0a1283",
+      "mlvamaps/candidate_contexts.py": "859abdbcf93b4598ec4601062106d989b27c84715c01c44c554cfeeaf23a0663",
+      "mlvamaps/cli.py": "1e43f0e2531c04de5f2e9b1182bf756e0a606e321051533a83dfcce2fd7310b1",
+      "mlvamaps/combined_marker_export.py": "f27a031309c2c8c7e69d294af9999a4621bf82b08baad2cd1239723807782b8a",
+      "mlvamaps/combined_marker_phylogeny.py": "3a7165c0f7393b7cc1c2e125fda9f120bfc98765b265860014d78b0324d3a4c9",
+      "mlvamaps/concurrency.py": "cf2a4ce00810c046a2284a0b85e6aa14f8d8353063b84a4eb868669b428ee098",
+      "mlvamaps/evidence_reporting.py": "38e7b135925c1dc88ec9f66c2df0925e34758d973c79a04cadb0ea6e7c2681f6",
+      "mlvamaps/fragment_calibration.py": "adc83aed4ecbfaf130f7d07d9f7de3be871af52819a927c8df1ce36ac84fdbbf",
+      "mlvamaps/in_silico_pcr.py": "7291a4b23b1652e0ca750b9e7d3ff4df580d24292a79c7b8fdd2311f0415ddc4",
+      "mlvamaps/io.py": "149439b5b745e60ecf6f15241f116a9d4b36cde326bacd64e4c9c5cadd34d425",
+      "mlvamaps/local_assembly.py": "5173929508990fbfafe89bb4659caca0a0d253fc6b2ea393e9f52c035f9a9f1d",
+      "mlvamaps/locus_assignment.py": "4e7e3014ece4f3b2aeb404d78c709aad95fbae05ad073ffddb607faefd4bfb8d",
+      "mlvamaps/locus_groups.py": "b0fcd67078f1a8f523bb2ecdec46a3a7eb53a4dfdd9d07c662daa552aa3c52d0",
+      "mlvamaps/locus_measurement.py": "a290fa07de3559c3b5c6a462714a3c3e0d32b44047c5d8dcfd0f5585303bd044",
+      "mlvamaps/long_read_evidence.py": "e95293374d0851c8229f0842a9b15f4f47bfd064af3683d08fbbe94977cf5bae",
+      "mlvamaps/mapped_reconstruction.py": "8d8a3eda2bb675f6be683ec82767fe111c959660190803fd181ec0fd37a58931",
+      "mlvamaps/mapped_variants.py": "d3bbaad35762dd4e423a1e2c502e284c08abed614791b538b3ebd8b0e25efa02",
+      "mlvamaps/mapping.py": "d8a13d516655274d279e1aa2d08dd797a0c19e625e08f9c31b07e0348142643f",
+      "mlvamaps/mapping_classification.py": "9743c4a27864dd8e37a863b637993e2b7a3ccb7bd7811e30636628153acf9327",
+      "mlvamaps/minimap_mapping.py": "f38fe906eb76f3857f92a3c0f90271e8e2f3d1bcc473fc32b6538567c2cbe4a6",
+      "mlvamaps/mixture.py": "680bdca3020a9252debc3b7856e4a1cb50ed3938c206fa9efa1ec3650f1d4348",
+      "mlvamaps/ml_classifier.py": "3492713caef36a5e40badd04c36a38df67cad4820080518dc27acd9fcc05f563",
+      "mlvamaps/models.py": "e05ea1851e639f7cc472ceabb00c71639fe32af4d935d1f7b4f4a12fa1469fea",
+      "mlvamaps/myoga_export.py": "229c1f9577b0e461b6cb83936fd4b4047fbb1c6e2539877226d016f386c55f97",
+      "mlvamaps/pipeline.py": "d062fdf497ff7e10512ff96461c12dea3bf5b34f2f0fec382b4d4fbf970ee968",
+      "mlvamaps/primers.py": "ab0a3332a4458e8f4a15c9dcd212bee3ab55d1fa83d983c58c3111db166e7f8a",
+      "mlvamaps/profile_matching.py": "ffc2c98b939b143eb31a642762584ecfc80d8679f5d6ae00f4d5ef117be2746e",
+      "mlvamaps/profile_tree.py": "555213abd33d160d16eb5c54ced1d1f5a0a623d233a9bd4dbe0f93c8e8b49d0c",
+      "mlvamaps/progress.py": "111a980e8fe170e77fd2d222a046fe253ed623cc861ce6fc955950da9b126cc7",
+      "mlvamaps/qc.py": "005831f7c0cf0ad8409da78ea601e89eb409ef77b55e278c284e70396657b69a",
+      "mlvamaps/recruitment.py": "75e5d46ae0268de552c0a2ef5f99c92a9d6e20b51c7c275d14e7e0091c5f5ec8",
+      "mlvamaps/reference_builder.py": "e7ee5a7e2dce33f4f7f8752a400745b113b3056ac710b23d5f2518692e3c7dea",
+      "mlvamaps/reference_database.py": "6bffb39548a5513b0083d0a3c1352de263bd69fab4039b029575357a0d68eda4",
+      "mlvamaps/reference_pipeline.py": "784966c78d58c0a276821faaabd103876cd1dfc272f9495764e4eec920e3b209",
+      "mlvamaps/repeat_calibration.py": "5c68927d666f0729623566cb03b53d6b7aa0c6a9439a9d92df52102ad5abc9bd",
+      "mlvamaps/repeat_parser.py": "45796c147400f571eccd7e2cacfa899ff17a096fc2eb4dfea3ff41733cfd5bc5",
+      "mlvamaps/report.py": "34a198324fe46021b5cbfcc6b4cfeb45aeb36e5b6dbdb7a0675470a633057a20",
+      "mlvamaps/sample_metadata.py": "4c9bf9cbcd501d1846aa116ab0ac21cadd38dfb89d41cfba5576d35b55b1dd3a",
+      "mlvamaps/sassy_cli.py": "3c7931352ad647ade9a9262b32489a272e5813f43905f061e841bebd4b388c9e",
+      "mlvamaps/sequence.py": "9321e68fb21dc4d09e2d139a902987a749f06e040aa2562232ed0b93eabdcab3",
+      "mlvamaps/short_read_evidence.py": "345944c0d5cb3df257e7a879a931377cbd22a429d7da00b83c1af587d3609e1a",
+      "mlvamaps/short_read_fragments.py": "6ca862bf708d330dcd061442af37e6745cd5c392f72c6463484575412f444bfe",
+      "mlvamaps/short_read_likelihood.py": "d1428801eaac29bb0adbb8245e9dfa8b35d5e4c9e1686e1d22e89b75eafe819d",
+      "mlvamaps/short_read_mapping.py": "620ce8d5bbadc36956115a756fb840de8313f35ab4685da0ee29597dd4802932",
+      "mlvamaps/short_read_pair_rescue.py": "5651cd08e0b5f1f978c96cb8e15f987e5846e8a0b3bf272c961dbe2bfe579fe8",
+      "mlvamaps/short_reads.py": "337cc4e3f66cfed333104a28bf3794d9ba8fb865d13480d572a11126d4a99975",
+      "mlvamaps/taxon_screen.py": "d8a6f496eef95cabd27629501c759b675b694347e534cf2dc5c71940f0dfb17e",
+      "mlvamaps/unified_fastq.py": "cb76a97ee69e9c95350a0525f87ab4ed6397700011ee402e7756308770d3e9a4"
+    }
+  },
+  "retained_comparison": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/comparison.json",
+  "challenge_fixture_unchanged": true,
+  "challenge_fixture_sha256": "b71402f4de7e11a4afc4ca4a7eb348ad9d11211f9adf3d5c04619a776a72ae9d",
+  "benchmark_script_sha256": "9df469467b5dea4ae30d5bdec2a384493b84b1d8ae3d55a14ceab86fb20ba264",
+  "test_files_sha256": {
+    "tests/test_fragment_calibration.py": "215b9b390f024e3ad71a092cf5a2b20340026cf640ecaa6140cc83f4373cf3aa",
+    "tests/test_short_read_pair_rescue.py": "bc7c67fe1bfc3c037de8ae9663db6103ad795c835f1ee3675b746f61e6bfdf87",
+    "tests/test_short_read_joint_workflow.py": "8c737cf0872c9bfae123b66152eb9b03126b3b0334eea9bf32da70f0b49adbfc"
+  },
+  "workflows": {
+    "paired": {
+      "input_fragments": 88,
+      "inputs_sha256": {
+        "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/inputs/r1.fastq": "9ea3dea3b74211efd1c14cb27596bb0c4bf63d7f3c802665ddace5e82483a0e7",
+        "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/inputs/r2.fastq": "38b4e147b231d5a655c004f122d3ffe595d57bf0e8dc2e7a54af2f46a535e4db"
+      },
+      "deterministic_artifacts": {
+        "baseline": true,
+        "updated": true,
+        "no_short_assembly": true
+      },
+      "versions": {
+        "baseline": {
+          "correct_counts": 11,
+          "truth_known_loci": 11,
+          "median_seconds": 0.2152718330034986,
+          "median_cpu_seconds": 0.12326699999999997,
+          "max_recorded_rss_mib": 88.953125,
+          "trials": [
+            {
+              "seconds": 0.2152718330034986,
+              "cpu_seconds": 0.127498,
+              "peak_rss_mib": 88.953125,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/baseline_0/calls",
+              "artifact_sha256": {
+                "calls.tsv": "2193f58006a2488876c7ff12d76b203b579716bb453dd1230d668fbf355d5291",
+                "common_locus_calls.tsv": "afaf3e638704b880a713c3eca0f7841175e8e594543d9caa26d6c5f1ddf70600",
+                "genotype_evidence.tsv": "e423283974b7c662a27b85bb4cb3282592547729668a015abdf1729b8f0c4adb",
+                "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "72f19af6bfe1fc88d35016faf5ad5f878425b2fc934bc77f04bcad25c454c67d",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+              }
+            },
+            {
+              "seconds": 0.21822995800175704,
+              "cpu_seconds": 0.12326699999999997,
+              "peak_rss_mib": 80.078125,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/baseline_1/calls",
+              "artifact_sha256": {
+                "calls.tsv": "2193f58006a2488876c7ff12d76b203b579716bb453dd1230d668fbf355d5291",
+                "common_locus_calls.tsv": "afaf3e638704b880a713c3eca0f7841175e8e594543d9caa26d6c5f1ddf70600",
+                "genotype_evidence.tsv": "e423283974b7c662a27b85bb4cb3282592547729668a015abdf1729b8f0c4adb",
+                "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "72f19af6bfe1fc88d35016faf5ad5f878425b2fc934bc77f04bcad25c454c67d",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+              }
+            },
+            {
+              "seconds": 0.16575141699286178,
+              "cpu_seconds": 0.115359,
+              "peak_rss_mib": 77.453125,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/baseline_2/calls",
+              "artifact_sha256": {
+                "calls.tsv": "2193f58006a2488876c7ff12d76b203b579716bb453dd1230d668fbf355d5291",
+                "common_locus_calls.tsv": "afaf3e638704b880a713c3eca0f7841175e8e594543d9caa26d6c5f1ddf70600",
+                "genotype_evidence.tsv": "e423283974b7c662a27b85bb4cb3282592547729668a015abdf1729b8f0c4adb",
+                "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "72f19af6bfe1fc88d35016faf5ad5f878425b2fc934bc77f04bcad25c454c67d",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+              }
+            }
+          ]
+        },
+        "updated": {
+          "correct_counts": 11,
+          "truth_known_loci": 11,
+          "median_seconds": 0.19926258298801258,
+          "median_cpu_seconds": 0.13097000000000003,
+          "max_recorded_rss_mib": 79.265625,
+          "trials": [
+            {
+              "seconds": 0.20119950000662357,
+              "cpu_seconds": 0.13097000000000003,
+              "peak_rss_mib": 78.328125,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/updated_0/calls",
+              "artifact_sha256": {
+                "calls.tsv": "da64de6b891c24aa364c383a58d4f7051d8189856a3be655c5bab87ead2a227b",
+                "common_locus_calls.tsv": "3ca6bdf803605e339e924c3611eb69a125bb4793f95db55e6333cd98fb925ba3",
+                "genotype_evidence.tsv": "67a85ae463e89d486634d5e4d0fc6eedc0365bdfa4d36ea653a6449158ec8c45",
+                "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "72f19af6bfe1fc88d35016faf5ad5f878425b2fc934bc77f04bcad25c454c67d",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "f89b12c82bf159ca738904ea0c8594420d2b2a653345cf82b9aa74d8d433b8f0",
+                "joint_pair_diagnostics.tsv": "a7ad6a6f90111104ac11e21074ed95052868acdc1a18b60ffd61fd4da2b07427"
+              }
+            },
+            {
+              "seconds": 0.1708427919948008,
+              "cpu_seconds": 0.12487600000000001,
+              "peak_rss_mib": 79.265625,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/updated_1/calls",
+              "artifact_sha256": {
+                "calls.tsv": "da64de6b891c24aa364c383a58d4f7051d8189856a3be655c5bab87ead2a227b",
+                "common_locus_calls.tsv": "3ca6bdf803605e339e924c3611eb69a125bb4793f95db55e6333cd98fb925ba3",
+                "genotype_evidence.tsv": "67a85ae463e89d486634d5e4d0fc6eedc0365bdfa4d36ea653a6449158ec8c45",
+                "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "72f19af6bfe1fc88d35016faf5ad5f878425b2fc934bc77f04bcad25c454c67d",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "f89b12c82bf159ca738904ea0c8594420d2b2a653345cf82b9aa74d8d433b8f0",
+                "joint_pair_diagnostics.tsv": "a7ad6a6f90111104ac11e21074ed95052868acdc1a18b60ffd61fd4da2b07427"
+              }
+            },
+            {
+              "seconds": 0.19926258298801258,
+              "cpu_seconds": 0.132329,
+              "peak_rss_mib": 76.53125,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/updated_2/calls",
+              "artifact_sha256": {
+                "calls.tsv": "da64de6b891c24aa364c383a58d4f7051d8189856a3be655c5bab87ead2a227b",
+                "common_locus_calls.tsv": "3ca6bdf803605e339e924c3611eb69a125bb4793f95db55e6333cd98fb925ba3",
+                "genotype_evidence.tsv": "67a85ae463e89d486634d5e4d0fc6eedc0365bdfa4d36ea653a6449158ec8c45",
+                "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "72f19af6bfe1fc88d35016faf5ad5f878425b2fc934bc77f04bcad25c454c67d",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "f89b12c82bf159ca738904ea0c8594420d2b2a653345cf82b9aa74d8d433b8f0",
+                "joint_pair_diagnostics.tsv": "a7ad6a6f90111104ac11e21074ed95052868acdc1a18b60ffd61fd4da2b07427"
+              }
+            }
+          ]
+        },
+        "no_short_assembly": {
+          "correct_counts": 11,
+          "truth_known_loci": 11,
+          "median_seconds": 0.20875770802376792,
+          "median_cpu_seconds": 0.137361,
+          "max_recorded_rss_mib": 78.109375,
+          "trials": [
+            {
+              "seconds": 0.20875770802376792,
+              "cpu_seconds": 0.14738099999999998,
+              "peak_rss_mib": 77.90625,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/no_short_assembly_0/calls",
+              "artifact_sha256": {
+                "calls.tsv": "da64de6b891c24aa364c383a58d4f7051d8189856a3be655c5bab87ead2a227b",
+                "common_locus_calls.tsv": "3ca6bdf803605e339e924c3611eb69a125bb4793f95db55e6333cd98fb925ba3",
+                "genotype_evidence.tsv": "67a85ae463e89d486634d5e4d0fc6eedc0365bdfa4d36ea653a6449158ec8c45",
+                "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "72f19af6bfe1fc88d35016faf5ad5f878425b2fc934bc77f04bcad25c454c67d",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "f89b12c82bf159ca738904ea0c8594420d2b2a653345cf82b9aa74d8d433b8f0",
+                "joint_pair_diagnostics.tsv": "a7ad6a6f90111104ac11e21074ed95052868acdc1a18b60ffd61fd4da2b07427"
+              }
+            },
+            {
+              "seconds": 0.17443400001502596,
+              "cpu_seconds": 0.12674000000000002,
+              "peak_rss_mib": 78.109375,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/no_short_assembly_1/calls",
+              "artifact_sha256": {
+                "calls.tsv": "da64de6b891c24aa364c383a58d4f7051d8189856a3be655c5bab87ead2a227b",
+                "common_locus_calls.tsv": "3ca6bdf803605e339e924c3611eb69a125bb4793f95db55e6333cd98fb925ba3",
+                "genotype_evidence.tsv": "67a85ae463e89d486634d5e4d0fc6eedc0365bdfa4d36ea653a6449158ec8c45",
+                "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "72f19af6bfe1fc88d35016faf5ad5f878425b2fc934bc77f04bcad25c454c67d",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "f89b12c82bf159ca738904ea0c8594420d2b2a653345cf82b9aa74d8d433b8f0",
+                "joint_pair_diagnostics.tsv": "a7ad6a6f90111104ac11e21074ed95052868acdc1a18b60ffd61fd4da2b07427"
+              }
+            },
+            {
+              "seconds": 0.20970941599807702,
+              "cpu_seconds": 0.137361,
+              "peak_rss_mib": 77.359375,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/paired/no_short_assembly_2/calls",
+              "artifact_sha256": {
+                "calls.tsv": "da64de6b891c24aa364c383a58d4f7051d8189856a3be655c5bab87ead2a227b",
+                "common_locus_calls.tsv": "3ca6bdf803605e339e924c3611eb69a125bb4793f95db55e6333cd98fb925ba3",
+                "genotype_evidence.tsv": "67a85ae463e89d486634d5e4d0fc6eedc0365bdfa4d36ea653a6449158ec8c45",
+                "sequence_alleles.tsv": "fc3e65a89430f02a4a213b84df0df7257d7fc14469aac68e131c244930438cb7",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "72f19af6bfe1fc88d35016faf5ad5f878425b2fc934bc77f04bcad25c454c67d",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "f89b12c82bf159ca738904ea0c8594420d2b2a653345cf82b9aa74d8d433b8f0",
+                "joint_pair_diagnostics.tsv": "a7ad6a6f90111104ac11e21074ed95052868acdc1a18b60ffd61fd4da2b07427"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "shotgun": {
+      "input_fragments": 580,
+      "inputs_sha256": {
+        "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/inputs/r1.fastq": "87b308c44f6aaba4d32a1313e16f6db27e2d8ecde5c51d232093ab291b2d26d3",
+        "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/inputs/r2.fastq": "68d0ed8cc7151706a29e95b6b9943d768ccfc0e8e391f79fc22d6827ef9a72e4"
+      },
+      "deterministic_artifacts": {
+        "baseline": true,
+        "updated": true,
+        "no_short_assembly": true
+      },
+      "versions": {
+        "baseline": {
+          "correct_counts": 11,
+          "truth_known_loci": 11,
+          "median_seconds": 1.595561624999391,
+          "median_cpu_seconds": 1.0101900000000001,
+          "max_recorded_rss_mib": 78.65625,
+          "trials": [
+            {
+              "seconds": 1.595561624999391,
+              "cpu_seconds": 1.0101900000000001,
+              "peak_rss_mib": 77.65625,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/baseline_0/calls",
+              "artifact_sha256": {
+                "calls.tsv": "d5f075684173782fd27157fc898dc5a26e81da7a82c09f9310f354f2893fe7ec",
+                "common_locus_calls.tsv": "9e5a2c0ec8c3e2f7cb3747c150c4f7ddf2c55b3b1b24f679ca2272552779c360",
+                "genotype_evidence.tsv": "21b87033d5441bb2d8e0d702740adc4cc1a528bc28ecada54cd4d180ff95521f",
+                "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "aa13a7cb1265d0680f996fc20a5225651ad8083b00d97545aa8ba2c55244eeb6",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+              }
+            },
+            {
+              "seconds": 1.5944968339754269,
+              "cpu_seconds": 0.9829209999999999,
+              "peak_rss_mib": 78.171875,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/baseline_1/calls",
+              "artifact_sha256": {
+                "calls.tsv": "d5f075684173782fd27157fc898dc5a26e81da7a82c09f9310f354f2893fe7ec",
+                "common_locus_calls.tsv": "9e5a2c0ec8c3e2f7cb3747c150c4f7ddf2c55b3b1b24f679ca2272552779c360",
+                "genotype_evidence.tsv": "21b87033d5441bb2d8e0d702740adc4cc1a528bc28ecada54cd4d180ff95521f",
+                "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "aa13a7cb1265d0680f996fc20a5225651ad8083b00d97545aa8ba2c55244eeb6",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+              }
+            },
+            {
+              "seconds": 1.629452583991224,
+              "cpu_seconds": 1.017611,
+              "peak_rss_mib": 78.65625,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/baseline_2/calls",
+              "artifact_sha256": {
+                "calls.tsv": "d5f075684173782fd27157fc898dc5a26e81da7a82c09f9310f354f2893fe7ec",
+                "common_locus_calls.tsv": "9e5a2c0ec8c3e2f7cb3747c150c4f7ddf2c55b3b1b24f679ca2272552779c360",
+                "genotype_evidence.tsv": "21b87033d5441bb2d8e0d702740adc4cc1a528bc28ecada54cd4d180ff95521f",
+                "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "aa13a7cb1265d0680f996fc20a5225651ad8083b00d97545aa8ba2c55244eeb6",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+              }
+            }
+          ]
+        },
+        "updated": {
+          "correct_counts": 11,
+          "truth_known_loci": 11,
+          "median_seconds": 1.7463077080028597,
+          "median_cpu_seconds": 1.143197,
+          "max_recorded_rss_mib": 79.546875,
+          "trials": [
+            {
+              "seconds": 1.7114787499886006,
+              "cpu_seconds": 1.112598,
+              "peak_rss_mib": 78.640625,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/updated_0/calls",
+              "artifact_sha256": {
+                "calls.tsv": "a0229de0b0da265d4702c43affdc85cfc39d5420709b6a4a3613e9be38fc7583",
+                "common_locus_calls.tsv": "0c0fd496091b66be23030f75e93fbabd427ba335d8fbd940e54dc2aaee2ef856",
+                "genotype_evidence.tsv": "28e0196eb7021c2fb125bb5fd46165401ec77b26189ea1fb6bacecb5cc4e5372",
+                "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "aa13a7cb1265d0680f996fc20a5225651ad8083b00d97545aa8ba2c55244eeb6",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "88665610d562a60b1677ef100fc315cd623d8ebe7ebfb9bd948d72f1cbcddadd",
+                "joint_pair_diagnostics.tsv": "2b98f88dfc7f26d775bd51c6725805c23ed4bdafc8180949b033f92ef09d18d1"
+              }
+            },
+            {
+              "seconds": 1.7590222079888918,
+              "cpu_seconds": 1.158719,
+              "peak_rss_mib": 79.546875,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/updated_1/calls",
+              "artifact_sha256": {
+                "calls.tsv": "a0229de0b0da265d4702c43affdc85cfc39d5420709b6a4a3613e9be38fc7583",
+                "common_locus_calls.tsv": "0c0fd496091b66be23030f75e93fbabd427ba335d8fbd940e54dc2aaee2ef856",
+                "genotype_evidence.tsv": "28e0196eb7021c2fb125bb5fd46165401ec77b26189ea1fb6bacecb5cc4e5372",
+                "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "aa13a7cb1265d0680f996fc20a5225651ad8083b00d97545aa8ba2c55244eeb6",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "88665610d562a60b1677ef100fc315cd623d8ebe7ebfb9bd948d72f1cbcddadd",
+                "joint_pair_diagnostics.tsv": "2b98f88dfc7f26d775bd51c6725805c23ed4bdafc8180949b033f92ef09d18d1"
+              }
+            },
+            {
+              "seconds": 1.7463077080028597,
+              "cpu_seconds": 1.143197,
+              "peak_rss_mib": 79.5,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/updated_2/calls",
+              "artifact_sha256": {
+                "calls.tsv": "a0229de0b0da265d4702c43affdc85cfc39d5420709b6a4a3613e9be38fc7583",
+                "common_locus_calls.tsv": "0c0fd496091b66be23030f75e93fbabd427ba335d8fbd940e54dc2aaee2ef856",
+                "genotype_evidence.tsv": "28e0196eb7021c2fb125bb5fd46165401ec77b26189ea1fb6bacecb5cc4e5372",
+                "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "aa13a7cb1265d0680f996fc20a5225651ad8083b00d97545aa8ba2c55244eeb6",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "88665610d562a60b1677ef100fc315cd623d8ebe7ebfb9bd948d72f1cbcddadd",
+                "joint_pair_diagnostics.tsv": "2b98f88dfc7f26d775bd51c6725805c23ed4bdafc8180949b033f92ef09d18d1"
+              }
+            }
+          ]
+        },
+        "no_short_assembly": {
+          "correct_counts": 11,
+          "truth_known_loci": 11,
+          "median_seconds": 1.7540650830196682,
+          "median_cpu_seconds": 1.130915,
+          "max_recorded_rss_mib": 80.140625,
+          "trials": [
+            {
+              "seconds": 1.7540650830196682,
+              "cpu_seconds": 1.130915,
+              "peak_rss_mib": 80.140625,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/no_short_assembly_0/calls",
+              "artifact_sha256": {
+                "calls.tsv": "a0229de0b0da265d4702c43affdc85cfc39d5420709b6a4a3613e9be38fc7583",
+                "common_locus_calls.tsv": "0c0fd496091b66be23030f75e93fbabd427ba335d8fbd940e54dc2aaee2ef856",
+                "genotype_evidence.tsv": "28e0196eb7021c2fb125bb5fd46165401ec77b26189ea1fb6bacecb5cc4e5372",
+                "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "aa13a7cb1265d0680f996fc20a5225651ad8083b00d97545aa8ba2c55244eeb6",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "88665610d562a60b1677ef100fc315cd623d8ebe7ebfb9bd948d72f1cbcddadd",
+                "joint_pair_diagnostics.tsv": "2b98f88dfc7f26d775bd51c6725805c23ed4bdafc8180949b033f92ef09d18d1"
+              }
+            },
+            {
+              "seconds": 1.7725442909868434,
+              "cpu_seconds": 1.1448749999999999,
+              "peak_rss_mib": 79.390625,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/no_short_assembly_1/calls",
+              "artifact_sha256": {
+                "calls.tsv": "a0229de0b0da265d4702c43affdc85cfc39d5420709b6a4a3613e9be38fc7583",
+                "common_locus_calls.tsv": "0c0fd496091b66be23030f75e93fbabd427ba335d8fbd940e54dc2aaee2ef856",
+                "genotype_evidence.tsv": "28e0196eb7021c2fb125bb5fd46165401ec77b26189ea1fb6bacecb5cc4e5372",
+                "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "aa13a7cb1265d0680f996fc20a5225651ad8083b00d97545aa8ba2c55244eeb6",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "88665610d562a60b1677ef100fc315cd623d8ebe7ebfb9bd948d72f1cbcddadd",
+                "joint_pair_diagnostics.tsv": "2b98f88dfc7f26d775bd51c6725805c23ed4bdafc8180949b033f92ef09d18d1"
+              }
+            },
+            {
+              "seconds": 1.697111458022846,
+              "cpu_seconds": 1.091785,
+              "peak_rss_mib": 79.0,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/shotgun/no_short_assembly_2/calls",
+              "artifact_sha256": {
+                "calls.tsv": "a0229de0b0da265d4702c43affdc85cfc39d5420709b6a4a3613e9be38fc7583",
+                "common_locus_calls.tsv": "0c0fd496091b66be23030f75e93fbabd427ba335d8fbd940e54dc2aaee2ef856",
+                "genotype_evidence.tsv": "28e0196eb7021c2fb125bb5fd46165401ec77b26189ea1fb6bacecb5cc4e5372",
+                "sequence_alleles.tsv": "ca786c2f7684e1759570fdbf4a9f17ac4a8d7e3301439a45e789b65b11e0c793",
+                "mlva_fingerprint.tsv": "cc9405a567f8c63f2b23b2cc70e957c4474ac1db582716d31c857f42d24ba390",
+                "molecule_candidate_evidence.tsv": "aa13a7cb1265d0680f996fc20a5225651ad8083b00d97545aa8ba2c55244eeb6",
+                "locus_group_calls.tsv": "1254a254328dc30b190a28a3e3cc031b1020f0c41e5256e39d474e5a09aef4d1",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "88665610d562a60b1677ef100fc315cd623d8ebe7ebfb9bd948d72f1cbcddadd",
+                "joint_pair_diagnostics.tsv": "2b98f88dfc7f26d775bd51c6725805c23ed4bdafc8180949b033f92ef09d18d1"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "challenge_paired": {
+      "input_fragments": 314,
+      "inputs_sha256": {
+        "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/inputs/r1.fastq": "268cae161ba8557913c8262ebf080597d1aec92bae7b50bb6095fcc3d614b1a6",
+        "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/inputs/r2.fastq": "6b438cf22fdb229f143e092ce41fc7318c51b7ce41fbbcdb99a6b6e44ddd7115"
+      },
+      "deterministic_artifacts": {
+        "baseline": true,
+        "updated": true,
+        "no_short_assembly": true
+      },
+      "versions": {
+        "baseline": {
+          "correct_counts": 9,
+          "truth_known_loci": 14,
+          "median_seconds": 1.0372414590092376,
+          "median_cpu_seconds": 0.721706,
+          "max_recorded_rss_mib": 84.140625,
+          "trials": [
+            {
+              "seconds": 1.0805412080080714,
+              "cpu_seconds": 0.725005,
+              "peak_rss_mib": 84.140625,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/baseline_0/calls",
+              "artifact_sha256": {
+                "calls.tsv": "735f9566acf707eedf29f1e0d9921d1887e83e2a1a81075100d769e9ad283b24",
+                "common_locus_calls.tsv": "4a68e48d477faccef82a725cb5e64f7e20f4c36225fc68a6c0bdfca519fe875a",
+                "genotype_evidence.tsv": "8334e2efb9b0eb944e211f0f2c458cd60a43fa8ad2ab422d8ac6cfa0ca060b3f",
+                "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+                "mlva_fingerprint.tsv": "f2b03d594f93d915e0b7743cbf5ec306ea2cfd1939ad6d6f7ec3b0a57d3c8829",
+                "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+                "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+              }
+            },
+            {
+              "seconds": 1.0372414590092376,
+              "cpu_seconds": 0.721706,
+              "peak_rss_mib": 84.03125,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/baseline_1/calls",
+              "artifact_sha256": {
+                "calls.tsv": "735f9566acf707eedf29f1e0d9921d1887e83e2a1a81075100d769e9ad283b24",
+                "common_locus_calls.tsv": "4a68e48d477faccef82a725cb5e64f7e20f4c36225fc68a6c0bdfca519fe875a",
+                "genotype_evidence.tsv": "8334e2efb9b0eb944e211f0f2c458cd60a43fa8ad2ab422d8ac6cfa0ca060b3f",
+                "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+                "mlva_fingerprint.tsv": "f2b03d594f93d915e0b7743cbf5ec306ea2cfd1939ad6d6f7ec3b0a57d3c8829",
+                "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+                "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+              }
+            },
+            {
+              "seconds": 0.9994810830103233,
+              "cpu_seconds": 0.709815,
+              "peak_rss_mib": 83.296875,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/baseline_2/calls",
+              "artifact_sha256": {
+                "calls.tsv": "735f9566acf707eedf29f1e0d9921d1887e83e2a1a81075100d769e9ad283b24",
+                "common_locus_calls.tsv": "4a68e48d477faccef82a725cb5e64f7e20f4c36225fc68a6c0bdfca519fe875a",
+                "genotype_evidence.tsv": "8334e2efb9b0eb944e211f0f2c458cd60a43fa8ad2ab422d8ac6cfa0ca060b3f",
+                "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+                "mlva_fingerprint.tsv": "f2b03d594f93d915e0b7743cbf5ec306ea2cfd1939ad6d6f7ec3b0a57d3c8829",
+                "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+                "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+              }
+            }
+          ]
+        },
+        "updated": {
+          "correct_counts": 10,
+          "truth_known_loci": 14,
+          "median_seconds": 1.087329999980284,
+          "median_cpu_seconds": 0.7842629999999999,
+          "max_recorded_rss_mib": 83.46875,
+          "trials": [
+            {
+              "seconds": 1.1160867080034222,
+              "cpu_seconds": 0.790485,
+              "peak_rss_mib": 83.203125,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/updated_0/calls",
+              "artifact_sha256": {
+                "calls.tsv": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2",
+                "common_locus_calls.tsv": "96141f44c6b46890a9ebd20e18b9d0282b6511fd02b77ddea69695d486d06087",
+                "genotype_evidence.tsv": "86ac999204a788adbd827b9d418de7709d46dabc6d026f49d23f9ae4d122c45b",
+                "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+                "mlva_fingerprint.tsv": "bebdaf66e18f6ccb3e70f0489f3ec85fbf5e6d2a7ed0d8c0ff32fc0c7a121ccb",
+                "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+                "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "2151a8efb82bcb6965319a0063084a105d0327836d55d52be416285fdbc260c8",
+                "joint_pair_diagnostics.tsv": "68f88550567d6053a7d3186463a6f796526149c82eb533808042aaec310a3c02"
+              }
+            },
+            {
+              "seconds": 1.061896416998934,
+              "cpu_seconds": 0.766824,
+              "peak_rss_mib": 83.46875,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/updated_1/calls",
+              "artifact_sha256": {
+                "calls.tsv": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2",
+                "common_locus_calls.tsv": "96141f44c6b46890a9ebd20e18b9d0282b6511fd02b77ddea69695d486d06087",
+                "genotype_evidence.tsv": "86ac999204a788adbd827b9d418de7709d46dabc6d026f49d23f9ae4d122c45b",
+                "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+                "mlva_fingerprint.tsv": "bebdaf66e18f6ccb3e70f0489f3ec85fbf5e6d2a7ed0d8c0ff32fc0c7a121ccb",
+                "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+                "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "2151a8efb82bcb6965319a0063084a105d0327836d55d52be416285fdbc260c8",
+                "joint_pair_diagnostics.tsv": "68f88550567d6053a7d3186463a6f796526149c82eb533808042aaec310a3c02"
+              }
+            },
+            {
+              "seconds": 1.087329999980284,
+              "cpu_seconds": 0.7842629999999999,
+              "peak_rss_mib": 83.1875,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/updated_2/calls",
+              "artifact_sha256": {
+                "calls.tsv": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2",
+                "common_locus_calls.tsv": "96141f44c6b46890a9ebd20e18b9d0282b6511fd02b77ddea69695d486d06087",
+                "genotype_evidence.tsv": "86ac999204a788adbd827b9d418de7709d46dabc6d026f49d23f9ae4d122c45b",
+                "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+                "mlva_fingerprint.tsv": "bebdaf66e18f6ccb3e70f0489f3ec85fbf5e6d2a7ed0d8c0ff32fc0c7a121ccb",
+                "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+                "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "2151a8efb82bcb6965319a0063084a105d0327836d55d52be416285fdbc260c8",
+                "joint_pair_diagnostics.tsv": "68f88550567d6053a7d3186463a6f796526149c82eb533808042aaec310a3c02"
+              }
+            }
+          ]
+        },
+        "no_short_assembly": {
+          "correct_counts": 10,
+          "truth_known_loci": 14,
+          "median_seconds": 1.0067689169954974,
+          "median_cpu_seconds": 0.708426,
+          "max_recorded_rss_mib": 84.046875,
+          "trials": [
+            {
+              "seconds": 1.067620750021888,
+              "cpu_seconds": 0.708426,
+              "peak_rss_mib": 83.234375,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/no_short_assembly_0/calls",
+              "artifact_sha256": {
+                "calls.tsv": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2",
+                "common_locus_calls.tsv": "96141f44c6b46890a9ebd20e18b9d0282b6511fd02b77ddea69695d486d06087",
+                "genotype_evidence.tsv": "86ac999204a788adbd827b9d418de7709d46dabc6d026f49d23f9ae4d122c45b",
+                "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+                "mlva_fingerprint.tsv": "bebdaf66e18f6ccb3e70f0489f3ec85fbf5e6d2a7ed0d8c0ff32fc0c7a121ccb",
+                "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+                "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "2151a8efb82bcb6965319a0063084a105d0327836d55d52be416285fdbc260c8",
+                "joint_pair_diagnostics.tsv": "68f88550567d6053a7d3186463a6f796526149c82eb533808042aaec310a3c02"
+              }
+            },
+            {
+              "seconds": 0.9910470829927363,
+              "cpu_seconds": 0.7142339999999999,
+              "peak_rss_mib": 84.046875,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/no_short_assembly_1/calls",
+              "artifact_sha256": {
+                "calls.tsv": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2",
+                "common_locus_calls.tsv": "96141f44c6b46890a9ebd20e18b9d0282b6511fd02b77ddea69695d486d06087",
+                "genotype_evidence.tsv": "86ac999204a788adbd827b9d418de7709d46dabc6d026f49d23f9ae4d122c45b",
+                "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+                "mlva_fingerprint.tsv": "bebdaf66e18f6ccb3e70f0489f3ec85fbf5e6d2a7ed0d8c0ff32fc0c7a121ccb",
+                "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+                "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "2151a8efb82bcb6965319a0063084a105d0327836d55d52be416285fdbc260c8",
+                "joint_pair_diagnostics.tsv": "68f88550567d6053a7d3186463a6f796526149c82eb533808042aaec310a3c02"
+              }
+            },
+            {
+              "seconds": 1.0067689169954974,
+              "cpu_seconds": 0.69893,
+              "peak_rss_mib": 83.59375,
+              "output": "/private/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/comparison/challenge_paired/no_short_assembly_2/calls",
+              "artifact_sha256": {
+                "calls.tsv": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2",
+                "common_locus_calls.tsv": "96141f44c6b46890a9ebd20e18b9d0282b6511fd02b77ddea69695d486d06087",
+                "genotype_evidence.tsv": "86ac999204a788adbd827b9d418de7709d46dabc6d026f49d23f9ae4d122c45b",
+                "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+                "mlva_fingerprint.tsv": "bebdaf66e18f6ccb3e70f0489f3ec85fbf5e6d2a7ed0d8c0ff32fc0c7a121ccb",
+                "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+                "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+                "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+                "overlap_fragment_calibration.tsv": "2151a8efb82bcb6965319a0063084a105d0327836d55d52be416285fdbc260c8",
+                "joint_pair_diagnostics.tsv": "68f88550567d6053a7d3186463a6f796526149c82eb533808042aaec310a3c02"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Synthetic fixtures only; matched server data remain inaccessible.",
+    "Rescue assumes a pure periodic array and a valid calibrated fragment component. Longer interrupted arrays can explain the same reads.",
+    "Overlap-derived calibration cannot exclude an unseen population of longer nonoverlapping fragments and never populates whole-library insert calibration.",
+    "Every rescue remains ESTIMATED with upper_unbounded=true, finite_length_support=false, no measured classification votes, and no reconstructed sequence.",
+    "Isolate paired-read rescue requires reciprocal informative junction molecules; metagenome mode does not use this rescue.",
+    "Candidate, profile-work and likelihood-cell caps fail closed. Unsupported multi-error/indel patterns, conflicting identities, competing loci and missing calibration can prevent a rescue."
+  ],
+  "expansion": {
+    "repeat_count": "40",
+    "genotype_status": "ESTIMATED",
+    "inference_method": "joint_pair_read_likelihood",
+    "repeat_interval_low": "20.25",
+    "repeat_interval_high": "",
+    "upper_unbounded": "True",
+    "finite_length_support": "False",
+    "pair_rescue_support": "12",
+    "pair_rescue_boundary_support": "4",
+    "pair_rescue_calibration_source": "exact_overlap_component"
+  },
+  "overlap_calibration": {
+    "sample": "sample",
+    "calibration_status": "calibrated_overlap_component",
+    "source": "exact_overlap_component",
+    "whole_library": "False",
+    "unobserved_tail_excluded": "False",
+    "input_pair_records": "314",
+    "sampled_fragments": "314",
+    "sample_limit": "5000",
+    "sample_limited": "False",
+    "required_fragments": "101",
+    "eligible_fragments": "210",
+    "retained_fragments": "205",
+    "conflicting_molecule_ids": "0",
+    "minimum_overlap_bp": "12",
+    "median_bp": "180.0",
+    "trimmed_fraction": "0.023809523809523836",
+    "mean_bp": "179.98048780487804",
+    "sd_bp": "1.0",
+    "sd_floor_bp": "1.0",
+    "detection_boundary_margin_bp": "6.019512195121962"
+  },
+  "whole_library_calibration": {
+    "sample": "sample",
+    "source": "unavailable",
+    "mean_bp": "",
+    "sd_bp": "",
+    "independent_fragments": "",
+    "calibration_status": "insufficient_unique_flank_pairs",
+    "eligible_fragments": "0",
+    "retained_fragments": "0",
+    "required_fragments": "100",
+    "limitation": "The conditional model corrects modeled target selection only; library and background assumptions remain uncalibrated and paired-length genotypes remain estimates."
+  },
+  "pair_diagnostics": [
+    {
+      "sample": "sample",
+      "locus": "canonical",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "",
+      "conditional_support": "",
+      "eligible_pairs": "",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "competitor_only",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "expansion",
+      "assumption": "pure_motif_and_calibrated_fragment_component",
+      "best_repeat_bases": "160",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "0",
+      "conditional_support": "0.9999999999991247",
+      "eligible_pairs": "12",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "2",
+      "recruited_pairs": "12",
+      "repeat_count": "40",
+      "right_boundary_pairs": "2",
+      "selected_pairs": "12",
+      "status": "estimated",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "long_array",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "0",
+      "conditional_support": "",
+      "eligible_pairs": "0",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "insufficient_independent_pairs",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "contraction",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "",
+      "conditional_support": "",
+      "eligible_pairs": "",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "competitor_only",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "interrupted",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "",
+      "conditional_support": "",
+      "eligible_pairs": "",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "competitor_only",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "partial_unit",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "",
+      "conditional_support": "",
+      "eligible_pairs": "",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "competitor_only",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "homopolymer",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "",
+      "conditional_support": "",
+      "eligible_pairs": "",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "competitor_only",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "long_motif",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "0",
+      "conditional_support": "",
+      "eligible_pairs": "2",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "9",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "insufficient_independent_pairs",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "noisy",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "",
+      "conditional_support": "",
+      "eligible_pairs": "",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "1",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "competitor_only",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "low_coverage",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "",
+      "conditional_support": "",
+      "eligible_pairs": "",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "competitor_only",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "zero_coverage",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "0",
+      "conditional_support": "",
+      "eligible_pairs": "0",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "insufficient_independent_pairs",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "absent",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "0",
+      "conditional_support": "",
+      "eligible_pairs": "0",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "insufficient_independent_pairs",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "mixture",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "",
+      "conditional_support": "",
+      "eligible_pairs": "",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "4",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "competitor_only",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "ambiguous_a",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "0",
+      "conditional_support": "",
+      "eligible_pairs": "0",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "insufficient_independent_pairs",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    },
+    {
+      "sample": "sample",
+      "locus": "ambiguous_b",
+      "assumption": "",
+      "best_repeat_bases": "",
+      "calibration_source": "exact_overlap_component",
+      "competing_pairs": "0",
+      "conditional_support": "",
+      "eligible_pairs": "0",
+      "finite_length_support": "False",
+      "left_boundary_pairs": "",
+      "recruited_pairs": "0",
+      "repeat_count": "",
+      "right_boundary_pairs": "",
+      "selected_pairs": "",
+      "status": "insufficient_independent_pairs",
+      "upper_unbounded": "True",
+      "whole_library": "False"
+    }
+  ],
+  "remaining_numeric_mismatches": [
+    {
+      "locus": "long_array",
+      "truth": [
+        400
+      ],
+      "prediction": "17.5",
+      "status": "LOWER_BOUND",
+      "upper_unbounded": "True",
+      "prior_only": "False"
+    },
+    {
+      "locus": "zero_coverage",
+      "truth": [
+        6
+      ],
+      "prediction": "4",
+      "status": "PRIOR_ONLY",
+      "upper_unbounded": "",
+      "prior_only": "True"
+    },
+    {
+      "locus": "ambiguous_a",
+      "truth": [
+        5
+      ],
+      "prediction": "4",
+      "status": "AMBIGUOUS_LOCUS",
+      "upper_unbounded": "",
+      "prior_only": "True"
+    },
+    {
+      "locus": "ambiguous_b",
+      "truth": [
+        5
+      ],
+      "prediction": "4",
+      "status": "AMBIGUOUS_LOCUS",
+      "upper_unbounded": "",
+      "prior_only": "True"
+    }
+  ],
+  "background_workload": {
+    "recipe": "Original challenge pairs plus50000 independent random180bp fragments;100bp mates;Q40;Random(41237). Generated preparation excluded from timing. Synthetic off-target throughput check, not a whole-genome accuracy benchmark.",
+    "script_sha256": "c59b5423fe8f8b5e4d0d63c9f1faf79a42dfd255161f445799280a00164d1eb4",
+    "retained_script": "/private/tmp/mlvamaps-pair-rescue-background.py",
+    "retained_report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/background/background.json",
+    "input_fragments": 50314,
+    "inputs_sha256": {
+      "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/background/r1.fastq": "0931494429614afe6fe0dbbe6e2df78fd757189f6467b730e98b35ac99ac0ebd",
+      "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/background/r2.fastq": "5243f9e9b4896c2110a3b95069375fd4f4685b94a7e0d3cd731eed34468dc801"
+    },
+    "versions": {
+      "baseline": {
+        "median_seconds": 2.659720499999821,
+        "median_cpu_seconds": 2.4080439999999994,
+        "max_recorded_rss_mib": 84.90625,
+        "deterministic_artifacts": true,
+        "trials": [
+          {
+            "seconds": 2.659720499999821,
+            "cpu_seconds": 2.4080439999999994,
+            "peak_rss_mib": 83.53125,
+            "output": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/background/baseline_0/calls",
+            "artifact_sha256": {
+              "calls.tsv": "735f9566acf707eedf29f1e0d9921d1887e83e2a1a81075100d769e9ad283b24",
+              "common_locus_calls.tsv": "4a68e48d477faccef82a725cb5e64f7e20f4c36225fc68a6c0bdfca519fe875a",
+              "genotype_evidence.tsv": "8334e2efb9b0eb944e211f0f2c458cd60a43fa8ad2ab422d8ac6cfa0ca060b3f",
+              "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+              "mlva_fingerprint.tsv": "f2b03d594f93d915e0b7743cbf5ec306ea2cfd1939ad6d6f7ec3b0a57d3c8829",
+              "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+              "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+              "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+            },
+            "correct": 9,
+            "expansion": "17.5"
+          },
+          {
+            "seconds": 2.6566212909820024,
+            "cpu_seconds": 2.3669199999999995,
+            "peak_rss_mib": 83.578125,
+            "output": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/background/baseline_1/calls",
+            "artifact_sha256": {
+              "calls.tsv": "735f9566acf707eedf29f1e0d9921d1887e83e2a1a81075100d769e9ad283b24",
+              "common_locus_calls.tsv": "4a68e48d477faccef82a725cb5e64f7e20f4c36225fc68a6c0bdfca519fe875a",
+              "genotype_evidence.tsv": "8334e2efb9b0eb944e211f0f2c458cd60a43fa8ad2ab422d8ac6cfa0ca060b3f",
+              "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+              "mlva_fingerprint.tsv": "f2b03d594f93d915e0b7743cbf5ec306ea2cfd1939ad6d6f7ec3b0a57d3c8829",
+              "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+              "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+              "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+            },
+            "correct": 9,
+            "expansion": "17.5"
+          },
+          {
+            "seconds": 2.6961544169753324,
+            "cpu_seconds": 2.4418740000000003,
+            "peak_rss_mib": 84.90625,
+            "output": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/background/baseline_2/calls",
+            "artifact_sha256": {
+              "calls.tsv": "735f9566acf707eedf29f1e0d9921d1887e83e2a1a81075100d769e9ad283b24",
+              "common_locus_calls.tsv": "4a68e48d477faccef82a725cb5e64f7e20f4c36225fc68a6c0bdfca519fe875a",
+              "genotype_evidence.tsv": "8334e2efb9b0eb944e211f0f2c458cd60a43fa8ad2ab422d8ac6cfa0ca060b3f",
+              "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+              "mlva_fingerprint.tsv": "f2b03d594f93d915e0b7743cbf5ec306ea2cfd1939ad6d6f7ec3b0a57d3c8829",
+              "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+              "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+              "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9"
+            },
+            "correct": 9,
+            "expansion": "17.5"
+          }
+        ]
+      },
+      "mapping_only": {
+        "median_seconds": 3.8768742499814834,
+        "median_cpu_seconds": 3.6423389999999998,
+        "max_recorded_rss_mib": 93.765625,
+        "deterministic_artifacts": true,
+        "trials": [
+          {
+            "seconds": 3.8835214170103427,
+            "cpu_seconds": 3.6423389999999998,
+            "peak_rss_mib": 93.484375,
+            "output": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/background/mapping_only_0/calls",
+            "artifact_sha256": {
+              "calls.tsv": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2",
+              "common_locus_calls.tsv": "96141f44c6b46890a9ebd20e18b9d0282b6511fd02b77ddea69695d486d06087",
+              "genotype_evidence.tsv": "86ac999204a788adbd827b9d418de7709d46dabc6d026f49d23f9ae4d122c45b",
+              "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+              "mlva_fingerprint.tsv": "bebdaf66e18f6ccb3e70f0489f3ec85fbf5e6d2a7ed0d8c0ff32fc0c7a121ccb",
+              "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+              "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+              "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+              "overlap_fragment_calibration.tsv": "3940f0eafad8cc523439ebf44b5885cabc3f6ec6283bfbdf0256786c9293c50a",
+              "joint_pair_diagnostics.tsv": "9f078f1bc3f3806408b5d0b6843268f13121b85d131f2bd0adeb085c8082a1d4"
+            },
+            "correct": 10,
+            "expansion": "40"
+          },
+          {
+            "seconds": 3.872383667010581,
+            "cpu_seconds": 3.6165860000000003,
+            "peak_rss_mib": 93.765625,
+            "output": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/background/mapping_only_1/calls",
+            "artifact_sha256": {
+              "calls.tsv": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2",
+              "common_locus_calls.tsv": "96141f44c6b46890a9ebd20e18b9d0282b6511fd02b77ddea69695d486d06087",
+              "genotype_evidence.tsv": "86ac999204a788adbd827b9d418de7709d46dabc6d026f49d23f9ae4d122c45b",
+              "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+              "mlva_fingerprint.tsv": "bebdaf66e18f6ccb3e70f0489f3ec85fbf5e6d2a7ed0d8c0ff32fc0c7a121ccb",
+              "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+              "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+              "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+              "overlap_fragment_calibration.tsv": "3940f0eafad8cc523439ebf44b5885cabc3f6ec6283bfbdf0256786c9293c50a",
+              "joint_pair_diagnostics.tsv": "9f078f1bc3f3806408b5d0b6843268f13121b85d131f2bd0adeb085c8082a1d4"
+            },
+            "correct": 10,
+            "expansion": "40"
+          },
+          {
+            "seconds": 3.8768742499814834,
+            "cpu_seconds": 3.6554599999999997,
+            "peak_rss_mib": 93.390625,
+            "output": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-pair-rescue-z_v2n_dj/background/mapping_only_2/calls",
+            "artifact_sha256": {
+              "calls.tsv": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2",
+              "common_locus_calls.tsv": "96141f44c6b46890a9ebd20e18b9d0282b6511fd02b77ddea69695d486d06087",
+              "genotype_evidence.tsv": "86ac999204a788adbd827b9d418de7709d46dabc6d026f49d23f9ae4d122c45b",
+              "sequence_alleles.tsv": "ddaf737f7c896b847518b9e5c167953f68129da783dad510ee75d6c36b9c31ae",
+              "mlva_fingerprint.tsv": "bebdaf66e18f6ccb3e70f0489f3ec85fbf5e6d2a7ed0d8c0ff32fc0c7a121ccb",
+              "molecule_candidate_evidence.tsv": "5fd668e136c1f1467c0097ad61bd796626c2cee015b362d391b39e6a162f3e11",
+              "locus_group_calls.tsv": "2d020ba5a2759d5faa9f10dca5427ae9e905dc92589d905db6416600dd185a9a",
+              "library_insert_distribution.tsv": "d33342d7424ee488b60287831d583b1e407ad9bf4f48b129f1e0d4c57b9b66d9",
+              "overlap_fragment_calibration.tsv": "3940f0eafad8cc523439ebf44b5885cabc3f6ec6283bfbdf0256786c9293c50a",
+              "joint_pair_diagnostics.tsv": "9f078f1bc3f3806408b5d0b6843268f13121b85d131f2bd0adeb085c8082a1d4"
+            },
+            "correct": 10,
+            "expansion": "40"
+          }
+        ]
+      }
+    }
+  }
+}

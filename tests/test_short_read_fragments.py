@@ -12,7 +12,7 @@ from mlvamaps.io import write_fastq, write_tsv
 from mlvamaps.repeat_calibration import assembly_equivalent_product_allele
 from mlvamaps.sequence import revcomp
 from mlvamaps.short_read_evidence import extract_short_read_evidence
-from mlvamaps.short_read_fragments import FlankRecruiter, RecruitedFragment, assemble_fragments
+from mlvamaps.short_read_fragments import FlankRecruiter, RecruitedFragment, _graph_fragments, assemble_fragments
 
 
 def locus_and_product(count=8, imperfect=False):
@@ -118,6 +118,62 @@ def test_competing_paths_are_not_collapsed_to_shortest_allele():
     fragments = recruited_tiling(locus, product)
     fragments.update({"alt_" + name: fragment for name, fragment in recruited_tiling(locus, altered).items()})
     assert assemble_fragments(fragments, generate_candidate_contexts([locus]))[2] == "competing_paths"
+
+
+def test_deep_tiling_retains_complete_support_and_is_order_independent():
+    locus, product = locus_and_product(12, imperfect=True)
+    fragments = recruited_tiling(locus, product, copies=100)
+    original_ids = set(fragments)
+    assert len(fragments) > 2000
+    contexts = generate_candidate_contexts([locus])
+    diagnostic = {}
+    result = assemble_fragments(fragments, contexts, diagnostics=diagnostic)
+    assert result == (product, original_ids, "assembled")
+    assert set(fragments) == original_ids
+    assert 0 < diagnostic["microassembly_selected_fragment_count"] < 2000
+    assert diagnostic["microassembly_selection"] == "exact_sequence_representatives"
+    assert assemble_fragments(dict(reversed(list(fragments.items()))), contexts) == result
+
+
+def test_deep_tiling_cannot_hide_a_rare_supported_competing_branch():
+    locus, product = locus_and_product(8, imperfect=True)
+    altered = product[:100] + ("C" if product[100] != "C" else "A") + product[101:]
+    fragments = recruited_tiling(locus, product, copies=100)
+    # Only two independent copies support the minority branch. A random or
+    # depth-ranked subset could omit it and falsely accept the major product.
+    fragments.update({"alt_" + name: fragment for name, fragment in
+                      recruited_tiling(locus, altered, copies=2).items()})
+    assert len(fragments) > 2000
+    assert assemble_fragments(fragments, generate_candidate_contexts([locus]))[2] == "competing_paths"
+
+
+def test_graph_representatives_keep_quality_ranked_original_pairs_and_diversity():
+    locus, product = locus_and_product(8, imperfect=True)
+    fragments = {}
+    for name, quality in (("low", "5"), ("best", "J"), ("second", "I"), ("tied", "I")):
+        reads = pair(name, product[:100], revcomp(product[-100:]))
+        reads = replace(reads, read1=replace(reads.read1, quality=quality * 100),
+                        read2=replace(reads.read2, quality=quality * 100))
+        fragments[name] = RecruitedFragment(reads, True, True, False)
+    fragments["rare_left"] = RecruitedFragment(pair("rare_left", product[:90], "N" * 100), True, False, True)
+    fragments["rare_right"] = RecruitedFragment(pair("rare_right", "N" * 100, revcomp(product[-90:])), False, True, True)
+    selected = _graph_fragments(fragments, maximum=4)
+    assert set(selected) == {"best", "second", "rare_left", "rare_right"}
+    assert all(selected[name] is fragments[name] for name in selected)
+    assert _graph_fragments(dict(reversed(list(fragments.items()))), maximum=4) == selected
+
+
+def test_graph_reports_diversity_limit_without_sampling_away_distinct_fragments():
+    locus, product = locus_and_product(8, imperfect=True)
+    rng = random.Random(171)
+    fragments = {str(i): RecruitedFragment(
+        pair(str(i), "".join(rng.choices("ACGT", k=100)), revcomp(product[-100:])),
+        False, True, True) for i in range(2001)}
+    diagnostic = {}
+    assert assemble_fragments(fragments, generate_candidate_contexts([locus]), diagnostics=diagnostic) == (
+        "", set(), "fragment_diversity_limit")
+    assert diagnostic == {"microassembly_selected_fragment_count": 0,
+                          "microassembly_selection": "fragment_diversity_limit"}
 
 
 @pytest.mark.parametrize("count,read_length", [(5, 100), (8, 150)])

@@ -22,8 +22,11 @@ from .short_reads import _merge_overlap_is_repeat_only, merge_read_pair
 _CIGAR = re.compile(r"(\d+)([MIDNSHP=X])")
 
 
-def estimate_insert_distribution(alignments, contexts, minimum_fragments=100):
+def estimate_insert_distribution(alignments, contexts, minimum_fragments=100, *, diagnostics=None):
     """Calibrate only uniquely mapped inward pairs wholly outside the VNTR."""
+    diagnostics = diagnostics if diagnostics is not None else {}
+    diagnostics.update(calibration_status="no_alignments", eligible_fragments=0,
+                       retained_fragments=0, required_fragments=minimum_fragments)
     known = {row.candidate_id: row for row in contexts}
     grouped = defaultdict(list)
     for row in alignments:
@@ -43,33 +46,54 @@ def estimate_insert_distribution(alignments, contexts, minimum_fragments=100):
             continue
         lengths.append(second.reference_end - first.reference_start)
         margins.append(min(first.reference_start, len(context.sequence) - second.reference_end))
+    diagnostics["eligible_fragments"] = len(lengths)
+    if grouped:
+        diagnostics["calibration_status"] = "insufficient_unique_flank_pairs"
     if len(lengths) < minimum_fragments:
         return None
     median = statistics.median(lengths)
     mad = statistics.median(abs(length - median) for length in lengths)
     retained = [length for length in lengths if abs(length - median) <= max(1, 4.5 * mad)]
+    diagnostics.update(retained_fragments=len(retained), calibration_status="insufficient_pairs_after_trimming")
     if len(retained) < minimum_fragments:
         return None
     deviation = statistics.stdev(retained)
     # Catalog ends censor longer fragments. Do not fit a narrow library from
     # short targets, or infer a distribution from a single observed size.
-    if deviation <= 0 or min(margins) < 3 * deviation:
+    if deviation <= 0:
+        diagnostics["calibration_status"] = "zero_dispersion"
         return None
+    if min(margins) < 3 * deviation:
+        diagnostics["calibration_status"] = "target_edge_censoring"
+        return None
+    diagnostics["calibration_status"] = "calibrated"
     return statistics.fmean(retained), deviation, len(retained)
 
 
 def partial_repeat_lower_bound(sequence, locus, reference_nonrepeat_bp=None):
     """Exact uniquely anchored terminal motif runs provide a conservative bound."""
-    motif, flank = locus.repeat_motif, locus.left_flank_sequence
-    if not motif or len(flank) < 12 or set(motif + flank) - set("ACGT"):
+    motif = locus.repeat_motif
+    if not motif or set(motif) - set("ACGT"):
         return None
-    flank = flank[-21:]
-    position = sequence.find(flank)
-    if position < 0 or sequence.find(flank, position + 1) >= 0:
+    visible_lengths = []
+    for side, flank in (("left", locus.left_flank_sequence[-21:]),
+                        ("right", locus.right_flank_sequence[:21])):
+        if len(flank) < 12 or set(flank) - set("ACGT"):
+            continue
+        position = sequence.find(flank)
+        if position < 0 or sequence.find(flank, position + 1) >= 0:
+            continue
+        repeat = sequence[position + len(flank):] if side == "left" else sequence[:position]
+        if len(repeat) < len(motif):
+            continue
+        # Right-anchored reads can start partway through a repeat unit, and
+        # fractional alleles need not end at the motif's nominal phase.
+        template = motif * (2 + len(repeat) // len(motif))
+        if (template.startswith(repeat) if side == "left" else repeat in template):
+            visible_lengths.append(len(repeat))
+    if not visible_lengths:
         return None
-    suffix = sequence[position + len(flank):]
-    if len(suffix) < len(motif) or any(base != motif[i % len(motif)] for i, base in enumerate(suffix)):
-        return None
+    repeat_bases = max(visible_lengths)
     unit = locus.repeat_unit_length_bp or len(motif)
     nonrepeat = (len(locus.forward_primer) + len(locus.left_flank_sequence)
                  + len(locus.right_flank_sequence) + len(locus.reverse_primer))
@@ -78,9 +102,104 @@ def partial_repeat_lower_bound(sequence, locus, reference_nonrepeat_bp=None):
             return None
         nonrepeat = reference_nonrepeat_bp[0]
     if not (locus.expected_product_size_bp and locus.nominal_repeat_units):
-        return assembly_equivalent_product_allele(locus, nonrepeat + len(suffix), 0)[0]
+        return assembly_equivalent_product_allele(locus, nonrepeat + repeat_bases, 0)[0]
     offset = locus.nominal_repeat_units - (locus.expected_product_size_bp - nonrepeat) / unit
-    return max(0, len(suffix) / unit + offset)
+    return max(0, repeat_bases / unit + offset)
+
+
+def _partial_pair_geometry(pair, locus, contexts, nonrepeat_lengths, insert_mean, insert_sd):
+    """Collect calibrated boundary-pair and repeat-only mate observations.
+
+    A strong anchor determines locus identity before this helper runs. The
+    opposite boundary can use a shorter exact anchor; it never recruits a read
+    on its own. Selection limits describe which opposite endpoints this search
+    accepts, so the length model can condition the insert distribution on the
+    union of boundary-pair and repeat-mate classes.
+    """
+    motif = locus.repeat_motif
+    unit = locus.repeat_unit_length_bp or len(motif)
+    if (pair.read2 is None or insert_mean is None or not unit or not motif
+            or set(motif) - set("ACGT") or len(nonrepeat_lengths or ()) != 1):
+        return {}
+    extents = {(context.repeat_start, len(context.sequence) - context.repeat_end)
+               for context in contexts if context.repeat_unit_length == unit}
+    if len(extents) != 1:
+        return {}
+    left_extent, right_extent = next(iter(extents))
+    nonrepeat = nonrepeat_lengths[0]
+    if locus.expected_product_size_bp and locus.nominal_repeat_units:
+        offset = locus.nominal_repeat_units - (locus.expected_product_size_bp - nonrepeat) / unit
+    else:
+        offset = (nonrepeat - len(locus.forward_primer) - len(locus.left_flank_sequence)
+                  - len(locus.right_flank_sequence) - len(locus.reverse_primer)) / unit
+
+    def boundary(sequence, flank, left):
+        found = {}
+        for length in (21, 12):
+            if len(flank) < length:
+                continue
+            anchor = flank[-length:] if left else flank[:length]
+            if set(anchor) - set("ACGT") or len(set(anchor)) < 3 or anchor in motif * (2 + length // len(motif)):
+                continue
+            position = sequence.find(anchor)
+            if position < 0 or sequence.find(anchor, position + 1) >= 0:
+                continue
+            repeat = sequence[position + length:] if left else sequence[:position]
+            template = motif * (2 + len(repeat) // len(motif))
+            if len(repeat) < len(motif) or not (template.startswith(repeat) if left else repeat in template):
+                continue
+            outside = position + length if left else len(sequence) - position
+            found[outside] = max(found.get(outside, 0), length)
+        return next(iter(found.items())) if len(found) == 1 else None
+
+    def repetitive(sequence):
+        return len(sequence) >= len(motif) and sequence in motif * (2 + len(sequence) // len(motif))
+
+    alternatives = {}
+    for first, second in ((pair.read1.sequence, revcomp(pair.read2.sequence)),
+                          (pair.read2.sequence, revcomp(pair.read1.sequence))):
+        left = boundary(first, locus.left_flank_sequence, True)
+        right = boundary(second, locus.right_flank_sequence, False)
+        if left and left[1] >= 21 and left[0] <= left_extent:
+            condition, primary, other, other_sequence = "left_anchor", left, right, second
+            primary_length = len(first)
+            maximum = min(right_extent, len(second) - len(motif))
+        elif right and right[1] >= 21 and right[0] <= right_extent:
+            condition, primary, other, other_sequence = "right_anchor", right, left, first
+            primary_length = len(second)
+            # A left anchor of 21 bases would select the left-conditioned class.
+            maximum = min(left_extent, len(first) - len(motif), 20)
+        else:
+            continue
+        if maximum <= 12:
+            continue
+        repeat_mate = other is None and repetitive(other_sequence)
+        if not repeat_mate and (other is None or not 12 <= other[0] <= maximum):
+            continue
+        metadata = dict(fragment_length_scheme="anchor_union_v1",
+            fragment_length_class="repeat_mate" if repeat_mate else "boundary_pair",
+            fragment_anchor_bp=primary[0], fragment_mate_length_bp=len(other_sequence),
+            fragment_boundary_min_bp=12, fragment_boundary_max_bp=maximum,
+            fragment_insert_mean_bp=insert_mean, fragment_insert_sd_bp=insert_sd,
+            fragment_allele_offset=offset, fragment_repeat_unit_bp=unit,
+            pair_geometry_source="repeat_rich_mate" if repeat_mate else "partial_repeat_boundaries",
+            pair_selection_condition=condition, pair_insert_mean_bp=insert_mean, pair_insert_sd_bp=insert_sd)
+        if repeat_mate:
+            # Placement within this array is a statistical assumption, not a
+            # measured endpoint. Do not increase the observed hard lower bound.
+            metadata["repeat_rich_mate"] = True
+        else:
+            observed = other[0]
+            metadata.update(fragment_opposite_anchor_bp=observed,
+                pair_repeat_count=offset + (insert_mean - primary[0] - observed) / unit,
+                pair_repeat_sigma=insert_sd / unit,
+                pair_selection_low_delta=(12 - observed) / unit,
+                pair_selection_high_delta=(maximum - observed) / unit,
+                pair_repeat_lower_bound=max(0, offset + max(primary_length - primary[0], len(other_sequence) - observed) / unit),
+                pair_nonrepeat_bases=primary[0] + observed)
+        alternatives[tuple(sorted(metadata.items()))] = metadata
+    # Conflicting orientations/boundaries are alternatives, not two votes.
+    return next(iter(alternatives.values())) if len(alternatives) == 1 else {}
 
 
 def _repeat_indel_delta(alignment: CandidateAlignment, context: CandidateContext) -> float:
@@ -113,6 +232,9 @@ def extract_short_read_evidence(
     ):
         raise ValueError("Insert-size mean and standard deviation must both be finite and positive")
     context_by_id = {context.candidate_id: context for context in contexts}
+    contexts_by_locus = defaultdict(list)
+    for context in contexts:
+        contexts_by_locus[context.locus_id].append(context)
     locus_by_id = {locus.locus_id: locus for locus in loci}
     nonrepeat_lengths = reference_nonrepeat_lengths(loci, contexts)
     span_patterns = {}
@@ -312,7 +434,15 @@ def extract_short_read_evidence(
                                 second.reference_end - first.reference_start)) / context.repeat_unit_length,
                             "pair_repeat_sigma": insert_sd / context.repeat_unit_length,
                             "pair_alignment_score": first.alignment_score + second.alignment_score,
+                            "pair_geometry_source": "opposite_flanks",
+                            "pair_nonrepeat_bases": second.reference_end - first.reference_start - (context.repeat_end - context.repeat_start),
+                            "pair_insert_mean_bp": insert_mean, "pair_insert_sd_bp": insert_sd,
                         }
+                        low = (context.repeat_end - second.reference_start) / context.repeat_unit_length
+                        high = (len(context.sequence) - second.reference_end) / context.repeat_unit_length
+                        if low <= 0 <= high and low < high:
+                            pair_estimate.update(pair_selection_low_delta=low, pair_selection_high_delta=high,
+                                                 pair_selection_condition="left_anchor")
         evidence.append(CandidateEvidence(
             locus_id, repeat, molecule, best.alignment_score, best.alignment_identity,
             min(1.0, best.alignment_identity * best.query_coverage),
@@ -350,6 +480,11 @@ def extract_short_read_evidence(
     for locus_id, fragments in (recruited_fragments or {}).items():
         for molecule, fragment in fragments.items():
             measured = direct_by_molecule.get((molecule, locus_id))
+            pair_geometry = {} if measured is not None else _partial_pair_geometry(
+                fragment.pair, locus_by_id[locus_id], contexts_by_locus[locus_id],
+                nonrepeat_lengths.get(locus_id), insert_mean, insert_sd)
+            if pair_geometry:
+                pair_geometry["pair_alignment_score"] = sum(row.alignment_score for row in observed_mates.get((molecule, locus_id), ()))
             bounds = [bound for read in (fragment.pair.read1, fragment.pair.read2) if read is not None
                       for sequence in (read.sequence, revcomp(read.sequence))
                       if (bound := partial_repeat_lower_bound(sequence, locus_by_id[locus_id],
@@ -365,6 +500,7 @@ def extract_short_read_evidence(
                 metadata={"left_anchor": fragment.left, "right_anchor": fragment.right,
                           "mate_rescue": fragment.rescued,
                           "repeat_lower_bound": max(bounds) if bounds and measured is None else None,
+                          **pair_geometry,
                           **(measured[6] if measured else {}),
                           **guided_segments.get((molecule, locus_id), {}),
                           "product_sequence": measured[5] if measured and measured[1] == "FULL_PRODUCT" else ""},

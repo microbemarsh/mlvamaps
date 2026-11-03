@@ -504,7 +504,7 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
         best_probability = dict(ranked).get(best_count, 0.0)
         second_probability = max((prob for state, prob in ranked if state != best_count), default=0.0)
         rows = [row for items in molecules.values() for row in items]
-        calls.append({
+        call = {
             "sample": sample_id, "locus": locus.locus_id,
             "repeat_count": best_count,
             "repeat_count_raw": raw_best,
@@ -547,7 +547,12 @@ def _infer_measurements(evidence, loci, sample_id, technology, thresholds,
             **({"estimation_method": "paired_fragment_length",
                 "estimation_reason": "Opposite-flank pairs scored using a flank-calibrated or user-supplied insert-size distribution; repeat length is not directly measured and mapping selection bias is not calibrated.",
                 "estimate_support": len(observations)} if pair_only else {}),
-        })
+        }
+        if technology == "illumina" and not measured_support and not consensus_measurements.get(locus.locus_id):
+            from .short_read_likelihood import infer_short_read_length
+            call.update(infer_short_read_length(rows, locus, thresholds,
+                round_tolerance=round_tolerance, sample_mode=sample_mode))
+        calls.append(call)
     return calls, molecule_calls
 
 
@@ -687,6 +692,9 @@ def estimate_unresolved_calls(calls, evidence, contexts, temperature=8.0, thresh
                 repeat_count_raw=raw_best,
             )
         call.update(estimation_method=method, estimation_reason=reason, estimate_support=support)
+        if method == "alignment_repeat_span" and call.get("length_model_status") == "lower_bound_only":
+            call.update(upper_unbounded=False, finite_length_support=True,
+                        length_model_status="superseded_by_spanning_alignment")
         call.update(repeat_count=call["best_candidate_repeat"],
                     status="estimated", confidence="low")
 
@@ -778,7 +786,7 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
                                   for state in states})
                 source = "partial_repeat_likelihood"
                 reason = ("Joint anchored lower-bound constraints condition the locus prior with an exponential expansion tail. "
-                          "No upper repeat boundary was measured; the reported interval is a bounded candidate envelope.")
+                          "No upper repeat boundary was measured; the upper length remains unresolved and the candidate grid is computational.")
                 call.update(status="estimated", repeat_lower_bound=lower)
             best = min(prior, key=lambda state: (-prior[state], state))
             rounded = legacy_round_repeat_count(best, round_tolerance) if bounds else best
@@ -794,6 +802,10 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
                         computational_fallback=call.get("computational_fallback") or limited,
                         confidence="low" if bounds else "unresolved", estimation_method=source,
                         estimation_reason=reason, estimate_support=len(bounds))
+            if bounds:
+                call.update(upper_unbounded=True, finite_length_support=False,
+                            candidate_grid_low=min(prior), candidate_grid_high=max(prior),
+                            length_model_status=call.get("length_model_status") or "lower_bound_only")
             prior_only = not bounds
             if prior_only and limited:
                 if source == "panel_range_prior":
@@ -818,6 +830,8 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
         # Replace with empirical reliability calibration when truth data exist.
         weight = {"joint_measurement_likelihood": 1., "reconstructed_product": .5,
                   "conflicting_measurements": .25, "paired_fragment_length": .35,
+                  "joint_short_read_length": .35,
+                  "joint_pair_read_likelihood": .2,
                   "alignment_repeat_span": .4, "reference_conditioned": .1,
                   "partial_repeat_likelihood": .1}.get(source, .25)
         sigma = max((row.repeat_sigma or .08 for row in usable if row.measured_repeat_count is not None), default=.08)
@@ -828,7 +842,9 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
             confidence *= .25
         if call.get("repeat_interval_low") in (None, ""):
             call["repeat_interval_low"] = min((state for state, _ in distribution), default=value)
-        if call.get("repeat_interval_high") in (None, ""):
+        if call.get("upper_unbounded"):
+            call["repeat_interval_high"] = ""
+        elif call.get("repeat_interval_high") in (None, ""):
             call["repeat_interval_high"] = max((state for state, _ in distribution), default=value)
         call.update(estimate_source=source, prior_only=prior_only, independent_support=support,
                     primary_molecule_support=call.get("molecule_allele_counts", {}).get(value, 0),
@@ -842,6 +858,11 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
 
 CONFIDENCE_FIELDS = ["estimate_source", "genotype_status", "model_support", "data_evidence_confidence",
                      "second_best_support", "repeat_interval_low", "repeat_interval_high",
+                     "candidate_grid_low", "candidate_grid_high", "upper_unbounded", "finite_length_support",
+                     "paired_span_support", "partial_bound_support", "repeat_rich_mate_support",
+                     "length_model_status", "length_null_fraction",
+                     "pair_rescue_support", "pair_rescue_boundary_support",
+                     "pair_rescue_calibration_source", "pair_rescue_status",
                      "independent_support", "prior_only", "computational_fallback", "confidence_reason"]
 ESTIMATION_FIELDS = ["estimation_method", "estimation_reason", "estimate_support"]
 

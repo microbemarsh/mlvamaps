@@ -166,7 +166,7 @@ def call_query_products(queries, sample_id, round_tolerance, max_primer_mismatch
 
 
 def resolve_query_products(calls, evidence, loci, assembled, sample_id, thresholds, round_tolerance,
-                           max_primer_mismatches=2, *, sample_mode="metagenome"):
+                           max_primer_mismatches=2, *, sample_mode="metagenome", allow_consensus=True):
     """Select supported sample products; recalibrate their original observations.
 
     No reference bases are used. Partial-read products come from the covered
@@ -215,7 +215,7 @@ def resolve_query_products(calls, evidence, loci, assembled, sample_id, threshol
                     and sum(len(names) == len(groups[best]) for names in groups.values()) == 1):
                 sequence, support, method = best, groups[best], "complete_molecules"
         observed = spanning[locus.locus_id]
-        if not sequence and len(observed) >= thresholds.minimum_molecules and call["status"] != "mixed":
+        if allow_consensus and not sequence and len(observed) >= thresholds.minimum_molecules and call["status"] != "mixed":
             # Cluster measured alleles before correction. Unmeasurable reads
             # may join only a narrow length mode; never pool distant products.
             clusters = defaultdict(set)

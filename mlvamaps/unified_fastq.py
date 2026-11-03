@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
 from dataclasses import replace
 from time import perf_counter
@@ -62,6 +63,9 @@ def run_unified_fastq_inference(
     sample_mode: str = "metagenome",
     insert_mean: float | None = None,
     insert_sd: float | None = None,
+    short_no_assembly: bool = False,
+    pair_collector=None,
+    overlap_calibration: dict | None = None,
     mixture_min_fraction: float = 0.2,
     mixture_min_molecules: int = 2,
     inference_limits: InferenceThresholds | None = None,
@@ -113,6 +117,8 @@ def run_unified_fastq_inference(
     from .mapped_reconstruction import apply_reconstructed_calls, recruit_mapping_fragments, resolve_query_products
 
     ambiguous_assignments = {}
+    locus_group_rows = []
+    pair_rescue_rows = []
     if technology == "illumina":
         recruited_fragments = recruit_mapping_fragments(
             alignments, contexts, recruited_fragments, unmapped_mates,
@@ -121,9 +127,12 @@ def run_unified_fastq_inference(
         owners = {name: locus for locus, pool in recruited_fragments.items() for name in pool}
         inference_alignments = [row for row in alignments if owners.get(row.molecule_id) == row.locus_id]
         insert_calibration = None
+        insert_diagnostics = dict(calibration_status="user_supplied", eligible_fragments="",
+                                  retained_fragments="", required_fragments="")
         if insert_mean is None and insert_sd is None:
             from .short_read_evidence import estimate_insert_distribution
-            insert_calibration = estimate_insert_distribution(inference_alignments, contexts)
+            insert_calibration = estimate_insert_distribution(inference_alignments, contexts,
+                                                              diagnostics=insert_diagnostics)
             if insert_calibration is not None:
                 insert_mean, insert_sd, _ = insert_calibration
         evidence = extract_short_read_evidence(
@@ -133,9 +142,15 @@ def run_unified_fastq_inference(
         )
         if insert_mean is not None:
             for row in evidence:
-                if "pair_repeat_count" in row.metadata:
+                if "pair_repeat_count" in row.metadata or "fragment_length_class" in row.metadata:
                     row.metadata["insert_calibration"] = "mapped_unique_flanks" if insert_calibration else "user_supplied"
                     row.metadata["insert_calibration_fragments"] = insert_calibration[2] if insert_calibration else ""
+        from .locus_groups import infer_locus_groups
+        locus_group_rows = infer_locus_groups(
+            alignments, contexts, loci, ambiguous_assignments, sample_id, thresholds,
+            unmapped_mates=unmapped_mates, round_tolerance=round_tolerance,
+            insert_mean=insert_mean, insert_sd=insert_sd,
+        )
     else:
         pools = recruit_mapping_fragments(alignments, contexts, ambiguous_assignments=ambiguous_assignments,
                                          allow_multi_locus=True)
@@ -237,6 +252,7 @@ def run_unified_fastq_inference(
             recruited_fragments, sample_id, thresholds, round_tolerance,
             require_measurement=bool(database_path),
             sample_mode=sample_mode,
+            allow_assembly=not short_no_assembly,
         )
         fragment_paths["short_read_diagnostics"] = outdir / "short_read_diagnostics.tsv"
         if keep_alignments:
@@ -245,6 +261,7 @@ def run_unified_fastq_inference(
     query_products, reconstruction, evidence, changed = resolve_query_products(
         calls, evidence, loci, products, sample_id, thresholds, round_tolerance, max_primer_mismatches,
         sample_mode=sample_mode,
+        allow_consensus=technology != "illumina" or not short_no_assembly,
     )
     unresolved_mixtures = {call["locus"] for call in calls if call["status"] == "mixed" or call.get("possible_secondary")}
     consensus = {row["locus_id"]: {"raw_repeat_count": row["raw_repeat_count"],
@@ -261,6 +278,38 @@ def run_unified_fastq_inference(
     estimate_unresolved_calls(calls, evidence, contexts, thresholds.temperature, thresholds,
                               loci=loci, round_tolerance=round_tolerance)
     apply_reconstructed_calls(calls, reconstruction, thresholds)
+    if technology == "illumina" and pair_collector is not None:
+        from .short_read_pair_rescue import infer_pair_repeat_rescue
+
+        measured_loci = {row.locus_id for row in evidence if row.measured_repeat_count is not None}
+        targets = {call["locus"] for call in calls
+            if call["locus"] not in measured_loci and not call.get("derived_molecule_support")
+            and not call.get("possible_secondary") and call["status"] != "mixed"
+            and not call.get("finite_length_support")
+            and call.get("estimation_method") not in {"paired_fragment_length", "consensus_supported"}
+            and call.get("inference_method") != "mapped_consensus_assembly_pcr"}
+        calibration = (dict(mean_bp=insert_mean, sd_bp=insert_sd, whole_library=True,
+            source="mapped_unique_flanks" if insert_calibration else "user_supplied")
+            if insert_mean is not None else overlap_calibration)
+        updates, pair_rescue_rows = infer_pair_repeat_rescue(
+            loci, contexts, pair_collector, calibration, thresholds, sample_mode=sample_mode,
+            round_tolerance=round_tolerance, target_loci=targets)
+        pair_diagnostics = {row["locus"]: row for row in pair_rescue_rows}
+        present_by_locus = defaultdict(set)
+        for row in evidence:
+            present_by_locus[row.locus_id].add(row.molecule_id)
+        for call in calls:
+            if call["locus"] not in targets or call["locus"] not in updates:
+                continue
+            update = dict(updates[call["locus"]])
+            lower = max(float(call.get("repeat_lower_bound") or 0), update["repeat_lower_bound"])
+            if update["repeat_count_raw"] < lower:
+                pair_diagnostics[call["locus"]]["status"] = "conflicts_with_existing_lower_bound"
+                continue
+            update.update(repeat_lower_bound=lower, repeat_interval_low=lower)
+            rescued = set(update.pop("_molecule_ids", ()))
+            present = present_by_locus[call["locus"]]
+            call.update(update, presence_support=len(present | rescued), prior_only=False)
     finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds, round_tolerance=round_tolerance)
     inferred_at = perf_counter()
     if "short_read_diagnostics" in fragment_paths:
@@ -274,11 +323,19 @@ def run_unified_fastq_inference(
     from .evidence_reporting import write_evidence_reports
     supplemental_paths = write_evidence_reports(calls, evidence, loci, outdir, thresholds)
     if technology == "illumina":
+        supplemental_paths["joint_pair_diagnostics"] = outdir / "joint_pair_diagnostics.tsv"
+        pair_fields = ["sample", "locus", *sorted({field for row in pair_rescue_rows for field in row} - {"sample", "locus"})]
+        write_tsv((dict(sample=sample_id, **row) for row in pair_rescue_rows),
+                  supplemental_paths["joint_pair_diagnostics"], pair_fields)
+        from .locus_groups import LOCUS_GROUP_FIELDS
+        supplemental_paths["locus_group_calls"] = outdir / "locus_group_calls.tsv"
+        write_tsv(locus_group_rows, supplemental_paths["locus_group_calls"], LOCUS_GROUP_FIELDS)
         supplemental_paths["library_insert_distribution"] = outdir / "library_insert_distribution.tsv"
         library = dict(sample=sample_id, source="mapped_unique_flanks" if insert_calibration else "user_supplied" if insert_mean is not None else "unavailable",
             mean_bp=insert_mean if insert_mean is not None else "", sd_bp=insert_sd if insert_sd is not None else "",
             independent_fragments=insert_calibration[2] if insert_calibration else "",
-            limitation="Mapping selection bias is not calibrated; paired-length genotypes remain estimates.")
+            **insert_diagnostics,
+            limitation="The conditional model corrects modeled target selection only; library and background assumptions remain uncalibrated and paired-length genotypes remain estimates.")
         write_tsv([library], supplemental_paths["library_insert_distribution"], list(library))
     supplemental_paths["fastq_performance"] = outdir / "fastq_performance.tsv"
     performance = [

@@ -3,6 +3,9 @@
 Run from a checkout with dev dependencies, minimap2 and sassy on PATH:
 python scripts/benchmark_fastq_inference.py --repetitions 3 --copies 25
 
+Include difficult loci and retain fresh-process measurements without a baseline:
+python scripts/benchmark_fastq_inference.py --challenge --workdir /tmp/fastq-benchmark
+
 Only FASTQ calling is timed; database construction and assembly truth are not.
 The fixture asserts the final fingerprint, including novel/fractional alleles.
 """
@@ -57,6 +60,8 @@ def version_worker(source, arguments, output, ablation=""):
     elif ablation == "no_partial_bounds":
         import mlvamaps.short_read_evidence as module
         module.partial_repeat_lower_bound = lambda *args: None
+    elif ablation == "no_short_assembly":
+        arguments = [*arguments, "--short-no-assembly"]
 
     started = time.perf_counter()
     before = resource.getrusage(resource.RUSAGE_SELF)
@@ -80,12 +85,19 @@ def version_worker(source, arguments, output, ablation=""):
             result["stage_metrics"] = {row["metric"]: float(row["value"]) for row in csv.DictReader(handle, delimiter="\t")}
     result["artifact_sha256"] = {name: file_sha256(root / name) for name in (
         "calls.tsv", "common_locus_calls.tsv", "genotype_evidence.tsv", "sequence_alleles.tsv",
-        "mlva_fingerprint.tsv", "locus_snps.tsv", "molecule_candidate_evidence.tsv") if (root / name).exists()}
+        "mlva_fingerprint.tsv", "locus_snps.tsv", "molecule_candidate_evidence.tsv",
+        "locus_group_calls.tsv", "library_insert_distribution.tsv",
+        "overlap_fragment_calibration.tsv", "joint_pair_diagnostics.tsv") if (root / name).exists()}
     Path(output).write_text(json.dumps(result, indent=2) + "\n")
 
 
 def challenge_metrics(output, truth):
     calls = read_calls(output, with_metadata=True)
+    group_path = Path(output) / "locus_group_calls.tsv"
+    group_calls = []
+    if group_path.exists():
+        with group_path.open() as handle:
+            group_calls = list(csv.DictReader(handle, delimiter="\t"))
     values = {locus: row["repeat_count"] for (_, locus), row in calls.items()}
     present = {locus: row for locus, row in truth.items() if row["repeat_count"] is not None}
     called = {locus: value for locus, value in values.items() if value is not None and locus in present}
@@ -155,6 +167,7 @@ def challenge_metrics(output, truth):
         curve.append({"model_support_threshold": threshold, "call_rate": len(selected) / max(1, len(present)),
             "accuracy": sum(row["repeat_count"] in present[row["locus_id"]]["alleles"] for row in selected) / len(selected) if selected else None})
     return {"call_rate": len(called) / max(1, len(present)),
+        "locus_group_calls": group_calls,
         "configured_loci": len(truth), "truth_known_loci": len(present),
         "numerical_completion_rate": sum(values.get(name) is not None for name in truth) / max(1, len(truth)),
         "exact_accuracy_all_truth_known": sum(error == 0 for error in errors) / max(1, len(present)),
@@ -173,15 +186,23 @@ def challenge_metrics(output, truth):
 
 
 def compare_versions(args, fixture):
-    """Run both sources on the same retained files; agreement is not truth."""
+    """Run one or both sources on retained files; agreement is not truth."""
     directory = args.workdir.resolve()
+    if args.output:
+        output = args.output.resolve()
+        if output.is_relative_to(directory) and (output.parent != directory or output.suffix.lower() != ".json"):
+            raise ValueError("Benchmark --output inside the workdir must be a top-level JSON file; retained inputs and artifacts cannot be overwritten")
+        if output.is_dir():
+            raise ValueError("Benchmark --output must be a file")
     if directory.exists() and any(directory.iterdir()):
-        raise ValueError("Comparison workdir must be empty; previous evidence is never overwritten")
+        raise ValueError("Benchmark workdir must be empty; previous evidence is never overwritten")
     directory.mkdir(parents=True, exist_ok=True)
-    sources = {"baseline": str(Path(args.baseline_source).resolve()),
-               "updated": str(Path(__file__).resolve().parents[1])}
-    report = {"sources": sources, "copies": args.copies, "sample_mode": args.sample_mode,
-              "workflows": {}, "method": "Alternating serial fresh processes, identical input bytes. "
+    sources = {"baseline": str(Path(args.baseline_source).resolve())} if args.baseline_source else {}
+    sources["updated"] = str(Path(__file__).resolve().parents[1])
+    report_path = directory / ("comparison.json" if args.baseline_source else "benchmark.json")
+    report = {"sources": sources, "copies": args.copies, "repetitions": args.repetitions,
+              "sample_mode": args.sample_mode, "workdir": str(directory),
+              "workflows": {}, "method": "Serial fresh processes, identical input bytes; source order alternates when comparing versions. "
               "Wall time excludes imports. RSS is max(parent, largest child), not concurrent total. "
               "Synthetic expected alleles are specified independently of caller agreement. "
               "Preparation is excluded from timing. All outputs and disagreements are retained."}
@@ -256,7 +277,7 @@ def compare_versions(args, fixture):
             input_fragments = sum(1 for _ in handle) // 4
         for trial in range(args.repetitions):
             measurements = {}
-            order = ("baseline", "updated") if trial % 2 == 0 else ("updated", "baseline")
+            order = list(sources) if trial % 2 == 0 else list(reversed(sources))
             for version in order:
                 result = run(sources[version], argv, directory / layout / f"{version}_{trial}")
                 result["input_fragments_per_second"] = input_fragments / result["seconds"] if result.get("seconds") else None
@@ -272,7 +293,7 @@ def compare_versions(args, fixture):
                     if synthetic_truth:
                         result["challenge_metrics"] = challenge_metrics(result["output"], synthetic_truth)
                 measurements[ablation] = result
-            if all(result["exit_code"] == 0 for result in measurements.values()):
+            if "baseline" in sources and all(result["exit_code"] == 0 for result in measurements.values()):
                 before = read_calls(measurements["baseline"]["output"], with_metadata=True)
                 after = read_calls(measurements["updated"]["output"], with_metadata=True)
                 measurements["comparison"] = audit_calls(
@@ -283,10 +304,13 @@ def compare_versions(args, fixture):
             name: file_sha256(name) for name in paths},
             "trials": trials, "input_fragments": input_fragments,
             "deterministic_artifacts": {version: all(
-                trial[version].get("artifact_sha256") == trials[0][version].get("artifact_sha256") for trial in trials)
+                trial[version]["exit_code"] == 0 and bool(trial[version].get("artifact_sha256"))
+                and trial[version]["artifact_sha256"] == trials[0][version].get("artifact_sha256") for trial in trials)
                 for version in (*sources, *args.ablations)}}
-        (directory / "comparison.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
-    print(str(directory / "comparison.json"))
+        report_path.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
+    if args.output:
+        args.output.write_text(report_path.read_text())
+    print(str(report_path))
     if any(trial[version]["exit_code"] for workflow in report["workflows"].values()
            for trial in workflow["trials"] for version in (*sources, *args.ablations)):
         raise SystemExit(1)
@@ -301,10 +325,10 @@ def main():
     parser.add_argument("--copies", type=int, default=25)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--baseline-source", type=Path)
-    parser.add_argument("--workdir", type=Path, help="Retain identical FASTQs, both versions' outputs and disagreements")
+    parser.add_argument("--workdir", type=Path, help="Retain FASTQs, outputs and fresh-process measurements; requires an empty directory")
     parser.add_argument("--challenge", action="store_true", help="Include deterministic difficult synthetic loci")
     parser.add_argument("--ablations", nargs="*", default=[],
-                        choices=("no_error_model", "no_motif_refinement", "no_partial_bounds"))
+                        choices=("no_error_model", "no_motif_refinement", "no_partial_bounds", "no_short_assembly"))
     parser.add_argument("--layouts", nargs="+", choices=("paired", "shotgun", "long"),
                         default=["paired", "shotgun", "long"])
     parser.add_argument("--sample-mode", choices=("isolate", "metagenome"), default="isolate")
@@ -313,12 +337,16 @@ def main():
     args = parser.parse_args()
     if args.repetitions < 1 or args.copies < 1:
         parser.error("repetitions and copies must be positive")
+    if any(value is not None and value < 1 for value in (args.max_candidates, args.max_likelihood_cells)):
+        parser.error("candidate and likelihood-cell limits must be positive")
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root))
     fixture = runpy.run_path(str(root / "tests/test_fastq_assembly_concordance.py"))
-    if args.baseline_source:
+    if args.baseline_source and args.workdir is None:
+        parser.error("--baseline-source requires --workdir")
+    if args.workdir or args.challenge or args.ablations or args.max_candidates or args.max_likelihood_cells:
         if args.workdir is None:
-            parser.error("--baseline-source requires --workdir")
+            args.workdir = Path(tempfile.mkdtemp(prefix="mlvamaps-benchmark-"))
         compare_versions(args, fixture)
         return
     test = fixture["test_short_read_fingerprint_matches_assembly"]

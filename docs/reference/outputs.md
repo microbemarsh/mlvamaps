@@ -57,6 +57,9 @@ reserved and cannot be used as a sample ID in a batch.
 | `genotype_evidence.tsv` | FASTQ uncertainty status, independent support, anchors, strands, candidate support, observation envelope, error-model source, and computational fallback. |
 | `sequence_alleles.tsv` | FASTQ complete products identically observed in at least three independent molecules, with SHA-256 identifiers, repeat sequence, pattern, interruptions, and partial terminal bases. |
 | `library_insert_distribution.tsv` | Illumina effective insert mean/SD and calibration source (`mapped_unique_flanks`, `user_supplied`, or `unavailable`), support, and selection-bias limitation. |
+| `overlap_fragment_calibration.tsv` | Illumina bounded exact-overlap calibration diagnostics, retained molecule counts, component mean/SD, and heterogeneity or censoring rejection. An accepted component has `whole_library=False` and `unobserved_tail_excluded=False`; it does not replace whole-library calibration. |
+| `joint_pair_diagnostics.tsv` | Illumina paired-read rescue outcome per locus, including molecule support, competition, calibration source, and reasons for abstaining. |
+| `locus_group_calls.tsv` | Illumina shared alleles and original molecule support for indistinguishable locus groups; separate from individual locus assignments and fingerprints. |
 | `fastq_performance.tsv` | FASTQ mapping, recruitment/extraction, and inference/reconstruction timings, mapped-molecule throughput, and inference-tier fractions. |
 | `variant_refinement_skips.tsv` | Long-read diagnostic variant alignments skipped because refinement would exceed resource limits. |
 
@@ -175,9 +178,20 @@ The model supports have not been calibrated against real-sample error rates.
 
 `molecule_candidate_evidence.tsv` preserves `raw_repeat_count` and `repeat_sigma`
 in repeat units, plus optional `pair_repeat_count` and `pair_repeat_sigma`.
-Methods `paired_fragment_length` and `consensus_supported` identify estimates
+Paired selection limits and `fragment_*` geometry fields retain the inputs to the
+conditional length likelihood, including `fragment_length_class` values
+`boundary_pair` and `repeat_mate`. Methods `paired_fragment_length`,
+`short_read_joint_length_likelihood`, and `consensus_supported` identify estimates
 from external or conservatively estimated library calibration and supported long-read consensus,
 respectively. Neither adds independently measured classification evidence.
+
+Method `joint_pair_read_likelihood` (`conditional_joint_pair_likelihood` in the
+common inference table) identifies the additional joint paired-read placement
+rescue. It can use an external/unique-flank calibration or a separately guarded
+overlap component. Its point estimate remains conditional on the pure-repeat
+and fragment-component assumptions: it is `ESTIMATED`, leaves the upper length
+unresolved, and creates neither a reconstructed query sequence nor measured
+classification evidence.
 
 `report.html` includes an always-visible table for every panel locus, with the
 count, status, support, and evidence or uncertainty reason. `≈` marks estimates.
@@ -218,7 +232,16 @@ MYOGA locus exports. Existing aliases such as `called_repeat_count` and
 | `model_support` | Relative support among tested candidates; not calibrated accuracy. |
 | `data_evidence_confidence` | Uncalibrated evidence-strength score: selected support × independent depth/(depth + minimum depth), discounted by source, measurement sigma, ambiguity and resource limits. Exactly zero for prior-only predictions. |
 | `second_best_repeat_count`, `second_best_support` | Strongest alternative and its model support, when represented. |
-| `repeat_interval_low`, `repeat_interval_high` | Observation or bounded candidate envelope; not a calibrated credible interval or proven biological bound. |
+| `repeat_interval_low`, `repeat_interval_high` | Observation envelope or likelihood support interval; not a calibrated credible interval. The upper field is blank when the upper length remains unresolved. |
+| `candidate_grid_low`, `candidate_grid_high` | Computational search endpoints, when reported; not biological bounds. |
+| `upper_unbounded`, `finite_length_support` | Whether available length evidence leaves the upper length unresolved or supports a finite interval in the fitted model. |
+| `paired_span_support`, `partial_bound_support`, `repeat_rich_mate_support` | Unique molecules supplying paired geometry, anchored bounds, and repeat-only mate observations. Categories can overlap and should not be summed as independent depth. |
+| `length_model_status` | Conditional length fit, bounds-only result, unsupported sample mode, or computational fallback status. |
+| `length_null_fraction` | Selected zero or 1% background assumption in the conditional fragment model; uncalibrated. |
+| `pair_rescue_support` | Distinct original molecules contributing to the joint paired-read placement rescue. |
+| `pair_rescue_boundary_support` | Informative junction molecules supporting the rescue's boundary constraints; a subset of its molecule support. |
+| `pair_rescue_calibration_source` | Fragment calibration used by the rescue, including the explicitly selected `exact_overlap_component`. |
+| `pair_rescue_status` | Rescue outcome retained with the call; successful fits remain `estimated`, with no finite upper-length claim. |
 | `independent_support` | Distinct contributing molecules; mates and duplicate references add no observations. Zero for prior-only predictions. |
 | `prior_only` | True when no informative sample repeat evidence contributed. Presence can still be ambiguous or flank-supported. |
 | `computational_fallback` | Candidate/matrix/refinement limit and bounded fallback reason. |
@@ -254,6 +277,15 @@ fields. Current valid configured FASTQ loci retain a numeric `repeat_count`;
 `repeat_interval_low`/`high` describe measured or candidate envelopes separately.
 Older results can have empty counts and populated `repeat_count_min`/`max`, or
 empty sizing fields with `PRESENCE_ONLY`. Those historical formats remain readable.
+
+`locus_group_calls.tsv` reports `member_loci`, a stable `group_id`, shared repeat
+alleles, independent molecule support, and `group_status`. Its `locus_assignment`
+remains `AMBIGUOUS_LOCUS`. These rows do not appear as additional loci in the
+fingerprint or as classification observations. `SHARED_ALLELE` establishes a
+pooled allele measurement; `MULTIPLE_ALLELES` retains distinct group alleles.
+Group fractions cannot identify which member carries an allele or establish
+strain fractions. `LOWER_BOUND` and `UNRESOLVED` rows retain absent full sizing
+without filling a group count from the reference prior.
 
 When Illumina mode receives `--database`, complete primer-bounded locus products
 also produce the standard `classification/` reference-support outputs. Their

@@ -35,8 +35,10 @@ Assembly and FASTQ inputs retain their own evidence-recovery paths:
   loci. Competitive locus assignments recruit reads and recover mates from the
   same BAM; flank seeds additionally retain paired, single-end and surviving
   orphan reads. Complete products supply a fast path; flank-only or uncertain
-  loci use bounded local assembly. Sample-derived products pass through the
-  assembly workflow's PCR selection and repeat-count calculation.
+  loci can use paired-read likelihoods or bounded local assembly. Use
+  `--short-no-assembly` for mapping and molecule likelihoods with no graph or
+  consensus reconstruction. Sample-derived complete products retain the shared
+  PCR selection and repeat-count calculation.
 - **Long-read or amplicon FASTQ:** competitive mapping locates each locus;
   bounded flank refinement extracts sample sequence in the mapped orientation.
   Supported products or SPOARS consensus pass through the assembly PCR caller.
@@ -180,9 +182,20 @@ mlvamaps call \
   --fq1 sample_R1.fastq.gz \
   --fq2 sample_R2.fastq.gz \
   --sample-id sample \
+  --sample-mode isolate --short-no-assembly \
   -o results/sample \
   -t 8
 ```
+
+This mapping-only command combines direct read measurements with conditional
+paired-read likelihoods. The unchanged difficult synthetic fixture's expansion
+improves from 17.5 to 40 repeats, with overall count agreement improving from
+9/14 to 10/14. The rescued count remains `ESTIMATED` with an unknown upper bound;
+it supplies no reconstructed sequence or measured classification votes. Fragment
+calibration, competing loci, and unresolved alternatives are recorded in the
+diagnostic tables. See the [Illumina workflow](docs/workflows/illumina.md) for the
+assumptions and remaining cases. Omit `--short-no-assembly` to permit the existing
+local graph and consensus reconstruction paths.
 
 For a directory containing exact `SAMPLE_1.fastq.gz` / `SAMPLE_2.fastq.gz`
 pairs:

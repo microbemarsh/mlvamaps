@@ -2,12 +2,23 @@ import pytest
 
 from mlvamaps.models import Locus
 from mlvamaps.report import (
+    _locus_group_section,
     _automatic_taxon_identification_section,
     _assembly_gel_svg,
     _gel_svg,
     write_assembly_report,
     write_report,
 )
+
+
+def test_group_alleles_are_rendered_as_shared_evidence_and_escape_member_names():
+    assert _locus_group_section([]) == ""
+    section = _locus_group_section([dict(member_loci="A;<script>B</script>", repeat_count=5,
+        secondary_repeat="", independent_support=40, group_status="SHARED_ALLELE")])
+    assert "Shared Alleles Across Indistinguishable Loci" in section
+    assert "cannot assign it" in section and "separate from the per-locus fingerprint" in section
+    assert "<td>5</td>" in section and "<td>40</td>" in section
+    assert "<script>" not in section and "&lt;script&gt;" in section
 
 
 @pytest.mark.parametrize("status", [

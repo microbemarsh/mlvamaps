@@ -428,6 +428,8 @@ def _repeat_count_table(rows: list[dict], loci: list[Locus], assembly: bool = Fa
             status = "PRIOR_ONLY"
         value = "Unavailable" if count is None else ("≈" if status in {"ESTIMATED", "PRIOR_ONLY"} else "") + str(count)
         reason = row.get("estimation_reason") or row.get("evidence") or row.get("primary_measurement_source", "")
+        if str(row.get("upper_unbounded", "")).lower() in {"true", "yes", "1"}:
+            reason = "Upper repeat length is unresolved. " + str(reason)
         if count is None:
             reason = reason or "No usable repeat-size evidence; a count cannot be estimated."
         support = row.get("estimate_support") if status == "ESTIMATED" else row.get("primary_read_depth", row.get("read_depth", ""))
@@ -705,6 +707,28 @@ def _mapping_coverage_svg(mapping_rows: list[dict]) -> str:
 """
 
 
+def _locus_group_section(rows):
+    if not rows:
+        return ""
+    body = "".join(
+        "<tr>" + "".join(f"<td>{_safe(row.get(field, ''))}</td>" for field in (
+            "member_loci", "repeat_count", "secondary_repeat", "independent_support", "group_status")) + "</tr>"
+        for row in rows
+    )
+    return f"""<section class="report-section">
+      <h2>Shared Alleles Across Indistinguishable Loci</h2>
+      <p class="section-intro">These loci share the same reference sequences and repeat calibration.
+      The reads can support a shared allele but cannot assign it or establish presence at each member locus.
+      Group calls are kept separate from the per-locus fingerprint. Multiple alleles may come from different
+      loci; they do not establish a strain mixture.</p>
+      <div class="table-scroll"><table>
+        <thead><tr><th>Member loci</th><th>Shared repeats</th><th>Secondary repeats</th>
+        <th>Independent molecules</th><th>Group evidence</th></tr></thead>
+        <tbody>{body}</tbody>
+      </table></div>
+    </section>"""
+
+
 def write_report(
     outdir: str | Path,
     sample_id: str,
@@ -722,6 +746,7 @@ def write_report(
     local_assembly_rows: list[dict] | None = None,
     taxon_screen_summary: dict | None = None,
     short_read_rows: list[dict] | None = None,
+    locus_group_rows: list[dict] | None = None,
 ) -> None:
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -738,6 +763,7 @@ def write_report(
     local_assembly_rows = local_assembly_rows or []
     taxon_screen_summary = taxon_screen_summary or {}
     short_read_rows = short_read_rows or []
+    locus_group_rows = locus_group_rows or []
     generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     passed = sum(1 for row in allele_rows if row.get("call_status") == "PASS")
     low_depth = sum(1 for row in allele_rows if row.get("call_status") == "LOW_DEPTH")
@@ -1244,6 +1270,7 @@ def write_report(
       <h2>Individual Locus Repeat Counts</h2>
       {_repeat_count_table(allele_rows, loci)}
       <div class="chart-scroll">{repeat_count_plot}</div>
+      {_locus_group_section(locus_group_rows)}
       {short_read_section}
       {local_assembly_section}
       <h2>Locus Confidence</h2>

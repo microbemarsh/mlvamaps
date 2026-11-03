@@ -50,6 +50,36 @@ def test_partial_bound_uses_observed_nonrepeat_length_for_short_boundary_anchors
     assert partial_repeat_lower_bound(partial, locus, reference_nonrepeat_bp=(120, 124)) is None
 
 
+@pytest.mark.parametrize("phase", range(4))
+def test_right_anchored_partial_bounds_handle_motif_phase_and_calibration(phase):
+    from mlvamaps.short_read_evidence import partial_repeat_lower_bound
+    locus = Locus("L", forward_primer="A" * 20, reverse_primer="T" * 20,
+                  left_flank_sequence="GACTGACCTGATCGACGTTAGCTA",
+                  right_flank_sequence="CCGTAACCGGTTAGGCTACTGAC", repeat_motif="ATGC",
+                  repeat_unit_length_bp=4, expected_product_size_bp=140, nominal_repeat_units=7)
+    repeat = ("ATGC" * 14)[phase:phase + 49]
+    sequence = repeat + locus.right_flank_sequence
+    assert partial_repeat_lower_bound(sequence, locus, (120,)) == 14.25
+    assert partial_repeat_lower_bound(sequence, locus, (120, 124)) is None
+    assert partial_repeat_lower_bound("N" + sequence[1:], locus, (120,)) is None
+    assert partial_repeat_lower_bound(sequence + locus.right_flank_sequence, locus, (120,)) is None
+
+
+def test_right_anchored_reverse_mate_supplies_one_bound_without_a_measured_count():
+    from mlvamaps.sequence import revcomp
+    locus = Locus("L", right_flank_sequence="CCGTAACCGGTTAGGCTACTGAC",
+                  repeat_motif="ATGC", repeat_unit_length_bp=4)
+    sequence = revcomp("ATGC" * 12 + locus.right_flank_sequence)
+    read = ReadRecord("m/2", sequence, "I" * len(sequence))
+    fragments = {"L": {"m": RecruitedFragment(ReadPair("m", read), False, True, True)}}
+    evidence = extract_short_read_evidence([], [], [locus], recruited_fragments=fragments)
+    assert len(evidence) == 1 and evidence[0].metadata["repeat_lower_bound"] == 12
+    assert evidence[0].measured_repeat_count is None
+    calls, molecules = infer_alleles(evidence * 3, [locus], [], "s", "illumina", require_measurement=True)
+    assert not molecules and calls[0]["presence_support"] == 1
+    assert calls[0]["repeat_lower_bound"] == 12
+
+
 @pytest.mark.parametrize("cigar,delta", [("50M1I50M", .25), ("50M3D47M", -.75),
     ("39M4I61M", 0), ("61M4I39M", 0), ("35M4D61M", 0), ("59M3D38M", -.25)])
 def test_repeat_indels_preserve_partial_units_and_exclude_flank_bases(cigar, delta):
@@ -107,11 +137,50 @@ def test_insert_calibration_uses_independent_flank_pairs_and_rejects_repeat_geom
     rows = [replace(first, molecule_id=str(i)) for i in range(120)]
     rows += [replace(first, molecule_id=str(i), mate=2, reverse=True,
                      reference_start=400 + i % 20, reference_end=500 + i % 20) for i in range(120)]
-    fit = estimate_insert_distribution(rows, [context])
+    diagnostics = {}
+    fit = estimate_insert_distribution(rows, [context], diagnostics=diagnostics)
     assert fit[0] == 309.5 and 5 < fit[1] < 7 and fit[2] == 120
+    assert diagnostics == dict(calibration_status="calibrated", eligible_fragments=120,
+                               retained_fragments=120, required_fragments=100)
     assert estimate_insert_distribution(rows[:10], [context]) is None
     assert estimate_insert_distribution(rows, [replace(context, repeat_start=350)]) is None
     assert estimate_insert_distribution([replace(row, mapping_quality=0) for row in rows], [context]) is None
+    assert estimate_insert_distribution([], [context], diagnostics=diagnostics) is None
+    assert diagnostics["calibration_status"] == "no_alignments" and diagnostics["eligible_fragments"] == 0
+    assert estimate_insert_distribution(rows[:10], [context], diagnostics=diagnostics) is None
+    assert diagnostics["calibration_status"] == "insufficient_unique_flank_pairs"
+    constant = [replace(row, reference_start=400, reference_end=500) if row.mate == 2 else row for row in rows]
+    assert estimate_insert_distribution(constant, [context], diagnostics=diagnostics) is None
+    assert diagnostics["calibration_status"] == "zero_dispersion"
+    outliers = [replace(row, reference_start=row.reference_start + 300, reference_end=row.reference_end + 300)
+                if row.mate == 2 and int(row.molecule_id) >= 90 else row for row in constant]
+    assert estimate_insert_distribution(outliers, [context], diagnostics=diagnostics) is None
+    assert diagnostics["calibration_status"] == "insufficient_pairs_after_trimming"
+    assert diagnostics["eligible_fragments"] == 120 and diagnostics["retained_fragments"] == 90
+    edge = [replace(row, reference_start=row.reference_start - 200, reference_end=row.reference_end - 200) for row in rows]
+    assert estimate_insert_distribution(edge, [context], diagnostics=diagnostics) is None
+    assert diagnostics["calibration_status"] == "target_edge_censoring"
+
+
+@pytest.mark.parametrize("insert", [None, (350, 30)])
+def test_library_calibration_export_distinguishes_unavailable_and_supplied(tmp_path, monkeypatch, insert):
+    import csv
+    from mlvamaps.unified_fastq import run_unified_fastq_inference
+    monkeypatch.setattr("mlvamaps.unified_fastq.map_reads_to_candidates_bam", lambda *args, **kwargs: [])
+    locus = Locus("L", repeat_unit_length_bp=4, expected_min_repeats=4, expected_max_repeats=5)
+    context = CandidateContext("c", "L", "ACGT" * 30, 4, 4, 50, 66, "", "")
+    calls, _, _, paths = run_unified_fastq_inference(
+        reads1=tmp_path / "reads.fastq", reads2=None, loci=[locus], contexts=[context],
+        database_path=None, outdir=tmp_path, sample_id="s", technology="illumina",
+        minimap2_bin="minimap2", threads=1, minimum_molecules=3, minimum_probability=.8,
+        insert_mean=insert[0] if insert else None, insert_sd=insert[1] if insert else None)
+    with paths["library_insert_distribution"].open() as handle:
+        row = next(csv.DictReader(handle, delimiter="\t"))
+    assert row["calibration_status"] == ("user_supplied" if insert else "no_alignments")
+    assert row["source"] == ("user_supplied" if insert else "unavailable")
+    assert row["mean_bp"] == ("350" if insert else "")
+    assert row["eligible_fragments"] == ("" if insert else "0")
+    assert calls[0]["prior_only"] and calls[0]["independent_support"] == 0
 
 
 def test_unspanned_long_array_reports_a_bound_and_never_copies_the_reference_count():

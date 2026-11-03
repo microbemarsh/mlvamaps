@@ -5,7 +5,157 @@ unique flank seeds during QC, retaining both mates independently of competitive
 minimap2 mapping. Direct sequence measurements enter shared allele inference;
 uncertain loci can use a bounded local graph. Single-end reads and QC-surviving
 orphan mates also participate in recruitment, direct measurement and local
-assembly.
+assembly. Use `--short-no-assembly` to disable local graph and consensus
+reconstruction while retaining read mapping and molecule likelihoods.
+
+## Mapping-only paired-read inference (2026-11-03)
+
+For an isolate, run:
+
+```bash
+mlvamaps call --database reference_build -i sr \
+  --fq1 sample_R1.fastq.gz --fq2 sample_R2.fastq.gz \
+  --sample-id sample --sample-mode isolate --short-no-assembly \
+  -o results/sample -t 8
+```
+
+This path uses competitive mapping, direct read measurements, and a conditional
+likelihood over paired-read placements. It builds no local graph or consensus
+sequence. Direct measurements keep precedence; the new pair rescue applies only
+to unresolved isolate loci without measured or mixed-allele support.
+
+Both mates contribute to the fit, including weak opposite junctions excluded by
+the earlier 21/12-base anchor rule. An exact primary flank anchor of at least
+12 bases supplies locus identity, subject to competition across configured
+loci. The model considers repeat-mate and boundary placements together, includes
+one-substitution alternatives in the opposite mate, and conditions the fragment
+likelihood on accepted placements. At least two informative junction molecules
+on each side are required. Mates, duplicate reference contexts, and repeated
+observations of one original molecule cannot multiply support.
+
+External or valid unique-flank fragment calibration takes priority. When that
+is unavailable, a bounded sample of 5,000 QC-passing molecules can estimate a
+narrow overlapping fragment component from unique, exact, nonperiodic overlaps.
+It requires more than 100 retained molecules and rejects broad, heterogeneous,
+multimodal, or detection-edge-censored overlap distributions. The SD has a 1 bp
+floor. This component is recorded separately in
+`overlap_fragment_calibration.tsv`; it never fills the whole-library calibration
+in `library_insert_distribution.tsv`. Fragments too long to overlap remain
+unobserved, so even an accepted component cannot exclude a longer library tail.
+
+The unchanged difficult fixture's expansion improves from **17.5 to 40 repeats**,
+bringing individual-locus count agreement from **9/14 to 10/14**, without assembly.
+The estimate assumes a pure repeat array and the calibrated fragment component.
+Longer interrupted arrays can still explain these reads. The result therefore
+remains low-confidence `ESTIMATED`, with `upper_unbounded=True`,
+`finite_length_support=False`, and a blank `repeat_interval_high`. It generates
+no assembled query product and no measured classification votes. The 400-repeat
+array, zero-coverage locus, and individually indistinguishable loci remain
+unresolved; real-sample agreement still needs matched server data.
+
+`joint_pair_diagnostics.tsv` records the rescue's support, calibration source,
+competition, fit outcome, and reasons for abstaining. The `pair_rescue_*` call
+fields preserve its provenance, with method `joint_pair_read_likelihood`
+(`conditional_joint_pair_likelihood` in the common inference table). Search and
+likelihood-cell limits bound the additional work; these are computational limits,
+not biological upper bounds.
+
+Three serial fresh-process trials per workflow used identical FASTQ bytes and
+alternated baseline/updated order. The baseline includes the preceding
+shared-group and conditional-length changes; mapping-only is the updated
+workflow with local assembly and consensus disabled.
+
+| Fixture | Correct counts before → mapping-only | Before median seconds | Updated default | Mapping-only |
+| --- | ---: | ---: | ---: | ---: |
+| Clean paired reads | 11/11 → 11/11 | 0.215 | 0.199 | 0.209 |
+| Clean shotgun reads | 11/11 → 11/11 | 1.596 | 1.746 | 1.754 |
+| Original difficult paired reads | 9/14 → 10/14 | 1.037 | 1.087 | 1.007 |
+
+All audited output tables were deterministic across the three trials. The full
+native suite passed **647 tests**, with **13 pair-model tests** rerun after the
+final resource-accounting correction. The native integration check raises if
+either graph assembly or consensus is invoked in mapping-only mode. It also
+checks that a stronger existing lower bound cannot be overwritten. These small
+synthetic timings do not establish whole-genome throughput or server accuracy.
+
+Appending 50,000 independent random 180 bp background fragments (100 bp mates)
+to the unchanged challenge retained the **9/14 → 10/14** improvement. Three
+alternating trials measured **2.660 → 3.877 seconds** median, an additional
+1.217 seconds (46%). Maximum recorded RSS was **84.91 → 93.77 MiB**; this is the
+maximum of the parent and largest child, not concurrent total memory. Output
+tables were deterministic. This workload checks background-read overhead and
+the bounded calibration pool; it is not a whole-genome accuracy benchmark.
+
+The [validation record](../reference/short-read-pair-rescue-validation.json)
+retains source/input hashes, individual trials, and remaining mismatches.
+
+## Earlier shared-group and conditional-length validation (2026-11-03)
+
+The preceding implementation added a shared **5-repeat** allele for
+`ambiguous_a;ambiguous_b`, supported by 40 original molecules. Both member loci
+remain ambiguous and retain their existing per-locus predictions. The original
+fixture's individual-locus accuracy remained **9/14** at that stage: the new
+conditional-length model had no usable independent library calibration for its
+fixed 180 bp fragments. The mapping-only pair rescue above subsequently improves
+that result to **10/14**. The fixture and truth were unchanged.
+
+A separate native test generates 100 bp mates from a known Gaussian fragment
+library and retains the two observation classes modeled by the caller. It uses
+a true 40-repeat expansion with a 4-repeat reference. Supplying the same
+260 bp mean and 30 bp SD to both versions changes the prediction from **19.5 to
+40 repeats**, with likelihood support from 39 to 40.75. The result remains
+`ESTIMATED` and supplies no measured classification votes. Without calibration,
+the updated workflow retains the lower-bound prediction and unknown upper length.
+This controlled test validates the length calculation; it is not a whole-genome
+or real-sample accuracy benchmark.
+
+Three alternating fresh-process trials on identical input files measured:
+
+| Fixture | Correct counts before → after | Before median seconds | After median seconds |
+| --- | ---: | ---: | ---: |
+| Clean paired reads | 11/11 → 11/11 | 0.181 | 0.155 |
+| Clean shotgun reads | 11/11 → 11/11 | 1.713 | 1.747 |
+| Original difficult paired reads | 9/14 → 9/14 | 0.976 | 1.004 |
+| Calibrated expansion, 1,007 fragments | 0/1 → 1/1 | 0.536 | 0.638 |
+
+Outputs were deterministic across all three trials. The calibrated test added
+about 0.10 seconds and used a maximum recorded RSS of 78.25 MiB versus 76.88 MiB
+before; RSS is the maximum of the parent and largest child, not their sum. The
+changes reuse the existing mapping and add no dependencies. The full native
+suite passed **622 tests**, including duplicate-molecule, mixed-group, resource
+limit, discrete-fragment, and unbounded-tail regressions. The
+[validation record](../reference/short-read-joint-length-validation.json) retains
+source/input hashes, timing trials, shared group calls, and remaining mismatches.
+Matched server data are still needed to assess real-sample agreement.
+
+## Earlier local recovery validation (2026-11-03)
+
+The earlier bounded-graph change recovered the known product from a redundant
+pool of 4,100 fragments that previously stopped at `fragment_limit`. It uses 82 graph
+representatives and retains all 4,100 original support IDs. A separate regression
+retains a competing branch supported by only two copies, preventing the reduction
+from manufacturing a unique product. New partial-read checks cover right-flank
+anchors, motif phase, calibrated fractional bounds, and reverse-oriented orphan
+reads. Insert-calibration diagnostics distinguish unavailable and supplied
+calibration without changing the acceptance rules.
+
+Three alternating fresh-process trials on identical synthetic inputs, using two
+copies and isolate mode, produced:
+
+| Fixture | Before exact | After exact | Before median seconds | After median seconds |
+| --- | ---: | ---: | ---: | ---: |
+| Clean paired reads | 11/11 | 11/11 | 0.158 | 0.149 |
+| Clean shotgun reads | 11/11 | 11/11 | 1.582 | 1.582 |
+| Difficult paired reads | 9/14 | 9/14 | 1.002 | 0.936 |
+
+Core output tables were deterministic across repeated trials in both versions.
+The full native-enabled test suite passed 583 tests.
+These small fixtures establish regression behavior, not server-cohort accuracy
+or a general speedup. At that stage, the difficult fixture's unspanned expansions
+and uninformative loci remained unresolved by sample length evidence. The
+[validation record](../reference/short-read-recovery-validation.json) retains
+source/input hashes, every timing trial, agreement metrics, and the deep-pool
+recovery check.
 
 ## Command line
 
@@ -67,7 +217,8 @@ multiplying support. Conflicting flank assignments are not recruited. Existing
 QC rejection thresholds still apply; mate rescue does not bypass quality QC.
 Seed uniqueness is checked against configured locus contexts, not every genome
 in a reference cohort. Background homology can therefore still recruit reads;
-sequence measurements or a covered two-flank graph must support sizing.
+sequence measurements, a supported pair-likelihood estimate, or a covered
+two-flank graph must support sizing.
 
 The same observed-reference mapping is reused for reference classification. In short-read
 allele inference, an exact flank assignment excludes competitors at other loci.
@@ -93,11 +244,11 @@ these alignments and the measured fragment counts without another FASTQ mapping.
 Mapped mates now use the same locus-window refinement as long reads. Mapping
 supplies orientation and local search coordinates. Complete primer products take
 the fast path; unresolved near-complete products receive bounded flank realignment.
-Partial mates retain local measurement windows and the fragment graph, avoiding
-unnecessary full-product realignment.
+Partial mates retain local measurement windows and, when enabled, the fragment
+graph, avoiding unnecessary full-product realignment.
 
-When supported complete segments have sequencing errors in their primers, the
-shared SPOARS correction step can recover the product before assembly PCR.
+With consensus reconstruction enabled, supported complete segments containing
+primer sequencing errors can use shared SPOARS correction before assembly PCR.
 Different measured repeat alleles are clustered separately. A consensus that
 conflicts with a confident molecule call remains unresolved; it does not add
 independent molecule votes. `query_locus_reconstruction.tsv` records the support
@@ -120,26 +271,84 @@ raw allele is then rounded using the assembly convention. Mates and duplicate
 reference alignments never add independent molecule votes.
 
 If library fragment lengths have been calibrated independently, supply
-`--short-insert-mean BP --short-insert-sd BP` together. The caller can then
-estimate an unresolved repeat length from complete inward-facing reads on
-opposite unique flanks. Mean and standard deviation describe the full library
-fragment length, including both reads. Estimates use Gaussian insert-length
-likelihoods and remain low-confidence `ESTIMATED`, with method
-`paired_fragment_length`. They cannot replace direct measurements or create
-measured support for classification. Without explicit settings, automatic
+`--short-insert-mean BP --short-insert-sd BP` together. Mean and standard deviation
+describe the full library fragment length, including both reads. In isolate mode,
+unresolved loci can use a bounded joint length model combining opposite-flank
+pairs, partial boundary pairs, anchored lower bounds, and repeat-only mates of
+uniquely anchored reads. These calls remain low-confidence `ESTIMATED`, with
+method `joint_short_read_length` (`short_read_joint_length_likelihood` in the
+common inference table); they cannot replace direct
+measurements or create measured support for classification.
+
+Partial pairs require one exact 21-base anchor. The opposite boundary can use an
+exact 12-base anchor solely for sizing. The model conditions the calibrated
+Gaussian fragment distribution on the accepted observation classes, correcting
+for fragment-length selection at the target. Boundary pairs and repeat-only
+mates share one selection normalizer. The model compares zero and 1% background
+components to allow anomalous pairs without imposing that fraction on clean
+data. This choice is uncalibrated and exported as `length_null_fraction`.
+Exact repeat tails are required, so interrupted or noisy repeats
+may supply no such observation. Unassigned repeat-only reads do not supply locus
+coverage or abundance. Targeted libraries and incorrect insert calibration can
+still violate the model's assumptions. Metagenome mode retains its existing
+paired-length fit; the new single-allele fit does not apply to mixtures.
+
+Candidate and likelihood-cell limits bound this calculation, with repeated
+observations scored together and every original molecule counted once. A finite
+search limit is reported as `candidate_grid_high`, separately from length
+uncertainty. Bounds alone, repeat-only mates alone, or a likelihood still supported
+at the upper search edge leave `repeat_interval_high` blank and
+`upper_unbounded=True`. A required numeric point prediction can still depend on
+the locus prior; it does not establish an upper length. Resource-limited fallback
+retains a bound-constrained estimate with zero model support and unknown upper
+length.
+
+Without explicit settings, automatic
 calibration requires at least 100 independent inward primary pairs wholly
 within unique nonrepeat flanks, MAPQ at least 20, near-complete high-identity
 alignments, nonzero trimmed dispersion, and sufficient distance from target
 edges. Short amplicon catalogs commonly provide no eligible calibration.
-The Gaussian fallback does not correct for target-selection bias; targeted or
-amplicon libraries may violate its fragment-sampling assumptions.
+Legacy paired evidence without selection geometry retains the original Gaussian
+fallback and its target-selection limitation.
 
 `library_insert_distribution.tsv` records the effective calibration and its
-source. The legacy QC and run-metadata insert fields still describe only
+source. It also reports `calibration_status`, eligible and retained fragment
+counts, and the required minimum. Failed automatic calibration distinguishes no
+alignments, insufficient unique-flank pairs, insufficient pairs after trimming,
+zero dispersion, and target-edge censoring. User-supplied calibration is labelled
+separately. These diagnostics do not relax calibration requirements or create
+an insert estimate when the targets lack suitable nonrepeat sequence.
+The legacy QC and run-metadata insert fields still describe only
 user-supplied settings. See [evidence validation](fastq-evidence-validation.md)
 for current status definitions, limits, retained errors, and measured tradeoffs.
 
+Reads containing a uniquely matched left or right repeat flank and an exact
+terminal repeat run can supply a lower bound when the other boundary is absent.
+Right-anchored reads may start or end within a motif unit; the visible repeat
+bases are converted to the same calibrated allele units as left-anchored reads.
+Both read orientations are checked, and mates still count as one molecule.
+This evidence bounds an estimate; it does not establish the full repeat length.
+
+## Shared alleles at indistinguishable loci
+
+When loci have identical observed sequence catalogs, boundaries, primers, and
+allele calibration, already ambiguous molecules can be measured as one group.
+`locus_group_calls.tsv` and the HTML report show the shared allele and independent
+molecule support. Duplicate references and mates do not multiply that support.
+Different measured group alleles remain separate, since the member loci can
+carry different repeat lengths even in an isolate.
+
+Group calls leave individual loci ambiguous. They do not assign presence or an
+allele to every member, enter the per-locus fingerprint, or supply classification
+votes. Group fractions combine loci and do not establish strain fractions.
+Molecules with competitors outside the group are excluded. Missing group evidence
+produces an unresolved group row without a prior-derived allele.
+
 ## Conditional micro-assembly
+
+This section describes the optional reconstruction path. `--short-no-assembly`
+skips it and disables consensus reconstruction; mapping and the paired-read
+likelihoods described above remain available.
 
 The graph is attempted only when a locus has flank-recruited fragments and
 lacks an agreeing direct count supported by the configured minimum fragments.
@@ -159,9 +368,17 @@ base in the reconstructed path comes from read-supported edges. No repeat
 sequence or copy number is filled in from a candidate template.
 
 The pool must contain at least three fragments (or the larger configured
-minimum). Limits of 2,000 fragments, 50,000 edges, and eight flank backgrounds
-bound work. Short anchors, gaps, competing branches, repeat cycles, or exceeded
-limits yield no assembled sequence. Supported contigs pass through the assembly
+minimum). Pools above 2,000 fragments first retain up to two original molecules
+per identical sequence-pair pattern, selected deterministically by quality and
+molecule ID. Both mates stay together. This reduction preserves every graph edge
+supported by at least two fragments, including minority branches. Original
+fragments still supply terminal-anchor evidence and support counts. If the
+sequence diversity still needs more than 2,000 representatives, assembly reports
+`fragment_diversity_limit` instead of discarding competing sequences.
+`short_read_diagnostics.tsv` records the input/selected fragment counts and the
+selection method. Limits of 50,000 edges and eight flank backgrounds also bound
+work. Short anchors, gaps, competing branches, repeat cycles, or exceeded limits
+yield no assembled sequence. Supported contigs pass through the assembly
 workflow's Sassy PCR search (two primer edits), `pcr_rows_to_products`, and
 `legacy_assembly_call_rows`, sharing product selection, primer-indel calibration
 and rounding. Original fragment IDs supply support; an assembled product
@@ -174,8 +391,8 @@ usable sizing evidence receive explicit prior-only predictions with zero
 sample-evidence confidence, provided a locus-specific prior is available.
 
 Orphan mates contribute through flank recruitment even when their surviving
-mate was originally R2. Their separate FASTQ file is not mapped, so they do not
-add reference-alignment SNP evidence.
+mate was originally R2. Their separate FASTQ file is mapped as unpaired reads
+with the original molecule identities retained.
 
 The current database schema is still required. Minimap2 output is streamed
 through htslib rather than materialized as text SAM. `--keep-intermediates`

@@ -53,6 +53,7 @@ def run_mapping_short_read_call(
     assembly_round_tolerance: float = 0.25,
     short_insert_mean: float | None = None,
     short_insert_sd: float | None = None,
+    short_no_assembly: bool = False,
     inference_limits=None,
     min_mixture_fraction: float = 0.2,
     min_secondary_reads: int = 2,
@@ -89,6 +90,12 @@ def run_mapping_short_read_call(
     else:
         contexts = generate_candidate_contexts(loci, maximum=short_max_candidate_repeat_count)
     recruiter = FlankRecruiter(contexts)
+    from .fragment_calibration import OverlapFragmentCollector
+    from .short_read_pair_rescue import WeakPairCollector
+
+    pair_collector = WeakPairCollector(contexts) if reads2_path and sample_mode == "isolate" else None
+    overlap_collector = (OverlapFragmentCollector() if pair_collector is not None
+                         and short_insert_mean is None else None)
 
     if show_progress:
         print(f"[{sample_id}] Filtering and validating Illumina read pairs")
@@ -104,6 +111,10 @@ def run_mapping_short_read_call(
                 counters[key] += int(value)
             for pair in retained:
                 recruiter.add(pair)
+                if pair_collector is not None:
+                    pair_collector.add(pair)
+                if overlap_collector is not None:
+                    overlap_collector.add(pair)
                 if pair.read2 is None:
                     target = orphan_handle if reads2_path else first_handle
                     quality = pair.read1.quality or "I" * len(pair.read1.sequence)
@@ -120,6 +131,13 @@ def run_mapping_short_read_call(
                 consume()
         if chunk:
             consume()
+
+    overlap_calibration, overlap_diagnostics = (overlap_collector.finish() if overlap_collector is not None
+        else (None, {"calibration_status": "not_requested", "source": "exact_overlap_component",
+                     "whole_library": False, "unobserved_tail_excluded": False}))
+    overlap_path = output / "overlap_fragment_calibration.tsv"
+    write_tsv([dict(sample=sample_id, **overlap_diagnostics)], overlap_path,
+              ["sample", *overlap_diagnostics])
 
     from .unified_fastq import common_calls_to_compatibility, run_unified_fastq_inference
 
@@ -147,6 +165,8 @@ def run_mapping_short_read_call(
         reference_alignments=reference_alignments,
         sample_mode=sample_mode,
         insert_mean=short_insert_mean, insert_sd=short_insert_sd,
+        short_no_assembly=short_no_assembly,
+        pair_collector=pair_collector, overlap_calibration=overlap_calibration,
         mixture_min_fraction=min_mixture_fraction, mixture_min_molecules=min_secondary_reads,
         inference_limits=inference_limits,
     )
@@ -335,12 +355,15 @@ def run_mapping_short_read_call(
                        "minimum_spanning_pairs": short_min_spanning_pairs,
                        "confidence_threshold": short_confidence_threshold,
                        "maximum_candidate_repeat_count": short_max_candidate_repeat_count,
+                       "local_assembly_enabled": not short_no_assembly,
                        "secondary_alignments": short_consider_secondary}}, indent=2, sort_keys=True) + "\n")
     write_report(
         output, sample_id, allele_rows, loci, matches, profiles,
         reference_rows=reference_rows,
         closest_reference_bands=closest_reference_bands,
         presence_rows=recruitment, local_assembly_rows=[], short_read_rows=calls,
+        locus_group_rows=read_profiles(unified_paths["locus_group_calls"])
+                         if "locus_group_calls" in unified_paths else [],
     )
     report_path = output / "report.html"
     report_path.write_text(report_path.read_text().replace(
@@ -365,6 +388,7 @@ def run_mapping_short_read_call(
         "myoga_loci": output / "myoga_loci.csv", "short_read_qc": output / "short_read_qc_summary.tsv",
         "short_read_recruitment": output / "short_read_recruitment_summary.tsv",
         "short_read_mapping": output / "short_read_mapping_evidence.tsv",
+        "overlap_fragment_calibration": overlap_path,
         "run_metadata": output / "short_read_run_metadata.json",
         **classification_paths,
         **unified_paths,

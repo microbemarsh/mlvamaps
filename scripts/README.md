@@ -5,6 +5,22 @@ of the public `mlvamaps` command-line interface.
 
 ## `benchmark_fastq_inference.py`
 
+Run clean and difficult short-read fixtures against the current checkout without
+a baseline or server data:
+
+```bash
+python scripts/benchmark_fastq_inference.py --challenge --layouts paired shotgun \
+  --workdir /path/to/empty-benchmark-directory --copies 2 --repetitions 3 \
+  --output fastq-benchmark.json
+```
+
+This writes `benchmark.json` in the work directory and copies that report to
+`--output` when supplied. Without `--workdir`, `--challenge` creates and prints a
+retained temporary directory's report path. Standalone retained runs also support
+ablations and candidate/cell limits. Plain timing runs without these options keep
+their original compact output. Challenge estimates remain in the accuracy
+denominator; executing the benchmark does not guarantee exact agreement.
+
 Run both source versions in fresh processes on exactly the same retained FASTQs:
 
 ```bash
@@ -22,6 +38,11 @@ nonempty work directory and retains FASTQs, SHA-256 hashes, source hashes,
 arguments, outputs, BAMs, logs, measurements, truth comparisons, and every
 numeric/status disagreement in `comparison.json`. A failed worker makes the
 benchmark fail. Output hashes check repeatability across trials.
+
+Add `--ablations no_short_assembly` to compare the updated mapping-only workflow
+on the same files. This invokes `--short-no-assembly` and disables both local
+assembly and consensus reconstruction; pair-likelihood rescue requires isolate
+mode, the benchmark default.
 
 The clean fixture exercises three layouts and 11 known alleles. With
 `--challenge`, `fastq_challenge_fixture.py` adds fixed-seed paired and long-read
@@ -82,6 +103,21 @@ The comparison also reports:
 - `disagreements`: ranked numeric discrepancies and missing calls, with source
   paths, statuses, method, and supporting depth.
 
+When sibling diagnostic tables exist, the audit joins `genotype_evidence.tsv`,
+`short_read_diagnostics.tsv`, `query_locus_reconstruction.tsv`,
+`library_insert_distribution.tsv`, and `sample_summary.tsv` by sample/locus.
+Disagreements retain those rows and their source paths. `by_evidence_observation`
+groups results by recorded evidence, assembly failure reason, reconstruction
+status, and insert-calibration availability/reason. These are diagnostic
+observations, not proven causes of a discrepancy. Older results without those
+files remain comparable.
+
+`exact_agreement_all_assembly_numeric` includes every locus with an assembly
+count, counting missing FASTQ calls as failures. The paired-count metrics also
+include `greater_than_2` and `max_absolute_error`. `presence` compares explicit
+`yes`/`no` fields separately, including cases where equal numeric predictions
+have different presence evidence; `NOT_FOUND` alone does not prove absence.
+
 The all-call result retains estimates. Status strata describe the recorded call
 status, not independently validated measurement quality, and must be interpreted
 alongside their callable sample/locus counts. Assembly calls are a comparator,
@@ -120,6 +156,7 @@ python scripts/compare_short_read_results.py benchmark \
   --baseline-source /path/to/previous/checkout --source . \
   --panel panel.tsv --reads1 sample_R1.fastq.gz --reads2 sample_R2.fastq.gz \
   --sample-id sample --assembly assembly_results/sample \
+  --sample-mode isolate --assembly-round-tolerance 0.25 \
   --outdir benchmark_results --threads 2 --trials 3 > runtime.json
 ```
 
@@ -130,3 +167,8 @@ parent and largest child, not their concurrent total. The utility also reports
 the fraction of updated loci attempting micro-assembly. Assembly calls are only
 read for comparison after inference. Run this on the server's matched dataset
 to assess real-data agreement and throughput.
+The benchmark passes the same explicit sample mode, rounding, and optional
+`--short-insert-mean`/`--short-insert-sd` to both versions and retains available
+`fastq_performance.tsv` stage timings. Supply independently calibrated insert
+settings together; the comparison script does not estimate them from assembly
+repeat counts.
