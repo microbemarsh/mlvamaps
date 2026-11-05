@@ -74,9 +74,12 @@ Both FASTQ paths call `run_unified_fastq_inference`:
    require a usable library distribution. Exact terminal motif runs with a unique
    flank can provide a lower bound. Duplicate reference alignments do not multiply
    support, and derived estimates do not become measured classification evidence.
-   After reconstruction, `finalize_repeat_count_calls` completes all configured
-   FASTQ loci from the best evidence or an explicit locus prior. Prior-only counts
-   carry zero sample-evidence confidence and are excluded from biological distances.
+   After reconstruction, `finalize_repeat_count_calls` retains diagnostic predictions
+   and accepts only resolved counts with sufficient independent support and
+   measurement agreement or a supported agreeing reconstruction. Rejected primary
+   counts stay blank; `predicted_repeat_count` and `call_rejection_reason` preserve
+   the candidate and decision. Prior-only predictions carry zero sample-evidence
+   confidence. Rejected predictions are excluded from biological distances.
 6. Write `common_locus_calls.tsv`, `molecule_candidate_evidence.tsv`,
    `genotype_evidence.tsv`, and `sequence_alleles.tsv`, then project conventional
    counts into the workflow's public tables. Legacy `PASS` does not mean `EXACT`.
@@ -110,10 +113,10 @@ observed reconstruction-support fraction; it is not a calibrated probability.
 Novel or fractional measured alleles can be called outside the
 reference catalog. Estimates carry `estimation_method`, `estimation_reason`, and
 `estimate_support`; their model support is not a calibrated probability of
-correctness. Presence statuses remain independent of the mandatory numerical
-prediction. Every valid configured FASTQ locus receives a count when its panel
-or observed references define a prior. A missing prior and absent informative
-evidence produce a configuration error; missingness is never converted to zero.
+correctness. Presence statuses remain independent of count acceptance. Every
+configured FASTQ locus receives a result row, but insufficient or conflicting
+evidence leaves the primary count blank. A missing prior and absent informative
+evidence produce an unresolved row; missingness is never converted to zero.
 
 ## Short-read FASTQ
 

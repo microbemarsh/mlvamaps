@@ -366,7 +366,7 @@ def run_call(
     max_read_length: int = 100000,
     min_qscore: float = 15.0,
     max_primer_mismatches: int = 3,
-    min_depth: int = 1,
+    min_depth: int = 3,
     min_posterior: float = 0.75,
     repeat_range_tolerance: float = 1.0,
     min_mixture_fraction: float = 0.01,

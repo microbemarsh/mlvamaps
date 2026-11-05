@@ -78,6 +78,82 @@ def test_shared_flanks_do_not_recruit_and_discordant_pairs_are_rejected():
     assert not recruiter.fragments
 
 
+def test_panel_primer_recruitment_rejects_shared_tiny_and_repeat_only_anchors():
+    locus, product = locus_and_product()
+    primer_only = replace(locus, left_flank_sequence="", right_flank_sequence="")
+    recruiter = FlankRecruiter([], loci=[primer_only, replace(primer_only, locus_id="other")])
+    recruiter.add(pair("shared", product, revcomp(product)))
+    assert not recruiter.fragments
+    tiny = replace(primer_only, forward_primer="ACGT", reverse_primer="TGCA")
+    repetitive = replace(primer_only, forward_primer=locus.repeat_motif * 2,
+                         reverse_primer=revcomp(locus.repeat_motif * 2))
+    for panel_locus in (tiny, repetitive):
+        recruiter = FlankRecruiter([], loci=[panel_locus])
+        recruiter.add(pair("repeat", locus.repeat_motif * 8, revcomp(locus.repeat_motif * 8)))
+        assert not recruiter.fragments and not recruiter.seeds
+
+
+def test_short_panel_primer_inside_another_locus_flank_is_not_unique():
+    locus, product = locus_and_product()
+    short_primer = locus.forward_primer[:15]
+    missing = Locus("missing", forward_primer=short_primer)
+    recruiter = FlankRecruiter(generate_candidate_contexts([locus]), loci=[locus, missing])
+    assert short_primer not in recruiter.seeds and revcomp(short_primer) not in recruiter.seeds
+    assert all(len(seed) == 21 for seed in recruiter.seeds)
+    recruiter.add(ReadPair("partial", ReadRecord("partial", short_primer)))
+    assert not recruiter.fragments
+    recruiter.add(pair("complete", product, revcomp(product)))
+    assert set(recruiter.fragments) == {locus.locus_id}
+
+
+@pytest.mark.skipif(not shutil.which("minimap2") or not shutil.which("sassy"), reason="native tools unavailable")
+@pytest.mark.parametrize("primer_only", [False, True])
+@pytest.mark.parametrize("no_assembly", [False, True])
+def test_panel_locus_without_reference_is_measured_and_empty_locus_retained(tmp_path, primer_only, no_assembly):
+    from mlvamaps.cli import main
+    from mlvamaps.candidate_contexts import write_candidate_contexts
+    from mlvamaps.io import read_loci
+    from mlvamaps.mapping_classification import observed_reference_contexts
+    from mlvamaps.minimap_mapping import build_competitive_indexes
+    from test_fastq_assembly_concordance import _sample
+
+    records, panel, _assembly, expected = _sample(tmp_path)
+    loci = read_loci(panel)[:3]
+    if primer_only:
+        loci = [replace(locus, left_flank_sequence="", right_flank_sequence="") for locus in loci]
+    write_tsv([vars(locus) for locus in loci], panel, list(vars(loci[0])))
+    database = tmp_path / "database"
+    database.mkdir()
+    (database / f"{loci[0].locus_id}.fasta").write_text(f">reference\n{records[0][1]}\n")
+    contexts = observed_reference_contexts(database, loci)[1]
+    assert {context.locus_id for context in contexts} == {loci[0].locus_id}
+    assets = write_candidate_contexts(contexts, database / "competitive_mapping")
+    build_competitive_indexes(assets["fasta"], database / "competitive_mapping")
+    (database / "manifest.json").write_text("{}")
+    reads = tmp_path / "reads.fastq"
+    write_fastq((ReadRecord(f"{name}_{copy}", sequence, "I" * len(sequence))
+                 for name, sequence in records[:2] for copy in range(4)), reads)
+    output = tmp_path / "output"
+    args = ["call", "-i", "sr", "--fq1", str(reads), "-p", str(panel),
+            "--database", str(database), "--sample-id", "s", "--sample-mode", "isolate",
+            "-o", str(output), "-t", "2", "--quiet"]
+    assert main(args + (["--short-no-assembly"] if no_assembly else [])) == 0
+    for filename in ("calls.tsv", "locus_repeat_counts.tsv", "genotype_evidence.tsv"):
+        with (output / filename).open() as handle:
+            rows = list(csv.DictReader(handle, delimiter="\t"))
+        calls = {row.get("locus") or row["locus_id"]: row for row in rows}
+        assert len(rows) == len(loci) and set(calls) == {locus.locus_id for locus in loci}
+        for locus in loci[:2]:
+            assert calls[locus.locus_id]["repeat_count"] == expected[locus.locus_id]
+            assert calls[locus.locus_id]["call_accepted"] == "True"
+        assert calls[loci[2].locus_id]["repeat_count"] == ""
+        assert calls[loci[2].locus_id]["call_accepted"] == "False"
+    with (output / "common_locus_calls.tsv").open() as handle:
+        calls = {row["locus"]: row for row in csv.DictReader(handle, delimiter="\t")}
+    assert calls[loci[1].locus_id]["molecule_support"] == calls[loci[1].locus_id]["presence_support"] == "4"
+    assert calls[loci[2].locus_id]["presence_support"] == "0"
+
+
 def test_unmapped_fragments_measure_beyond_candidate_range_without_double_counting():
     locus, product = locus_and_product(12)
     contexts = generate_candidate_contexts([locus], maximum=6)
@@ -438,7 +514,7 @@ def test_ambiguous_candidate_estimate_is_retained_without_inventing_missing_call
 
 
 @pytest.mark.skipif(not shutil.which("minimap2") or not shutil.which("sassy"), reason="native tools unavailable")
-def test_failed_assembly_estimate_reaches_report_fingerprint_and_summary(tmp_path):
+def test_failed_assembly_estimate_remains_diagnostic_in_report_and_summary(tmp_path):
     from mlvamaps.short_reads import run_short_read_call
     locus, product = locus_and_product(24)
     fragments = recruited_tiling(locus, product)
@@ -450,7 +526,8 @@ def test_failed_assembly_estimate_reaches_report_fingerprint_and_summary(tmp_pat
                                 threads=2, show_progress=False)
     with paths["calls"].open() as handle:
         call = next(csv.DictReader(handle, delimiter="\t"))
-    assert call["repeat_count"] != "" and call["status"] == "ESTIMATED"
+    assert call["repeat_count"] == "" and call["status"] == "ESTIMATED"
+    assert call["predicted_repeat_count"] != "" and call["call_accepted"] == "False"
     assert call["allele_confidence"] != "" and call["allele_distribution"] != ""
     with paths["fingerprint"].open() as handle:
         assert next(csv.DictReader(handle, delimiter="\t"))["L"] == call["repeat_count"]
@@ -458,5 +535,5 @@ def test_failed_assembly_estimate_reaches_report_fingerprint_and_summary(tmp_pat
         summary = next(csv.DictReader(handle, delimiter="\t"))
     assert summary["partial_loci"] == "1" and summary["complete_loci"] == "0"
     report = paths["report"].read_text()
-    assert f"≈{call['repeat_count']} repeats · ESTIMATED" in report
-    assert "Low confidence; model support" in report
+    assert "Withheld" in report and "Diagnostic prediction (not called)" in report
+    assert call["call_rejection_reason"] in report

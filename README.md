@@ -34,7 +34,8 @@ Assembly and FASTQ inputs retain their own evidence-recovery paths:
 - **Illumina reads:** minimap2 maps molecules directly to observed database
   loci. Competitive locus assignments recruit reads and recover mates from the
   same BAM; flank seeds additionally retain paired, single-end and surviving
-  orphan reads. Complete products supply a fast path; flank-only or uncertain
+  orphan reads. Panel primer/flank seeds also recruit loci missing from the
+  database sequences. Complete products supply a fast path; flank-only or uncertain
   loci can use paired-read likelihoods or bounded local assembly. Use
   `--short-no-assembly` for mapping and molecule likelihoods with no graph or
   consensus reconstruction. Sample-derived complete products retain the shared
@@ -50,11 +51,15 @@ A supported consensus conflicting with a confident molecule call is explicitly
 unresolved. Consensus retains original molecule identities and never fills gaps
 with reference bases.
 
-Every valid configured FASTQ locus receives a finite, nonnegative numerical
-estimate when the panel or observed reference alleles define an eligible prior.
-Confidence and presence remain separate from that prediction. No-data loci use
-explicit `prior_only` predictions with zero sample-evidence confidence; missing
-evidence is never replaced with an arbitrary zero. Assembly behavior is unchanged.
+FASTQ calls prioritize supported counts over completeness. `repeat_count` and
+`repeat_count_raw` are blank when a count is withheld; `predicted_repeat_count`
+and `predicted_repeat_count_raw` retain the diagnostic estimate. `call_accepted`
+and `call_rejection_reason` record the decision. Direct measurements or supported
+reconstruction must meet the existing depth, model-support and margin criteria.
+Low-depth, prior-only, partial/unbounded, conflicting and indirect estimates stay
+out of fingerprints and repeat distances. Presence and observed depth remain
+available. These thresholds are not calibrated accuracy guarantees; assembly
+behavior is unchanged.
 
 FASTQ inference retains raw molecule lengths and measurement uncertainty until
 the final assembly-compatible rounding step. Isolate mode fits one allele;
@@ -72,10 +77,11 @@ FASTQ genotyping and reference typing share one competitive mapping to the
 actual observed database amplicons. Measured products, resolved repeat flanks,
 or supported local assemblies supply direct counts. If direct sizing is
 unresolved, flank-supported spanning alignment indels or calibrated paired
-lengths can supply an `ESTIMATED` count. Partial reference matches and conflicting
-measurements retain a best estimate together with their uncertainty.
-The report lists every locus with its count, status, support, and uncertainty.
-Loci without usable sample sizing evidence receive a labelled locus-specific prior prediction.
+lengths can supply diagnostic estimates. Partial reference matches and conflicting
+measurements retain predictions and uncertainty separately from accepted counts.
+The report lists every locus with its accepted count or withholding reason,
+diagnostic prediction, status, support, and uncertainty. Loci without usable
+sample sizing evidence can retain a labelled prior prediction, never a call.
 Novel measured alleles remain callable.
 The same alignments and molecule-level repeat measurements inform reference
 classification, preserving equivalent references and unresolved evidence.
@@ -188,9 +194,10 @@ mlvamaps call \
 ```
 
 This mapping-only command combines direct read measurements with conditional
-paired-read likelihoods. The unchanged difficult synthetic fixture's expansion
-improves from 17.5 to 40 repeats, with overall count agreement improving from
-9/14 to 10/14. The rescued count remains `ESTIMATED` with an unknown upper bound;
+paired-read likelihoods. In the historical mandatory-count benchmark, the
+unchanged difficult synthetic fixture's expansion improved from 17.5 to 40
+repeats, with count agreement improving from 9/14 to 10/14. That unbounded rescue
+is now retained as a diagnostic prediction with a blank accepted count;
 it supplies no reconstructed sequence or measured classification votes. Fragment
 calibration, competing loci, and unresolved alternatives are recorded in the
 diagnostic tables. See the [Illumina workflow](docs/workflows/illumina.md) for the
@@ -221,9 +228,13 @@ Start with:
 | `calls.tsv` | Tidy per-locus calls and statuses. |
 | `locus_repeat_counts.tsv` | Compact individual-locus repeat counts. |
 
-FASTQ fingerprints include measured, estimated, and prior-only counts. Biological
-comparisons exclude prior-only predictions. See the [output reference](docs/reference/outputs.md) for all
-evidence and diagnostic files.
+FASTQ fingerprints and repeat distances use accepted counts; withheld values stay
+blank. Diagnostic predictions remain in the per-locus tables. See the
+[output reference](docs/reference/outputs.md) for evidence and diagnostic files.
+Re-run existing samples into a fresh output directory to apply this policy;
+successful short-read batch samples resume by default, so use `--force` when
+reusing their output directory. Matched-cohort validation is still needed to
+measure any improvement in concordance.
 
 Single-input calls write directly to the requested output directory. Directory
 and manifest calls write each sample under `OUTDIR/<sample_id>/` and place only

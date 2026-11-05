@@ -275,6 +275,38 @@ def test_default_callable_threshold_retains_any_sample_with_an_exact_vntr_call(t
     )
 
 
+def test_profiles_exclude_rejected_and_prior_values_but_keep_original_long_rows(tmp_path):
+    results = tmp_path / "results"
+    for sample_id in ("S1", "S2"):
+        sample = results / sample_id
+        sample.mkdir(parents=True)
+        (sample / "calls.tsv").write_text(
+            "sample_id\tlocus_id\trepeat_count\tprior_only\tcall_accepted\tpredicted_repeat_count\n"
+            f"{sample_id}\taccepted\t5\tFalse\tTrue\t5\n"
+            f"{sample_id}\tzero\t0\tFalse\tTrue\t0\n"
+            f"{sample_id}\tlegacy\t2\t\t\t\n"
+            f"{sample_id}\tprior\t9\tTrue\t\t\n"
+            f"{sample_id}\trejected\t8\tFalse\tFalse\t8\n"
+        )
+    output = tmp_path / "export"
+    export_myoga(results, _metadata(tmp_path / "metadata.tsv"), output)
+
+    for profile in _read_tsv(output / "mlva_profiles.tsv"):
+        assert profile == dict(sample_id=profile["sample_id"], accepted="5", zero="0",
+                               legacy="2", prior="", rejected="")
+    long_rows = {(row["sample_id"], row["locus_id"]): row
+                 for row in _read_tsv(output / "mlva_calls_long.tsv")}
+    for sample_id in ("S1", "S2"):
+        assert long_rows[sample_id, "prior"]["repeat_count"] == "9"
+        assert long_rows[sample_id, "prior"]["prior_only"] == "True"
+        rejected = long_rows[sample_id, "rejected"]
+        assert rejected["repeat_count"] == rejected["predicted_repeat_count"] == "8"
+        assert rejected["call_accepted"] == "False"
+    pair = _read_tsv(output / "mlva_pairwise_distances.tsv")[0]
+    assert pair["loci_compared"] == "3" and float(pair["repeat_distance"]) == 0
+    assert all(row["callable_loci"] == "3" for row in _read_tsv(output / "samples_used.tsv"))
+
+
 def test_default_pairwise_threshold_retains_sparse_shared_calls(tmp_path):
     results = tmp_path / "results"
     _write_calls(results, "A", {"L1": 1, "L2": None, "L3": None, "L4": None})

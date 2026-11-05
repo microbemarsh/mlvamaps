@@ -136,7 +136,8 @@ def test_native_challenge_exports_shared_allele_without_locus_or_classification_
     assert group["group_status"] == "SHARED_ALLELE"
     per_locus = {row["locus_id"]: row for row in table("calls.tsv")}
     for name in ("ambiguous_a", "ambiguous_b"):
-        assert per_locus[name]["repeat_count"] == "4" and per_locus[name]["genotype_status"] == "AMBIGUOUS_LOCUS"
+        assert per_locus[name]["repeat_count"] == "" and per_locus[name]["genotype_status"] == "AMBIGUOUS_LOCUS"
+        assert per_locus[name]["predicted_repeat_count"] == "4" and per_locus[name]["call_accepted"] == "False"
     assert all(locus not in {"ambiguous_a", "ambiguous_b", group["group_id"]}
                for locus, molecule in measurements[0])
     report = (output / "report.html").read_text()

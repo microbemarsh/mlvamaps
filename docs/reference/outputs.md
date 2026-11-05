@@ -47,7 +47,7 @@ reserved and cannot be used as a sample ID in a batch.
 | `profile_matches.tsv` | Complete machine-readable match table corresponding to the HTML results. Rows are labeled `mlva_profile` for direct repeat-profile comparisons and `mapping_reference` for alignment-based references. Includes every ranked match, metadata, distances, comparison counts, and source-specific support fields. Header-only only when neither `--profiles` nor `--database` supplies reference matches. |
 | `profile_match_loci.tsv` | Long-form profile comparison with one row per profile and locus, including query/profile alleles, absolute difference, match status, and profile-allele probability. |
 | `report.html` | Self-contained interpretation report with sample findings, locus-quality flags, FASTQ SPOARS/assembly-PCR concordance, gel evidence, profile matches, closest reference genomes, and technical tables. |
-| `locus_repeat_counts.tsv` | Conventional individual-locus repeat counts in a compact long-form table; numeric counts can include estimates. |
+| `locus_repeat_counts.tsv` | Compact per-locus accepted counts; FASTQ diagnostic predictions and acceptance fields remain separate. |
 | `allele_probability_distribution.tsv` | Ranked integer/half-unit allele probabilities, selected state, and inference method. |
 | `common_locus_calls.tsv` | Technology-neutral FASTQ calls with probability, margin, informative molecule support, total presence support, and explicit called/low-coverage/unresolved/ambiguous/mixed/not-found status. |
 | `molecule_candidate_evidence.tsv` | Optional detailed competitive-alignment and VNTR evidence for each molecule/candidate state; intended for validation rather than the default report. |
@@ -71,10 +71,10 @@ rerunning sample analysis:
 | File | Meaning |
 | --- | --- |
 | `myoga_metadata.tsv` | Original metadata restricted/padded to final tree samples, with canonical `sample_id`, validated `latitude`, and validated `longitude`. |
-| `mlva_profiles.tsv` | Complete sample-by-locus numerical predictions; join `mlva_calls_long.tsv` for evidence and prior-only flags. Distance matrices separately exclude prior-only predictions. |
+| `mlva_profiles.tsv` | Sample-by-locus accepted counts, with blanks for withheld FASTQ calls; join `mlva_calls_long.tsv` for diagnostic predictions and rejection reasons. |
 | `mlva_calls_long.tsv` | Auditable final sample-by-locus calls retaining available `calls.tsv` evidence fields. |
-| `mlva_pairwise_distances.tsv` | Both categorical and repeat-count distance components over shared exact calls, including unsupported pre-tree pairs. |
-| `mlva_distance_matrix.tsv` | Symmetric selected-distance matrix for all samples passing per-sample thresholds, with a zero diagonal and blank cells where no shared exact call permits a distance. |
+| `mlva_pairwise_distances.tsv` | Both categorical and repeat-count distance components over shared accepted counts, including unsupported pre-tree pairs. |
+| `mlva_distance_matrix.tsv` | Symmetric selected-distance matrix for all samples passing per-sample thresholds, with a zero diagonal and blank cells where no shared accepted count permits a distance. |
 | `mlva_nj.tree` | Deterministic neighbor-joining MLVA relatedness tree; absent when no sample passes filtering. |
 | `samples_used.tsv` | Final tree sample paths, callability, metadata, and coordinate status. |
 | `samples_excluded.tsv` | Tree exclusions and non-fatal geography exclusions with reason codes and details. |
@@ -82,7 +82,7 @@ rerunning sample analysis:
 
 With `--combined-markers`, `combined_marker_distance_matrix.tsv` and
 `combined_marker_metadata.tsv` retain all discovered valid samples. Pairwise
-cells are blank only when neither a shared exact repeat call nor a shared
+cells are blank only when neither a shared accepted repeat call nor a shared
 recovered SNP sequence permits a distance; the
 neighbor-joining tree remains limited to a finite complete submatrix.
 
@@ -144,13 +144,14 @@ complete dominant local product includes its `product_size_bp` and unrounded
 blank. An assembly-only call has product size but no read depth unless support
 data are supplied.
 
-Database-backed FASTQ calls retain direct measurements and also report
-low-confidence `ESTIMATED` counts when direct sizing is unresolved. The fallback
+Database-backed FASTQ calls retain direct measurements and diagnostic
+predictions when direct sizing is unresolved. The fallback
 uses repeat-spanning CIGAR indels with sufficient aligned support at both flanks,
 or calibrated opposite-flank pairs. Conflicting measurements, partial-repeat bounds,
-and reference-conditioned alignments retain numerical estimates and distributions. Estimates
-are included in calls and fingerprints, but not promoted to measured molecule
-evidence for reference classification. Model support compares available alleles;
+and reference-conditioned alignments retain numerical estimates and distributions.
+Indirect estimates remain in `predicted_repeat_count`, with blank `repeat_count`;
+they do not enter fingerprints or become measured molecule evidence for
+reference classification. Model support compares available alleles;
 it is not a calibrated probability of correctness.
 
 `estimation_method`, `estimation_reason`, and `estimate_support` are appended to
@@ -166,8 +167,8 @@ inflate measured `molecule_support`.
 each reported allele. `calls.tsv` uses total presence for `read_depth` and the
 observed primary count for `primary_read_depth`; fitted allele fractions do not
 create read counts. Mates and alternative mappings share their molecule identity.
-Confidence thresholds never erase these observed depths or the selected repeat
-prediction.
+Acceptance thresholds never erase these observed depths or diagnostic predictions;
+they can withhold the accepted repeat count.
 
 `common_locus_calls.tsv` also includes `repeat_count_raw`, `inference_method`,
 `probability_kind`, `allele_fractions`, `em_iterations`, `em_converged`, and
@@ -194,20 +195,33 @@ unresolved, and creates neither a reconstructed query sequence nor measured
 classification evidence.
 
 `report.html` includes an always-visible table for every panel locus, with the
-count, status, support, and evidence or uncertainty reason. `≈` marks estimates.
-FASTQ counts are mandatory for every valid configured locus with an eligible prior,
-including no-data loci. Presence statuses such as `NOT_FOUND`, `LOCUS_DROPOUT`, and
-`PRESENT_COUNT_UNKNOWN` describe observed evidence and can coexist with a numeric
-prediction. Zero is emitted only when it is the selected allele. A locus without
-informative evidence or an eligible prior fails with a configuration error.
+accepted count or **Withheld**, a separate diagnostic prediction, status, support,
+and rejection reason. Presence statuses such as `NOT_FOUND`, `LOCUS_DROPOUT`, and
+`PRESENT_COUNT_UNKNOWN` describe observed evidence independently of the prediction.
+Missing accepted counts are blank, never zero. With no informative evidence or
+eligible prior, the diagnostic prediction is also blank.
 
 ### Complete FASTQ predictions and confidence
 
 The shared finalizer runs after reconstruction and inference. Its priority is:
 joint direct measurements, conflicting measured candidates, calibrated paired
 lengths, repeat-spanning alignments, partial-repeat bounds, reference-conditioned
-alignments, then a locus-specific prior. It preserves the selected number when
-probability, margin, coverage, mixture, or computational thresholds fail.
+alignments, then a locus-specific prior. It retains the selected number as a
+diagnostic prediction, then accepts only resolved direct measurements or supported
+reconstructions meeting the existing minimum informative depth, model support and
+margin criteria where applicable (reconstruction-support fractions have no likelihood
+margin requirement). Ordinary measured calls without an agreeing supported consensus
+also require enough independent molecules selecting the reported allele and a
+selected-allele fraction meeting the existing minimum probability threshold.
+Prior-only, low-depth, partial/unbounded, conflicting, mixed, indirect and
+computationally limited estimates are withheld from count outputs. These
+thresholds and scores are not calibrated accuracy guarantees.
+
+This replaces the historical mandatory-count behavior described in earlier
+validation reports. Existing result directories are not upgraded automatically:
+rerun FASTQ into a fresh output directory, or use `--force` for resumed short-read
+batches, then run `export-myoga` again. Cohort concordance still requires evaluation
+on matched samples, reporting both accepted-call accuracy and coverage.
 
 Priors give equal mass to **distinct observed reference alleles**, irrespective
 of duplicate references. If none exist, a panel with product-size calibration
@@ -226,9 +240,11 @@ MYOGA locus exports. Existing aliases such as `called_repeat_count` and
 
 | Field | Meaning |
 | --- | --- |
-| `repeat_count`, `repeat_count_raw` | Selected reported and underlying estimates; raw values survive uncertainty thresholds. |
+| `repeat_count`, `repeat_count_raw` | Accepted count and underlying raw value; both are blank when withheld. |
+| `predicted_repeat_count`, `predicted_repeat_count_raw` | Diagnostic candidate and raw value retained even when rejected; blank if no prediction is available. Never substitute these fields into fingerprints or distances. |
+| `call_accepted`, `call_rejection_reason` | Boolean acceptance decision and explanation when a count is withheld. |
 | `estimate_source` | Measurement, reconstruction, paired length, spanning alignment, partial-bound likelihood, reference-conditioned evidence, or the explicit prior source. |
-| `genotype_status` | Evidence classification, independent of numerical completion. |
+| `genotype_status` | Evidence category; consult `call_accepted` separately for the final call decision. |
 | `model_support` | Relative support among tested candidates; not calibrated accuracy. |
 | `data_evidence_confidence` | Uncalibrated evidence-strength score: selected support × independent depth/(depth + minimum depth), discounted by source, measurement sigma, ambiguity and resource limits. Exactly zero for prior-only predictions. |
 | `second_best_repeat_count`, `second_best_support` | Strongest alternative and its model support, when represented. |
@@ -247,9 +263,9 @@ MYOGA locus exports. Existing aliases such as `called_repeat_count` and
 | `computational_fallback` | Candidate/matrix/refinement limit and bounded fallback reason. |
 | `confidence_reason` | Explanation of evidence and limitations. |
 
-Complete numerical fingerprints agree with the primary per-locus table. Profile
-matching, repeat-profile trees, MYOGA distances and SNP-plus-repeat distances
-exclude prior-only values. Reference classification continues to use original
+Fingerprints agree with the accepted-count column of the primary per-locus table.
+Profile matching, repeat-profile trees, MYOGA distances and SNP-plus-repeat
+distances exclude withheld counts. Reference classification continues to use original
 alignments and measured molecule counts; finalized predictions create no new
 classification evidence. Legacy assembly rows retain their existing behavior.
 
@@ -267,13 +283,13 @@ classification evidence. Legacy assembly rows retain their existing behavior.
 | `filtered_orphan_reads.fastq.gz` | Retained single mates whose partner failed QC; empty when no orphans are present. |
 | `sample_summary.tsv` | One normalized sample row for batch aggregation. |
 | `myoga_samples.csv` | MYOGA metadata; `genome_id` equals `sample_id` and generated sample tree-tip IDs. |
-| `myoga_loci.csv` | Long-form numerical predictions, intervals, evidence, confidence, and prior-only flags; also produced by long-read FASTQ calls. |
+| `myoga_loci.csv` | Long-form accepted counts, diagnostic predictions, intervals, evidence, confidence, and acceptance flags; also produced by long-read FASTQ calls. |
 | `batch_summary/batch_status.tsv` | Success, failure, or resume status for every directory or manifest sample. |
 
 Illumina `calls.tsv` preserves the compact columns and appends read technology,
 evidence class, boundary support, informative molecules, local assembly,
 repeat interval, confidence explanation, failure/warning, and mixture-support
-fields. Current valid configured FASTQ loci retain a numeric `repeat_count`;
+fields. FASTQ loci retain a numeric `repeat_count` only when accepted;
 `repeat_interval_low`/`high` describe measured or candidate envelopes separately.
 Older results can have empty counts and populated `repeat_count_min`/`max`, or
 empty sizing fields with `PRESENCE_ONLY`. Those historical formats remain readable.
@@ -366,10 +382,10 @@ supplementary `genotype_evidence.tsv`:
 | Evidence status | Meaning |
 | --- | --- |
 | `EXACT` | A resolved call with at least `max(3, minimum_molecules)` independent complete products, agreeing conventional counts, measurement sigma at most 0.25 repeats, no quality flags or ambiguous bases, and no derived consensus votes. These are evidence criteria, not a calibrated error guarantee. |
-| `ESTIMATED` | A numeric count failing the exact-evidence criteria, including low coverage, uncertain measurements, reconstruction, and paired-length estimates. |
-| `LOWER_BOUND` | A uniquely anchored terminal motif run supplies `repeat_lower_bound`; the numeric prediction depends on a conditioned prior and an explicit expansion-tail assumption. |
-| `UNRESOLVED` | Evidence or computation cannot resolve a genotype confidently; a bounded numeric prediction is still retained. |
-| `PRIOR_ONLY` | No informative sample repeat evidence; numerical prediction comes entirely from the explicit locus prior and data-evidence confidence is zero. |
+| `ESTIMATED` | Evidence does not meet EXACT criteria; a supported reconstruction can still be accepted. Consult `call_accepted` rather than using this label as a count filter. |
+| `LOWER_BOUND` | Sample evidence supplies `repeat_lower_bound` without resolving the upper length; a diagnostic prediction may remain, but the accepted count is blank. |
+| `UNRESOLVED` | Evidence or computation cannot resolve a genotype confidently; a diagnostic prediction may remain, with a blank accepted count. |
+| `PRIOR_ONLY` | No informative sample repeat evidence; the diagnostic prediction comes entirely from the locus prior, data-evidence confidence is zero, and the accepted count is blank. |
 | `AMBIGUOUS_LOCUS` | Only competing locus assignments support the locus; those molecules do not vote for a repeat count. |
 | `POSSIBLE_MIXTURE` | Supported secondary-allele evidence; this does not confirm a strain mixture. |
 

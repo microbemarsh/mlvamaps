@@ -46,9 +46,10 @@ def write_evidence_reports(calls, evidence, loci, outdir, thresholds):
             status, reason = "PRIOR_ONLY", call["estimation_reason"]
         elif call.get("repeat_lower_bound") and call.get("estimate_source") == "partial_repeat_likelihood":
             status, reason = "LOWER_BOUND", "Anchored terminal repeat supplies a lower bound; the point estimate depends on the locus prior."
-        elif call["repeat_count"] == "" and call.get("repeat_lower_bound"):
+        elif (call["repeat_count"] in ("", None) and call.get("repeat_lower_bound")
+              and (call.get("upper_unbounded") or not call.get("finite_length_support"))):
             status, reason = "LOWER_BOUND", "Anchored terminal repeat sequence; the opposite boundary is unobserved."
-        elif call["repeat_count"] == "":
+        elif call["repeat_count"] in ("", None):
             status, reason = "UNRESOLVED", reason or ("No recruited evidence." if not rows else "Insufficient identifiable allele evidence.")
         elif (call["status"] == "called" and direct >= max(3, thresholds.minimum_molecules)
               and measured and all(row.measured_repeat_count == call["repeat_count"]
@@ -59,6 +60,8 @@ def write_evidence_reports(calls, evidence, loci, outdir, thresholds):
         else:
             status = "ESTIMATED"
             reason = reason or "Coverage, measurement uncertainty, or reconstruction does not meet EXACT criteria."
+        if call.get("call_rejection_reason"):
+            reason += " Call withheld: " + str(call["call_rejection_reason"])
         call["genotype_status"] = status
         call["confidence_reason"] = reason + " Model support is not calibrated accuracy."
         call["inference_tier"] = max([call.get("inference_tier", 0)] + [row.metadata.get("inference_tier", 0) for row in rows])

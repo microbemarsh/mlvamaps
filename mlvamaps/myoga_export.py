@@ -932,7 +932,8 @@ def export_myoga(
             {
                 "sample_id": sample.sample_id,
                 **{
-                    locus: by_locus.get(locus, {}).get("repeat_count", "")
+                    locus: (by_locus.get(locus, {}).get("repeat_count", "")
+                            if repeat_is_comparable(by_locus.get(locus, {})) else "")
                     for locus in locus_order
                 },
             }
@@ -1116,7 +1117,7 @@ def export_myoga(
         *[f"{metric}: {value}" for metric, value in summary_values],
         "",
         "The tree is a neighbor-joining MLVA relatedness tree, not a whole-genome phylogeny.",
-        "Distances use only exact repeat counts callable in both samples; missing loci are not imputed.",
+        "Distances use eligible repeat counts callable in both samples; rejected and prior-only predictions are excluded and missing loci are not imputed.",
     ]
     _write_text_atomic(output / "export_summary.txt", "\n".join(summary_text) + "\n")
 

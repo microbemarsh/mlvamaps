@@ -553,9 +553,9 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
     call.add_argument(
         "--min-depth",
         type=_positive_int,
-        default=1,
+        default=3,
         help=(
-            "Minimum informative reads required to avoid LOW_DEPTH "
+            "Minimum independent informative molecules for an accepted long-read count "
             "(default: %(default)s)"
         ),
     )
@@ -690,7 +690,7 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         "export-myoga",
         help="Aggregate completed MLVA results into a MYOGA-ready relatedness dataset",
         description=(
-            "Discover completed mlvamaps samples, filter exact repeat-count profiles, "
+            "Discover completed mlvamaps samples, filter accepted repeat-count profiles, "
             "join metadata, calculate shared-locus distances, and write a deterministic "
             "neighbor-joining MLVA profile-similarity tree without rerunning calling."
         ),
@@ -731,7 +731,7 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         default=0.0,
         metavar="FRACTION",
         help=(
-            "Minimum exact VNTR-call fraction per sample; by default, retain any "
+            "Minimum accepted VNTR-call fraction per sample; by default, retain any "
             "sample with at least one finite repeat_count (default: %(default)s)"
         ),
     )
@@ -740,14 +740,14 @@ def build_parser(*, advanced: bool = False) -> argparse.ArgumentParser:
         type=_nonnegative_int,
         default=0,
         metavar="COUNT",
-        help="Additional minimum exact-call count; both sample thresholds must pass (default: %(default)s)",
+        help="Additional minimum accepted-call count; both sample thresholds must pass (default: %(default)s)",
     )
     export.add_argument(
         "--min-pairwise-loci",
         type=_positive_int,
         default=1,
         metavar="COUNT",
-        help="Minimum shared exact loci per supported pair (default: %(default)s)",
+        help="Minimum shared accepted loci per supported pair (default: %(default)s)",
     )
     export.add_argument(
         "--min-pairwise-fraction",

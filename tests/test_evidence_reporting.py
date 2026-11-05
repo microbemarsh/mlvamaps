@@ -28,6 +28,29 @@ def test_exact_requires_independent_complete_unambiguous_evidence(tmp_path):
     assert calls[0]["genotype_status"] == "ESTIMATED"
 
 
+@pytest.mark.parametrize("details, expected", [
+    ({}, "UNRESOLVED"),
+    ({"prior_only": True}, "PRIOR_ONLY"),
+    ({"repeat_lower_bound": 3}, "LOWER_BOUND"),
+    ({"repeat_lower_bound": 3, "finite_length_support": True}, "UNRESOLVED"),
+    ({"possible_secondary": True}, "POSSIBLE_MIXTURE"),
+])
+def test_withheld_counts_preserve_evidence_category_and_rejection_reason(tmp_path, details, expected):
+    locus = Locus("L")
+    limits = InferenceThresholds()
+    calls, _ = infer_alleles([], [locus], [], "s", "hifi", limits, require_measurement=True)
+    calls[0].update(repeat_count="", repeat_count_raw="", predicted_repeat_count=5,
+        predicted_repeat_count_raw=5.2, call_accepted=False,
+        call_rejection_reason="Insufficient independent support.", estimation_reason="Uncertain evidence.", **details)
+    paths = write_evidence_reports(calls, [], [locus], tmp_path, limits)
+    with paths["genotype_evidence"].open() as handle:
+        row = next(csv.DictReader(handle, delimiter="\t"))
+    assert row["genotype_status"] == expected and row["repeat_count"] == ""
+    assert "Call withheld: Insufficient independent support." in row["reason"]
+    assert row["call_accepted"] == "False" and row["predicted_repeat_count"] == "5"
+    assert row["predicted_repeat_count_raw"] == "5.2" and row["repeat_count_raw"] == ""
+
+
 def test_equal_repeat_counts_keep_distinct_observed_sequence_alleles(tmp_path):
     locus = Locus("L", left_flank_sequence="GACTGACCTGATCGACGTTAGCTA",
                   right_flank_sequence="CCGTAACCGGTTAGGCTACTGAC", repeat_motif="ATGC", repeat_unit_length_bp=4)

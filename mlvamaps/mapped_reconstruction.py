@@ -306,8 +306,6 @@ def apply_reconstructed_calls(calls, audit, thresholds):
         row = reconstructed.get(call["locus"])
         if not row or call["status"] == "mixed" or call.get("possible_secondary") or call.get("computational_fallback"):
             continue
-        if row["method"] != "mapped_flank_consensus":
-            continue
         if call.get("consensus_status") in {"resolved_ambiguity", "disagrees"}:
             continue  # Preserve the molecule likelihood after consensus evaluation.
         allele = row["repeat_count"]
@@ -316,8 +314,10 @@ def apply_reconstructed_calls(calls, audit, thresholds):
                         consensus_status="disagrees", estimation_method="",
                         estimation_reason="Supported PCR product conflicts with molecule measurements.")
             continue
-        if call["status"] in {"called", "low_coverage"}:
+        if call["status"] == "called":
             call["consensus_status"] = "agrees"
+            continue
+        if row["method"] != "mapped_flank_consensus":
             continue
         if row["reconstruction_molecules"] < thresholds.minimum_molecules:
             continue

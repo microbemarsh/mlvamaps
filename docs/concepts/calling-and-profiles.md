@@ -42,8 +42,10 @@ confirmation outputs; they do not replace the shared primary call.
 ## Status logic
 
 Primary statuses distinguish called, low-coverage, ambiguous, mixed,
-detected-but-unresolved, and not-found loci. `--min-depth` defaults to one for
-long reads and three for Illumina. Low-depth measured counts remain visible.
+detected-but-unresolved, and not-found loci. The minimum independent support
+defaults to three: `--min-depth` for long reads and
+`--short-min-informative-molecules` for Illumina. Low-depth predictions remain
+visible in diagnostic fields, with a blank primary count.
 A call is ambiguous when the leading probability fails its configured threshold
 or leads the next allele by less than 0.2.
 
@@ -60,8 +62,12 @@ reference matches do not multiply support, and repeat-only cross-mappings do
 not qualify for an alignment estimate.
 
 `PRESENT_COUNT_UNKNOWN` retains the presence classification when sample sizing
-is unidentifiable. A shared finalizer still supplies an explicit prior prediction
-for every valid configured FASTQ locus with an eligible prior. Prior-only counts
+is unidentifiable. The shared finalizer accepts resolved measured or reconstructed
+counts after support, ambiguity and conflict checks. Without an agreeing supported
+consensus, the selected measured allele must also meet the configured independent
+molecule support and dominance fraction. Other predictions, including eligible
+priors, remain in `predicted_repeat_count` and `predicted_repeat_count_raw`;
+`call_accepted` and `call_rejection_reason` record the decision. Prior-only values
 have zero sample-evidence confidence and are excluded from biological comparisons.
 Missing data are never zero-filled. `presence_support` records detected molecules and
 `molecule_support` records informative molecules in the common table. The
@@ -72,9 +78,9 @@ probabilities describe model support, not a calibrated probability of correctnes
 `mlva_fingerprint.tsv` contains one row with one column per panel locus.
 `mlva_fingerprint_probabilistic.tsv` contains long-form repeat counts and
 posterior values.
-Estimated and prior-only counts are included; consult the call status and estimation fields
-before treating a fingerprint value as measured. The HTML report presents every
-panel locus in an always-visible count table, marking estimates with `≈`.
+Only accepted FASTQ counts populate the fingerprint. Diagnostic predictions are
+retained in the probabilistic and per-locus tables. The HTML report presents every
+panel locus, with withheld predictions separated from accepted counts.
 
 Assembly calls use the same fingerprint shape and historical integer/half-unit
 rounding convention. Product selection follows the MLVA_finder-compatible rule

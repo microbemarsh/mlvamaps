@@ -89,7 +89,7 @@ def run_mapping_short_read_call(
         _root, contexts, _members = observed_reference_contexts(database_path, loci, assembly_round_tolerance)
     else:
         contexts = generate_candidate_contexts(loci, maximum=short_max_candidate_repeat_count)
-    recruiter = FlankRecruiter(contexts)
+    recruiter = FlankRecruiter(contexts, loci=loci)
     from .fragment_calibration import OverlapFragmentCollector
     from .short_read_pair_rescue import WeakPairCollector
 

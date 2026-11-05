@@ -9,7 +9,7 @@ Add `--combined-markers` to restore the retrospective repeat-masked SNP plus
 repeat-distance workflow. It uses eight threads by default (`-t/--threads`),
 retains every discovered valid sample in the combined distance matrix and
 metadata, and leaves a distance blank only when two samples have neither a
-shared non-prior-only repeat prediction nor a shared recovered SNP sequence. These repeat values
+shared eligible repeat count nor a shared recovered SNP sequence. These repeat values
 remain usable when retained sequences are unavailable. Supply the rich locus panel with `--loci` when retained amplicons
 must be masked because precomputed masked query sequences are unavailable. For
 current results, the exporter reads `classification/query_amplicons.fasta` for
@@ -51,15 +51,18 @@ Directories containing recognizable `mlvamaps` outputs but no
 `calls.tsv` are reported as `MISSING_CALLS_FILE`.
 
 A locus contributes to a repeat distance only when its final `repeat_count` is
-finite and `prior_only` is false. New FASTQ runs provide complete numerical
-predictions; `mlva_profiles.tsv` preserves these numbers while distance matrices
-and callability filters exclude prior-only values. Join `mlva_calls_long.tsv` for
-evidence classes; a finite value is not necessarily an exact measured genotype.
+finite, `prior_only` is false and `call_accepted` is not explicitly false.
+New FASTQ runs leave rejected counts blank, retaining their candidates in
+`predicted_repeat_count` and their reasons in `call_rejection_reason`.
+`mlva_profiles.tsv` preserves eligible counts and blanks rejected or prior-only
+values; `mlva_calls_long.tsv` retains the original input fields, diagnostic
+predictions and evidence classes. Legacy results without acceptance
+fields retain their previous finite, non-prior-only comparison behavior.
 Legacy/assembly missing calls remain empty and are never converted to zero.
 
-By default, the exporter retains any sample with at least one finite, non-prior-only
-VNTR `repeat_count`; this is equivalent to `--min-callable-fraction 0` and
-`--min-callable-loci 0`. Samples with no eligible VNTR predictions are still excluded
+By default, the exporter retains any sample with at least one eligible VNTR
+`repeat_count`; this is equivalent to `--min-callable-fraction 0` and
+`--min-callable-loci 0`. Samples with no eligible VNTR counts are still excluded
 because no repeat-count distance can be calculated for them.
 
 Use a positive `--min-callable-fraction` when a completeness filter is desired.
@@ -79,7 +82,7 @@ observations.
 
 ## Pairwise MLVA distances
 
-For samples `i` and `j`, `Cij` is the set of loci with finite repeat predictions
+For samples `i` and `j`, `Cij` is the set of loci with finite accepted repeat counts
 and `prior_only` false in both samples. The exporter does not require `EXACT`;
 consumers can apply stricter filters using `genotype_status`. The export reports both:
 
@@ -93,7 +96,7 @@ repeat_distance     = repeat_distance_raw / |Cij|
 
 The default tree metric is `repeat`, the mean absolute repeat-count difference.
 Use `--distance categorical` for the proportion of differing shared alleles.
-A pair is supported by default when it shares at least one exact call
+A pair is supported by default when it shares at least one accepted call
 (`--min-pairwise-loci 1`); the default `--min-pairwise-fraction 0` adds no
 fractional completeness requirement. The fractional denominator, when a
 positive threshold is requested, is the intersection of the two samples'
@@ -101,10 +104,10 @@ assayed loci, so mixing compatible panels does not count loci absent from one
 panel as failed calls. Unsupported pairs remain in
 `mlva_pairwise_distances.tsv` with
 `comparison_status=insufficient_overlap`. Their calculated distance is retained
-when the pair has at least one shared exact call; it is empty only when no
+when the pair has at least one shared accepted call; it is empty only when no
 distance can be calculated. The complete square distance matrix retains every
 sample that passes the per-sample callable threshold, including blank cells for
-pairs with no shared exact calls. The exporter never substitutes zero or a
+pairs with no shared accepted calls. The exporter never substitutes zero or a
 maximum distance. Before tree construction it repeatedly removes the sample
 with the
 most unsupported relationships, then the fewest callable loci and natural
@@ -146,7 +149,7 @@ global_mlva/
 The pairwise long table also retains threshold-passing samples subsequently
 removed for insufficient overlap, making those decisions auditable. The square
 matrix contains all threshold-passing samples in identical row and column order;
-blank cells mean that a pair has no shared exact call.
+blank cells mean that a pair has no shared eligible count.
 
 `mlva_nj.tree` is built with `mlvamaps`' deterministic NumPy neighbor-joining
 implementation. One- and two-sample exports produce valid simple Newick trees;

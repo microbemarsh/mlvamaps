@@ -2,9 +2,15 @@
 
 FASTQ calling requires a completed `--database`. Short and long reads map
 directly to its observed reference loci and share molecule-level repeat
-inference and reference classification. Every valid configured locus receives a
-numerical prediction when an eligible prior exists. Direct measurements take
-precedence; uncertainty changes confidence rather than suppressing the count.
+inference and reference classification. Accepted counts must pass the existing
+depth, model-support and margin criteria. Otherwise `repeat_count` and
+`repeat_count_raw` are blank, while `predicted_repeat_count` and
+`predicted_repeat_count_raw` retain the diagnostic estimate. `call_accepted` and
+`call_rejection_reason` distinguish the two. Presence and observed support remain
+available; assembly calling is unchanged.
+The default minimum is three independent informative molecules in both read
+workflows (`--min-depth` for long reads, `--short-min-informative-molecules`
+for Illumina).
 
 ```bash
 mlvamaps call --database reference_build -i sample.fastq.gz -o results --sample-mode isolate
@@ -14,15 +20,21 @@ Use `--sample-mode isolate` for the isolate-versus-assembly comparison. The
 default `metagenome` mode fits mixtures and should be used for mixed samples.
 
 For paired reads, see the [Illumina workflow](illumina.md).
-For current uncertainty rules, limits, and same-input old/new comparisons, see
-the [mandatory-count validation report](fastq-complete-count-validation.md). The historical
-runtime tables below describe earlier implementations.
+For current output semantics, see [accepted calls and diagnostic predictions](../reference/outputs.md#complete-fastq-predictions-and-confidence).
+The [mandatory-count validation report](fastq-complete-count-validation.md) and
+runtime tables below describe earlier implementations; their complete-count
+benchmarks do not validate the current acceptance policy.
 
 ## 1. Load the database panel and filter reads
 
 The saved `reference_panel.tsv` supplies primers, locus names, repeat
 calibration, and fingerprint order unless `-p` supplies an explicit panel.
 The database's per-locus FASTAs supply the observed mapping targets.
+Every configured panel locus remains in the output, including loci without a
+reference product or usable reads. A missing reference product does not prevent
+primer/flank recruitment from the panel; an accepted count still requires
+supported sample sequence. If neither sample sizing evidence nor an eligible
+prior exists, both the count and diagnostic prediction remain blank.
 Current-schema databases remain usable; their older `competitive_mapping/`
 assets are retained for compatibility but do not supply the primary FASTQ
 mapping targets or numeric allele estimates.
@@ -61,7 +73,10 @@ reference IDs. Alternative reference mappings are preserved. Synthetic repeat
 expansions do not define the sample's allele hypotheses in this path.
 
 For short reads, flank recruitment and mate rescue run during QC and feed the
-same measurement stage. Surviving orphan mates are mapped as unpaired reads;
+same measurement stage. Seeds include configured panel primers/flanks, so a
+locus can be recruited even when its reference product is absent. Seeds must be
+unique across loci and excluded from configured repeats; a complete anchor
+shorter than 21 bases requires at least 15 exact bases. Surviving orphan mates are mapped as unpaired reads;
 they retain the original molecule identity. Conflicting mate measurements remain
 alternatives from one molecule, and a complete product takes precedence over a
 partial measurement. The appropriate technology preset is used for mapping.
@@ -127,7 +142,7 @@ approximate matches still use Sassy's coordinates and traceback.
 
 Measured evidence supplies direct alleles. If direct sizing remains unresolved,
 repeat-spanning CIGAR projections with meaningful aligned support at both flanks
-can provide `ESTIMATED` counts. Conflicting measurements and partial reference
+can provide diagnostic estimates. Conflicting measurements and partial reference
 matches retain best estimates with candidate distributions. Reference copies
 and mate records do not multiply molecule support. Estimates are kept separate
 from measured counts used in reference classification.
@@ -149,15 +164,20 @@ ambiguous-locus, and possible-mixture evidence. Its interval is an observation
 envelope, not a calibrated confidence interval. `sequence_alleles.tsv` reports
 identical complete products observed in at least three independent molecules;
 it does not manufacture a polished sequence from uncertain bases. Isolate
-bimodality retains the best primary count with possible secondary
+bimodality retains the best primary diagnostic prediction with possible secondary
 evidence. Neither that label nor legacy mixture support confirms strain mixtures.
 
 Low-depth calls, mixtures, ambiguous measurements, detected-but-unresolved loci,
-and missing loci retain distinct statuses. The finalizer uses a locus-specific
-prior when sample repeat evidence is absent, including when every read fails QC.
-These predictions carry `prior_only=True` and zero data-evidence confidence.
-Missing evidence is never converted to an arbitrary zero. A locus with neither
-informative evidence nor an eligible prior fails with a configuration error.
+and missing loci retain distinct statuses. The finalizer can retain a locus-specific
+prior prediction when sample repeat evidence is absent, including when every read
+fails QC. These predictions carry `prior_only=True` and zero data-evidence confidence.
+Acceptance follows all reconstruction and rescue steps. Low depth, prior-only
+evidence, partial or unbounded lengths, conflicting alleles, computational limits,
+and indirect length estimates cannot supply accepted counts. Direct measurement
+or supported reconstruction must also pass the existing resolution thresholds;
+these are not calibrated probabilities of correctness. Missing calls stay blank,
+never zero. A locus with neither informative evidence nor an eligible prior has
+no diagnostic prediction either.
 See [prior and confidence definitions](../reference/outputs.md#complete-fastq-predictions-and-confidence).
 
 ## 5. Confirm representative sequences
@@ -213,13 +233,13 @@ by itself establish a reference identity.
 ## 7. Export results
 
 Start with `report.html`, `calls.tsv`, `mlva_fingerprint.tsv`, and
-`locus_repeat_counts.tsv`. Fingerprints contain all predictions; biological
-comparisons exclude prior-only values. Use the same panel calibration and `--assembly-round-tolerance` when
+`locus_repeat_counts.tsv`. Fingerprints and repeat distances contain accepted
+counts only; per-locus tables retain withheld predictions and reasons. Use the
+same panel calibration and `--assembly-round-tolerance` when
 comparing FASTQ and assembly fingerprints.
 
-Low-confidence predictions supported by sample evidence remain available to
-profile and combined-marker distances. Their status, uncertainty, and support
-remain explicit; including them does not make the estimate exact. For FASTQ
+Withheld predictions do not enter profile or combined-marker repeat distances.
+The report displays them separately for review. For FASTQ
 combined-marker exports, the current reconstruction audit governs sample sequence
 eligibility. Rejected or mismatched products cannot re-enter through stale
 classification or local-assembly files. Empty runs clear the current query
@@ -231,7 +251,53 @@ shotgun, and long reads, novel and fractional alleles, zero-repeat products,
 primer indels, and primer rescue when mapping misses reads. Performance and
 accuracy on a particular sample still require comparison with its known truth.
 
+Apply the new acceptance policy with a fresh FASTQ run. Successful short-read
+batch directories resume by default: use a new output directory or `--force`
+to recompute them. Re-exporting old results alone does not re-evaluate calls.
+
+## Accuracy-first acceptance check (2026-11-05)
+
+The [validation record](../reference/fastq-accuracy-benchmark.json) compares the
+new acceptance policy with commit `9cf4c79` on identical organism-independent
+synthetic inputs. Clean paired and long-read fixtures retain all **11/11** correct
+calls at each of three copy levels. The difficult fixtures each contain 14
+truth-known loci; abstentions remain in the callability denominator.
+
+| Fixture copies | Paired correct / accepted | Paired accepted / 14 | Long correct / accepted | Long accepted / 14 |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 4/4 | 4/14 | 7/7 | 7/14 |
+| 2 | 4/4 | 4/14 | 7/7 | 7/14 |
+| 4 | 5/5 | 5/14 | 8/8 | 8/14 |
+
+The previous primary predictions were correct at 9/14, 10/14 and 8/14 paired
+loci, and 11/14 long-read loci at every copy level. Diagnostic predictions are
+unchanged. No incorrect counts remain accepted in these development fixtures,
+but correct predictions are also withheld: 5, 6 and 3 paired counts and 4, 4 and
+3 long-read counts. The coverage cost is substantial on these difficult inputs.
+
+These results measure selective abstention, not improved underlying length
+estimation, calibrated accuracy or real-cohort distance concordance. Copy levels
+change molecule multiplicity and seeded errors; they are not nested genomic
+downsampling. Validation records retain input/source hashes, per-locus decisions,
+and rejected correct predictions. One trial per configuration supports no runtime
+claim. Matched server-cohort validation remains necessary.
+
+The final commit also adds panel-only recruitment, permits sufficiently supported
+consensus to resolve low-depth measurements, and filters rejected values from
+MYOGA wide profiles. Replaying all 12 frozen fixture configurations after these
+fixes preserves the table above. Separate native CLI regressions recover an
+absent-reference locus from full flanks or a 20-base primer-only panel, with
+assembly enabled or disabled, and retain a no-read locus with a blank count.
+Shared short primers remain excluded even when embedded in another locus's
+longer flank. The full native suite passes **707 tests**. Final source hashes and
+replay results are recorded in `final_workspace_validation` in the validation
+record; the earlier frozen measurements remain intact.
+
 ## FASTQ concordance sweep (2026-11-03)
+
+This historical sweep used mandatory numerical completion. Its counts, accuracy
+denominators and timings below are retained as recorded; they do not describe
+the current sparse-call acceptance policy.
 
 The complete native-enabled suite passed **552 tests**. Regressions cover orphan
 mates, conflicting measurements, independent loci on both strands of a genomic

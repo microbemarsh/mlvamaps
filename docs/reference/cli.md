@@ -165,7 +165,7 @@ correctness claims. Paired length estimates never qualify as `EXACT`.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--min-depth` | `1` | Informative reads required to avoid `LOW_DEPTH`. One repeat-informative read is sufficient for a provisional call. |
+| `--min-depth` | `3` | Independent informative molecules required for an accepted long-read count. Lower support remains diagnostic. Illumina uses `--short-min-informative-molecules` (also default `3`). |
 | `--min-posterior` | `0.75` | Required top repeat-count probability for FASTQ and assembly calls. |
 | `--repeat-range-tolerance` | `1.0` | Number of repeats allowed beyond either expected locus bound before assigning `OUT_OF_RANGE`. |
 | `--max-confidence-depth` | `25` | Maximum effective dominant-cluster evidence used to sharpen FASTQ allele confidence. |

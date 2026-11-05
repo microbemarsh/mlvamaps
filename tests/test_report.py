@@ -223,6 +223,23 @@ def test_report_displays_estimates_with_support_without_labelling_them_confident
     assert "NA · ESTIMATED" not in report
 
 
+def test_report_separates_withheld_prediction_from_repeat_call(tmp_path):
+    rows = [{"locus_id": "uncertain", "called_repeat_count": "", "primary_repeat_count_raw": "",
+        "posterior_probability": .9, "read_depth": 1, "call_status": "LOW_DEPTH",
+        "predicted_repeat_count": 7, "predicted_repeat_count_raw": 6.8, "call_accepted": False,
+        "estimation_reason": "repeat-region CIGAR indels < diagnostic",
+        "call_rejection_reason": "Independent support < required minimum."}]
+    write_report(tmp_path, "sample", rows, [Locus("uncertain")])
+    report = (tmp_path / "report.html").read_text()
+    table = report.split('<table aria-label="Per-locus repeat counts">')[1].split('</table>')[0]
+    assert "<strong>Withheld</strong>" in table and "<strong>7</strong>" not in table
+    assert "Diagnostic prediction (not called)" in table and "<td>7 (raw 6.8)</td>" in table
+    assert "Call withheld: Independent support &lt; required minimum." in table
+    assert "repeat-region CIGAR indels &lt; diagnostic" in table
+    assert "NA · LOW_DEPTH" in report and "7 repeats" not in report
+    assert "excluded from repeat-count comparisons" in report
+
+
 @pytest.mark.parametrize("assembly", [False, True])
 def test_repeat_table_is_visible_and_includes_every_panel_locus(tmp_path, assembly):
     loci = [Locus("zero"), Locus("estimated"), Locus("missing<locus>")]

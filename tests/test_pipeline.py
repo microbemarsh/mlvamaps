@@ -283,7 +283,8 @@ def test_dropout_is_reported(tmp_path):
     easy_calls = {row["locus_id"]: row for row in read_tsv(result["calls"])}
     assert easy_calls["VNTR_01"]["present"] == "no"
     for row in easy_calls.values():
-        assert float(row["repeat_count"]) >= 0 and row["prior_only"] == "True"
+        assert row["repeat_count"] == "" and row["prior_only"] == "True"
+        assert float(row["predicted_repeat_count"]) >= 0 and row["call_accepted"] == "False"
         assert row["genotype_status"] == "PRIOR_ONLY" and float(row["data_evidence_confidence"]) == 0
     assert result["myoga_loci"].exists()
     assert not (output / "query_loci.fasta").read_text().strip()
@@ -689,7 +690,7 @@ def test_cli_has_conventional_output_and_thread_options():
     )
     assert call_args.outdir == "run"
     assert call_args.threads == 4
-    assert call_args.min_depth == 1
+    assert call_args.min_depth == 3
     assert call_args.repeat_range_tolerance == 1.0
 
     default_call_args = parser.parse_args(

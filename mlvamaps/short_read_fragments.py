@@ -43,42 +43,68 @@ def _seed_matcher(seeds):
 class FlankRecruiter:
     """Scan with the installed native regex engine; retain relevant molecules."""
 
-    def __init__(self, contexts: list[CandidateContext], seed_length: int = 21):
+    def __init__(self, contexts: list[CandidateContext], seed_length: int = 21, *, loci=()):
         owners = defaultdict(set)
         flanks = set()
         repeats = set()
         for context in contexts:
-            flanks.add((context.locus_id, "left", context.sequence[:context.repeat_start]))
-            flanks.add((context.locus_id, "right", context.sequence[context.repeat_end:]))
+            flanks.add((context.locus_id, "left", context.sequence[:context.repeat_start], seed_length))
+            flanks.add((context.locus_id, "right", context.sequence[context.repeat_end:], seed_length))
             repeats.add(context.sequence[context.repeat_start:context.repeat_end])
             if context.repeat_motif and set(context.repeat_motif) <= set("ACGT"):
                 repeats.add(context.repeat_motif * (2 + seed_length // len(context.repeat_motif)))
-        for locus, side, sequence in flanks:
-            for start in range(len(sequence) - seed_length + 1):
-                seed = sequence[start:start + seed_length]
+        for locus in loci:
+            # Panel anchors also recruit loci absent from the reference bank.
+            # Shorter complete primers need at least 15 exact bases; their
+            # products still pass the shared molecule measurement checks.
+            for side, sequence in (("left", locus.forward_primer + locus.left_flank_sequence),
+                                   ("right", locus.right_flank_sequence + revcomp(locus.reverse_primer))):
+                if len(sequence) >= 15:
+                    flanks.add((locus.locus_id, side, sequence, min(seed_length, len(sequence))))
+            if locus.repeat_motif and set(locus.repeat_motif) <= set("ACGT"):
+                repeats.add(locus.repeat_motif * (2 + seed_length // len(locus.repeat_motif)))
+        for locus, side, sequence, length in flanks:
+            for start in range(len(sequence) - length + 1):
+                seed = sequence[start:start + length]
                 if set(seed) <= set("ACGT") and len(set(seed)) >= 3:
                     owners[min(seed, revcomp(seed))].add((locus, side))
+        # A short primer inside another locus's longer flank is also shared.
+        # Check its ownership without creating shorter seeds for every flank.
+        for length in {len(seed) for seed in owners}:
+            for locus, side, sequence, own_length in flanks:
+                if length == own_length:
+                    continue
+                for start in range(len(sequence) - length + 1):
+                    seed = sequence[start:start + length]
+                    canonical = min(seed, revcomp(seed))
+                    if canonical in owners:
+                        owners[canonical].add((locus, side))
         self.seeds = {}
         for seed, locations in owners.items():
             if len({locus for locus, _side in locations}) == 1:
                 self.seeds[seed] = self.seeds[revcomp(seed)] = locations
         # A flank-like seed found inside any configured repeat is not unique.
-        matcher = _seed_matcher(self.seeds)
-        if matcher:
+        # Separate lengths keep a short primer from masking longer trie seeds.
+        lengths = sorted({len(seed) for seed in self.seeds})
+        for length in lengths:
+            matcher = _seed_matcher([seed for seed in self.seeds if len(seed) == length])
+            if matcher is None:
+                continue
             for sequence in repeats:
                 for match in matcher.finditer(sequence):
                     seed = match.group(1)
                     self.seeds.pop(seed, None)
                     self.seeds.pop(revcomp(seed), None)
-        self.matcher = _seed_matcher(self.seeds)
+        self.matchers = [matcher for length in lengths
+                         if (matcher := _seed_matcher([seed for seed in self.seeds if len(seed) == length]))]
         self.fragments: dict[str, dict[str, RecruitedFragment]] = defaultdict(dict)
         self.ambiguous_fragments = 0
 
     def add(self, pair: ReadPair) -> None:
-        if self.matcher is None:
+        if not self.matchers:
             return
         hits = [
-            {location for match in self.matcher.finditer(read.sequence)
+            {location for matcher in self.matchers for match in matcher.finditer(read.sequence)
              for location in self.seeds[match.group(1)]}
             for read in (pair.read1, pair.read2) if read is not None
         ]

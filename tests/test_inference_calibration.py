@@ -59,8 +59,10 @@ def test_conflicting_and_partial_fallbacks_keep_raw_counts_and_use_final_roundin
         calls, _ = infer_alleles(evidence, [locus], [], "s", "illumina", require_measurement=True)
         estimate_unresolved_calls(calls, evidence, [], loci=[locus], round_tolerance=tolerance)
         finalize_repeat_count_calls(calls, evidence, [locus], [], round_tolerance=tolerance)
-        assert calls[0]["repeat_count_raw"] == raw
-        assert calls[0]["repeat_count"] == legacy_round_repeat_count(raw, tolerance)
+        assert calls[0]["predicted_repeat_count_raw"] == raw
+        assert calls[0]["predicted_repeat_count"] == legacy_round_repeat_count(raw, tolerance)
+        assert calls[0]["repeat_count"] == calls[0]["repeat_count_raw"] == ""
+        assert not calls[0]["call_accepted"]
         assert not calls[0]["prior_only"]
 
 
@@ -73,7 +75,8 @@ def test_mixture_at_minimum_observed_support_keeps_both_alleles_and_actual_depth
     calls, _ = infer_alleles(evidence, [locus], [], "s", "illumina", require_measurement=True,
                             sample_mode="metagenome")
     finalize_repeat_count_calls(calls, evidence, [locus], [])
-    assert calls[0]["status"] == "mixed" and calls[0]["repeat_count"] == 5
+    assert calls[0]["status"] == "mixed" and calls[0]["repeat_count"] == ""
+    assert calls[0]["predicted_repeat_count"] == 5 and not calls[0]["call_accepted"]
     assert calls[0]["secondary_repeat"] == 8
     assert calls[0]["presence_support"] == 14 and calls[0]["molecule_support"] == 9
     assert calls[0]["primary_molecule_support"] == 6 and calls[0]["secondary_molecule_support"] == 3

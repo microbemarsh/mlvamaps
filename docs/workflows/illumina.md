@@ -8,7 +8,28 @@ orphan mates also participate in recruitment, direct measurement and local
 assembly. Use `--short-no-assembly` to disable local graph and consensus
 reconstruction while retaining read mapping and molecule likelihoods.
 
+Recruitment uses both observed reference flanks and configured panel anchors.
+This includes primer-panel loci without a database product; complete reads or
+overlapping pairs can still supply a measured count. Every panel locus remains
+in the results, with a blank accepted count and an explicit reason when the
+sample evidence cannot resolve it.
+
+Current FASTQ outputs prioritize supported calls over completeness. Accepted
+`repeat_count`/`repeat_count_raw` values are otherwise blank;
+`predicted_repeat_count`/`predicted_repeat_count_raw` retain diagnostic candidates,
+with `call_accepted` and `call_rejection_reason` explaining the decision. Low-depth,
+prior-only, partial/unbounded, conflicting and indirect estimates do not enter
+fingerprints or repeat distances. Direct measurements or supported reconstruction
+must meet the existing depth, model-support and margin criteria; those scores are
+not calibrated accuracy guarantees. Presence support and assembly behavior are
+unchanged. See the [output reference](../reference/outputs.md#complete-fastq-predictions-and-confidence).
+
 ## Mapping-only paired-read inference (2026-11-03)
+
+The dated validation results below predate the current acceptance policy and
+retain their original mandatory-count accuracy denominators. Unbounded and
+indirect rescue predictions now remain diagnostic estimates with blank accepted
+counts; the historical results do not establish current cohort concordance.
 
 For an isolate, run:
 
@@ -275,7 +296,7 @@ If library fragment lengths have been calibrated independently, supply
 describe the full library fragment length, including both reads. In isolate mode,
 unresolved loci can use a bounded joint length model combining opposite-flank
 pairs, partial boundary pairs, anchored lower bounds, and repeat-only mates of
-uniquely anchored reads. These calls remain low-confidence `ESTIMATED`, with
+uniquely anchored reads. These remain diagnostic predictions, with
 method `joint_short_read_length` (`short_read_joint_length_likelihood` in the
 common inference table); they cannot replace direct
 measurements or create measured support for classification.
@@ -298,7 +319,7 @@ observations scored together and every original molecule counted once. A finite
 search limit is reported as `candidate_grid_high`, separately from length
 uncertainty. Bounds alone, repeat-only mates alone, or a likelihood still supported
 at the upper search edge leave `repeat_interval_high` blank and
-`upper_unbounded=True`. A required numeric point prediction can still depend on
+`upper_unbounded=True`. A diagnostic point prediction can still depend on
 the locus prior; it does not establish an upper length. Resource-limited fallback
 retains a bound-constrained estimate with zero model support and unknown upper
 length.
@@ -385,8 +406,8 @@ and rounding. Original fragment IDs supply support; an assembled product
 is not reported as multiple independently observed full-spanning reads.
 
 If assembly fails and no independent sequence measurement resolves the count,
-usable mapping evidence can still supply a low-confidence `ESTIMATED` count.
-This remains distinct from an independently measured product. Loci without
+usable mapping evidence can still supply a diagnostic prediction, with the
+accepted count left blank. Loci without
 usable sizing evidence receive explicit prior-only predictions with zero
 sample-evidence confidence, provided a locus-specific prior is available.
 
@@ -569,17 +590,18 @@ Each assembled product, merged pair, and original read uses the same panel
 anchors and assembly-calibrated repeat convention. Direct counts require an
 independent product or flank measurement. Both boundaries on separate unmerged
 mates do not establish a measured repeat interval. Adequately flank-supported
-spanning CIGAR evidence or calibrated paired lengths can provide an `ESTIMATED`
-count. Conflicting observations and partial reference matches retain a best
+spanning CIGAR evidence or calibrated paired lengths can provide a diagnostic
+prediction. Conflicting observations and partial reference matches retain a best
 numeric estimate with uncertainty. Exact terminal motif runs with a unique flank
 condition a locus prior on a lower bound. These distinctions appear in `genotype_evidence.tsv`.
 
 `common_locus_calls.tsv` separates all detected molecules (`presence_support`)
 from informative molecules (`molecule_support`). The compact call table uses
 `PRESENT_COUNT_UNKNOWN` for detected loci without identifiable sample sizing.
-Every valid configured locus still receives a numerical prediction when an
-eligible prior exists. Prior-only predictions have zero sample-evidence confidence;
-presence is never inferred from a nonempty count. Reported intervals may describe
+Diagnostic predictions remain available when evidence or an eligible prior
+supports them; withheld accepted counts stay blank. Prior-only predictions have
+zero sample-evidence confidence. Presence is never inferred from a prediction.
+Reported intervals may describe
 bounded candidate envelopes rather than measured spans.
 
 ## Mixtures and confidence
@@ -590,11 +612,13 @@ defensible alleles are preserved with primary/secondary support, informative
 molecules, fractions, and `mixture_status`. Fractions are left empty when no
 allele-discriminating molecule exists.
 
-Confidence reasons are textual and auditable. A primer/flank-bounded local
-assembly with adequate molecule support is high confidence; direct molecule
-evidence without depth is provisional; conflicts lower confidence; interval or
-presence-only rows have no falsely precise probability. The HTML report uses a
-dedicated Illumina table and labels unresolved rows explicitly.
+Acceptance reasons are textual and auditable. A primer/flank-bounded local
+assembly with adequate molecule support can supply an accepted count. Direct
+calls without an agreeing supported consensus also need enough independently
+agreeing molecules and a selected-allele fraction meeting the existing minimum
+probability threshold. Insufficient support and unresolved conflicts withhold
+the count. The HTML report separates diagnostic predictions from accepted calls;
+neither model support nor acceptance establishes calibrated accuracy.
 
 ## Metadata and MYOGA
 
@@ -628,7 +652,9 @@ mlvamaps call -p panel.tsv -i sr --manifest samples.tsv \
 Samples run independently and write to `results/<sample_id>/`. One malformed or
 missing sample is recorded in `results/batch_summary/batch_status.tsv` without
 stopping the rest.
-Successful sample directories resume by default; use `--force` to recompute.
+Successful sample directories resume by default; use a fresh output directory or
+`--force` to recompute calls under the current acceptance policy. Re-exporting old
+results alone does not apply it.
 Combined standard, sample-summary, and MYOGA tables are written at the batch
 root's clearly scoped `batch_summary/` directory.
 

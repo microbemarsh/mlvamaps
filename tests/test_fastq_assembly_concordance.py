@@ -239,7 +239,7 @@ def test_short_read_fingerprint_matches_assembly(tmp_path, layout, tolerance, mo
     reason="minimap2 and sassy are needed for workflow estimates",
 )
 @pytest.mark.parametrize("technology", ["short", "long"])
-def test_alignment_estimate_reaches_html_tables_and_fingerprint(tmp_path, monkeypatch, technology):
+def test_alignment_estimate_remains_diagnostic_across_exports(tmp_path, monkeypatch, technology):
     from types import SimpleNamespace
     from mlvamaps.pipeline import run_call
     from mlvamaps.short_reads import run_short_read_call
@@ -275,15 +275,18 @@ def test_alignment_estimate_reaches_html_tables_and_fingerprint(tmp_path, monkey
         with path.open() as handle:
             return list(csv.DictReader(handle, delimiter="\t"))
     calls = rows(paths["calls"])
-    assert calls[0]["repeat_count"] == "5" and calls[0]["status"] == "ESTIMATED"
+    assert calls[0]["repeat_count"] == "" and calls[0]["status"] == "ESTIMATED"
+    assert calls[0]["predicted_repeat_count"] == "5" and calls[0]["call_accepted"] == "False"
     assert calls[0]["estimation_method"] == "alignment_repeat_span"
     assert calls[0]["estimate_support"] == "4"
-    assert calls[1]["repeat_count"] == "4" and calls[1]["prior_only"] == "True"
+    assert calls[1]["repeat_count"] == "" and calls[1]["prior_only"] == "True"
+    assert calls[1]["predicted_repeat_count"] == "4"
     assert float(calls[1]["data_evidence_confidence"]) == 0
-    assert rows(paths["repeat_counts"])[0]["repeat_count"] == "5"
-    assert _fingerprint(paths["fingerprint"])[loci[0].locus_id] == "5"
+    assert rows(paths["repeat_counts"])[0]["repeat_count"] == ""
+    assert _fingerprint(paths["fingerprint"])[loci[0].locus_id] == ""
     report = paths["report"].read_text()
-    assert "<strong>≈5</strong>" in report and "repeat-region CIGAR indels" in report
+    assert "Withheld" in report and "Diagnostic prediction (not called)" in report
+    assert "repeat-region CIGAR indels" in report
     assert loci[1].locus_id in report and "Unavailable" in report
     evidence = rows(tmp_path / "out" / "molecule_candidate_evidence.tsv")
     assert all(row["inferred_molecule_repeat"] == "" for row in evidence)

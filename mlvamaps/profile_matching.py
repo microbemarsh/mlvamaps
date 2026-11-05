@@ -7,8 +7,9 @@ from .allele_inference import CONFIDENCE_FIELDS
 
 
 def repeat_is_comparable(row):
-    """Prior predictions never become observations; legacy/assembly rows remain usable."""
-    return str(row.get("prior_only", "")).lower() not in {"true", "yes", "1"}
+    """Only accepted observations are compared; legacy/assembly rows remain usable."""
+    return (str(row.get("prior_only", "")).lower() not in {"true", "yes", "1"}
+            and str(row.get("call_accepted", "")).lower() not in {"false", "no", "0"})
 
 
 def _comparison_fingerprint(fingerprint, allele_rows):

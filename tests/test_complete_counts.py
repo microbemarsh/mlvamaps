@@ -1,4 +1,4 @@
-"""Complete numeric predictions retain independent evidence semantics."""
+"""Diagnostic predictions survive abstention without becoming accepted counts."""
 from mlvamaps.pipeline import simple_call_rows_from_alleles
 from mlvamaps.profile_matching import build_fingerprint
 from mlvamaps.models import Locus
@@ -22,7 +22,7 @@ def complete(evidence=(), locus=None, contexts=(), limits=None, mode="isolate"):
     return calls[0], molecules
 
 
-def test_zero_depth_exports_keep_selected_count_and_absence():
+def test_legacy_zero_depth_exports_keep_selected_count_and_absence():
     alleles = [dict(locus_id="L", called_repeat_count=4, read_depth=0,
                     call_status="LOCUS_DROPOUT")]
     row = simple_call_rows_from_alleles("s", alleles)[0]
@@ -38,17 +38,21 @@ def test_prior_is_explicit_and_reference_copy_invariant():
     assert locus_repeat_prior(locus, contexts)[0] == {4: .5, 8: .5}
     assert locus_repeat_prior(locus, contexts + [context] * 100) == locus_repeat_prior(locus, contexts)
     row, molecules = complete(locus=locus, contexts=contexts)
-    assert row["repeat_count"] == 4 and row["prior_only"] and not molecules
+    assert row["predicted_repeat_count"] == 4 and row["prior_only"] and not molecules
+    assert row["repeat_count"] == "" and not row["call_accepted"]
     assert row["model_support"] == .5 and row["data_evidence_confidence"] == row["independent_support"] == 0
     assert row["presence_support"] == 0 and row["status"] == "not_found"
     assert row["second_best_repeat_count"] == 8
-    with pytest.raises(ValueError, match="eligible locus-specific prior"):
-        complete(locus=locus)
-    with pytest.raises(ValueError, match="eligible locus-specific prior"):
-        complete(locus=replace(locus, expected_product_size_bp=200, repeat_unit_length_bp=4))
-    assert complete(locus=replace(locus, expected_min_repeats=2, expected_max_repeats=8))[0]["repeat_count"] == 2
+    for uncalibrated in (locus, replace(locus, expected_product_size_bp=200, repeat_unit_length_bp=4)):
+        unresolved, molecules = complete(locus=uncalibrated)
+        assert unresolved["repeat_count"] == unresolved["predicted_repeat_count"] == ""
+        assert not unresolved["call_accepted"] and not molecules
+        assert "eligible locus-specific prior" in unresolved["estimation_reason"]
+    ranged, _ = complete(locus=replace(locus, expected_min_repeats=2, expected_max_repeats=8))
+    assert ranged["predicted_repeat_count"] == 2 and ranged["repeat_count"] == ""
     zero = complete(locus=replace(locus, expected_max_repeats=0))[0]
-    assert zero["repeat_count"] == 0 and zero["prior_only"]
+    assert zero["predicted_repeat_count"] == 0 and zero["prior_only"]
+    assert zero["repeat_count"] == "" and not zero["call_accepted"]
     bounded = complete(locus=replace(locus, expected_max_repeats=1000000), limits=InferenceThresholds(maximum_candidates=1))[0]
     assert bounded["repeat_interval_high"] == 1000000 and bounded["computational_fallback"]
 
@@ -59,7 +63,8 @@ def test_bounded_likelihood_keeps_large_noisy_measurements(mode, limit):
     rows = [CandidateEvidence("L", 4, str(i), measured_repeat_count=400,
             raw_repeat_count=400, repeat_sigma=100, direct_product_measurement=True) for i in range(3)]
     call, molecules = complete(rows, limits=InferenceThresholds(**limit), mode=mode)
-    assert call["repeat_count"] == 400 and not call["prior_only"] and len(molecules) == 3
+    assert call["predicted_repeat_count"] == 400 and not call["prior_only"] and len(molecules) == 3
+    assert call["repeat_count"] == "" and not call["call_accepted"]
     assert call["computational_fallback"] and call["data_evidence_confidence"] < .01
     assert call["repeat_interval_high"] >= 700
     assert complete(rows * 10, limits=InferenceThresholds(**limit), mode=mode)[0] == call
@@ -71,15 +76,18 @@ def test_ambiguous_locus_is_never_sample_support_for_a_prior(tmp_path):
                 quality_flags=("ambiguous_locus",), metadata={"pair_repeat_count": 9})]
     call, molecules = complete(evidence, locus)
     write_evidence_reports([call], evidence, [locus], tmp_path, InferenceThresholds())
-    assert call["repeat_count"] == 4 and call["prior_only"] and not molecules
+    assert call["predicted_repeat_count"] == 4 and call["prior_only"] and not molecules
+    assert call["repeat_count"] == "" and not call["call_accepted"]
     assert call["data_evidence_confidence"] == call["independent_support"] == 0
     assert call["genotype_status"] == "AMBIGUOUS_LOCUS" and call["presence_support"] == 1
 
 
-def test_prior_counts_are_exported_but_not_compared():
+def test_prior_predictions_are_diagnostic_and_not_compared():
     row, _ = complete()
     alleles = [dict(locus_id="L", called_repeat_count=row["repeat_count"], **row)]
-    fingerprint, _ = build_fingerprint("s", alleles, [Locus("L")])
+    fingerprint, probabilistic = build_fingerprint("s", alleles, [Locus("L")])
+    assert fingerprint[0]["L"] == probabilistic[0]["repeat_count"] == ""
+    assert probabilistic[0]["predicted_repeat_count"] == 4
     profiles = [dict(profile_id="reference", L=4)]
     matches = match_profiles("s", fingerprint[0], profiles, alleles)
     assert matches[0]["compared_loci"] == 0
@@ -88,7 +96,8 @@ def test_prior_counts_are_exported_but_not_compared():
     from types import SimpleNamespace
     import numpy as np
     matrix, rows = build_call_matrix([SimpleNamespace(sample_id="s", rows=[dict(locus_id="L", **row)])], ["L"])
-    assert np.isnan(matrix[0, 0]) and rows["s"]["L"]["repeat_count"] == 4
+    assert np.isnan(matrix[0, 0]) and rows["s"]["L"]["repeat_count"] == ""
+    assert rows["s"]["L"]["predicted_repeat_count"] == 4
 
 
 def test_partial_bounds_condition_prior_without_counting_mates_or_copies(tmp_path):
@@ -96,14 +105,15 @@ def test_partial_bounds_condition_prior_without_counting_mates_or_copies(tmp_pat
     rows = [CandidateEvidence("L", 4, "m", metadata={"repeat_lower_bound": 15}),
             CandidateEvidence("L", 4, "m", metadata={"repeat_lower_bound": 12})]
     call, molecules = complete(rows, locus)
-    assert call["repeat_count"] == 15 and not molecules and not call["prior_only"]
+    assert call["predicted_repeat_count"] == 15 and not molecules and not call["prior_only"]
+    assert call["repeat_count"] == "" and not call["call_accepted"]
     assert call["independent_support"] == 1 and call["data_evidence_confidence"] < .1
     assert call["repeat_interval_high"] == "" and call["upper_unbounded"]
     assert call["candidate_grid_high"] > 15 and call["candidate_grid_low"] == 15
     assert complete(rows * 20, locus)[0] == call
     write_evidence_reports([call], rows, [locus], tmp_path, InferenceThresholds())
     assert call["genotype_status"] == "LOWER_BOUND"
-    assert complete(rows, replace(locus, expected_product_size_bp=0))[0]["repeat_count"] == 15
+    assert complete(rows, replace(locus, expected_product_size_bp=0))[0]["predicted_repeat_count"] == 15
 
 
 def test_conflicting_candidates_use_joint_likelihood_and_never_reference_copy_votes():
@@ -111,11 +121,13 @@ def test_conflicting_candidates_use_joint_likelihood_and_never_reference_copy_vo
                 raw_repeat_count=value, repeat_sigma=.2, direct_product_measurement=True)
             for molecule, values in (("a", (4, 8)), ("b", (6, 8))) for value in values]
     call, molecules = complete(rows)
-    assert call["repeat_count"] == 8 and call["estimate_source"] == "conflicting_measurements"
+    assert call["predicted_repeat_count"] == 8 and call["estimate_source"] == "conflicting_measurements"
+    assert call["repeat_count"] == "" and not call["call_accepted"]
     assert call["independent_support"] == 2 and not molecules
     assert complete(rows + [rows[0]] * 100)[0] == call
     limited, _ = complete(rows, limits=InferenceThresholds(maximum_candidates=1))
-    assert limited["repeat_count"] == 8 and limited["computational_fallback"]
+    assert limited["predicted_repeat_count"] == 8 and limited["computational_fallback"]
+    assert limited["repeat_count"] == "" and not limited["call_accepted"]
 
 
 def test_spanning_alignment_supersedes_partial_only_uncertainty():
@@ -131,7 +143,8 @@ def test_spanning_alignment_supersedes_partial_only_uncertainty():
     estimate_unresolved_calls(calls, evidence, [context])
     finalize_repeat_count_calls(calls, evidence, [locus], [context])
     call, = calls
-    assert call["repeat_count"] == 6 and call["repeat_interval_high"] == 6
+    assert call["predicted_repeat_count"] == 6 and call["repeat_interval_high"] == 6
+    assert call["repeat_count"] == "" and not call["call_accepted"]
     assert not call["upper_unbounded"] and call["finite_length_support"]
     assert call["length_model_status"] == "superseded_by_spanning_alignment" and not molecules
 
@@ -141,7 +154,8 @@ def test_competing_pair_lengths_precede_partial_or_prior_predictions():
                 "pair_repeat_sigma": .2, "pair_alignment_score": 100, "repeat_lower_bound": 2})
             for molecule, values in (("a", (4, 8)), ("b", (6, 8))) for value in values]
     call, molecules = complete(rows)
-    assert call["repeat_count"] == 8 and call["estimate_source"] == "paired_fragment_length"
+    assert call["predicted_repeat_count"] == 8 and call["estimate_source"] == "paired_fragment_length"
+    assert call["repeat_count"] == "" and not call["call_accepted"]
     assert call["independent_support"] == 2 and not molecules and call["molecule_support"] == 0
     assert complete(rows + [rows[0]] * 100)[0] == call
 
@@ -189,20 +203,31 @@ def test_challenge_completion_export_agreement_and_determinism(tmp_path, layout,
     calls = {row["locus"]: row for row in read("common_locus_calls.tsv")}
     assert set(calls) == set(truth) and len(read("common_locus_calls.tsv")) == len(truth)
     for call in calls.values():
-        assert math.isfinite(float(call["repeat_count"])) and float(call["repeat_count"]) >= 0
+        assert math.isfinite(float(call["predicted_repeat_count"])) and float(call["predicted_repeat_count"]) >= 0
+        assert call["repeat_count"] == (call["predicted_repeat_count"] if call["call_accepted"] == "True" else "")
+        assert bool(call["call_rejection_reason"]) == (call["call_accepted"] == "False")
     for name in ("calls.tsv", "locus_repeat_counts.tsv", "mlva_fingerprint_probabilistic.tsv", "genotype_evidence.tsv", "myoga_loci.csv"):
         rows = read(name, "," if name.endswith("csv") else "\t")
         assert len(rows) == len(truth)
         for row in rows:
             locus = row.get("locus") or row["locus_id"]
-            assert float(row["repeat_count"]) == float(calls[locus]["repeat_count"])
+            assert row["repeat_count"] == calls[locus]["repeat_count"]
+            assert float(row["predicted_repeat_count"]) == float(calls[locus]["predicted_repeat_count"])
+            assert row["predicted_repeat_count_raw"] == calls[locus]["predicted_repeat_count_raw"]
+            assert row["call_accepted"] == calls[locus]["call_accepted"]
             assert row["prior_only"] == calls[locus]["prior_only"]
     if layout == "long":
         for row in read("allele_calls.tsv"):
-            assert float(row["called_repeat_count"]) == float(calls[row["locus_id"]]["repeat_count"])
-        assert float(calls["long_array"]["repeat_count"]) == 400
+            assert row["called_repeat_count"] == calls[row["locus_id"]]["repeat_count"]
+            assert float(row["predicted_repeat_count"]) == float(calls[row["locus_id"]]["predicted_repeat_count"])
+        assert float(calls["long_array"]["predicted_repeat_count"]) == 400
+        # This long-array fixture was already ambiguous: twelve matching
+        # measurements give model support below the configured call threshold.
+        assert float(calls["long_array"]["model_support"]) < InferenceThresholds().minimum_probability
+        assert calls["long_array"]["repeat_count"] == ""
+        assert calls["long_array"]["call_accepted"] == "False"
     fingerprint = read("mlva_fingerprint.tsv")[0]
-    assert all(float(fingerprint[locus]) == float(call["repeat_count"]) for locus, call in calls.items())
+    assert all(fingerprint[locus] == call["repeat_count"] for locus, call in calls.items())
     for locus in ("absent", "zero_coverage"):
         assert calls[locus]["prior_only"] == "True"
         assert float(calls[locus]["data_evidence_confidence"]) == float(calls[locus]["independent_support"]) == 0

@@ -1,5 +1,10 @@
 # Mandatory FASTQ repeat counts: implementation and validation
 
+This is a historical validation record. Current FASTQ runs retain these
+predictions diagnostically and leave rejected primary counts blank; see the
+[current FASTQ acceptance rules](fastq.md). The results below describe the
+earlier mandatory-count behavior and have not been reinterpreted as accepted calls.
+
 Every successfully completed FASTQ run now contains one finite, nonnegative
 repeat-count prediction per configured locus when an eligible locus prior is
 available. Confidence thresholds change the evidence classification rather than

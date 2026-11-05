@@ -1,0 +1,1967 @@
+{
+  "date": "2026-11-05",
+  "scope": "Organism-independent synthetic regression of selective FASTQ abstention. Development fixtures, not independent held-out validation or a real-cohort concordance study.",
+  "baseline_commit": "9cf4c79c9f1e838db22ad01d5ef96b68f2e59cbe",
+  "baseline_source": "/private/tmp/mlvamaps-accuracy-baseline-0v5o2mec/source",
+  "updated_frozen_source": "/private/tmp/mlvamaps-accuracy-checked-w5rngf2c/source",
+  "retained_workdir": "/private/tmp/mlvamaps-accuracy-checked-w5rngf2c",
+  "method": {
+    "copies": [
+      1,
+      2,
+      4
+    ],
+    "trials_per_version_and_workflow": 1,
+    "sample_mode": "isolate",
+    "threads": 2,
+    "inputs": "Updated workers rerun after reconstruction-conflict fixes on exactly the earlier retained inputs and arguments except output destination. Unchanged baseline measurements are reused from the per-run baseline_report_reused. Hashes also match the original frozen-baseline fixtures.",
+    "reconstruction_conflicts": "Finalizer rejects disagreement with derived microassembly evidence; shared reconstruction handling records disagreement for every supported product method.",
+    "coverage": "Copies change synthetic molecule multiplicity and seeded error realizations. This is a depth/error sensitivity sweep, not nested genomic downsampling; outcomes need not be monotonic.",
+    "timing": "Concurrent test activity was possible. No performance claim; timings omitted here and retained in raw reports.",
+    "policy": "Primary counts now require accepted sample evidence; rejected numerical proposals remain diagnostic. The long-read default minimum depth changes from 1 to 3; the short-read default remains 3."
+  },
+  "definitions": {
+    "call_rate": "Numeric primary calls / all truth-known loci; abstentions remain in the denominator.",
+    "accuracy_among_calls": "Exact primary calls / numeric primary calls at truth-known loci.",
+    "exact_accuracy_all_truth_known": "Exact primary calls / all truth-known loci.",
+    "mixtures": "Either known mixture allele counts as numerically correct. Withholding such a prediction need not be an undesirable decision.",
+    "absence": "The absent locus has no allele truth, is excluded from accuracy denominators, and remains in per-locus records.",
+    "database_file_manifest": "SHA256 of JSON mapping every relative database filename to its file SHA256, with sort_keys=True."
+  },
+  "environment": {
+    "python": "3.13.15",
+    "platform": "macOS-26.7.2-arm64-arm-64bit-Mach-O",
+    "packages": {
+      "numpy": "2.5.2",
+      "parasail": "1.3.4",
+      "pysam": "0.24.0",
+      "regex": "2026.7.19",
+      "spoars": "0.1.3",
+      "pytest": "9.1.1"
+    },
+    "minimap2": "2.31-r1302",
+    "sassy": "sassy 0.2.1"
+  },
+  "fixture_source_sha256": {
+    "scripts/fastq_challenge_fixture.py": "b71402f4de7e11a4afc4ca4a7eb348ad9d11211f9adf3d5c04619a776a72ae9d",
+    "scripts/benchmark_fastq_inference.py": "9df469467b5dea4ae30d5bdec2a384493b84b1d8ae3d55a14ceab86fb20ba264",
+    "scripts/compare_short_read_results.py": "cfde3c711bda38f664e1d70dcdc44b675eb0f29cc7d35a239eabff6fbbc0cd14",
+    "tests/test_fastq_assembly_concordance.py": "97889b8513484c0e0b97fbee2d756b71a33ce879e6f8b43740d89870a76db7ec"
+  },
+  "runs": [
+    {
+      "copies": 1,
+      "report": "/private/tmp/mlvamaps-accuracy-checked-w5rngf2c/copies1/comparison.json",
+      "report_sha256": "6bde99b078daa310da01e0282d25bcffedc3af298f8fe1581266215c583a4f71",
+      "baseline_report_reused": "/private/tmp/mlvamaps-accuracy-final-2g14jkna/copies1/comparison.json",
+      "baseline_report_sha256": "5876af6ed8c93bf66099eb004b2217fa682abb202b40399e9db9a409fab42437",
+      "workflows": {
+        "paired": {
+          "input_fragments": 44,
+          "input_sha256": {
+            "r1.fastq": "d751b13e11308f75c20fb639cca062ef16d04b7f1e60275594006287b602357d",
+            "r2.fastq": "d797ec6276bb74063f8684350c833a29d858a5df34f0318f65d96ca1c3dc3807",
+            "panel.tsv": "4375d437dfbd9a48558d93520c3fc9c0395affbd636a4a323692f11b5b5425f8",
+            "database_file_manifest": "6381f65a9f62fa80461fbfb28e6ed688c7e8bbc7344fa2d924d843bf625469a3"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "2a317dc483e6fc265d4774a7a154274bb7e2377efd356b745bbe18ce46cd76b1"
+            },
+            "updated": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "a689b0d07fd1194698648bd050f4394c3488920996d8861a320cbb2ddee3f29f"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [],
+          "wrong_predictions_withheld": [],
+          "predictions_changed": []
+        },
+        "long": {
+          "input_fragments": 44,
+          "input_sha256": {
+            "r1.fastq": "d751b13e11308f75c20fb639cca062ef16d04b7f1e60275594006287b602357d",
+            "r2.fastq": "148b91c447a689046322248c368b0dde02be8b70513519468cbfb338f1c5f3f9",
+            "panel.tsv": "4375d437dfbd9a48558d93520c3fc9c0395affbd636a4a323692f11b5b5425f8",
+            "database_file_manifest": "6381f65a9f62fa80461fbfb28e6ed688c7e8bbc7344fa2d924d843bf625469a3"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "ea078a4d8d87a3d3a67e46e9d920dfa9fcb0f65d93d7c0c2a039353dcfdef17c"
+            },
+            "updated": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "418a6a8956bd7ede390f1c409cb67a3ed07b94a337ace870b0cbf106bf7bdfbf"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [],
+          "wrong_predictions_withheld": [],
+          "predictions_changed": []
+        },
+        "challenge_paired": {
+          "input_fragments": 157,
+          "input_sha256": {
+            "r1.fastq": "bc2a26739d9d0e468db13ba7d94a6cf46f9a011bad3e937fb12426cab9bc5a6b",
+            "read_truth.json": "7f2d57d56b15854c78b2699e5d05492509616701e1c845c9a8928010e996d300",
+            "r2.fastq": "376c40a888b1db64b307f2d92a6cdb4fa5f5237f04e3755ed30a774269d6aece",
+            "panel.tsv": "a6fec0fe136a88f2a1a79c7495510d397aa3d3dde1421a93c4c7947351032700",
+            "truth.json": "5bc923c5c36b51a7a7250d29f05992f42fcc3ea23df9bee05d8c71b48b8c0d6c",
+            "database_file_manifest": "cbb5d50673e23cb82d379b2748dbaa7309c9f051440a5379e67bd3fa45503bd5"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 14,
+              "called": 14,
+              "correct": 9,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 0.6428571428571429,
+              "exact_accuracy_all_truth_known": 0.6428571428571429,
+              "mae_among_calls": 29.214285714285715,
+              "calls_sha256": "9d6654e3efdc0c602fd22a6edc6a5ea52d0c738eb70bd583fa5973c270d191fa"
+            },
+            "updated": {
+              "truth_known": 14,
+              "called": 4,
+              "correct": 4,
+              "call_rate": 0.2857142857142857,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 0.2857142857142857,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "2fe29b388d0f4ea62b01b3d276656a4362c274ef610f429b9db08ba914f185f4"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [
+            "homopolymer",
+            "long_motif",
+            "low_coverage",
+            "mixture",
+            "noisy"
+          ],
+          "wrong_predictions_withheld": [
+            "ambiguous_a",
+            "ambiguous_b",
+            "expansion",
+            "long_array",
+            "zero_coverage"
+          ],
+          "predictions_changed": [],
+          "loci": [
+            {
+              "locus": "absent",
+              "truth": null,
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_a",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_b",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "canonical",
+              "truth": [
+                5
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": 5.0,
+              "reason": ""
+            },
+            {
+              "locus": "contraction",
+              "truth": [
+                1
+              ],
+              "baseline": 1.0,
+              "prediction": 1.0,
+              "prediction_raw": 1.0,
+              "accepted": 1.0,
+              "reason": ""
+            },
+            {
+              "locus": "expansion",
+              "truth": [
+                40
+              ],
+              "baseline": 17.5,
+              "prediction": 17.5,
+              "prediction_raw": 17.5,
+              "accepted": null,
+              "reason": "The upper repeat length is unresolved; a lower bound is not a count."
+            },
+            {
+              "locus": "homopolymer",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": null,
+              "reason": "Independent molecule measurements do not agree sufficiently on the selected allele."
+            },
+            {
+              "locus": "interrupted",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 8.0,
+              "accepted": 8.0,
+              "reason": ""
+            },
+            {
+              "locus": "long_array",
+              "truth": [
+                400
+              ],
+              "baseline": 17.5,
+              "prediction": 17.5,
+              "prediction_raw": 17.5,
+              "accepted": null,
+              "reason": "The upper repeat length is unresolved; a lower bound is not a count."
+            },
+            {
+              "locus": "long_motif",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 7.888888888888889,
+              "accepted": null,
+              "reason": "The upper repeat length is unresolved; a lower bound is not a count."
+            },
+            {
+              "locus": "low_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 6.0,
+              "prediction": 6.0,
+              "prediction_raw": 6.0,
+              "accepted": null,
+              "reason": "Too few independent informative molecules for an accepted count."
+            },
+            {
+              "locus": "mixture",
+              "truth": [
+                5,
+                9
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": null,
+              "reason": "Competing alleles do not support a single repeat count."
+            },
+            {
+              "locus": "noisy",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": null,
+              "reason": "Too few independent informative molecules for an accepted count."
+            },
+            {
+              "locus": "partial_unit",
+              "truth": [
+                5.5
+              ],
+              "baseline": 5.5,
+              "prediction": 5.5,
+              "prediction_raw": 5.25,
+              "accepted": 5.5,
+              "reason": ""
+            },
+            {
+              "locus": "zero_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            }
+          ]
+        },
+        "challenge_long": {
+          "input_fragments": 157,
+          "input_sha256": {
+            "r1.fastq": "13414bcc004c9d076c431c7296bfacb283b65d63e86a280e2693e2fcc56445af",
+            "read_truth.json": "7f2d57d56b15854c78b2699e5d05492509616701e1c845c9a8928010e996d300",
+            "r2.fastq": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "panel.tsv": "cffb54c6e175267238b8cd2f8309705c40415d80d3c14a6886bfd6ea9017d00b",
+            "truth.json": "4cd557651f3e3a7ec1fc00ca43c9c7f4993626871bcafddeb5fb49bde3e81f43",
+            "database_file_manifest": "4cbeb3f4a520374024ec66a165e61fcd482d022d5cf02f4f0fc820d9b9534c5e"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 14,
+              "called": 14,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 0.7857142857142857,
+              "exact_accuracy_all_truth_known": 0.7857142857142857,
+              "mae_among_calls": 0.2857142857142857,
+              "calls_sha256": "f5126451460eec41508974b760d48ffcbf9b1b6eaedfd7a01753602afeacef02"
+            },
+            "updated": {
+              "truth_known": 14,
+              "called": 7,
+              "correct": 7,
+              "call_rate": 0.5,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 0.5,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "de7933e05f2661c6db0b15feb12f88efa838625565a7eac13b0c3693c56a80dc"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [
+            "homopolymer",
+            "long_array",
+            "low_coverage",
+            "mixture"
+          ],
+          "wrong_predictions_withheld": [
+            "ambiguous_a",
+            "ambiguous_b",
+            "zero_coverage"
+          ],
+          "predictions_changed": [],
+          "loci": [
+            {
+              "locus": "absent",
+              "truth": null,
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_a",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_b",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "canonical",
+              "truth": [
+                5
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": 5.0,
+              "reason": ""
+            },
+            {
+              "locus": "contraction",
+              "truth": [
+                1
+              ],
+              "baseline": 1.0,
+              "prediction": 1.0,
+              "prediction_raw": 1.0,
+              "accepted": 1.0,
+              "reason": ""
+            },
+            {
+              "locus": "expansion",
+              "truth": [
+                40
+              ],
+              "baseline": 40.0,
+              "prediction": 40.0,
+              "prediction_raw": 40.0,
+              "accepted": 40.0,
+              "reason": ""
+            },
+            {
+              "locus": "homopolymer",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": null,
+              "reason": "The repeat count does not meet the existing allele-resolution thresholds."
+            },
+            {
+              "locus": "interrupted",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 8.0,
+              "accepted": 8.0,
+              "reason": ""
+            },
+            {
+              "locus": "long_array",
+              "truth": [
+                400
+              ],
+              "baseline": 400.0,
+              "prediction": 400.0,
+              "prediction_raw": 400.0,
+              "accepted": null,
+              "reason": "The repeat count does not meet the existing allele-resolution thresholds."
+            },
+            {
+              "locus": "long_motif",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 8.0,
+              "accepted": 8.0,
+              "reason": ""
+            },
+            {
+              "locus": "low_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 6.0,
+              "prediction": 6.0,
+              "prediction_raw": 6.0,
+              "accepted": null,
+              "reason": "Too few independent informative molecules for an accepted count."
+            },
+            {
+              "locus": "mixture",
+              "truth": [
+                5,
+                9
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": null,
+              "reason": "Competing alleles do not support a single repeat count."
+            },
+            {
+              "locus": "noisy",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": 16.0,
+              "reason": ""
+            },
+            {
+              "locus": "partial_unit",
+              "truth": [
+                5.5
+              ],
+              "baseline": 5.5,
+              "prediction": 5.5,
+              "prediction_raw": 5.25,
+              "accepted": 5.5,
+              "reason": ""
+            },
+            {
+              "locus": "zero_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "copies": 2,
+      "report": "/private/tmp/mlvamaps-accuracy-checked-w5rngf2c/copies2/comparison.json",
+      "report_sha256": "c299411ca2e350d5c99aaf3788066d84e4fbe8d2ad70c0935d59f267603bd4f1",
+      "baseline_report_reused": "/private/tmp/mlvamaps-accuracy-final-2g14jkna/copies2/comparison.json",
+      "baseline_report_sha256": "71b789cd167ab4f2e2792bbe0add549944bf02e99cc4add439f86b3d3fe3b957",
+      "workflows": {
+        "paired": {
+          "input_fragments": 88,
+          "input_sha256": {
+            "r1.fastq": "9ea3dea3b74211efd1c14cb27596bb0c4bf63d7f3c802665ddace5e82483a0e7",
+            "r2.fastq": "38b4e147b231d5a655c004f122d3ffe595d57bf0e8dc2e7a54af2f46a535e4db",
+            "panel.tsv": "4375d437dfbd9a48558d93520c3fc9c0395affbd636a4a323692f11b5b5425f8",
+            "database_file_manifest": "6381f65a9f62fa80461fbfb28e6ed688c7e8bbc7344fa2d924d843bf625469a3"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "da64de6b891c24aa364c383a58d4f7051d8189856a3be655c5bab87ead2a227b"
+            },
+            "updated": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "63e8b54c3e3df2269b310374172610ba76c87f7fa45f2bfd9243d6e62e4545ab"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [],
+          "wrong_predictions_withheld": [],
+          "predictions_changed": []
+        },
+        "long": {
+          "input_fragments": 88,
+          "input_sha256": {
+            "r1.fastq": "9ea3dea3b74211efd1c14cb27596bb0c4bf63d7f3c802665ddace5e82483a0e7",
+            "r2.fastq": "148b91c447a689046322248c368b0dde02be8b70513519468cbfb338f1c5f3f9",
+            "panel.tsv": "4375d437dfbd9a48558d93520c3fc9c0395affbd636a4a323692f11b5b5425f8",
+            "database_file_manifest": "6381f65a9f62fa80461fbfb28e6ed688c7e8bbc7344fa2d924d843bf625469a3"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "cde5f94c409354940703fd1565ba8b25e7ee64c9d92481da02990b7f4cb6d233"
+            },
+            "updated": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "fd45738552d4a953a4882720808642099a997c272676a93896ee99f9f220b641"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [],
+          "wrong_predictions_withheld": [],
+          "predictions_changed": []
+        },
+        "challenge_paired": {
+          "input_fragments": 314,
+          "input_sha256": {
+            "r1.fastq": "268cae161ba8557913c8262ebf080597d1aec92bae7b50bb6095fcc3d614b1a6",
+            "read_truth.json": "2b1ce8f9007b53537686d094d92a453b62a249536e09834bfb28f3f29ef14478",
+            "r2.fastq": "6b438cf22fdb229f143e092ce41fc7318c51b7ce41fbbcdb99a6b6e44ddd7115",
+            "panel.tsv": "6922c79647ec553d8706a559a5aacf9c7a52a91c13520902d6d918f997500c90",
+            "truth.json": "56ca3ad4a29152d8207a2b96447d3614e8ac346840f6ff116d6d9ac06b3a6fb1",
+            "database_file_manifest": "1bb03c33108414050a2adac27fe6627057c81531858ed49122ab0f0f643392d3"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 14,
+              "called": 14,
+              "correct": 10,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 0.7142857142857143,
+              "exact_accuracy_all_truth_known": 0.7142857142857143,
+              "mae_among_calls": 27.607142857142858,
+              "calls_sha256": "53c01c9d5dfaad87b3035ec12ba2cfaf3d57cf77bf08351214bf2fb3068eefd2"
+            },
+            "updated": {
+              "truth_known": 14,
+              "called": 4,
+              "correct": 4,
+              "call_rate": 0.2857142857142857,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 0.2857142857142857,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "c7967517a800bfc3f938637e741d82742903742a7971f4f6bd00c6cda3f477d7"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [
+            "expansion",
+            "homopolymer",
+            "long_motif",
+            "low_coverage",
+            "mixture",
+            "noisy"
+          ],
+          "wrong_predictions_withheld": [
+            "ambiguous_a",
+            "ambiguous_b",
+            "long_array",
+            "zero_coverage"
+          ],
+          "predictions_changed": [],
+          "loci": [
+            {
+              "locus": "absent",
+              "truth": null,
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_a",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_b",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "canonical",
+              "truth": [
+                5
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": 5.0,
+              "reason": ""
+            },
+            {
+              "locus": "contraction",
+              "truth": [
+                1
+              ],
+              "baseline": 1.0,
+              "prediction": 1.0,
+              "prediction_raw": 1.0,
+              "accepted": 1.0,
+              "reason": ""
+            },
+            {
+              "locus": "expansion",
+              "truth": [
+                40
+              ],
+              "baseline": 40.0,
+              "prediction": 40.0,
+              "prediction_raw": 40.0,
+              "accepted": null,
+              "reason": "The upper repeat length is unresolved; a lower bound is not a count."
+            },
+            {
+              "locus": "homopolymer",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": null,
+              "reason": "Independent molecule measurements do not agree sufficiently on the selected allele."
+            },
+            {
+              "locus": "interrupted",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 8.0,
+              "accepted": 8.0,
+              "reason": ""
+            },
+            {
+              "locus": "long_array",
+              "truth": [
+                400
+              ],
+              "baseline": 17.5,
+              "prediction": 17.5,
+              "prediction_raw": 17.5,
+              "accepted": null,
+              "reason": "The upper repeat length is unresolved; a lower bound is not a count."
+            },
+            {
+              "locus": "long_motif",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 7.888888888888889,
+              "accepted": null,
+              "reason": "The upper repeat length is unresolved; a lower bound is not a count."
+            },
+            {
+              "locus": "low_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 6.0,
+              "prediction": 6.0,
+              "prediction_raw": 6.0,
+              "accepted": null,
+              "reason": "Too few independent informative molecules for an accepted count."
+            },
+            {
+              "locus": "mixture",
+              "truth": [
+                5,
+                9
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": null,
+              "reason": "Competing alleles do not support a single repeat count."
+            },
+            {
+              "locus": "noisy",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": null,
+              "reason": "The repeat count does not meet the existing allele-resolution thresholds."
+            },
+            {
+              "locus": "partial_unit",
+              "truth": [
+                5.5
+              ],
+              "baseline": 5.5,
+              "prediction": 5.5,
+              "prediction_raw": 5.25,
+              "accepted": 5.5,
+              "reason": ""
+            },
+            {
+              "locus": "zero_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            }
+          ]
+        },
+        "challenge_long": {
+          "input_fragments": 314,
+          "input_sha256": {
+            "r1.fastq": "56ecd5e595612ae236e4f28d63b18f44db54e6f976af7eedb609ac3259450542",
+            "read_truth.json": "2b1ce8f9007b53537686d094d92a453b62a249536e09834bfb28f3f29ef14478",
+            "r2.fastq": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "panel.tsv": "f6fb1200dc34e7ddb7df0918d787c05ce599c0269632e5f4812e1b7310777c29",
+            "truth.json": "ad3bc2b44941c187d4ca2893bf11a45dedaccee25a51587819d55c79b41a2a73",
+            "database_file_manifest": "d9923a6bdbe108b98f9744b03559458e2833cacd0ef3baa25531fd112a38f117"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 14,
+              "called": 14,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 0.7857142857142857,
+              "exact_accuracy_all_truth_known": 0.7857142857142857,
+              "mae_among_calls": 0.2857142857142857,
+              "calls_sha256": "4c1673b5b854b969c0a53637e1d239c31b84572751a3cd4b129f5c2c1b3f98dc"
+            },
+            "updated": {
+              "truth_known": 14,
+              "called": 7,
+              "correct": 7,
+              "call_rate": 0.5,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 0.5,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "65ee9fb71fb94decf6f688a7f61c81af5174c56c57a4566257d4d6daeb081e92"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [
+            "homopolymer",
+            "long_array",
+            "low_coverage",
+            "mixture"
+          ],
+          "wrong_predictions_withheld": [
+            "ambiguous_a",
+            "ambiguous_b",
+            "zero_coverage"
+          ],
+          "predictions_changed": [],
+          "loci": [
+            {
+              "locus": "absent",
+              "truth": null,
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_a",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_b",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "canonical",
+              "truth": [
+                5
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": 5.0,
+              "reason": ""
+            },
+            {
+              "locus": "contraction",
+              "truth": [
+                1
+              ],
+              "baseline": 1.0,
+              "prediction": 1.0,
+              "prediction_raw": 1.0,
+              "accepted": 1.0,
+              "reason": ""
+            },
+            {
+              "locus": "expansion",
+              "truth": [
+                40
+              ],
+              "baseline": 40.0,
+              "prediction": 40.0,
+              "prediction_raw": 40.0,
+              "accepted": 40.0,
+              "reason": ""
+            },
+            {
+              "locus": "homopolymer",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": null,
+              "reason": "Independent molecule measurements do not agree sufficiently on the selected allele."
+            },
+            {
+              "locus": "interrupted",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 8.0,
+              "accepted": 8.0,
+              "reason": ""
+            },
+            {
+              "locus": "long_array",
+              "truth": [
+                400
+              ],
+              "baseline": 400.0,
+              "prediction": 400.0,
+              "prediction_raw": 400.0,
+              "accepted": null,
+              "reason": "The repeat count does not meet the existing allele-resolution thresholds."
+            },
+            {
+              "locus": "long_motif",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 8.0,
+              "accepted": 8.0,
+              "reason": ""
+            },
+            {
+              "locus": "low_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 6.0,
+              "prediction": 6.0,
+              "prediction_raw": 6.0,
+              "accepted": null,
+              "reason": "Too few independent informative molecules for an accepted count."
+            },
+            {
+              "locus": "mixture",
+              "truth": [
+                5,
+                9
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": null,
+              "reason": "Competing alleles do not support a single repeat count."
+            },
+            {
+              "locus": "noisy",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": 16.0,
+              "reason": ""
+            },
+            {
+              "locus": "partial_unit",
+              "truth": [
+                5.5
+              ],
+              "baseline": 5.5,
+              "prediction": 5.5,
+              "prediction_raw": 5.25,
+              "accepted": 5.5,
+              "reason": ""
+            },
+            {
+              "locus": "zero_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "copies": 4,
+      "report": "/private/tmp/mlvamaps-accuracy-checked-w5rngf2c/copies4/comparison.json",
+      "report_sha256": "b95faaaf9bf5988ae00c988c90e272cdff57d8617b95317dab954ddb8d7aa858",
+      "baseline_report_reused": "/private/tmp/mlvamaps-accuracy-final-2g14jkna/copies4/comparison.json",
+      "baseline_report_sha256": "8d4966f3f6b521ec9574e6a811764c24e7bbb0c1721da2ef01df2cde4f6fe96c",
+      "workflows": {
+        "paired": {
+          "input_fragments": 176,
+          "input_sha256": {
+            "r1.fastq": "d6ed59bd99999685d9d3b6d823eece6fbb4d46565f4f3dac259070f2dff2b697",
+            "r2.fastq": "4b547e405614d9a45f48a2c87b6dcb51f2b2b6091f783dc4062f99609ef582a8",
+            "panel.tsv": "4375d437dfbd9a48558d93520c3fc9c0395affbd636a4a323692f11b5b5425f8",
+            "database_file_manifest": "6381f65a9f62fa80461fbfb28e6ed688c7e8bbc7344fa2d924d843bf625469a3"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "cd3585dd5fb15f729e468f1d3b620cf7a00b05b62d6b99452360efe528f3e322"
+            },
+            "updated": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "10be789b221ff80190c6e6c9627e74d649387b3d0ad1564b11f70037d5f0ed33"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [],
+          "wrong_predictions_withheld": [],
+          "predictions_changed": []
+        },
+        "long": {
+          "input_fragments": 176,
+          "input_sha256": {
+            "r1.fastq": "d6ed59bd99999685d9d3b6d823eece6fbb4d46565f4f3dac259070f2dff2b697",
+            "r2.fastq": "148b91c447a689046322248c368b0dde02be8b70513519468cbfb338f1c5f3f9",
+            "panel.tsv": "4375d437dfbd9a48558d93520c3fc9c0395affbd636a4a323692f11b5b5425f8",
+            "database_file_manifest": "6381f65a9f62fa80461fbfb28e6ed688c7e8bbc7344fa2d924d843bf625469a3"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "ba9f372e8b3ae2269aff0180f52bcb294a17a5ca314793002da780c2f5880c3c"
+            },
+            "updated": {
+              "truth_known": 11,
+              "called": 11,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 1.0,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "f295e7994154d5f6cac2320a8961b2df983a04a511c3c828753762cc1b8e8bd4"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [],
+          "wrong_predictions_withheld": [],
+          "predictions_changed": []
+        },
+        "challenge_paired": {
+          "input_fragments": 628,
+          "input_sha256": {
+            "r1.fastq": "2e9afedc3651e71127a31050241afc322c81e7f914e06997b4319ddb15734683",
+            "read_truth.json": "dbc2bfcfd9fe81cb8ae94b6777743f1274baaa880f9297bc0c8a4ee601b61ab4",
+            "r2.fastq": "fb0f330df55b912ea670f17c8ade99cc022604c2a7285323354fa23621853e04",
+            "panel.tsv": "8d367ed214c4d601c9f76c0057cae306a2c3a3e4283cc7f7289defebf4961eda",
+            "truth.json": "4f54a9a3140ab2be5bc0b2962862eb3268340b108a648bdadee41f3693c128d9",
+            "database_file_manifest": "e6e42fbb5636703ea040fed2057fe64b606a811f01098a49db5a2639fb4742ad"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 14,
+              "called": 14,
+              "correct": 8,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 0.5714285714285714,
+              "exact_accuracy_all_truth_known": 0.5714285714285714,
+              "mae_among_calls": 29.25,
+              "calls_sha256": "953352da9a2cd699885e05ede4d92e9affe91da243f87393c2f8c84ad413ea10"
+            },
+            "updated": {
+              "truth_known": 14,
+              "called": 5,
+              "correct": 5,
+              "call_rate": 0.35714285714285715,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 0.35714285714285715,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "4f0b816253cd88820320b1d0047ff079113cb13ec83ee37272ee7e0d2755b122"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [
+            "homopolymer",
+            "long_motif",
+            "mixture"
+          ],
+          "wrong_predictions_withheld": [
+            "ambiguous_a",
+            "ambiguous_b",
+            "expansion",
+            "long_array",
+            "noisy",
+            "zero_coverage"
+          ],
+          "predictions_changed": [],
+          "loci": [
+            {
+              "locus": "absent",
+              "truth": null,
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_a",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_b",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "canonical",
+              "truth": [
+                5
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": 5.0,
+              "reason": ""
+            },
+            {
+              "locus": "contraction",
+              "truth": [
+                1
+              ],
+              "baseline": 1.0,
+              "prediction": 1.0,
+              "prediction_raw": 1.0,
+              "accepted": 1.0,
+              "reason": ""
+            },
+            {
+              "locus": "expansion",
+              "truth": [
+                40
+              ],
+              "baseline": 17.5,
+              "prediction": 17.5,
+              "prediction_raw": 17.5,
+              "accepted": null,
+              "reason": "The upper repeat length is unresolved; a lower bound is not a count."
+            },
+            {
+              "locus": "homopolymer",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": null,
+              "reason": "Independent molecule measurements do not agree sufficiently on the selected allele."
+            },
+            {
+              "locus": "interrupted",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 8.0,
+              "accepted": 8.0,
+              "reason": ""
+            },
+            {
+              "locus": "long_array",
+              "truth": [
+                400
+              ],
+              "baseline": 17.5,
+              "prediction": 17.5,
+              "prediction_raw": 17.5,
+              "accepted": null,
+              "reason": "The upper repeat length is unresolved; a lower bound is not a count."
+            },
+            {
+              "locus": "long_motif",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 7.888888888888889,
+              "accepted": null,
+              "reason": "The upper repeat length is unresolved; a lower bound is not a count."
+            },
+            {
+              "locus": "low_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 6.0,
+              "prediction": 6.0,
+              "prediction_raw": 6.0,
+              "accepted": 6.0,
+              "reason": ""
+            },
+            {
+              "locus": "mixture",
+              "truth": [
+                5,
+                9
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": null,
+              "reason": "Competing alleles do not support a single repeat count."
+            },
+            {
+              "locus": "noisy",
+              "truth": [
+                16
+              ],
+              "baseline": 15.5,
+              "prediction": 15.5,
+              "prediction_raw": 15.75,
+              "accepted": null,
+              "reason": "Independent molecule measurements do not agree sufficiently on the selected allele."
+            },
+            {
+              "locus": "partial_unit",
+              "truth": [
+                5.5
+              ],
+              "baseline": 5.5,
+              "prediction": 5.5,
+              "prediction_raw": 5.25,
+              "accepted": 5.5,
+              "reason": ""
+            },
+            {
+              "locus": "zero_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            }
+          ]
+        },
+        "challenge_long": {
+          "input_fragments": 628,
+          "input_sha256": {
+            "r1.fastq": "7cb6ba3d83b205989fe85fbf1fcfe1b4376f223f1c6848188d19262e99104ab8",
+            "read_truth.json": "dbc2bfcfd9fe81cb8ae94b6777743f1274baaa880f9297bc0c8a4ee601b61ab4",
+            "r2.fastq": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "panel.tsv": "60e76c67dcf77fa4ca47c4b0a2ce64e10539415c54f99056bcfa270fa6cb3c76",
+            "truth.json": "c0a45889ec5008e3b1772e626304cc345155ed4fb5e05523d82354c682929518",
+            "database_file_manifest": "e2287b87680093823821023a609a7f2f2fefddfeaba944544432af5e23ecdfab"
+          },
+          "matches_original_frozen_baseline_inputs": true,
+          "versions": {
+            "baseline": {
+              "truth_known": 14,
+              "called": 14,
+              "correct": 11,
+              "call_rate": 1.0,
+              "accuracy_among_calls": 0.7857142857142857,
+              "exact_accuracy_all_truth_known": 0.7857142857142857,
+              "mae_among_calls": 0.2857142857142857,
+              "calls_sha256": "86128eebd39988659493d121f6602b1b1d1c73647b8db3b6b5a0f820461e3da7"
+            },
+            "updated": {
+              "truth_known": 14,
+              "called": 8,
+              "correct": 8,
+              "call_rate": 0.5714285714285714,
+              "accuracy_among_calls": 1.0,
+              "exact_accuracy_all_truth_known": 0.5714285714285714,
+              "mae_among_calls": 0.0,
+              "calls_sha256": "64f45c534d372fe3f0b944f178aab68db6de39b74ed5749be073ba7fc758eca4"
+            }
+          },
+          "accepted_wrong": [],
+          "correct_predictions_withheld": [
+            "homopolymer",
+            "mixture",
+            "noisy"
+          ],
+          "wrong_predictions_withheld": [
+            "ambiguous_a",
+            "ambiguous_b",
+            "zero_coverage"
+          ],
+          "predictions_changed": [],
+          "loci": [
+            {
+              "locus": "absent",
+              "truth": null,
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_a",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "ambiguous_b",
+              "truth": [
+                5
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            },
+            {
+              "locus": "canonical",
+              "truth": [
+                5
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": 5.0,
+              "reason": ""
+            },
+            {
+              "locus": "contraction",
+              "truth": [
+                1
+              ],
+              "baseline": 1.0,
+              "prediction": 1.0,
+              "prediction_raw": 1.0,
+              "accepted": 1.0,
+              "reason": ""
+            },
+            {
+              "locus": "expansion",
+              "truth": [
+                40
+              ],
+              "baseline": 40.0,
+              "prediction": 40.0,
+              "prediction_raw": 40.0,
+              "accepted": 40.0,
+              "reason": ""
+            },
+            {
+              "locus": "homopolymer",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": null,
+              "reason": "Independent molecule measurements do not agree sufficiently on the selected allele."
+            },
+            {
+              "locus": "interrupted",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 8.0,
+              "accepted": 8.0,
+              "reason": ""
+            },
+            {
+              "locus": "long_array",
+              "truth": [
+                400
+              ],
+              "baseline": 400.0,
+              "prediction": 400.0,
+              "prediction_raw": 400.0,
+              "accepted": 400.0,
+              "reason": ""
+            },
+            {
+              "locus": "long_motif",
+              "truth": [
+                8
+              ],
+              "baseline": 8.0,
+              "prediction": 8.0,
+              "prediction_raw": 8.0,
+              "accepted": 8.0,
+              "reason": ""
+            },
+            {
+              "locus": "low_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 6.0,
+              "prediction": 6.0,
+              "prediction_raw": 6.0,
+              "accepted": 6.0,
+              "reason": ""
+            },
+            {
+              "locus": "mixture",
+              "truth": [
+                5,
+                9
+              ],
+              "baseline": 5.0,
+              "prediction": 5.0,
+              "prediction_raw": 5.0,
+              "accepted": null,
+              "reason": "Competing alleles do not support a single repeat count."
+            },
+            {
+              "locus": "noisy",
+              "truth": [
+                16
+              ],
+              "baseline": 16.0,
+              "prediction": 16.0,
+              "prediction_raw": 16.0,
+              "accepted": null,
+              "reason": "Independent molecule measurements do not agree sufficiently on the selected allele."
+            },
+            {
+              "locus": "partial_unit",
+              "truth": [
+                5.5
+              ],
+              "baseline": 5.5,
+              "prediction": 5.5,
+              "prediction_raw": 5.25,
+              "accepted": 5.5,
+              "reason": ""
+            },
+            {
+              "locus": "zero_coverage",
+              "truth": [
+                6
+              ],
+              "baseline": 4.0,
+              "prediction": 4.0,
+              "prediction_raw": 4.0,
+              "accepted": null,
+              "reason": "Prior-only prediction; no sample-derived repeat-length evidence."
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "source_files_sha256": {
+    "baseline": {
+      "mlvamaps/__init__.py": "f07e6e2284c9ed466d9bf57cae93ace47d54d62d2a68730eabf9b77a1a1e7a79",
+      "mlvamaps/_version.py": "17731d00ddac369e4b9a50d87de8b8164b191edd5709322b5edf29f58ce6bc30",
+      "mlvamaps/alignment.py": "bbb1dd0e07a5f40156f24b611204288a9be460fde2fdcbc0dfed0f212683a8c6",
+      "mlvamaps/alignment_evidence.py": "1a68cf7fb6e169ff36bf8326729778265428886be3e3729f6aad141a049d5adf",
+      "mlvamaps/allele_inference.py": "1ebe53eecc62ba94c9f5ae37d9264ef3cc0ca0c6b3ca4d5e2f1133ccfff92918",
+      "mlvamaps/assembly_call.py": "d47baea74669a50962f78436543a7bb535ecd1b75f9b50c9f0b5fbb3022f89a6",
+      "mlvamaps/bayesian_caller.py": "fd36c4d5a5229fa152ee1df91061226b0879078a7a0404118e0a165698cc507d",
+      "mlvamaps/calling.py": "8372a136648c7712c65f6c5725632a3697b41efa8b4f90c5ebb350260f0a1283",
+      "mlvamaps/candidate_contexts.py": "859abdbcf93b4598ec4601062106d989b27c84715c01c44c554cfeeaf23a0663",
+      "mlvamaps/cli.py": "1e43f0e2531c04de5f2e9b1182bf756e0a606e321051533a83dfcce2fd7310b1",
+      "mlvamaps/combined_marker_export.py": "f27a031309c2c8c7e69d294af9999a4621bf82b08baad2cd1239723807782b8a",
+      "mlvamaps/combined_marker_phylogeny.py": "3a7165c0f7393b7cc1c2e125fda9f120bfc98765b265860014d78b0324d3a4c9",
+      "mlvamaps/concurrency.py": "cf2a4ce00810c046a2284a0b85e6aa14f8d8353063b84a4eb868669b428ee098",
+      "mlvamaps/evidence_reporting.py": "38e7b135925c1dc88ec9f66c2df0925e34758d973c79a04cadb0ea6e7c2681f6",
+      "mlvamaps/fragment_calibration.py": "adc83aed4ecbfaf130f7d07d9f7de3be871af52819a927c8df1ce36ac84fdbbf",
+      "mlvamaps/in_silico_pcr.py": "7291a4b23b1652e0ca750b9e7d3ff4df580d24292a79c7b8fdd2311f0415ddc4",
+      "mlvamaps/io.py": "149439b5b745e60ecf6f15241f116a9d4b36cde326bacd64e4c9c5cadd34d425",
+      "mlvamaps/local_assembly.py": "5173929508990fbfafe89bb4659caca0a0d253fc6b2ea393e9f52c035f9a9f1d",
+      "mlvamaps/locus_assignment.py": "4e7e3014ece4f3b2aeb404d78c709aad95fbae05ad073ffddb607faefd4bfb8d",
+      "mlvamaps/locus_groups.py": "b0fcd67078f1a8f523bb2ecdec46a3a7eb53a4dfdd9d07c662daa552aa3c52d0",
+      "mlvamaps/locus_measurement.py": "a290fa07de3559c3b5c6a462714a3c3e0d32b44047c5d8dcfd0f5585303bd044",
+      "mlvamaps/long_read_evidence.py": "e95293374d0851c8229f0842a9b15f4f47bfd064af3683d08fbbe94977cf5bae",
+      "mlvamaps/mapped_reconstruction.py": "8d8a3eda2bb675f6be683ec82767fe111c959660190803fd181ec0fd37a58931",
+      "mlvamaps/mapped_variants.py": "d3bbaad35762dd4e423a1e2c502e284c08abed614791b538b3ebd8b0e25efa02",
+      "mlvamaps/mapping.py": "d8a13d516655274d279e1aa2d08dd797a0c19e625e08f9c31b07e0348142643f",
+      "mlvamaps/mapping_classification.py": "9743c4a27864dd8e37a863b637993e2b7a3ccb7bd7811e30636628153acf9327",
+      "mlvamaps/minimap_mapping.py": "f38fe906eb76f3857f92a3c0f90271e8e2f3d1bcc473fc32b6538567c2cbe4a6",
+      "mlvamaps/mixture.py": "680bdca3020a9252debc3b7856e4a1cb50ed3938c206fa9efa1ec3650f1d4348",
+      "mlvamaps/ml_classifier.py": "3492713caef36a5e40badd04c36a38df67cad4820080518dc27acd9fcc05f563",
+      "mlvamaps/models.py": "e05ea1851e639f7cc472ceabb00c71639fe32af4d935d1f7b4f4a12fa1469fea",
+      "mlvamaps/myoga_export.py": "229c1f9577b0e461b6cb83936fd4b4047fbb1c6e2539877226d016f386c55f97",
+      "mlvamaps/pipeline.py": "d062fdf497ff7e10512ff96461c12dea3bf5b34f2f0fec382b4d4fbf970ee968",
+      "mlvamaps/primers.py": "ab0a3332a4458e8f4a15c9dcd212bee3ab55d1fa83d983c58c3111db166e7f8a",
+      "mlvamaps/profile_matching.py": "ffc2c98b939b143eb31a642762584ecfc80d8679f5d6ae00f4d5ef117be2746e",
+      "mlvamaps/profile_tree.py": "555213abd33d160d16eb5c54ced1d1f5a0a623d233a9bd4dbe0f93c8e8b49d0c",
+      "mlvamaps/progress.py": "111a980e8fe170e77fd2d222a046fe253ed623cc861ce6fc955950da9b126cc7",
+      "mlvamaps/qc.py": "005831f7c0cf0ad8409da78ea601e89eb409ef77b55e278c284e70396657b69a",
+      "mlvamaps/recruitment.py": "75e5d46ae0268de552c0a2ef5f99c92a9d6e20b51c7c275d14e7e0091c5f5ec8",
+      "mlvamaps/reference_builder.py": "e7ee5a7e2dce33f4f7f8752a400745b113b3056ac710b23d5f2518692e3c7dea",
+      "mlvamaps/reference_database.py": "6bffb39548a5513b0083d0a3c1352de263bd69fab4039b029575357a0d68eda4",
+      "mlvamaps/reference_pipeline.py": "784966c78d58c0a276821faaabd103876cd1dfc272f9495764e4eec920e3b209",
+      "mlvamaps/repeat_calibration.py": "5c68927d666f0729623566cb03b53d6b7aa0c6a9439a9d92df52102ad5abc9bd",
+      "mlvamaps/repeat_parser.py": "45796c147400f571eccd7e2cacfa899ff17a096fc2eb4dfea3ff41733cfd5bc5",
+      "mlvamaps/report.py": "34a198324fe46021b5cbfcc6b4cfeb45aeb36e5b6dbdb7a0675470a633057a20",
+      "mlvamaps/sample_metadata.py": "4c9bf9cbcd501d1846aa116ab0ac21cadd38dfb89d41cfba5576d35b55b1dd3a",
+      "mlvamaps/sassy_cli.py": "3c7931352ad647ade9a9262b32489a272e5813f43905f061e841bebd4b388c9e",
+      "mlvamaps/sequence.py": "9321e68fb21dc4d09e2d139a902987a749f06e040aa2562232ed0b93eabdcab3",
+      "mlvamaps/short_read_evidence.py": "345944c0d5cb3df257e7a879a931377cbd22a429d7da00b83c1af587d3609e1a",
+      "mlvamaps/short_read_fragments.py": "6ca862bf708d330dcd061442af37e6745cd5c392f72c6463484575412f444bfe",
+      "mlvamaps/short_read_likelihood.py": "d1428801eaac29bb0adbb8245e9dfa8b35d5e4c9e1686e1d22e89b75eafe819d",
+      "mlvamaps/short_read_mapping.py": "620ce8d5bbadc36956115a756fb840de8313f35ab4685da0ee29597dd4802932",
+      "mlvamaps/short_read_pair_rescue.py": "5651cd08e0b5f1f978c96cb8e15f987e5846e8a0b3bf272c961dbe2bfe579fe8",
+      "mlvamaps/short_reads.py": "337cc4e3f66cfed333104a28bf3794d9ba8fb865d13480d572a11126d4a99975",
+      "mlvamaps/taxon_screen.py": "d8a6f496eef95cabd27629501c759b675b694347e534cf2dc5c71940f0dfb17e",
+      "mlvamaps/unified_fastq.py": "cb76a97ee69e9c95350a0525f87ab4ed6397700011ee402e7756308770d3e9a4"
+    },
+    "updated": {
+      "mlvamaps/__init__.py": "f07e6e2284c9ed466d9bf57cae93ace47d54d62d2a68730eabf9b77a1a1e7a79",
+      "mlvamaps/_version.py": "17731d00ddac369e4b9a50d87de8b8164b191edd5709322b5edf29f58ce6bc30",
+      "mlvamaps/alignment.py": "bbb1dd0e07a5f40156f24b611204288a9be460fde2fdcbc0dfed0f212683a8c6",
+      "mlvamaps/alignment_evidence.py": "1a68cf7fb6e169ff36bf8326729778265428886be3e3729f6aad141a049d5adf",
+      "mlvamaps/allele_inference.py": "4c23ee598ad2d731cf5c24da1b449f10e2b42222e414fea8473b59e8afcc7967",
+      "mlvamaps/assembly_call.py": "d47baea74669a50962f78436543a7bb535ecd1b75f9b50c9f0b5fbb3022f89a6",
+      "mlvamaps/bayesian_caller.py": "fd36c4d5a5229fa152ee1df91061226b0879078a7a0404118e0a165698cc507d",
+      "mlvamaps/calling.py": "8372a136648c7712c65f6c5725632a3697b41efa8b4f90c5ebb350260f0a1283",
+      "mlvamaps/candidate_contexts.py": "859abdbcf93b4598ec4601062106d989b27c84715c01c44c554cfeeaf23a0663",
+      "mlvamaps/cli.py": "f0314ad84f4f49cd6e7001fabbcf87b14a9a9c560f94b12b74d4aa9a01c18cbb",
+      "mlvamaps/combined_marker_export.py": "f27a031309c2c8c7e69d294af9999a4621bf82b08baad2cd1239723807782b8a",
+      "mlvamaps/combined_marker_phylogeny.py": "3a7165c0f7393b7cc1c2e125fda9f120bfc98765b265860014d78b0324d3a4c9",
+      "mlvamaps/concurrency.py": "cf2a4ce00810c046a2284a0b85e6aa14f8d8353063b84a4eb868669b428ee098",
+      "mlvamaps/evidence_reporting.py": "d6342d6ca8f548dfb2121ae8c34c20babcc0772c208701dbc162d1fa67931558",
+      "mlvamaps/fragment_calibration.py": "adc83aed4ecbfaf130f7d07d9f7de3be871af52819a927c8df1ce36ac84fdbbf",
+      "mlvamaps/in_silico_pcr.py": "7291a4b23b1652e0ca750b9e7d3ff4df580d24292a79c7b8fdd2311f0415ddc4",
+      "mlvamaps/io.py": "149439b5b745e60ecf6f15241f116a9d4b36cde326bacd64e4c9c5cadd34d425",
+      "mlvamaps/local_assembly.py": "5173929508990fbfafe89bb4659caca0a0d253fc6b2ea393e9f52c035f9a9f1d",
+      "mlvamaps/locus_assignment.py": "4e7e3014ece4f3b2aeb404d78c709aad95fbae05ad073ffddb607faefd4bfb8d",
+      "mlvamaps/locus_groups.py": "b0fcd67078f1a8f523bb2ecdec46a3a7eb53a4dfdd9d07c662daa552aa3c52d0",
+      "mlvamaps/locus_measurement.py": "a290fa07de3559c3b5c6a462714a3c3e0d32b44047c5d8dcfd0f5585303bd044",
+      "mlvamaps/long_read_evidence.py": "e95293374d0851c8229f0842a9b15f4f47bfd064af3683d08fbbe94977cf5bae",
+      "mlvamaps/mapped_reconstruction.py": "7efd07f002c95faeb01f5629b6b024879ff2d075925c3ac59391db600641a3fa",
+      "mlvamaps/mapped_variants.py": "d3bbaad35762dd4e423a1e2c502e284c08abed614791b538b3ebd8b0e25efa02",
+      "mlvamaps/mapping.py": "d8a13d516655274d279e1aa2d08dd797a0c19e625e08f9c31b07e0348142643f",
+      "mlvamaps/mapping_classification.py": "9743c4a27864dd8e37a863b637993e2b7a3ccb7bd7811e30636628153acf9327",
+      "mlvamaps/minimap_mapping.py": "f38fe906eb76f3857f92a3c0f90271e8e2f3d1bcc473fc32b6538567c2cbe4a6",
+      "mlvamaps/mixture.py": "680bdca3020a9252debc3b7856e4a1cb50ed3938c206fa9efa1ec3650f1d4348",
+      "mlvamaps/ml_classifier.py": "3492713caef36a5e40badd04c36a38df67cad4820080518dc27acd9fcc05f563",
+      "mlvamaps/models.py": "e05ea1851e639f7cc472ceabb00c71639fe32af4d935d1f7b4f4a12fa1469fea",
+      "mlvamaps/myoga_export.py": "40447de21245a06cdaf727889177ab73660fff0dd9c6011287be208b6298adfa",
+      "mlvamaps/pipeline.py": "40d8928857b998358124131c54355fc691c8de4e3998b70a4d75dca65c7b1dbb",
+      "mlvamaps/primers.py": "ab0a3332a4458e8f4a15c9dcd212bee3ab55d1fa83d983c58c3111db166e7f8a",
+      "mlvamaps/profile_matching.py": "30d585b8643fe5ecd37b5fa73372f091ab1346aac2b16c764da4b31d487257b1",
+      "mlvamaps/profile_tree.py": "555213abd33d160d16eb5c54ced1d1f5a0a623d233a9bd4dbe0f93c8e8b49d0c",
+      "mlvamaps/progress.py": "111a980e8fe170e77fd2d222a046fe253ed623cc861ce6fc955950da9b126cc7",
+      "mlvamaps/qc.py": "005831f7c0cf0ad8409da78ea601e89eb409ef77b55e278c284e70396657b69a",
+      "mlvamaps/recruitment.py": "75e5d46ae0268de552c0a2ef5f99c92a9d6e20b51c7c275d14e7e0091c5f5ec8",
+      "mlvamaps/reference_builder.py": "e7ee5a7e2dce33f4f7f8752a400745b113b3056ac710b23d5f2518692e3c7dea",
+      "mlvamaps/reference_database.py": "6bffb39548a5513b0083d0a3c1352de263bd69fab4039b029575357a0d68eda4",
+      "mlvamaps/reference_pipeline.py": "784966c78d58c0a276821faaabd103876cd1dfc272f9495764e4eec920e3b209",
+      "mlvamaps/repeat_calibration.py": "5c68927d666f0729623566cb03b53d6b7aa0c6a9439a9d92df52102ad5abc9bd",
+      "mlvamaps/repeat_parser.py": "45796c147400f571eccd7e2cacfa899ff17a096fc2eb4dfea3ff41733cfd5bc5",
+      "mlvamaps/report.py": "556c5df9e70c4419be95f7b14f49dd1936cc58a5e2d8cac054a94ccd7a46d669",
+      "mlvamaps/sample_metadata.py": "4c9bf9cbcd501d1846aa116ab0ac21cadd38dfb89d41cfba5576d35b55b1dd3a",
+      "mlvamaps/sassy_cli.py": "3c7931352ad647ade9a9262b32489a272e5813f43905f061e841bebd4b388c9e",
+      "mlvamaps/sequence.py": "9321e68fb21dc4d09e2d139a902987a749f06e040aa2562232ed0b93eabdcab3",
+      "mlvamaps/short_read_evidence.py": "345944c0d5cb3df257e7a879a931377cbd22a429d7da00b83c1af587d3609e1a",
+      "mlvamaps/short_read_fragments.py": "6ca862bf708d330dcd061442af37e6745cd5c392f72c6463484575412f444bfe",
+      "mlvamaps/short_read_likelihood.py": "d1428801eaac29bb0adbb8245e9dfa8b35d5e4c9e1686e1d22e89b75eafe819d",
+      "mlvamaps/short_read_mapping.py": "620ce8d5bbadc36956115a756fb840de8313f35ab4685da0ee29597dd4802932",
+      "mlvamaps/short_read_pair_rescue.py": "5651cd08e0b5f1f978c96cb8e15f987e5846e8a0b3bf272c961dbe2bfe579fe8",
+      "mlvamaps/short_reads.py": "337cc4e3f66cfed333104a28bf3794d9ba8fb865d13480d572a11126d4a99975",
+      "mlvamaps/taxon_screen.py": "d8a6f496eef95cabd27629501c759b675b694347e534cf2dc5c71940f0dfb17e",
+      "mlvamaps/unified_fastq.py": "cb76a97ee69e9c95350a0525f87ab4ed6397700011ee402e7756308770d3e9a4"
+    }
+  },
+  "post_snapshot_source_changes": {
+    "mlvamaps/mapped_reconstruction.py": {
+      "benchmarked": "7efd07f002c95faeb01f5629b6b024879ff2d075925c3ac59391db600641a3fa",
+      "current": "cece91f6f6a5a03b88b28f1a46698cf082833ceef61cb6c4f355381cfc2cc305"
+    },
+    "mlvamaps/myoga_export.py": {
+      "benchmarked": "40447de21245a06cdaf727889177ab73660fff0dd9c6011287be208b6298adfa",
+      "current": "a522de63ad2332a6f8ebbe24c654176376ca9720f650a49172f1193d97321961"
+    },
+    "mlvamaps/short_read_fragments.py": {
+      "benchmarked": "6ca862bf708d330dcd061442af37e6745cd5c392f72c6463484575412f444bfe",
+      "current": "ecd5e6aeb6bbd2921a0c179363b39b5303e05ea0dc3ff6944faca0fe2e36eb28"
+    },
+    "mlvamaps/short_read_mapping.py": {
+      "benchmarked": "620ce8d5bbadc36956115a756fb840de8313f35ab4685da0ee29597dd4802932",
+      "current": "756c2d57a60fb5f5fb47d245b5d8b7975609de563178790abf510d156b7b9e76"
+    }
+  },
+  "post_snapshot_note": "Original metrics and source hashes above describe the frozen acceptance-policy snapshot. Final workspace changes and fresh replay results are recorded below; original measurements are preserved.",
+  "limitations": [
+    "No real FASTQ/assembly cohort, held-out isolates, pairwise isolate-distance correlation, or independently calibrated probability was evaluated.",
+    "Observed accepted-call accuracy on this small development fixture is not a production accuracy estimate.",
+    "Abstention removes correct predictions as well as wrong ones; correct calls across all truth-known loci decrease despite higher accuracy among accepted calls.",
+    "The four-copy noisy paired fixture informed development of the empirical-agreement gate and is not independent validation of that gate.",
+    "Changed callability changes distance overlap; these results do not establish improved strain-typing concordance or nearest-neighbor preservation.",
+    "Temporary retained directories may be removed by the operating system. This record preserves metrics, per-locus outcomes and hashes, not full FASTQ inputs."
+  ],
+  "final_workspace_validation": {
+    "date": "2026-11-05",
+    "retained_workdir": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41",
+    "method": "Serial fresh-process replay of the frozen accuracy inputs after panel recruitment, consensus-depth and export fixes; one trial per configuration, no runtime claim.",
+    "source_files_sha256": {
+      "mlvamaps/__init__.py": "f07e6e2284c9ed466d9bf57cae93ace47d54d62d2a68730eabf9b77a1a1e7a79",
+      "mlvamaps/_version.py": "17731d00ddac369e4b9a50d87de8b8164b191edd5709322b5edf29f58ce6bc30",
+      "mlvamaps/alignment.py": "bbb1dd0e07a5f40156f24b611204288a9be460fde2fdcbc0dfed0f212683a8c6",
+      "mlvamaps/alignment_evidence.py": "1a68cf7fb6e169ff36bf8326729778265428886be3e3729f6aad141a049d5adf",
+      "mlvamaps/allele_inference.py": "4c23ee598ad2d731cf5c24da1b449f10e2b42222e414fea8473b59e8afcc7967",
+      "mlvamaps/assembly_call.py": "d47baea74669a50962f78436543a7bb535ecd1b75f9b50c9f0b5fbb3022f89a6",
+      "mlvamaps/bayesian_caller.py": "fd36c4d5a5229fa152ee1df91061226b0879078a7a0404118e0a165698cc507d",
+      "mlvamaps/calling.py": "8372a136648c7712c65f6c5725632a3697b41efa8b4f90c5ebb350260f0a1283",
+      "mlvamaps/candidate_contexts.py": "859abdbcf93b4598ec4601062106d989b27c84715c01c44c554cfeeaf23a0663",
+      "mlvamaps/cli.py": "f0314ad84f4f49cd6e7001fabbcf87b14a9a9c560f94b12b74d4aa9a01c18cbb",
+      "mlvamaps/combined_marker_export.py": "f27a031309c2c8c7e69d294af9999a4621bf82b08baad2cd1239723807782b8a",
+      "mlvamaps/combined_marker_phylogeny.py": "3a7165c0f7393b7cc1c2e125fda9f120bfc98765b265860014d78b0324d3a4c9",
+      "mlvamaps/concurrency.py": "cf2a4ce00810c046a2284a0b85e6aa14f8d8353063b84a4eb868669b428ee098",
+      "mlvamaps/evidence_reporting.py": "d6342d6ca8f548dfb2121ae8c34c20babcc0772c208701dbc162d1fa67931558",
+      "mlvamaps/fragment_calibration.py": "adc83aed4ecbfaf130f7d07d9f7de3be871af52819a927c8df1ce36ac84fdbbf",
+      "mlvamaps/in_silico_pcr.py": "7291a4b23b1652e0ca750b9e7d3ff4df580d24292a79c7b8fdd2311f0415ddc4",
+      "mlvamaps/io.py": "149439b5b745e60ecf6f15241f116a9d4b36cde326bacd64e4c9c5cadd34d425",
+      "mlvamaps/local_assembly.py": "5173929508990fbfafe89bb4659caca0a0d253fc6b2ea393e9f52c035f9a9f1d",
+      "mlvamaps/locus_assignment.py": "4e7e3014ece4f3b2aeb404d78c709aad95fbae05ad073ffddb607faefd4bfb8d",
+      "mlvamaps/locus_groups.py": "b0fcd67078f1a8f523bb2ecdec46a3a7eb53a4dfdd9d07c662daa552aa3c52d0",
+      "mlvamaps/locus_measurement.py": "a290fa07de3559c3b5c6a462714a3c3e0d32b44047c5d8dcfd0f5585303bd044",
+      "mlvamaps/long_read_evidence.py": "e95293374d0851c8229f0842a9b15f4f47bfd064af3683d08fbbe94977cf5bae",
+      "mlvamaps/mapped_reconstruction.py": "cece91f6f6a5a03b88b28f1a46698cf082833ceef61cb6c4f355381cfc2cc305",
+      "mlvamaps/mapped_variants.py": "d3bbaad35762dd4e423a1e2c502e284c08abed614791b538b3ebd8b0e25efa02",
+      "mlvamaps/mapping.py": "d8a13d516655274d279e1aa2d08dd797a0c19e625e08f9c31b07e0348142643f",
+      "mlvamaps/mapping_classification.py": "9743c4a27864dd8e37a863b637993e2b7a3ccb7bd7811e30636628153acf9327",
+      "mlvamaps/minimap_mapping.py": "f38fe906eb76f3857f92a3c0f90271e8e2f3d1bcc473fc32b6538567c2cbe4a6",
+      "mlvamaps/mixture.py": "680bdca3020a9252debc3b7856e4a1cb50ed3938c206fa9efa1ec3650f1d4348",
+      "mlvamaps/ml_classifier.py": "3492713caef36a5e40badd04c36a38df67cad4820080518dc27acd9fcc05f563",
+      "mlvamaps/models.py": "e05ea1851e639f7cc472ceabb00c71639fe32af4d935d1f7b4f4a12fa1469fea",
+      "mlvamaps/myoga_export.py": "a522de63ad2332a6f8ebbe24c654176376ca9720f650a49172f1193d97321961",
+      "mlvamaps/pipeline.py": "40d8928857b998358124131c54355fc691c8de4e3998b70a4d75dca65c7b1dbb",
+      "mlvamaps/primers.py": "ab0a3332a4458e8f4a15c9dcd212bee3ab55d1fa83d983c58c3111db166e7f8a",
+      "mlvamaps/profile_matching.py": "30d585b8643fe5ecd37b5fa73372f091ab1346aac2b16c764da4b31d487257b1",
+      "mlvamaps/profile_tree.py": "555213abd33d160d16eb5c54ced1d1f5a0a623d233a9bd4dbe0f93c8e8b49d0c",
+      "mlvamaps/progress.py": "111a980e8fe170e77fd2d222a046fe253ed623cc861ce6fc955950da9b126cc7",
+      "mlvamaps/qc.py": "005831f7c0cf0ad8409da78ea601e89eb409ef77b55e278c284e70396657b69a",
+      "mlvamaps/recruitment.py": "75e5d46ae0268de552c0a2ef5f99c92a9d6e20b51c7c275d14e7e0091c5f5ec8",
+      "mlvamaps/reference_builder.py": "e7ee5a7e2dce33f4f7f8752a400745b113b3056ac710b23d5f2518692e3c7dea",
+      "mlvamaps/reference_database.py": "6bffb39548a5513b0083d0a3c1352de263bd69fab4039b029575357a0d68eda4",
+      "mlvamaps/reference_pipeline.py": "784966c78d58c0a276821faaabd103876cd1dfc272f9495764e4eec920e3b209",
+      "mlvamaps/repeat_calibration.py": "5c68927d666f0729623566cb03b53d6b7aa0c6a9439a9d92df52102ad5abc9bd",
+      "mlvamaps/repeat_parser.py": "45796c147400f571eccd7e2cacfa899ff17a096fc2eb4dfea3ff41733cfd5bc5",
+      "mlvamaps/report.py": "556c5df9e70c4419be95f7b14f49dd1936cc58a5e2d8cac054a94ccd7a46d669",
+      "mlvamaps/sample_metadata.py": "4c9bf9cbcd501d1846aa116ab0ac21cadd38dfb89d41cfba5576d35b55b1dd3a",
+      "mlvamaps/sassy_cli.py": "3c7931352ad647ade9a9262b32489a272e5813f43905f061e841bebd4b388c9e",
+      "mlvamaps/sequence.py": "9321e68fb21dc4d09e2d139a902987a749f06e040aa2562232ed0b93eabdcab3",
+      "mlvamaps/short_read_evidence.py": "345944c0d5cb3df257e7a879a931377cbd22a429d7da00b83c1af587d3609e1a",
+      "mlvamaps/short_read_fragments.py": "ecd5e6aeb6bbd2921a0c179363b39b5303e05ea0dc3ff6944faca0fe2e36eb28",
+      "mlvamaps/short_read_likelihood.py": "d1428801eaac29bb0adbb8245e9dfa8b35d5e4c9e1686e1d22e89b75eafe819d",
+      "mlvamaps/short_read_mapping.py": "756c2d57a60fb5f5fb47d245b5d8b7975609de563178790abf510d156b7b9e76",
+      "mlvamaps/short_read_pair_rescue.py": "5651cd08e0b5f1f978c96cb8e15f987e5846e8a0b3bf272c961dbe2bfe579fe8",
+      "mlvamaps/short_reads.py": "337cc4e3f66cfed333104a28bf3794d9ba8fb865d13480d572a11126d4a99975",
+      "mlvamaps/taxon_screen.py": "d8a6f496eef95cabd27629501c759b675b694347e534cf2dc5c71940f0dfb17e",
+      "mlvamaps/unified_fastq.py": "cb76a97ee69e9c95350a0525f87ab4ed6397700011ee402e7756308770d3e9a4"
+    },
+    "runs": [
+      {
+        "copies": 1,
+        "workflows": {
+          "paired": {
+            "configured_loci": 11,
+            "truth_known": 11,
+            "accepted": 11,
+            "correct": 11,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "a689b0d07fd1194698648bd050f4394c3488920996d8861a320cbb2ddee3f29f",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies1/paired/measurement.json",
+            "report_sha256": "16951bfbf0d21aa497bc25c952c254787dfac6ffeda92041be3dbaa81850a635"
+          },
+          "long": {
+            "configured_loci": 11,
+            "truth_known": 11,
+            "accepted": 11,
+            "correct": 11,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "418a6a8956bd7ede390f1c409cb67a3ed07b94a337ace870b0cbf106bf7bdfbf",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies1/long/measurement.json",
+            "report_sha256": "4818b43a3ebb4c2a12545c00d521e5e2959f9fa56634007da13bec2aae870799"
+          },
+          "challenge_paired": {
+            "configured_loci": 15,
+            "truth_known": 14,
+            "accepted": 4,
+            "correct": 4,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "2fe29b388d0f4ea62b01b3d276656a4362c274ef610f429b9db08ba914f185f4",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies1/challenge_paired/measurement.json",
+            "report_sha256": "e43c07039a5c3dbf11fa96bba8917d4a76a0e42e3b87a67a6f30e996d2a5dfa5"
+          },
+          "challenge_long": {
+            "configured_loci": 15,
+            "truth_known": 14,
+            "accepted": 7,
+            "correct": 7,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "de7933e05f2661c6db0b15feb12f88efa838625565a7eac13b0c3693c56a80dc",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies1/challenge_long/measurement.json",
+            "report_sha256": "5fafc7fc535bd1b79cf63c315d21dc8e9c9075dc2af0a3b69d252ee0f3c0ac61"
+          }
+        }
+      },
+      {
+        "copies": 2,
+        "workflows": {
+          "paired": {
+            "configured_loci": 11,
+            "truth_known": 11,
+            "accepted": 11,
+            "correct": 11,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "63e8b54c3e3df2269b310374172610ba76c87f7fa45f2bfd9243d6e62e4545ab",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies2/paired/measurement.json",
+            "report_sha256": "f0eef8f1adb8d3d794697abeeac5fb46631c67c68b08d1ff94b1a0aa1e6f27ec"
+          },
+          "long": {
+            "configured_loci": 11,
+            "truth_known": 11,
+            "accepted": 11,
+            "correct": 11,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "fd45738552d4a953a4882720808642099a997c272676a93896ee99f9f220b641",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies2/long/measurement.json",
+            "report_sha256": "d08993660732600e330927e32ef9a90d7d5d51ae0012b2003424e8895faa3013"
+          },
+          "challenge_paired": {
+            "configured_loci": 15,
+            "truth_known": 14,
+            "accepted": 4,
+            "correct": 4,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "c7967517a800bfc3f938637e741d82742903742a7971f4f6bd00c6cda3f477d7",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies2/challenge_paired/measurement.json",
+            "report_sha256": "eeb10045805c6cf2daa46e13b0904d71bec1c78ab80f1066df9870b3537f23b9"
+          },
+          "challenge_long": {
+            "configured_loci": 15,
+            "truth_known": 14,
+            "accepted": 7,
+            "correct": 7,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "65ee9fb71fb94decf6f688a7f61c81af5174c56c57a4566257d4d6daeb081e92",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies2/challenge_long/measurement.json",
+            "report_sha256": "c0204045df84de47b04cfe535b471b14e743438cd8fe2a0b141e041ce679ed35"
+          }
+        }
+      },
+      {
+        "copies": 4,
+        "workflows": {
+          "paired": {
+            "configured_loci": 11,
+            "truth_known": 11,
+            "accepted": 11,
+            "correct": 11,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "10be789b221ff80190c6e6c9627e74d649387b3d0ad1564b11f70037d5f0ed33",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies4/paired/measurement.json",
+            "report_sha256": "dd698c1895ce7906391c71882bd713c7a1a0d3e8a4990e1595896fb1aa5ad65e"
+          },
+          "long": {
+            "configured_loci": 11,
+            "truth_known": 11,
+            "accepted": 11,
+            "correct": 11,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "f295e7994154d5f6cac2320a8961b2df983a04a511c3c828753762cc1b8e8bd4",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies4/long/measurement.json",
+            "report_sha256": "bedcb347628d98206e554407a371790b68647c3f49b59b6bdaf9d65b14630aaf"
+          },
+          "challenge_paired": {
+            "configured_loci": 15,
+            "truth_known": 14,
+            "accepted": 5,
+            "correct": 5,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "4f0b816253cd88820320b1d0047ff079113cb13ec83ee37272ee7e0d2755b122",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies4/challenge_paired/measurement.json",
+            "report_sha256": "077ee387273c5b2b0d2f07fb5e87b4db251e446b27fdebd5227b058900cf146b"
+          },
+          "challenge_long": {
+            "configured_loci": 15,
+            "truth_known": 14,
+            "accepted": 8,
+            "correct": 8,
+            "accepted_wrong": [],
+            "changed_accepted_counts": {},
+            "matches_frozen_input_hashes": true,
+            "calls_sha256": "64f45c534d372fe3f0b944f178aab68db6de39b74ed5749be073ba7fc758eca4",
+            "report": "/var/folders/cq/zd4mfrpx3mg1xbhxgfbnykph0000gq/T/mlvamaps-commit-validation-cdaqri41/copies4/challenge_long/measurement.json",
+            "report_sha256": "d45cc5283a344dc500ddd9a3fcbd4c5269b85709da4cbf3e292120e38f4e7280"
+          }
+        }
+      }
+    ],
+    "test_suite": {
+      "command": "python -m pytest -q",
+      "passed": 707,
+      "failed": 0,
+      "skipped": 0
+    },
+    "environment": {
+      "python": "3.13.15",
+      "platform": "macOS-26.7.2-arm64-arm-64bit-Mach-O",
+      "packages": {
+        "numpy": "2.5.2",
+        "parasail": "1.3.4",
+        "pysam": "0.24.0",
+        "regex": "2026.7.19",
+        "spoars": "0.1.3",
+        "pytest": "9.1.1"
+      },
+      "minimap2": "2.31-r1302",
+      "sassy": "sassy 0.2.1"
+    }
+  }
+}

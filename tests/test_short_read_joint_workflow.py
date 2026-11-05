@@ -71,10 +71,11 @@ def test_calibrated_partial_pairs_recover_novel_length_without_measured_votes(tm
         assert main(argv) == 0
         with (output / "calls.tsv").open() as handle:
             calls[calibrated], = csv.DictReader(handle, delimiter="\t")
-    assert calls[True]["repeat_count"] == "40"
-    assert float(calls[False]["repeat_count"]) < 40
+    assert calls[True]["predicted_repeat_count"] == "40"
+    assert float(calls[False]["predicted_repeat_count"]) < 40
+    assert all(call["repeat_count"] == "" and call["call_accepted"] == "False" for call in calls.values())
     assert calls[True]["inference_method"] == "joint_short_read_length"
-    assert calls[True]["genotype_status"] == "ESTIMATED"
+    assert calls[True]["genotype_status"] == "UNRESOLVED"
     assert calls[True]["finite_length_support"] == "True"
     assert all(not measured for measured in measurements)
 
@@ -119,13 +120,14 @@ def test_original_expansion_is_rescued_without_assembly_or_measured_votes(tmp_pa
     with (output / "calls.tsv").open() as handle:
         calls = {row["locus_id"]: row for row in csv.DictReader(handle, delimiter="\t")}
     call = calls["expansion"]
-    assert float(call["repeat_count"]) == (existing_lower_bound or truth["expansion"]["repeat_count"])
-    assert call["genotype_status"] == "ESTIMATED"
+    assert float(call["predicted_repeat_count"]) == (existing_lower_bound or truth["expansion"]["repeat_count"])
+    assert call["repeat_count"] == "" and call["call_accepted"] == "False"
+    assert call["genotype_status"] == "LOWER_BOUND"
     assert call["upper_unbounded"] == "True" and call["repeat_interval_high"] == ""
     assert call["finite_length_support"] == "False"
     assert all(locus != "expansion" for locus, molecule in measurements[0])
     assert "expansion" not in dict(read_fasta(output / "query_loci.fasta"))
-    assert sum(float(calls[name]["repeat_count"]) in values["alleles"]
+    assert sum(float(calls[name]["predicted_repeat_count"]) in values["alleles"]
                for name, values in truth.items() if values["repeat_count"] is not None) >= (9 if existing_lower_bound else 10)
     if existing_lower_bound:
         with (output / "joint_pair_diagnostics.tsv").open() as handle:

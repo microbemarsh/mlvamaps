@@ -47,11 +47,13 @@ in memory. No reference build migration is required for current-schema databases
 Long reads undergo observed mapping before Sassy primer rescue. Paired short
 reads undergo flank recruitment and mate rescue during QC. Both paths measure
 molecules with the shared product parser. A reference alignment without a
-measurement establishes presence. A separate fallback can report a low-confidence
-`ESTIMATED` count from adequately flank-supported spanning CIGAR evidence or
-calibrated paired lengths. Conflicting measurements and reference-conditioned
-partial mappings retain distributions without a numeric count. Estimates remain
-separate from measured molecule evidence; loci without either remain unavailable.
+measurement establishes presence. A separate fallback can retain diagnostic
+predictions from adequately flank-supported spanning CIGAR evidence or calibrated
+paired lengths. Conflicting measurements and reference-conditioned partial
+mappings also retain predictions and uncertainty, with accepted counts left blank.
+Only resolved direct measurements or supported reconstructions meeting the call
+criteria enter fingerprints and repeat distances. Loci without sample sizing
+evidence can retain a prior-only diagnostic prediction when an eligible prior exists.
 Primer-recovered long-read products can contribute even when mapping misses them.
 
 Long-read QC uses an indexed temporary disk spool; original FASTQ sequence is

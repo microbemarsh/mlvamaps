@@ -735,7 +735,7 @@ def locus_repeat_prior(locus, contexts, maximum_candidates=2048):
 
 
 def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None, *, round_tolerance=0.25):
-    """Complete FASTQ predictions after reconstruction, without creating reads."""
+    """Retain diagnostic predictions, then accept only resolved FASTQ counts."""
     thresholds = thresholds or InferenceThresholds()
     by_locus = defaultdict(list)
     contexts_by_locus = defaultdict(list)
@@ -747,6 +747,8 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
     if len(locus_by_id) != len(loci) or Counter(call["locus"] for call in calls) != Counter(locus_by_id.keys()):
         raise ValueError("FASTQ completion requires exactly one call per unique configured locus")
     for call in calls:
+        if "call_accepted" in call:
+            continue  # Terminal decisions must not be refilled from a prior.
         locus = locus_by_id[call["locus"]]
         rows = by_locus[locus.locus_id]
         ambiguous = {row.molecule_id for row in rows if "ambiguous_locus" in row.quality_flags}
@@ -768,8 +770,11 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
                 if bound is not None and math.isfinite(bound) and bound > 0:
                     bounds[row.molecule_id] = max(bound, bounds.get(row.molecule_id, 0))
             if not prior and not bounds:
-                raise ValueError(f"Locus {locus.locus_id}: no informative repeat evidence or eligible locus-specific prior; "
-                                 "provide observed reference alleles, calibrated nominal units, or an explicit non-default repeat range")
+                call.update(repeat_count="", repeat_count_raw="", estimate_source="unresolved",
+                            prior_only=False, independent_support=0, model_support=0.,
+                            data_evidence_confidence=0.,
+                            estimation_reason="No informative repeat evidence or eligible locus-specific prior.")
+                continue
             reason = "Prior-only prediction; no sample-derived repeat-length evidence. Presence is reported separately."
             if bounds:
                 lower = max(bounds.values())
@@ -855,8 +860,62 @@ def finalize_repeat_count_calls(calls, evidence, loci, contexts, thresholds=None
                     confidence_reason=call.get("estimation_reason") or
                     "Sample molecule likelihood; model support and evidence confidence are uncalibrated.")
 
+    for call in calls:
+        if "call_accepted" in call:
+            continue
+        # Final acceptance follows every rescue/reconstruction path. Presence,
+        # candidate likelihoods and bounds survive abstention, but a prediction
+        # must not become a measured distance input merely because it is numeric.
+        value = call["repeat_count"]
+        reason = ""
+        if value in ("", None):
+            reason = "No repeat-length prediction is supported by the available evidence."
+        elif call.get("prior_only"):
+            reason = "Prior-only prediction; no sample-derived repeat-length evidence."
+        elif call.get("upper_unbounded"):
+            reason = "The upper repeat length is unresolved; a lower bound is not a count."
+        elif call.get("computational_fallback"):
+            reason = "Inference was limited: " + str(call["computational_fallback"])
+        elif call["status"] == "mixed" or call.get("possible_secondary"):
+            reason = "Competing alleles do not support a single repeat count."
+        elif call.get("consensus_status") in {"disagrees", "resolved_ambiguity"}:
+            reason = "Molecule measurements and reconstruction do not resolve the same count confidently."
+        elif call.get("derived_molecule_support") and any(
+                row.evidence_tier == "microassembly" and row.measured_repeat_count is not None
+                and row.measured_repeat_count != value for row in by_locus[call["locus"]]):
+            reason = "The reconstructed product disagrees with the selected molecule allele."
+        elif call.get("estimate_source") not in {"joint_measurement_likelihood", "reconstructed_product"}:
+            reason = "Indirect repeat-length evidence remains a diagnostic estimate."
+        elif call.get("molecule_support", 0) < thresholds.minimum_molecules:
+            reason = "Too few independent informative molecules for an accepted count."
+        elif (call["status"] != "called"
+              or call["best_probability"] < thresholds.minimum_probability
+              or (call.get("probability_kind") != "reconstruction_support_fraction"
+                  and call["margin"] < thresholds.minimum_margin)):
+            reason = "The repeat count does not meet the existing allele-resolution thresholds."
+        elif (call["estimate_source"] == "joint_measurement_likelihood"
+              and call.get("consensus_status") != "agrees"):
+            observed = call.get("molecule_allele_counts", {})
+            matching = observed.get(value, 0)
+            # Model support can be sharp even when the empirical measurements
+            # disagree. Reuse the reconstruction dominance threshold; supported
+            # consensus can still resolve noisy reads across rounding boundaries.
+            if (matching < thresholds.minimum_molecules
+                    or matching / max(1, sum(observed.values())) < thresholds.minimum_probability):
+                reason = "Independent molecule measurements do not agree sufficiently on the selected allele."
+        call.update(predicted_repeat_count=value,
+                    predicted_repeat_count_raw=call.get("repeat_count_raw", value),
+                    call_accepted=not reason, call_rejection_reason=reason)
+        if reason:
+            call.update(repeat_count="", repeat_count_raw="")
+            if call["status"] == "called":
+                call["status"] = ("low_coverage" if call.get("molecule_support", 0) < thresholds.minimum_molecules
+                                  else "ambiguous")
+                call["confidence"] = "unresolved"
 
-CONFIDENCE_FIELDS = ["estimate_source", "genotype_status", "model_support", "data_evidence_confidence",
+
+CONFIDENCE_FIELDS = ["predicted_repeat_count", "predicted_repeat_count_raw", "call_accepted", "call_rejection_reason",
+                     "estimate_source", "genotype_status", "model_support", "data_evidence_confidence",
                      "second_best_support", "repeat_interval_low", "repeat_interval_high",
                      "candidate_grid_low", "candidate_grid_high", "upper_unbounded", "finite_length_support",
                      "paired_span_support", "partial_bound_support", "repeat_rich_mate_support",
